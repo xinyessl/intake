@@ -162,6 +162,12 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
 .f-proddd .opt:hover, .f-sysdd-list .opt:hover { background: var(--color-bg); }
 .f-proddd .opt.on, .f-sysdd-list .opt.on { color: var(--color-primary); font-weight: 600; background: var(--color-primary-light); }
 .f-proddd .opt.sub, .f-sysdd-list .opt.sub { padding-left: 20px; }
+/* 医院下拉：拖拽调整顺序（把常用/在实施中的医院置顶；纯前端个人偏好，不改运营端分配的 sites 集） */
+.f-sysdd-list .opt .f-hosp-grip { color: var(--color-text-tertiary); cursor: grab; font-size: 15px; opacity: .5; flex: 0 0 auto; }
+.f-sysdd-list .opt:hover .f-hosp-grip { opacity: 1; }
+.f-sysdd-list .opt .hn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.f-sysdd-list .opt.dragging { opacity: .4; }
+.f-sysdd-list .opt.drag-over { box-shadow: inset 0 2px 0 var(--color-primary); }
 .f-proddd-empty { padding: 14px 12px; font-size: 12px; color: var(--color-text-tertiary); line-height: 1.6; }
 /* 清单主体（内部滚动） */
 .f-list-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 12px 16px 20px; }
@@ -670,7 +676,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   // ---------- 进入工作空间 ----------
   function enterWorkspace(me) {
     state.me = me;
-    state.sites = Array.isArray(me.sites) ? me.sites.slice() : [];
+    state.sites = applyHospOrder(Array.isArray(me.sites) ? me.sites.slice() : []);   // 套用个人保存的医院顺序（拖拽置顶偏好）；集合仍是运营端分配的 me.sites，仅重排
     state.projects = Array.isArray(me.projects) ? me.projects.slice() : [];
     state.curSite = state.sites.length ? state.sites[0] : null;   // NH-4 默认当前所选（第一家）医院
     state.groupBy = 'type'; state.curSub = '';
@@ -886,6 +892,34 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   }
 
   // ---------- 医院视图下拉（触发器 + 面板：搜索 + 医院列表 + 🔒 提示）----------
+  // ---------- 医院顺序个人化（拖拽把常用/在实施中的医院置顶；纯前端 localStorage 按账号存，不动运营端分配的 sites 集）----------
+  function hospOrderKey() { return 'intake_field_hosp_order_' + ((state.me && state.me.username) || '_'); }
+  function applyHospOrder(sites) {
+    var saved = [];
+    try { saved = JSON.parse(localStorage.getItem(hospOrderKey()) || '[]'); } catch (e) { saved = []; }
+    if (!Array.isArray(saved) || !saved.length) return sites.slice();
+    var inSites = {}; sites.forEach(function (s) { inSites[s] = true; });
+    var ordered = saved.filter(function (s) { return inSites[s]; });   // 保存序里仍被分配的医院，按保存序在前
+    var seen = {}; ordered.forEach(function (s) { seen[s] = true; });
+    sites.forEach(function (s) { if (!seen[s]) ordered.push(s); });    // 新分配、还没排过序的 → 追加到末尾（保证不丢医院）
+    return ordered;
+  }
+  function saveHospOrder() { try { localStorage.setItem(hospOrderKey(), JSON.stringify(state.sites)); } catch (e) {} }
+  var _hospDrag = null;   // 拖拽中的医院名
+  // 把 fromSite 移到 toSite 位置（从上往下拖→插到目标之后，从下往上→之前），保存偏好并重渲染
+  function reorderHosp(fromSite, toSite) {
+    var arr = state.sites.slice();
+    var fi = arr.indexOf(fromSite), ti = arr.indexOf(toSite);
+    if (fi < 0 || ti < 0 || fi === ti) return;
+    var down = fi < ti;
+    arr.splice(fi, 1);
+    var ti2 = arr.indexOf(toSite);
+    arr.splice(down ? ti2 + 1 : ti2, 0, fromSite);
+    state.sites = arr;
+    saveHospOrder();
+    renderHospList();
+  }
+
   // AC-1/2/3/4（2026-07-23 裁决）：以下拉替代平铺医院 tab；触发器显当前所选医院，面板可搜索、单选一家（无分组、无「全部」聚合项）、底部保留「🔒 医院由运营端分配」提示。
   // 复用系统视图那套 .f-sysdd* 样式（id/state 不同），面板 position:fixed 逃离 #fHtabs 的 overflow 裁剪。
   function buildHospDropdown() {
@@ -955,8 +989,18 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
         var o = document.createElement('div');
         o.className = 'opt' + (state.curSite === site ? ' on' : '');
         o.setAttribute('data-hosp', site);
-        o.innerHTML = '<i class="ti ti-building-hospital"></i> ' + escapeHtml(site);
+        var canDrag = !q && state.sites.length > 1;   // 仅未搜索（全量列表）且多于一家时可拖拽排序
+        o.innerHTML = (canDrag ? '<i class="ti ti-grip-vertical f-hosp-grip" title="拖拽调整顺序"></i>' : '') +
+          '<i class="ti ti-building-hospital"></i> <span class="hn">' + escapeHtml(site) + '</span>';
         o.addEventListener('click', function (e) { e.stopPropagation(); onHospSelect(site); });
+        if (canDrag) {
+          o.setAttribute('draggable', 'true');
+          o.addEventListener('dragstart', function (e) { _hospDrag = site; o.classList.add('dragging'); try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', site); } catch (er) {} });
+          o.addEventListener('dragend', function () { _hospDrag = null; o.classList.remove('dragging'); var xs = list.querySelectorAll('.opt.drag-over'); for (var k = 0; k < xs.length; k++) xs[k].classList.remove('drag-over'); });
+          o.addEventListener('dragover', function (e) { if (_hospDrag == null || _hospDrag === site) return; e.preventDefault(); try { e.dataTransfer.dropEffect = 'move'; } catch (er) {} o.classList.add('drag-over'); });
+          o.addEventListener('dragleave', function () { o.classList.remove('drag-over'); });
+          o.addEventListener('drop', function (e) { e.preventDefault(); e.stopPropagation(); o.classList.remove('drag-over'); if (_hospDrag != null && _hospDrag !== site) reorderHosp(_hospDrag, site); });
+        }
         list.appendChild(o);
       })(state.sites[i]);
     }
