@@ -1826,7 +1826,8 @@ const server = http.createServer((req, res) => {
         if (!map.has(s)) { map.set(s, []); order.push(s); }
         map.get(s).push(mapItem(it));
       }
-      const groups = order.map(s => ({ key: s, label: s, count: map.get(s).length, items: map.get(s) }));
+      // 组头显中文：label 复用 kbSubLabel（=projById(product).subsystems[].desc，同 inbox/批次/KB 口径，见 lessons「不要另写映射」）；product 取该组首条工单的 project。空子系统组保留「其他」。
+      const groups = order.map(s => { const items = map.get(s); const proj = (items[0] && items[0].project) || ''; const label = (s === '其他') ? '其他' : (proj ? kbSubLabel(proj, s) : s); return { key: s, label, count: items.length, items }; });
       return send(res, 200, JSON.stringify({ dimension: 'sys', system: only, groupBy: 'system', degraded: false, groups }));
     }
     // ===== FS-02 医院视图：当前所选医院 + 三桶（需求/BUG/咨询）分组 =====
