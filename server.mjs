@@ -1045,6 +1045,23 @@ const server = http.createServer((req, res) => {
           changed = true;
         }
       }
+      // 编辑包信息（2026-07-30 用户反馈：包地址/版本填错要能改）——纯字段更新，不重新发包、不推工单状态（区别于 batch-release）。
+      const pkgIn = ('pkgVersion' in b) || ('artifactUrl' in b) || ('releaseNote' in b);
+      if (pkgIn) {
+        const pkgVersion = 'pkgVersion' in b ? String(b.pkgVersion == null ? '' : b.pkgVersion).trim() : null;
+        const artifactUrl = 'artifactUrl' in b ? String(b.artifactUrl == null ? '' : b.artifactUrl).trim() : null;
+        if ((pkgVersion !== null && !pkgVersion) || (artifactUrl !== null && !artifactUrl))
+          return send(res, 400, JSON.stringify({ ok: false, error: '包版本/包地址不能清空' }));
+        const chg = [];
+        if (pkgVersion !== null && pkgVersion.slice(0, 60) !== String(bt.pkgVersion || '')) { bt.pkgVersion = pkgVersion.slice(0, 60); chg.push('包版本'); }
+        if (artifactUrl !== null && artifactUrl.slice(0, 500) !== String(bt.artifactUrl || '')) { bt.artifactUrl = artifactUrl.slice(0, 500); chg.push('包地址'); }
+        if ('releaseNote' in b) { const rn = String(b.releaseNote == null ? '' : b.releaseNote).trim().slice(0, 2000); if (rn !== String(bt.releaseNote || '')) { bt.releaseNote = rn; chg.push('更新说明'); } }
+        if (chg.length) {
+          const at = nowStamp(); const by = user ? (user.name || user.username) : 'admin';
+          bt.history = bt.history || []; bt.history.push({ action: 'update', by, at, note: '改包信息（' + chg.join('/') + '）' });
+          changed = true;
+        }
+      }
       if (changed) saveBatches(list);
       return send(res, 200, JSON.stringify({ ok: true, item: batchOut(bt) }));
     });

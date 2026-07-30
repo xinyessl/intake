@@ -214,12 +214,20 @@ async function openDetail(id){
     </div>`;
   } else if(b.pkgVersion){
     relHtml=`<div class="relbox pkgbox">
-      <div class="rlhd"><i class="ti ti-package"></i>包信息</div>
-      <div class="prow"><span class="k">包版本</span><span class="v mono">${esc(b.pkgVersion)}</span></div>
-      <div class="prow"><span class="k">包地址</span><span class="v">${b.artifactUrl?`<a href="${esc(b.artifactUrl)}" target="_blank" rel="noopener">${esc(b.artifactUrl)}</a>`:'—'}</span></div>
-      <div class="prow"><span class="k">更新说明</span><span class="v">${esc(b.releaseNote||'—')}</span></div>
-      <div class="prow"><span class="k">上传时间</span><span class="v mono">${esc(fmtTime(b.releaseTime))}</span></div>
-      <div class="prow"><span class="k">下载数</span><span class="v mono">${esc(b.downloads||0)}</span></div>
+      <div class="rlhd" style="display:flex;align-items:center;gap:6px"><i class="ti ti-package"></i>包信息<button class="btn btn-sm" id="btnPkgEdit" style="margin-left:auto"><i class="ti ti-edit"></i>编辑</button></div>
+      <div id="pkgView">
+        <div class="prow"><span class="k">包版本</span><span class="v mono">${esc(b.pkgVersion)}</span></div>
+        <div class="prow"><span class="k">包地址</span><span class="v">${b.artifactUrl?`<a href="${esc(b.artifactUrl)}" target="_blank" rel="noopener">${esc(b.artifactUrl)}</a>`:'—'}</span></div>
+        <div class="prow"><span class="k">更新说明</span><span class="v">${esc(b.releaseNote||'—')}</span></div>
+        <div class="prow"><span class="k">上传时间</span><span class="v mono">${esc(fmtTime(b.releaseTime))}</span></div>
+        <div class="prow"><span class="k">下载数</span><span class="v mono">${esc(b.downloads||0)}</span></div>
+      </div>
+      <div id="pkgEdit" style="display:none">
+        <div class="form-group"><label>包版本 <span class="req">*</span></label><input id="pkgVersionInp" value="${esc(b.pkgVersion||'')}" maxlength="60"></div>
+        <div class="form-group"><label>包地址 <span class="req">*</span></label><input id="pkgUrlInp" value="${esc(b.artifactUrl||'')}" placeholder="https://.../pkg.zip" maxlength="500"></div>
+        <div class="form-group"><label>更新说明</label><textarea id="pkgNoteInp" placeholder="本次更新内容…" maxlength="2000">${esc(b.releaseNote||'')}</textarea></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-sm" id="btnPkgCancel">取消</button><button class="btn btn-sm btn-primary" id="btnPkgSave"><i class="ti ti-check"></i>保存</button></div>
+      </div>
     </div>`;
   }
   $('#detailBody').innerHTML=`
@@ -254,6 +262,12 @@ async function openDetail(id){
   if(schEdit) schEdit.addEventListener('click',()=>{ schEdit.style.display='none'; if(schBox) schBox.style.display='inline-flex'; if(schInput) schInput.focus(); });
   const schCancel=$('#btnSchCancel'); if(schCancel) schCancel.addEventListener('click',()=>{ if(schBox) schBox.style.display='none'; if(schEdit) schEdit.style.display='inline-flex'; if(schInput) schInput.value=b.scheduleDate||''; });
   const schSave=$('#btnSchSave'); if(schSave) schSave.addEventListener('click',()=>saveSchedule(b.id));
+  // 绑编辑包信息（内联：编辑→显表单；保存→batch-update 纯改字段；取消→收起）
+  const pkgEditBtn=$('#btnPkgEdit');
+  if(pkgEditBtn) pkgEditBtn.addEventListener('click',()=>{ $('#pkgView').style.display='none'; $('#pkgEdit').style.display='block'; pkgEditBtn.style.display='none'; });
+  const pkgCancel=$('#btnPkgCancel');
+  if(pkgCancel) pkgCancel.addEventListener('click',()=>{ $('#pkgEdit').style.display='none'; $('#pkgView').style.display='block'; if(pkgEditBtn) pkgEditBtn.style.display='inline-flex'; });
+  const pkgSave=$('#btnPkgSave'); if(pkgSave) pkgSave.addEventListener('click',()=>savePkgInfo(b.id));
 }
 
 /* ---------- 改排期（batch-update，即点即存 + toast + 刷新） ---------- */
@@ -267,6 +281,23 @@ async function saveSchedule(id){
     await loadBatches();
     await openDetail(id);   // 刷新详情显示新排期
   }catch(e){ toast('保存排期失败：'+e.message,'error'); }
+  finally{ if(btn) btn.disabled=false; }
+}
+
+/* ---------- 编辑包信息（batch-update 纯改字段，不重新发包、不动工单状态；改错的包地址/版本/更新说明可回改） ---------- */
+async function savePkgInfo(id){
+  const pkgVersion=($('#pkgVersionInp')?.value||'').trim();
+  const artifactUrl=($('#pkgUrlInp')?.value||'').trim();
+  const releaseNote=($('#pkgNoteInp')?.value||'').trim();
+  if(!pkgVersion||!artifactUrl){ toast('包版本/包地址必填','warning'); return; }
+  const btn=$('#btnPkgSave'); if(btn) btn.disabled=true;
+  try{
+    const r=await (await fetch('/api/batch-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,pkgVersion,artifactUrl,releaseNote})})).json();
+    if(!r.ok){ toast(r.error||'保存失败','warning'); return; }
+    toast('包信息已更新','success');
+    await loadBatches();
+    await openDetail(id);   // 刷新详情显示新包信息
+  }catch(e){ toast('保存失败：'+e.message,'error'); }
   finally{ if(btn) btn.disabled=false; }
 }
 
