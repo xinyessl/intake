@@ -1330,12 +1330,18 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       (g.releaseNote ? '<div class="pk-note">' + escapeHtml(g.releaseNote) + '</div>' : '');
     var btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'f-dl-btn' + (g.downloadedByMe ? ' done' : '');
-    btn.innerHTML = g.downloadedByMe ? '<i class="ti ti-circle-check"></i> 已下载' : '<i class="ti ti-download"></i> 下载更新包';
-    if (!g.downloadedByMe) btn.addEventListener('click', function () { doBatchDownload(g, btn, card); });
+    btn.className = 'f-dl-btn';
+    btn.innerHTML = g.downloadedByMe ? '<i class="ti ti-download"></i> 重新下载' : '<i class="ti ti-download"></i> 下载更新包';
+    btn.addEventListener('click', function () { doBatchDownload(g, btn, card); });   // 总是可点 → 支持多次下载（更新包可重复下）
     card.appendChild(btn);
-    // 已下载过 → 直接渲染改版本条（重进/刷新后仍显）
-    if (g.downloadedByMe) renderBumpRows(card, g, null);
+    // 已下载标识（不锁死按钮，仍可重新下载）
+    if (g.downloadedByMe) {
+      var dltag = document.createElement('span');
+      dltag.style.cssText = 'display:inline-flex;align-items:center;gap:4px;margin-left:9px;color:#1E8E4E;font-size:12px;font-weight:600;vertical-align:middle';
+      dltag.innerHTML = '<i class="ti ti-circle-check"></i> 已下载';
+      card.appendChild(dltag);
+      renderBumpRows(card, g, null);   // 重进/刷新后仍显改版本条
+    }
     return card;
   }
 
@@ -1345,8 +1351,8 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     api('/api/batch-download', { method: 'POST', body: JSON.stringify({ batchId: g.batchId }) }).then(function (r) {
       var b = r.body || {};
       if (!b.ok) { btn.disabled = false; showToast(b.error || '下载失败', 'error'); return; }
-      btn.classList.add('done'); btn.innerHTML = '<i class="ti ti-circle-check"></i> 已下载';
       g.downloadedByMe = true;
+      btn.disabled = false; btn.innerHTML = '<i class="ti ti-download"></i> 重新下载';   // 保持可点 → 支持多次下载
       if (b.artifactUrl) { try { window.open(b.artifactUrl, '_blank', 'noopener'); } catch (e) {} showToast('更新包已开始下载', 'success'); }
       else showToast('已记录下载，更新包地址待运营发布', 'success');
       renderBumpRows(card, g, b.bumps || []);
@@ -1511,6 +1517,8 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     var time = fmtTime(it.updatedAt || it.submittedAt);
     // 归批工单带批次排期 → 顶行加醒目 chip「计划交付 <date>」（纯 yyyy-MM-dd）；无排期不显。放在类型/状态标签之后。
     var sched = (it.batchSchedule || '').trim();
+    // 已发包（已出包/待验证）且归批 → 引导「去下载更新包」：切到「按批次」视图并定位该批次的更新包卡
+    var canDl = !!it.batchId && (it.lifecycle === '已出包' || it.lifecycle === '待验证');
     el.innerHTML =
       '<div class="f-item-top">' +
         '<span class="f-tk ' + tag.cls + '">' + escapeHtml(tag.label) + '</span>' +
@@ -1522,9 +1530,24 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
         '<span>' + escapeHtml(sub) + '</span><span class="sep">·</span>' +
         '<span>' + escapeHtml(site) + '</span><span class="sep">·</span>' +
         '<span>' + escapeHtml(time) + '</span>' +
-      '</div>';
+      '</div>' +
+      (canDl ? '<div style="margin-top:8px"><a class="f-godl" role="button" style="display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:600;color:#1A6DBE;cursor:pointer;padding:4px 10px;border:1px solid #C7DCF1;border-radius:8px;background:#F4F9FE"><i class="ti ti-package-import"></i> 去下载更新包</a></div>' : '');
     bindReopen(el, it);
+    if (canDl) { var gd = el.querySelector('.f-godl'); if (gd) gd.addEventListener('click', function (e) { e.stopPropagation(); goToBatchDownload(it.batchId); }); }
     return el;
+  }
+
+  // 从「按类型」条目点「去下载」→ 切到「按批次」视图并滚动+高亮到该批次的更新包卡（引导实施去下载）
+  function goToBatchDownload(batchId) {
+    setGroupBy('batch');
+    setTimeout(function () {
+      var t = document.querySelector('#fListBatch [data-batch="' + batchId + '"]');
+      if (t) {
+        try { t.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { t.scrollIntoView(); }
+        var old = t.style.boxShadow; t.style.transition = 'box-shadow .3s'; t.style.boxShadow = '0 0 0 3px rgba(26,109,190,.4)';
+        setTimeout(function () { t.style.boxShadow = old || ''; }, 1500);
+      } else { showToast('已切到「按批次」，请在对应批次卡下载更新包', 'info'); }
+    }, 450);
   }
 
   // 点击某条提交记录能否恢复对话续聊：咨询（consult）恢复 consult 会话；需求/BUG（requirement/bug）恢复 intake 会话、续聊走 intake-reply（append 同单，不建重单）。
