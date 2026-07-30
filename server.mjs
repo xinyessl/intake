@@ -629,12 +629,13 @@ function kbSearch(projId, query, n = 5, minScore = 1) {   // 零依赖关键词�
   return entries.map(e => { const toks = kbTokenize([e.q, e.a, e.subsystem, e.module, (e.tags || []).join(' ')].join(' ')); let sc = 0; const seen = new Set(); for (const t of toks) if (q.has(t) && !seen.has(t)) { sc++; seen.add(t); } return { e, sc }; })
     .filter(x => x.sc >= lo).sort((a, b) => b.sc - a.sc).slice(0, n).map(x => x.e);
 }
-function intakeSolution(e) {   // 从已解决工单里抽"解法"用于沉淀
-  if (e.resolution && (e.resolution.note || e.resolution.fixedVersion)) return [e.resolution.note, e.resolution.fixedVersion ? '修复版本：' + e.resolution.fixedVersion : ''].filter(Boolean).join('\n');
-  const devs = (e.chat || []).filter(m => m.role === 'dev'); if (devs.length) return devs[devs.length - 1].text;
-  if (e.opinion) return e.opinion;
-  if (e.analysis && e.analysis.detail) return e.analysis.detail;
-  return '';
+function intakeSolution(e) {   // 从已解决工单里抽"解法"用于沉淀：根因/处理说明 + 修复版本一起带（别只留版本号，2026-07-30 用户反馈）
+  const res = e.resolution || {};
+  const devs = (e.chat || []).filter(m => m.role === 'dev');
+  // 根因/处理说明：人工 note 优先 → 开发回复 → AI 意见(opinion) → AI 初判根因(analysis.detail)
+  const body = String((res.note || (devs.length ? devs[devs.length - 1].text : '') || e.opinion || (e.analysis && e.analysis.detail) || '')).trim();
+  const ver = res.fixedVersion ? '修复版本：' + res.fixedVersion : '';
+  return [body, ver].filter(Boolean).join('\n\n');   // 有根因 + 有版本 → 两段都带；只有版本（发包只写 fixedVersion）→ 退回仅版本，但不再吞掉已有的 analysis 根因
 }
 async function kbAddFromIntake(proj, e) {   // 工单解决时自动沉淀成经验；按来源去重
   try {
