@@ -17,5 +17,9 @@
 - 类型 token 改动 = 全后台「需求」标签统一变橙（inbox/detail/batches 等，一致）。批次状态标签（batches/field 的 `STATUS_TAG` 开发中/可下载/已交付）是**另一套**，未动。
 - 纯样式，无行为/数据变化 → 不涉 spec（TK-01 状态语义不变，只换展示色）。
 
+## ⚠️ 根因补记（第一次改完"没变化"的真原因）
+首次只改 `--ticket-*` + 加 `.tag-blue/.tag-indigo` 部署后**标签仍是灰的**。排查发现：后台页 `<head>` 里 `app.css` 在 `theme.css` **之后**加载，`app.css` 的 `.tag{background:var(--alt);color:var(--sub)}` 灰基类与 theme.css 的 `.tag-bug/.tag-blue` **同为单类特异性**、后加载者胜 → 盖掉修饰类颜色，改 theme.css 根本不显。
+**真修**：theme.css 标签修饰类改用 `.tag.tag-X` **双类**提特异性（0,0,2,0 > app.css `.tag` 0,0,1,0），压过 app.css。**未删 app.css `.tag`**（login/submit 只加载 app.css 依赖它）；**未改 `<link>` 顺序**（避免 theme.css 盖过 app.css 全部共有类）。已沉淀 lessons 自检项。
+
 ## 部署 / 验证
-rsync `theme.css` + `inbox.html` → 线上（静态即时生效）；线上确认 `--ticket-req:#D9730D`、`tag-blue/indigo` 已在、`inbox.html` `'已立项':'tag-blue'` 已落地。
+rsync `theme.css` + `inbox.html` → 线上（静态即时生效，theme.css 响应头 `no-cache` 刷新即更新）；线上确认 `--ticket-req:#D9730D`、`.tag.tag-bug`/`.tag.tag-blue` 双类规则已在、`inbox.html` `'已立项':'tag-blue'` 已落地。

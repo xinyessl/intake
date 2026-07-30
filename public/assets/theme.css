@@ -305,21 +305,22 @@ button { font-family: inherit; }
   background: var(--color-info-light); color: var(--color-info); border: 1px solid transparent;
 }
 .tag-dot::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
-.tag-success { background: var(--color-success-light); color: var(--color-success); border-color: var(--color-success-border); }
-.tag-warning { background: var(--color-warning-light); color: var(--color-warning); border-color: var(--color-warning-border); }
-.tag-danger  { background: var(--color-danger-light);  color: var(--color-danger);  border-color: var(--color-danger-border); }
-.tag-info    { background: var(--color-info-light);    color: var(--color-info); }
-.tag-primary { background: var(--color-primary-light); color: var(--color-primary); border-color: var(--color-primary-border); }
-.tag-accent  { background: var(--color-accent-light);  color: var(--color-accent);  border-color: var(--color-accent-border); }
-.tag-gray    { background: #EEF1F5; color: var(--color-text-secondary); }
-.tag-blue    { background: #E1ECFA; color: #2563C9; border-color: #BBD3F2; }   /* 状态：已落实·排期（已立项）等——鲜明蓝，替代暗藏青 tag-primary 的发灰观感 */
-.tag-indigo  { background: #E9E7FB; color: #5A47D6; border-color: #C9C2F1; }   /* 状态：开发中——靛，与「已落实」蓝区分 */
+/* 修饰类一律 .tag.tag-X 双类（特异性 0,0,2,0），压过遗留 app.css 的 `.tag` 灰底（app.css 在 theme.css 之后加载、会盖单类 .tag-X 的色）——本项目修饰类恒与 .tag 连用，安全。 */
+.tag.tag-success { background: var(--color-success-light); color: var(--color-success); border-color: var(--color-success-border); }
+.tag.tag-warning { background: var(--color-warning-light); color: var(--color-warning); border-color: var(--color-warning-border); }
+.tag.tag-danger  { background: var(--color-danger-light);  color: var(--color-danger);  border-color: var(--color-danger-border); }
+.tag.tag-info    { background: var(--color-info-light);    color: var(--color-info); }
+.tag.tag-primary { background: var(--color-primary-light); color: var(--color-primary); border-color: var(--color-primary-border); }
+.tag.tag-accent  { background: var(--color-accent-light);  color: var(--color-accent);  border-color: var(--color-accent-border); }
+.tag.tag-gray    { background: #EEF1F5; color: var(--color-text-secondary); }
+.tag.tag-blue    { background: #E1ECFA; color: #2563C9; border-color: #BBD3F2; }   /* 状态：已落实·排期（已立项）等——鲜明蓝，替代暗藏青 tag-primary 的发灰观感 */
+.tag.tag-indigo  { background: #E9E7FB; color: #5A47D6; border-color: #C9C2F1; }   /* 状态：开发中——靛，与「已落实」蓝区分 */
 /* 业务标签：工单类型 —— 描边式「类别筹码」，与填充式「状态标签」分家，避免一片蓝 */
-.tag-req, .tag-bug, .tag-consult { border-width: 1px; font-weight: 600; }
+.tag.tag-req, .tag.tag-bug, .tag.tag-consult { border-width: 1px; font-weight: 600; }
 .tag-req::before, .tag-bug::before, .tag-consult::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
-.tag-req     { color: var(--ticket-req);     background: var(--ticket-req-bg);     border-color: #F0C89A; }
-.tag-bug     { color: var(--ticket-bug);     background: var(--ticket-bug-bg);     border-color: var(--color-danger-border); }
-.tag-consult { color: var(--ticket-consult); background: var(--ticket-consult-bg); border-color: #D8C9EA; }
+.tag.tag-req     { color: var(--ticket-req);     background: var(--ticket-req-bg);     border-color: #F0C89A; }
+.tag.tag-bug     { color: var(--ticket-bug);     background: var(--ticket-bug-bg);     border-color: var(--color-danger-border); }
+.tag.tag-consult { color: var(--ticket-consult); background: var(--ticket-consult-bg); border-color: #D8C9EA; }
 
 /* 时效 / 元信息小筹码 */
 .chip { display: inline-flex; align-items: center; gap: 4px; height: 19px; padding: 0 7px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 500; line-height: 1; background: #EEF1F5; color: var(--color-text-secondary); font-family: var(--font-num); white-space: nowrap; }
