@@ -91,13 +91,18 @@
       <label>负责实施人 <span class="text-tertiary" style="font-weight:400;font-size:12px">手机号在账号管理维护</span></label>
       <select class="select" id="edImplName"><option value="">（未指定实施人）</option></select>
     </div>
-    <div class="grid grid-cols-2 gap-12">
-      <div class="form-group"><label>医院联系人</label><input class="input" id="edContactName" maxlength="20" placeholder="联系人姓名"></div>
-      <div class="form-group"><label>联系电话</label><input class="input" id="edContactPhone" maxlength="20" placeholder="联系电话"></div>
+    <div class="form-group">
+      <div class="flex items-center justify-between mb-8">
+        <label style="margin:0">医院联系人 <span class="text-tertiary" style="font-weight:400;font-size:12px">可添加多个</span></label>
+        <button class="btn btn-sm" id="btnAddContact" type="button"><i class="ti ti-plus"></i>添加联系人</button>
+      </div>
+      <div id="edContactRows"></div>
     </div>
     <div class="grid grid-cols-2 gap-12">
       <div class="form-group"><label>设备码</label><input class="input" id="edDeviceCode" maxlength="120" placeholder="设备 / 授权码"></div>
-      <div class="form-group"><label>维保时间</label><input class="input" id="edMaintainDate" maxlength="60" placeholder="如 2026-12-31 或 2025-01~2026-12"></div>
+      <div class="form-group"><label>维保时间</label>
+        <div class="range-box"><i class="ti ti-calendar"></i><input type="date" id="edMaintainStart" style="min-width:0;flex:1"><span class="range-sep">~</span><input type="date" id="edMaintainEnd" style="min-width:0;flex:1"></div>
+      </div>
     </div>
     <div class="form-group"><label>服务器信息</label><textarea class="textarea" id="edServerInfo" maxlength="1000" placeholder="服务器 IP / 配置 / 部署位置等" style="min-height:60px"></textarea></div>
     <div class="form-group"><label>备注信息</label><textarea class="textarea" id="edRemark" maxlength="1000" placeholder="备注" style="min-height:60px"></textarea></div>
@@ -307,6 +312,19 @@ function fillImplSelect(cur){
   sel.innerHTML='<option value="">（未指定实施人）</option>'+names.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
   sel.value = cur||'';
 }
+/* 医院联系人：动态多行（姓名 + 电话 + 删除）。收集时去空。 */
+function addContactRow(name, phone){
+  const box=$('#edContactRows'); if(!box) return;
+  const row=document.createElement('div');
+  row.className='contact-row'; row.style.cssText='display:flex;gap:8px;margin-bottom:8px';
+  row.innerHTML='<input class="input cName" maxlength="20" placeholder="联系人姓名" style="flex:1;min-width:0"><input class="input cPhone" maxlength="20" placeholder="联系电话" style="flex:1;min-width:0"><button class="btn btn-sm cDel" type="button" title="删除" style="flex:0 0 auto"><i class="ti ti-trash" style="color:var(--color-danger)"></i></button>';
+  row.querySelector('.cName').value=name||''; row.querySelector('.cPhone').value=phone||'';
+  row.querySelector('.cDel').addEventListener('click',()=>row.remove());
+  box.appendChild(row);
+}
+function collectContacts(){
+  return $$('#edContactRows .contact-row').map(r=>({ name:r.querySelector('.cName').value.trim(), phone:r.querySelector('.cPhone').value.trim() })).filter(x=>x.name||x.phone);
+}
 function openEdit(c){
   editId = c ? c.id : null;
   $('#edTitle').textContent = c ? '编辑医院' : '新增医院';
@@ -314,10 +332,15 @@ function openEdit(c){
   $('#edLevel').value = c ? (c.level||'三甲') : '三甲';
   $('#edStatus').value = c ? (c.status||'已开通') : '已开通';
   fillImplSelect(c && c.impl ? (c.impl.name||'') : '');
-  $('#edContactName').value = c ? (c.contactName||'') : '';
-  $('#edContactPhone').value = c ? (c.contactPhone||'') : '';
+  // 医院联系人（可多个）回填：新形状 c.contacts；兼容旧扁平 contactName/contactPhone → 迁一条
+  $('#edContactRows').innerHTML='';
+  let cts = (c && Array.isArray(c.contacts)) ? c.contacts : null;
+  if(!cts && c && (c.contactName||c.contactPhone)) cts=[{name:c.contactName,phone:c.contactPhone}];
+  (cts||[]).forEach(ct=>addContactRow(ct&&ct.name,ct&&ct.phone));
+  if(!$$('#edContactRows .contact-row').length) addContactRow('','');   // 至少留一行空的方便填
   $('#edDeviceCode').value = c ? (c.deviceCode||'') : '';
-  $('#edMaintainDate').value = c ? (c.maintainDate||'') : '';
+  $('#edMaintainStart').value = c ? (c.maintainStart||'') : '';
+  $('#edMaintainEnd').value = c ? (c.maintainEnd||'') : '';
   $('#edServerInfo').value = c ? (c.serverInfo||'') : '';
   $('#edRemark').value = c ? (c.remark||'') : '';
   countName();
@@ -357,8 +380,8 @@ async function saveCustomer(){
     }
     const payload={ id:editId||'', name, level:$('#edLevel').value, region:(CUSTOMERS.find(c=>c.id===editId)||{}).region||'', status:$('#edStatus').value,
       impl:{ name:$('#edImplName').value.trim(), phone:((CUSTOMERS.find(c=>c.id===editId)||{}).impl||{}).phone||'' }, products,
-      contactName:$('#edContactName').value.trim(), contactPhone:$('#edContactPhone').value.trim(),
-      deviceCode:$('#edDeviceCode').value.trim(), maintainDate:$('#edMaintainDate').value.trim(),
+      contacts:collectContacts(),
+      deviceCode:$('#edDeviceCode').value.trim(), maintainStart:$('#edMaintainStart').value, maintainEnd:$('#edMaintainEnd').value,
       serverInfo:$('#edServerInfo').value.trim(), remark:$('#edRemark').value.trim() };
     const r=await (await fetch('/api/customer-save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})).json();
     if(!r.ok){ toast(r.error||'保存失败','error'); return; }
@@ -381,6 +404,7 @@ async function delCustomer(c){
 /* ---------- 事件绑定 ---------- */
 $('#btnAdd').addEventListener('click',()=>openEdit(null));
 $('#btnAddProd').addEventListener('click',()=>addProdRow('',null));
+$('#btnAddContact').addEventListener('click',()=>addContactRow('',''));
 $('#btnSave').addEventListener('click',saveCustomer);
 $('#edName').addEventListener('input',countName);
 $('#custBody').addEventListener('click',e=>{
