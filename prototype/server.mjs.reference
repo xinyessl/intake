@@ -1,0 +1,1318 @@
+#!/usr/bin/env node
+// Steward · 多项目控制台服务（零依赖）
+//   - 提供可视化页面（dashboard/）
+//   - GET  /api/projects            项目清单（~/.steward/projects.json，与工具隔离）
+//   - GET  /api/board?project=ID    该项目进度看板
+//   - GET  /api/tasks?project=ID    该项目开发清单
+//   - GET  /api/agents?project=ID   该项目 AI 团队状态
+//   - GET  /api/events              SSE：任一项目 docs/ 变更时推送
+//   - POST /api/chat?project=ID     在该项目目录内跑 `claude -p` 调起编排器
+// 用法：node tools/server.mjs  → 打开 http://127.0.0.1:51780
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawn, spawnSync, execFile } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import os from 'node:os';
+import net from 'node:net';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); // 控制台宿主目录（工具本体）
+const PORT = process.env.PORT || 51780;
+// 同源/同机访问白名单（#6）：本地单用户控制台只接受来自控制台自身的请求，
+// 借此挡住「任意网站跨源调本地 API」与 DNS-rebinding（Host 被改成攻击者域名）。
+const SELF_HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`, `[::1]:${PORT}`]);
+const SELF_ORIGINS = new Set([`http://127.0.0.1:${PORT}`, `http://localhost:${PORT}`, `http://[::1]:${PORT}`]);
+// 用户数据目录（与工具本体隔离，像 VSCode）：项目注册表存这里，工具目录保持干净/可分享。可用 STEWARD_DATA 覆盖。
+const DATA_DIR = process.env.STEWARD_DATA || path.join(os.homedir(), '.steward');
+// CLI 对话自定义名(按会话 id 存·本机个人化·不入库)：重命名 tab 落这里，历史列表与 tab 都读它
+const NAMES_FILE = path.join(DATA_DIR, 'cli-names.json');
+function readNames() { try { return JSON.parse(fs.readFileSync(NAMES_FILE, 'utf8')) || {}; } catch { return {}; } }
+function writeName(sid, name) { if (!sid) return; const m = readNames(); if (name && name.trim()) m[sid] = name.trim().slice(0, 120); else delete m[sid]; try { fs.mkdirSync(path.dirname(NAMES_FILE), { recursive: true }); fs.writeFileSync(NAMES_FILE, JSON.stringify(m)); } catch {} }
+// ===== 模型 API 配置(云端进件助手用直连 API，不走交互式登录)。本地存 ~/.steward/model-api.json，不入库 =====
+const MODEL_CFG_FILE = path.join(DATA_DIR, 'model-api.json');
+function readModelCfg() { try { return JSON.parse(fs.readFileSync(MODEL_CFG_FILE, 'utf8')) || {}; } catch { return {}; } }
+function writeModelCfg(c) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(MODEL_CFG_FILE, JSON.stringify(c)); } catch {} }
+function maskKey(k) { k = String(k || ''); return k.length > 8 ? (k.slice(0, 4) + '……' + k.slice(-4)) : (k ? '已配置' : ''); }
+// 直连模型 API(anthropic 原生 / openai 兼容)，返回纯文本。messages:[{role,content}]，system 可选。
+async function callModel(cfg, { system, messages, maxTokens = 1024 }) {
+  const provider = cfg.provider || 'anthropic';
+  const key = cfg.apiKey; if (!key) throw new Error('未配置 API Key');
+  const model = cfg.model || (provider === 'openai' ? 'gpt-4o' : 'claude-sonnet-4-6');
+  if (provider === 'anthropic') {
+    const base = (cfg.baseUrl || 'https://api.anthropic.com').replace(/\/$/, '');
+    const r = await fetch(base + '/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' }, body: JSON.stringify({ model, max_tokens: maxTokens, ...(system ? { system } : {}), messages }) });
+    const j = await r.json(); if (!r.ok) throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
+    return (j.content || []).map(b => b.text || '').join('');
+  }
+  const base = (cfg.baseUrl || 'https://api.openai.com').replace(/\/$/, '');   // openai 兼容(含国内代理端点)
+  const msgs = system ? [{ role: 'system', content: system }, ...messages] : messages;
+  const r = await fetch(base + '/v1/chat/completions', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + key }, body: JSON.stringify({ model, messages: msgs, max_tokens: maxTokens }) });
+  const j = await r.json(); if (!r.ok) throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
+  return (((j.choices || [])[0] || {}).message || {}).content || '';
+}
+// ===== 进件(需求/BUG)：H5 提交页提交 → 写项目 docs/intake/<id>.md → 云端 AI 沟通澄清/给处理意见 =====
+function intakeDir(proj) { return path.join(proj.path, 'docs', 'intake'); }
+function specIndex(proj) {   // 给 AI 的项目上下文：spec 的 [模块] 标题 清单，帮它把进件落到对的模块
+  const out = [];
+  try { const d = path.join(proj.path, 'docs', 'specs'); for (const f of fs.readdirSync(d)) { if (!f.endsWith('.md') || f.startsWith('_') || f.toLowerCase() === 'readme.md') continue; const t = fs.readFileSync(path.join(d, f), 'utf8').slice(0, 800); const mod = ((t.match(/^module:\s*(.+)$/m) || [])[1] || '').trim(); const ti = ((t.match(/^title:\s*(.+)$/m) || [])[1] || f.replace(/\.md$/, '')).trim(); out.push(`[${mod}] ${ti}`); } } catch {}
+  return out.slice(0, 60).join('\n');
+}
+function intakeGenId(proj, type) { const d = new Date(); const dp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`; const pre = type === 'bug' ? 'BUG' : 'XQ'; let n = 1; try { n = fs.readdirSync(intakeDir(proj)).filter(f => f.startsWith(`${pre}-${dp}`) && f.endsWith('.md')).length + 1; } catch {} return `${pre}-${dp}-${String(n).padStart(2, '0')}`; }
+function yamlEsc(s) { s = String(s == null ? '' : s).replace(/\n/g, ' ').trim(); return /[:#"']/.test(s) ? JSON.stringify(s) : s; }
+function renderIntakeMd(e) {   // 结构化 frontmatter + 可读正文 + 沟通记录
+  const fm = ['---', `id: ${e.id}`, `type: ${e.type}`, `project: ${e.project}`, `module: ${yamlEsc(e.module)}`, `title: ${yamlEsc(e.title)}`, `priority: ${yamlEsc(e.priority)}`];
+  if (e.type === 'bug') { fm.push(`severity: ${yamlEsc(e.severity)}`, `scope: ${yamlEsc(e.scope)}`, `env: ${yamlEsc(e.env)}`, `freq: ${yamlEsc(e.freq)}`); }
+  fm.push(`reporter: ${yamlEsc(e.reporter)}`, `role: ${yamlEsc(e.role)}`, `contact: ${yamlEsc(e.contact)}`, `status: ${e.status}`, `submittedAt: ${e.submittedAt}`, '---', '');
+  let body = [`# ${e.title}\n`];
+  if (e.type === 'bug') { body.push(`## 问题现象\n${e.desc || ''}\n`, `## 报错信息\n${e.errorInfo || '（无）'}\n`, `## 复现步骤\n${e.steps || ''}\n`, `## 期望结果\n${e.expectResult || '（无）'}\n`); if (e.opinion) body.push(`## AI 处理意见\n${e.opinion}\n`); }
+  else { body.push(`## 需求背景 / 为什么\n${e.bg || ''}\n`, `## 期望效果 / 具体描述\n${e.reqDesc || ''}\n`, `## 使用场景 / 涉及角色\n${e.scene || '（无）'}\n`, `## 验收标准\n${e.accept || '（无）'}\n`, `## 关联页面 / 功能\n${e.relate || '（无）'}\n`); }
+  if (e.media && e.media.length) body.push(`## 截图 / 视频\n${e.media.map(m => '- ' + m).join('\n')}\n`);
+  if (e.chat && e.chat.length) body.push('## 沟通记录\n' + e.chat.map(m => `**${m.role === 'assistant' ? 'AI' : e.reporter || '提交人'}**：${m.text}`).join('\n\n') + '\n');
+  return fm.join('\n') + body.join('\n');
+}
+function saveIntake(proj, e) { const dir = intakeDir(proj); fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, e.id + '.json'), JSON.stringify(e, null, 2)); fs.writeFileSync(path.join(dir, e.id + '.md'), renderIntakeMd(e)); }
+function loadIntake(proj, id) { try { return JSON.parse(fs.readFileSync(path.join(intakeDir(proj), id + '.json'), 'utf8')); } catch { return null; } }
+function listIntake(proj) { const out = []; try { for (const f of fs.readdirSync(intakeDir(proj))) { if (!f.endsWith('.json')) continue; try { const e = JSON.parse(fs.readFileSync(path.join(intakeDir(proj), f), 'utf8')); out.push({ id: e.id, type: e.type, title: e.title, module: e.module, priority: e.priority, reporter: e.reporter, status: e.status, submittedAt: e.submittedAt, unread: !!e.needReply }); } catch {} } } catch {} return out.sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || '')); }
+function intakeSystem(type, proj) {
+  return `你是「需求/BUG 进件助手」。对面是产品经理/实施工程师(不懂技术、不看代码)。项目「${proj.name}」的系统模块清单（供你把进件对到正确模块）：\n${specIndex(proj) || '（暂无 spec 索引）'}\n\n你的任务：\n- 若是【需求】：判断是否讲清楚了。没讲清就用大白话问 1~2 个最关键的澄清问题（每次别超过2个）；讲清了就一句话确认你的理解 + 指出它大概落在哪个模块。\n- 若是【BUG】：根据现象/报错，给一个初步「处理意见 / 可能原因 / 建议先排查什么」，供开发参考；信息不足就问关键的1个点（如具体报错、哪条数据）。\n- 【绝不写代码、不臆造功能】。回复要简短、口语化、条理清楚，中文。`;
+}
+function intakeChatSystem(proj) {   // 纯对话进件的系统提示：AI 主导追问，信息够了输出 record 块归档
+  return `你是「需求/BUG 进件助手」。对面是产品经理/实施工程师(不懂技术、不看代码)。
+项目：「${proj.name}」。该项目的系统模块清单(帮你把进件对到正确模块)：
+${specIndex(proj) || '（暂无 spec 索引）'}
+
+任务：用轻松的对话，帮 TA 把一条【需求】或【BUG】说清楚，然后归档。
+风格：一次最多问 1~2 个关键问题，别一股脑问；简短、口语、中文；绝不写代码、不臆造功能。
+
+要收集齐(缺什么问什么，已经说清的别重复问)：
+· 共同：需求还是BUG、一句话标题、提出人姓名、联系方式(电话/微信，便于回访)、优先级(紧急/高/中/低)、大概哪个模块。
+· 需求：背景(为什么/解决什么)、期望效果/具体描述、可选的验收标准、关联的现有页面/功能。
+· BUG：问题现象、报错信息(若有)、复现步骤、可选的期望结果、严重程度(阻塞/影响使用/轻微)、影响范围、出现环境(生产/预发/测试/开发)、频率(必现/偶现)；并给一个初步「处理意见/可能原因/建议先查什么」。
+
+当信息基本齐了：先用一两句确认你的理解(BUG 顺带给处理意见)，然后在回复的最末尾附一个归档块(用户看不到里面内容，别在正文提“归档块”三个字)，严格 JSON、字段名照抄：
+\`\`\`intake-record
+{"type":"bug或requirement","module":"","title":"","priority":"","reporter":"","contact":"","severity":"","scope":"","env":"","freq":"","bg":"","reqDesc":"","accept":"","relate":"","desc":"","errorInfo":"","steps":"","expectResult":"","opinion":""}
+\`\`\`
+只有信息基本齐才输出 record；还在澄清阶段就别输出。`;
+}
+async function intakeAI(proj, e) {   // 组装对话喂模型，返回 AI 文本
+  const cfg = readModelCfg(); if (!cfg.apiKey) return { ok: false, reply: '（未配置模型 API，管理员配置后 AI 才会自动沟通。内容已收到并存档。）', configured: false };
+  const head = `【${e.type === 'bug' ? 'BUG' : '需求'}】${e.title}\n模块：${e.module}｜优先级：${e.priority}` + (e.type === 'bug' ? `｜严重：${e.severity}｜环境：${e.env}｜频率：${e.freq}\n现象：${e.desc}\n报错：${e.errorInfo || '无'}\n复现：${e.steps}\n期望：${e.expectResult || '无'}` : `\n背景：${e.bg}\n期望效果：${e.reqDesc}\n场景：${e.scene || '无'}\n验收：${e.accept || '无'}\n关联：${e.relate || '无'}`);
+  const messages = [{ role: 'user', content: head }];
+  for (const m of (e.chat || [])) messages.push({ role: m.role, content: m.text });
+  try { const txt = await callModel(cfg, { system: intakeSystem(e.type, proj), messages, maxTokens: 700 }); return { ok: true, reply: (txt || '').trim(), configured: true }; }
+  catch (err) { return { ok: false, reply: '（AI 暂时连不上：' + String((err && err.message) || err) + '。内容已存档，稍后可再沟通。）', configured: true }; }
+}
+const PROJECTS_FILE = path.join(DATA_DIR, 'projects.json');
+const LESSONS_FILE = path.join(ROOT, 'lessons.md');   // Steward 经验库：放工具仓库根、提交进 git，随 steward 沉淀+共享（跨项目、跨人）
+try {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  if (!fs.existsSync(PROJECTS_FILE)) {   // 首次运行：从旧位置 tools/projects.json 迁移注册表，否则建空表
+    let init = JSON.stringify({ projects: [] }, null, 2);
+    try { const legacy = path.join(ROOT, 'tools/projects.json'); if (fs.existsSync(legacy)) { const j = JSON.parse(fs.readFileSync(legacy, 'utf8')); if (j && j.projects && j.projects.length) init = JSON.stringify({ projects: j.projects }, null, 2); } } catch {}
+    fs.writeFileSync(PROJECTS_FILE, init);
+  }
+  if (!fs.existsSync(LESSONS_FILE)) { try { fs.copyFileSync(path.join(ROOT, 'templates/lessons.md'), LESSONS_FILE); } catch { fs.writeFileSync(LESSONS_FILE, '# Steward 全局经验库 / 防回归（跨项目共享）\n\n'); } }
+} catch {}
+function findClaude() {
+  if (process.env.CLAUDE_BIN && fs.existsSync(process.env.CLAUDE_BIN)) return process.env.CLAUDE_BIN;
+  try { const s = (spawnSync('which', ['claude']).stdout || '').toString().trim().split('\n')[0]; if (s && fs.existsSync(s)) return s; } catch {}
+  for (const c of [path.join(os.homedir(), '.claude/local/claude'), '/opt/homebrew/bin/claude', '/usr/local/bin/claude']) if (fs.existsSync(c)) return c;
+  return 'claude';
+}
+const CLAUDE_BIN = findClaude();
+// codex CLI：定位 + 真身可执行校验。codex 的真身是平台子包里的 vendor 二进制，npm 装坏时 `which codex`
+// 有软链但一跑就 ENOENT（本机踩过）→ 必须真跑 `codex --version` 确认能执行，不能只看 which。
+function findCodex() {
+  const cands = [];
+  if (process.env.CODEX_BIN) cands.push(process.env.CODEX_BIN);
+  try { const s = (spawnSync('which', ['codex']).stdout || '').toString().trim().split('\n')[0]; if (s) cands.push(s); } catch {}
+  for (const c of ['/opt/homebrew/bin/codex', '/usr/local/bin/codex', path.join(os.homedir(), '.nvm/versions/node')]) cands.push(c);
+  for (const c of cands) { if (c && fs.existsSync(c)) { try { const r = spawnSync(c, ['--version'], { encoding: 'utf8', timeout: 8000 }); if (r.status === 0 && /codex/i.test(r.stdout || '')) return c; } catch {} } }
+  return '';   // 空 = 未装或装坏（前端据此灰掉 codex 入口）
+}
+const CODEX_BIN = findCodex();
+// —— 引擎注册表（引擎无关：新增引擎只加一条，不动交互框架）——
+// 每窗口一个引擎；命令拼装、resume 语法、hooks 挂法、状态检测方式全按这里派生。
+// bin：可执行；extra：放开权限的固定参数；resumeArgs(id)：恢复某会话的参数（claude=flag，codex=子命令）。
+// statusMode：'scrape'=抓 tmux 屏幕判状态（claude 现状，保留）；'hooks'=事件驱动读状态文件（codex）。
+const WSTATE_DIR = path.join(os.tmpdir(), 'steward-cli-state');
+try { fs.mkdirSync(WSTATE_DIR, { recursive: true }); } catch {}
+const CODEX_EXTRA = (process.env.CODEX_EXTRA || '--dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust').split(' ').filter(Boolean);
+const ENGINES = {
+  claude: {
+    id: 'claude', label: 'Claude', bin: CLAUDE_BIN, available: () => true,
+    baseArgs: () => [CLAUDE_BIN, ...CLAUDE_EXTRA],
+    resumeArgs: (id) => ['--resume', id],
+    statusMode: 'scrape',
+  },
+  codex: {
+    id: 'codex', label: 'Codex', bin: CODEX_BIN, available: () => !!CODEX_BIN,
+    // codex 恢复是子命令 `codex resume <id>`，不是顶层 flag；放权参数追加其后
+    baseArgs: () => [CODEX_BIN, ...CODEX_EXTRA],
+    resumeArgs: (id) => { throw new Error('codex resume handled in buildEngineCmd'); },
+    statusMode: 'hooks',
+  },
+};
+function engineOf(id) { return ENGINES[id] || ENGINES.claude; }
+// 生成 codex 的 hooks -c 覆盖：把生命周期事件写到「按窗口 key 命名的状态文件」。
+// 关键实测结论：用 -c hooks.<Event>=[...] 内联覆盖生效，且**不隔离 CODEX_HOME、不往用户 repo 写文件**，
+// 会话/登录态/skills 全留在真实 ~/.codex。busy=UserPromptSubmit/PreToolUse/PostToolUse，attn=PermissionRequest，idle=SessionStart/Stop。
+// 踩坑：命令串里带引号会让 codex 的 TOML 解析退化成「整个值当字符串」而报错（invalid type: string, expected a sequence）。
+// 解法：给每个窗口在临时目录生成**无参数、无引号**的 busy/attn/idle 三个 wrapper 脚本，TOML 里用**单引号字面串**引其裸路径。
+function ensureCodexHookWrappers(port, stateFile) {
+  const dir = path.join(WSTATE_DIR, `w${port}`);
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  const mk = (st) => { const fp = path.join(dir, `${st}.sh`); try { fs.writeFileSync(fp, `#!/bin/bash\ncat >/dev/null 2>&1\nprintf '${st}' > ${JSON.stringify(stateFile)}\n`); fs.chmodSync(fp, 0o755); } catch {} return fp; };
+  return { busy: mk('busy'), attn: mk('attn'), idle: mk('idle'), dir };
+}
+function codexHookArgs(port, stateFile) {
+  const w = ensureCodexHookWrappers(port, stateFile);
+  const ev = (fp) => `[{hooks=[{type='command',command='${fp}'}]}]`;   // 单引号字面串：路径在临时目录，无引号/空格
+  return [
+    '-c', `hooks.SessionStart=${ev(w.idle)}`,
+    '-c', `hooks.UserPromptSubmit=${ev(w.busy)}`,
+    '-c', `hooks.PreToolUse=${ev(w.busy)}`,
+    '-c', `hooks.PostToolUse=${ev(w.busy)}`,
+    '-c', `hooks.PermissionRequest=${ev(w.attn)}`,
+    '-c', `hooks.Stop=${ev(w.idle)}`,
+  ];
+}
+// 组装某引擎某窗口的启动命令（含可选 resume + codex 状态 hooks）
+function buildEngineCmd(engineId, sessionId, stateFile, port) {
+  const eng = engineOf(engineId);
+  if (eng.id === 'codex') {
+    const a = [eng.bin];
+    if (sessionId) a.push('resume', sessionId);   // 子命令形式，须在放权/hook 参数之前
+    a.push(...CODEX_EXTRA, ...codexHookArgs(port, stateFile));
+    return a;
+  }
+  const a = eng.baseArgs();
+  if (sessionId) a.push(...eng.resumeArgs(sessionId));
+  return a;
+}
+// 等端口可连通再回调（最多 ~5s），避免 iframe 抢在 ttyd 起好前去连接
+function waitForPort(port, cb, tries = 50) {
+  const sock = net.connect(port, '127.0.0.1');
+  sock.once('connect', () => { sock.destroy(); cb(true); });
+  sock.once('error', () => { sock.destroy(); if (tries <= 0) return cb(false); setTimeout(() => waitForPort(port, cb, tries - 1), 100); });
+}
+// 额外参数（如本地放开权限）：CLAUDE_EXTRA="--dangerously-skip-permissions"
+const CLAUDE_EXTRA = (process.env.CLAUDE_EXTRA || '').split(' ').filter(Boolean);
+// 起子 claude 前剔除从控制台进程继承来的会话身份变量。否则若控制台是从某个 claude 会话里启动的，
+// 子 claude 会被当成"子会话"(CHILD_SESSION) → 不落地成可恢复会话 → 进不了「历史对话」。
+function childEnv(projectId) {
+  const e = { ...process.env };
+  for (const k of ['CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_EXECPATH']) delete e[k];
+  e.STEWARD_LESSONS = LESSONS_FILE;   // 让子 claude 知道 Steward 全局经验库在哪（兼容 STEWARD_DATA 覆盖）
+  e.STEWARD_DATA = DATA_DIR;          // 让子进程脚本（如 feishu-fetch）找到 ~/.steward 数据目录
+  if (projectId) e.STEWARD_PROJECT_ID = projectId; else delete e.STEWARD_PROJECT_ID;   // 当前终端属于哪个项目；projectId 缺失则删掉，绝不继承泄漏旧值
+  return e;
+}
+// 内嵌终端：每项目一个 ttyd（按 projects.json 顺序分配端口）
+function findTtyd() {
+  if (process.env.TTYD_BIN && fs.existsSync(process.env.TTYD_BIN)) return process.env.TTYD_BIN;
+  for (const c of ['/opt/homebrew/bin/ttyd', '/usr/local/bin/ttyd']) if (fs.existsSync(c)) return c;
+  try { const s = (spawnSync('which', ['ttyd']).stdout || '').toString().trim(); if (s && fs.existsSync(s)) return s; } catch {}
+  return null;
+}
+const TTYD_BIN = findTtyd();
+const TTYD_BASE = parseInt(process.env.TTYD_BASE || '7700', 10);
+
+// tmux（可选）：claude 跑在 tmux 持久会话里。tmux 在服务端保留整屏内容，刷新页面/断连后重连
+// 会完整回放当前屏幕（dtach 不保存屏幕缓冲，重连只剩空屏，故用 tmux）。专用 -L socket 隔离用户自己的 tmux。
+function findTmux() {
+  if (process.env.TMUX_BIN && fs.existsSync(process.env.TMUX_BIN)) return process.env.TMUX_BIN;
+  for (const c of ['/opt/homebrew/bin/tmux', '/usr/local/bin/tmux']) if (fs.existsSync(c)) return c;
+  try { const s = (spawnSync('which', ['tmux']).stdout || '').toString().trim(); if (s && fs.existsSync(s)) return s; } catch {}
+  return null;
+}
+const TMUX_BIN = findTmux();
+const TMUX_SOCK = 'steward';                                   // -L steward 专用 socket
+const TMUX_CONF = path.join(os.tmpdir(), 'steward-tmux.conf');
+if (TMUX_BIN) { try { fs.writeFileSync(TMUX_CONF, [
+  'set -g status off',            // 隐藏底部状态栏，嵌入终端更干净
+  'set -sg escape-time 0',        // 无 ESC 延迟，TUI 跟手
+  'set -g history-limit 50000',   // 滚动历史
+  'set -g mouse on',              // 开鼠标：滚轮翻历史（claude 用普通屏，靠 tmux copy-mode 才能滚）；滚到底自动退出查看模式，回到实时可继续打字/选择
+  'set -g set-clipboard on',      // 复制时用 OSC52 转义直写终端剪贴板 → ttyd(xterm.js) 落进浏览器系统剪贴板（配合 iframe allow=clipboard-write）
+  // 鼠标拖拽选中、松手即复制到系统剪贴板并退出 copy-mode（含在 copy-mode 里滚历史后跨屏选的整段）；双击选词/三击选行用 tmux 自带绑定（配 set-clipboard 即复制）
+  'bind -T copy-mode    MouseDragEnd1Pane send -X copy-selection-and-cancel',
+  'bind -T copy-mode-vi MouseDragEnd1Pane send -X copy-selection-and-cancel',
+  'bind -T copy-mode    q send -X cancel',   // 查看模式按 q 退出
+  'bind -T copy-mode-vi q send -X cancel',
+  'set -g destroy-unattached off' // 无客户端时会话保留（刷新后还能 reattach）
+].join('\n') + '\n'); } catch {} }
+// 按需开窗：每个对话窗口 = 一个独立 ttyd（各跑一段 CLI），可同项目多开
+const openWindows = new Map(); // key -> { key, port, projectId, sessionId, label, engine, stateFile, proc, tmuxSess }
+const WIN_STATE_FILE = path.join(os.tmpdir(), 'steward-windows.json'); // 持久化窗口元数据，供重启后 adopt
+function allocPort() { const used = new Set([...openWindows.values()].map(w => w.port)); let p = TTYD_BASE; while (used.has(p)) p++; return p; }
+function saveWindows() { try { fs.writeFileSync(WIN_STATE_FILE, JSON.stringify([...openWindows.values()].map(w => ({ port: w.port, projectId: w.projectId, label: w.label, sessionId: w.sessionId, engine: w.engine, stateFile: w.stateFile, tmuxSess: w.tmuxSess })))); } catch {} }
+function portBound(port) { try { return (((spawnSync('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN'], { encoding: 'utf8' }).stdout) || '').includes('LISTEN')); } catch { return false; } }
+function openWindow(proj, sessionId, label, engineId) {
+  const port = allocPort();
+  const eng = engineOf(engineId);
+  const stateFile = eng.statusMode === 'hooks' ? path.join(WSTATE_DIR, `${port}.state`) : '';
+  if (stateFile) { try { fs.writeFileSync(stateFile, 'idle'); } catch {} }   // 起手先置空闲，hook 触发前不误报
+  const cliArgs = buildEngineCmd(eng.id, sessionId, stateFile, port);
+  // 有 tmux 就包一层：CLI 跑在 tmux 会话里；new-session -A = 在则 attach（不重启）、不在则建并跑。
+  // 刷新页面后 ttyd 重连 → 同名 -A attach → tmux 回放整屏，TUI 原样恢复。
+  let cmd = cliArgs, tmuxSess = '';
+  if (TMUX_BIN) {
+    tmuxSess = `steward-${port}`;
+    cmd = [TMUX_BIN, '-L', TMUX_SOCK, '-f', TMUX_CONF, 'new-session', '-A', '-s', tmuxSess, ...cliArgs];
+  }
+  const args = ['-W', '-i', '127.0.0.1', '-p', String(port), ...cmd];
+  const proc = spawn(TTYD_BIN, args, { cwd: proj.path, stdio: 'ignore', env: childEnv(proj.id) });
+  proc.on('error', e => console.error('[ttyd spawn]', e?.message || e));   // spawn 失败不可掀翻进程
+  const key = String(port);
+  openWindows.set(key, { key, port, projectId: proj.id, sessionId: sessionId || '', label: label || '新对话', engine: eng.id, stateFile, proc, tmuxSess });
+  saveWindows();
+  return { key, port, engine: eng.id };
+}
+// 关窗 = 用户主动关：杀 ttyd（有句柄直接 kill，adopt 来的无句柄按端口 pkill）+ kill tmux 会话（彻底结束 claude）
+function killMux(sess) { if (!sess || !TMUX_BIN) return; try { spawnSync(TMUX_BIN, ['-L', TMUX_SOCK, 'kill-session', '-t', sess]); } catch {} }
+function killTtyd(w) { if (w.proc) { try { w.proc.kill(); } catch {} } else { try { spawnSync('pkill', ['-f', `ttyd -W -i 127.0.0.1 -p ${w.port} `]); } catch {} } }
+function closeWindow(key) { const w = openWindows.get(key); if (w) { killTtyd(w); killMux(w.tmuxSess); if (w.stateFile) { try { fs.unlinkSync(w.stateFile); } catch {} try { fs.rmSync(path.join(WSTATE_DIR, `w${w.port}`), { recursive: true, force: true }); } catch {} } openWindows.delete(key); saveWindows(); } }
+// 进程退出：只存档，不杀 ttyd/tmux —— 让会话存活，下次启动 adopt 接回（重启不打断 claude）
+process.on('exit', () => saveWindows());
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => process.exit(0));
+// 进程级兜底：单个坏请求 / 子进程 spawn 错误只记日志，绝不掀翻整个控制台
+process.on('uncaughtException', e => console.error('[uncaught]', e?.stack || e));
+process.on('unhandledRejection', e => console.error('[unhandled]', e?.stack || e));
+// 启动时接管已存在的 tmux 会话（上次退出/被 kill 遗留的）：tmux/claude 还活着就拉回来管，端口已被 ttyd 占着则直接认领（无缝），否则重起 ttyd 接回（需刷新页面）
+function adoptWindows() {
+  if (!TMUX_BIN) return;
+  let saved = []; try { saved = JSON.parse(fs.readFileSync(WIN_STATE_FILE, 'utf8')) || []; } catch {}
+  const meta = {}; for (const w of saved) if (w && w.tmuxSess) meta[w.tmuxSess] = w;
+  let live = []; try { live = (((spawnSync(TMUX_BIN, ['-L', TMUX_SOCK, 'ls', '-F', '#{session_name}'], { encoding: 'utf8' }).stdout) || '').split('\n').map(s => s.trim()).filter(s => /^steward-\d+$/.test(s))); } catch {}
+  const fallbackPid = (loadProjects()[0] || {}).id;
+  for (const sess of live) {
+    const port = parseInt(sess.slice('steward-'.length), 10);
+    if ([...openWindows.values()].some(w => w.port === port)) continue;
+    const m = meta[sess] || {};
+    const projectId = m.projectId || fallbackPid;
+    let proc = null;
+    if (!portBound(port)) {  // ttyd 没了 → 重起一个接回（new-session -A 已存在=attach，claude 不重启）
+      const args = ['-W', '-i', '127.0.0.1', '-p', String(port), TMUX_BIN, '-L', TMUX_SOCK, '-f', TMUX_CONF, 'new-session', '-A', '-s', sess];
+      try { proc = spawn(TTYD_BIN, args, { cwd: (projById(projectId) || {}).path || ROOT, stdio: 'ignore', env: childEnv(projectId) }); proc.on('error', e => console.error('[ttyd adopt]', e?.message || e)); } catch {}
+    } // else：ttyd 还在（被 SIGKILL 残留）→ 直接认领，浏览器 iframe 不断连，无缝
+    openWindows.set(String(port), { key: String(port), port, projectId, sessionId: m.sessionId || '', label: m.label || '恢复的对话', engine: m.engine || 'claude', stateFile: m.stateFile || '', proc, tmuxSess: sess });
+  }
+  saveWindows();
+}
+
+// —— 窗口忙/闲检测 ——
+// 每 ~2.5s 抓 tmux 屏幕，剔掉会自走的状态灯（ccgotchi 宠物/用量条/模式行）后做差分：
+// 变了 = claude 正跑一个 turn（spinner 的秒数计时每秒在动）；没变 = 空闲等输入。忙→闲那一刻 = 刚完成，置 done。
+// 异步抓取（#7）：execFile 不阻塞事件循环，多窗口可并发，控制台不再随窗口数变卡。
+function capturePane(sess, full) { return new Promise(resolve => { try { const a = ['-L', TMUX_SOCK, 'capture-pane', '-t', sess, '-p']; if (full) a.push('-S', '-'); execFile(TMUX_BIN, a, { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 }, (e, out) => resolve(out || '')); } catch { resolve(''); } }); }
+function titleFromPane(out) {  // 取最早一条用户输入（❯ 后有内容）作为会话话题，拼接换行续行抓全
+  const lines = out.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^❯\s+(\S.*)$/); if (!m) continue;
+    let t = m[1].trim();
+    for (let j = i + 1; j < lines.length; j++) {            // 续行：2+ 空格缩进、非边框、非 ⎿ hook 行
+      const c = lines[j];
+      if (c.includes('⎿') || /^[\s─-]+$/.test(c) || !/^\s{2,}\S/.test(c)) break;
+      t += c.trim();
+    }
+    if (t) return t.slice(0, 160);
+  }
+  return '';
+}
+function sigFromPane(out) {  // 剔掉会自走的状态灯/边框，剩下用于差分判忙闲
+  return out.split('\n').filter(l => {
+    if (l.includes('⠀')) return false;          // ccgotchi 宠物行（braille 空格）
+    if (l.includes('⏵⏵')) return false;          // 模式行（bypass permissions…）
+    if (/^\s*\d+h\s/.test(l)) return false;     // 用量条 "5h ●●● 37% 3h21m"
+    if (/^[\s─-]*$/.test(l)) return false;      // 边框/空行
+    return true;
+  }).join('\n');
+}
+function activityFromPane(out) {  // 提取「最新在干啥」：优先最近的子代理运行行，其次当前 spinner 行（与具体 agent 命名无关）
+  const raw = out.split('\n');
+  // 1) 子代理运行行：◯/◉/○ <agent> <任务> <计时> · ↓ <tokens>（去掉开头 agent 名 + 尾部计时/token）
+  for (let i = raw.length - 1; i >= 0; i--) {
+    const m = raw[i].match(/^\s*[◯○◉]\s+(\S.*)$/);
+    if (!m) continue;
+    let t = m[1]
+      .replace(/\s*[·∙•]\s*[↑↓].*$/, '').replace(/\s+\d+m?\s*\d+s\b.*$/, '').replace(/\s*\((?:ctrl|esc).*$/i, '')
+      .replace(/^[A-Za-z][\w-]*[\s:：]+/, '')   // 去开头 agent 名（dev / xxx-dev 等）
+      .trim();
+    if (t && !/^(main)\b/i.test(t)) return t.slice(0, 46);
+  }
+  // 2) 当前 spinner gerund 行（✻/✽… <任务>），取 … 或 ( 之前
+  for (let i = raw.length - 1; i >= 0; i--) {
+    const m = raw[i].match(/^\s*[✻✽✶✷✸✹✺✢·]\s+(\S[^…(]*)/);   // 仅真·claude spinner 字符，避免误命中 * 列表/日志行
+    if (m) { const t = m[1].trim(); if (t) return t.slice(0, 46); }
+  }
+  return '';
+}
+// 空闲时检测是否在等"确认/选择"（需你处理）→ 红；否则普通空闲 → 黄
+function confirmFromPane(out) {
+  // 只看 live 提示区(最后 ~6 行非空)+ 窄信号;不匹配中文散文,避免把 claude 收尾叙述误判成待确认(#33)
+  const tail = out.split('\n').map(l => l.trim()).filter(Boolean).slice(-6).join('\n');
+  return /\([yY]\/[nN]\)|\[[yY]\/[nN]\]|❯\s*\d+[.\)]|\bDo you want to (proceed|continue)|press \w+ to (confirm|continue)/i.test(tail);
+}
+// codex（statusMode='hooks'）：状态来自 hook 写的状态文件，不抓屏判忙闲（事件驱动、稳）。
+// 文件内容：busy / attn / idle。仍抓一次屏幕补 activity/title（纯展示，不影响状态灯）。
+async function pollCodexHooks(w) {
+  let st = 'idle';
+  try { st = (fs.readFileSync(w.stateFile, 'utf8') || '').trim() || 'idle'; } catch {}
+  const wasBusy = w.busy;
+  w.confirm = st === 'attn';
+  w.busy = st === 'busy';
+  if (wasBusy && !w.busy && !w.confirm) { w.done = true; w.doneAt = Date.now(); }
+  if (w.tmuxSess) {
+    try { const out = await capturePane(w.tmuxSess); if (out) { w.activity = activityFromPane(out); } } catch {}
+    if (!w.title) {
+      if (w.sessionId) { try { w.title = (codexSessionPreview(w.sessionId) || ''); } catch {} }
+      if (!w.title && w.tmuxSess) { try { w.title = titleFromPane(await capturePane(w.tmuxSess, true)); } catch {} }
+    }
+  }
+}
+async function pollOne(w) {
+  if (w.engine === 'codex' && w.stateFile) return void await pollCodexHooks(w);
+  if (!w.tmuxSess) return;
+  const out = await capturePane(w.tmuxSess);
+  if (!out) return;                            // 本轮抓不到，保留旧状态
+  const sig = sigFromPane(out);
+  const now = Date.now();
+  if (w.lastSig !== undefined && sig !== w.lastSig) w.lastChange = now;   // 记录最近一次屏幕变化
+  w.lastSig = sig;
+  // 工作信号:生成中「esc to interrupt」/ token 计数「↑↓ N tokens」/ 实时等子代理「Waiting for N background」。
+  // 不用宽泛 background agents/Waiting for——会误命中"上次残留 Background agent ... did not complete"陈述句→卡 busy
+  const tail = sigFromPane(out).split('\n').slice(-12).join('\n');
+  const working = /esc to interrupt|[↑↓]\s*[\d.,]+\s*k?\s*tokens?|Waiting for \d+ background/i.test(tail);
+  w.activity = activityFromPane(out);
+  w.confirm = confirmFromPane(out);   // 待确认独立判定:菜单/y-n 一出现即红，不被 busy 卡住
+  // 忙 = 非待确认 且 (有工作文案 或 10 秒内有过变化)。时间窗迟滞 → 后台代理间歇重绘也不闪
+  const wasBusy = w.busy;
+  w.busy = !w.confirm && (working || (w.lastChange && now - w.lastChange < 10000));
+  if (wasBusy && !w.busy && !w.confirm) { w.done = true; w.doneAt = Date.now(); }
+  if (!w.title) {  // 会话话题（一次性）：resume 的读会话文件 preview，新窗口从全量屏幕抓第一句用户输入
+    if (w.sessionId) { try { w.title = sessionPreview(path.join(os.homedir(), '.claude', 'projects', encodeCwd((projById(w.projectId) || {}).path || ''), w.sessionId + '.jsonl')); } catch {} }
+    if (!w.title) w.title = titleFromPane(await capturePane(w.tmuxSess, true));
+  }
+}
+async function pollWindows() {   // 所有窗口并发抓取，整轮不阻塞事件循环（#7）
+  if (!TMUX_BIN) return;
+  await Promise.all([...openWindows.values()].map(w => pollOne(w).catch(() => {})));
+}
+// 自调度而非 setInterval：上一轮没跑完不会重叠堆积
+(function pollLoop() { Promise.resolve(pollWindows()).catch(() => {}).finally(() => setTimeout(pollLoop, 2500)); })();
+
+// ---- claude 会话发现（按项目 cwd 编码）----
+function encodeCwd(abs) { return abs.replace(/[/.]/g, '-'); }
+function sessionPreview(fp) {
+  try {
+    // 读前 ~1.5MB 但**按完整行**切（含图片的首条消息那行会很大，base64 内嵌；按字节截断会把这行切坏导致 JSON.parse 失败 → 取不到预览）
+    const fd = fs.openSync(fp, 'r');
+    const buf = Buffer.alloc(1500000);
+    const n = fs.readSync(fd, buf, 0, buf.length, 0);
+    fs.closeSync(fd);
+    let head = buf.toString('utf8', 0, n);
+    const nl = head.lastIndexOf('\n'); if (nl > 0) head = head.slice(0, nl);   // 丢掉最后不完整的一行
+    let imgSeen = false;
+    for (const line of head.split('\n')) {
+      if (!line.trim()) continue; let j; try { j = JSON.parse(line); } catch { continue; }
+      const m = j.message;
+      if (j.type === 'user' && m && m.content) {
+        const arr = Array.isArray(m.content) ? m.content : null;
+        if (arr && arr.some(b => b.type === 'image')) imgSeen = true;
+        let t = typeof m.content === 'string' ? m.content : (arr ? ((arr.find(b => b.type === 'text') || {}).text || '') : '');
+        t = (t || '').replace(/\[Image[^\]]*\]/g, ' ').replace(/\s+/g, ' ').trim();   // 去掉 [Image #N] / [Image: …] 占位
+        if (t && !t.startsWith('<')) return t.slice(0, 70);
+      }
+    }
+    if (imgSeen) return '[图片]';   // 只有图片、没文字时给个标签，别空着
+  } catch {}
+  return '';
+}
+function listClaudeSessions(abs) {
+  const dir = path.join(os.homedir(), '.claude', 'projects', encodeCwd(abs));
+  const out = [], names = readNames();
+  try { for (const f of fs.readdirSync(dir)) { if (!f.endsWith('.jsonl')) continue; const fp = path.join(dir, f); const st = fs.statSync(fp); const id = f.replace(/\.jsonl$/, ''); out.push({ id, mtime: st.mtimeMs, preview: sessionPreview(fp), name: names[id] || '' }); } } catch {}
+  return out.sort((a, b) => b.mtime - a.mtime);
+}
+// ---- codex 会话发现 ----
+// codex 会话按日期分层：~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl；首行 session_meta 带 cwd。
+// 预览用 ~/.codex/session_index.jsonl 的 thread_name（现成标题），缺失则回退读 rollout 首条用户消息。
+const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
+function codexIndexNames() {   // {id: thread_name}
+  const m = {};
+  try { const raw = fs.readFileSync(path.join(CODEX_HOME, 'session_index.jsonl'), 'utf8'); for (const ln of raw.split('\n')) { if (!ln.trim()) continue; try { const j = JSON.parse(ln); if (j && j.id) m[j.id] = j.thread_name || ''; } catch {} } } catch {}
+  return m;
+}
+function codexRolloutFirstUser(fp) {   // 回退预览：读 rollout 里第一条 role=user 的文本
+  try {
+    const fd = fs.openSync(fp, 'r'); const buf = Buffer.alloc(400000); const n = fs.readSync(fd, buf, 0, buf.length, 0); fs.closeSync(fd);
+    for (const ln of buf.toString('utf8', 0, n).split('\n')) {
+      if (!ln.trim()) continue; let j; try { j = JSON.parse(ln); } catch { continue; }
+      const p = j && j.payload; if (p && p.type === 'message' && p.role === 'user' && Array.isArray(p.content)) {
+        const t = p.content.map(c => c && c.text || '').join(' ').trim();
+        if (t && !t.startsWith('<environment_context>') && !t.startsWith('<permissions')) return t.slice(0, 120);
+      }
+    }
+  } catch {}
+  return '';
+}
+let _codexIdx = null, _codexIdxAt = 0;
+function listCodexSessions(abs) {
+  const root = path.join(CODEX_HOME, 'sessions');
+  const names = readNames();
+  if (!_codexIdx || Date.now() - _codexIdxAt > 5000) { _codexIdx = codexIndexNames(); _codexIdxAt = Date.now(); }
+  const out = [];
+  // 递归 YYYY/MM/DD 找 rollout-*.jsonl；按 mtime 先排，只对最近 ~80 条解析 cwd/preview（避免全量烧 IO）
+  const files = [];
+  const walk = (d) => { let ents = []; try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return; } for (const e of ents) { const fp = path.join(d, e.name); if (e.isDirectory()) walk(fp); else if (e.name.startsWith('rollout-') && e.name.endsWith('.jsonl')) { try { files.push({ fp, mtime: fs.statSync(fp).mtimeMs }); } catch {} } } };
+  walk(root);
+  files.sort((a, b) => b.mtime - a.mtime);
+  for (const { fp, mtime } of files.slice(0, 80)) {
+    try {
+      const fd = fs.openSync(fp, 'r'); const buf = Buffer.alloc(65536); const n = fs.readSync(fd, buf, 0, buf.length, 0); fs.closeSync(fd);
+      const firstLine = buf.toString('utf8', 0, n).split('\n', 1)[0];
+      let meta; try { meta = JSON.parse(firstLine); } catch { continue; }
+      const p = meta && meta.payload; if (!p || meta.type !== 'session_meta') continue;
+      if (abs && p.cwd !== abs) continue;   // 只列该项目 cwd 的会话
+      const id = p.id; if (!id) continue;
+      const preview = _codexIdx[id] || codexRolloutFirstUser(fp) || '';
+      out.push({ id, mtime, preview, name: names[id] || '' });
+    } catch {}
+  }
+  return out;
+}
+function codexSessionPreview(id) { const m = codexIndexNames(); return m[id] || ''; }
+
+// ---- 新项目脚手架（复制团队文件，已存在不覆盖）----
+function copyIfAbsent(src, dst) { try { if (fs.existsSync(src) && !fs.existsSync(dst)) { fs.mkdirSync(path.dirname(dst), { recursive: true }); fs.copyFileSync(src, dst); } } catch {} }
+function copyMdDir(srcDir, dstDir) { try { fs.mkdirSync(dstDir, { recursive: true }); for (const f of fs.readdirSync(srcDir)) if (f.endsWith('.md')) copyIfAbsent(path.join(srcDir, f), path.join(dstDir, f)); } catch {} }
+// 递归拷贝整个目录（绿地导入原型用）；返回拷贝的文件数
+function copyDirAll(srcDir, dstDir) { let n = 0; try { fs.mkdirSync(dstDir, { recursive: true }); for (const e of fs.readdirSync(srcDir, { withFileTypes: true })) { if (e.name.startsWith('.')) continue; const s = path.join(srcDir, e.name), d = path.join(dstDir, e.name); if (e.isDirectory()) n += copyDirAll(s, d); else { try { fs.copyFileSync(s, d); n++; } catch {} } } } catch {} return n; }
+// 模板占位符替换（{{PROJECT_NAME}} / {{PROJECT_ID}} 等）；文件不存在或无占位符则 no-op
+function fillPlaceholders(file, map) { try { if (!fs.existsSync(file)) return; let s = fs.readFileSync(file, 'utf8'); for (const [k, v] of Object.entries(map)) s = s.split(k).join(v); fs.writeFileSync(file, s); } catch {} }
+function scaffoldProject(dest, name, id) {
+  const T = path.join(ROOT, 'templates');   // 脚手架模板源（与中枢自身的 CLAUDE.md 分开）
+  ['docs/specs', 'docs/.state', 'tools'].forEach(d => fs.mkdirSync(path.join(dest, d), { recursive: true }));
+  copyIfAbsent(path.join(T, 'CLAUDE.md'), path.join(dest, 'CLAUDE.md'));
+  fillPlaceholders(path.join(dest, 'CLAUDE.md'), { '{{PROJECT_NAME}}': name || '', '{{PROJECT_ID}}': id || '' });
+  copyMdDir(path.join(T, '.claude/agents'), path.join(dest, '.claude/agents'));
+  copyMdDir(path.join(T, '.claude/commands'), path.join(dest, '.claude/commands'));
+  copyIfAbsent(path.join(T, 'docs/lessons.md'), path.join(dest, 'docs/lessons.md'));   // 项目级经验库（项目专属坑，随项目提交）
+  copyIfAbsent(path.join(T, 'docs/specs/_TEMPLATE.md'), path.join(dest, 'docs/specs/_TEMPLATE.md'));
+  copyIfAbsent(path.join(T, 'docs/specs/README.md'), path.join(dest, 'docs/specs/README.md'));
+  copyIfAbsent(path.join(T, 'tools/board.mjs'), path.join(dest, 'tools/board.mjs'));
+  copyIfAbsent(path.join(T, 'tools/feishu-fetch.mjs'), path.join(dest, 'tools/feishu-fetch.mjs'));   // /intake 飞书拉取(文档/多维表格)用
+  copyIfAbsent(path.join(T, 'docs/.gitignore'), path.join(dest, 'docs/.gitignore'));         // 忽略 board/state/tasks 派生文件
+  copyIfAbsent(path.join(T, '.claude/.gitignore'), path.join(dest, '.claude/.gitignore'));   // 忽略本地设置/plan
+  if (!fs.existsSync(path.join(dest, 'docs/tasks.json'))) fs.writeFileSync(path.join(dest, 'docs/tasks.json'), JSON.stringify({ title: '任务清单', batches: [] }, null, 2));
+  if (!fs.existsSync(path.join(dest, 'docs/board.json'))) fs.writeFileSync(path.join(dest, 'docs/board.json'), JSON.stringify({ specs: [], summary: { total: 0, accepted: 0, inDev: 0, ready: 0, draft: 0 }, nodes: ['product', 'backend', 'frontend', 'test', 'ci', 'review', 'accept'] }, null, 2));
+  fs.mkdirSync(path.join(dest, 'docs/.state'), { recursive: true });
+  if (!fs.existsSync(path.join(dest, 'docs/.state/agents.json'))) fs.writeFileSync(path.join(dest, 'docs/.state/agents.json'), JSON.stringify({ updatedAt: '', agents: [{ id: 'dev', name: '开发', icon: 'code', status: 'idle', current: '', since: '' }] }, null, 2));
+}
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf' };
+const sseClients = new Set();
+function sseBroadcast(obj) { const s = 'data: ' + JSON.stringify(obj) + '\n\n'; for (const c of sseClients) { try { c.write(s); } catch {} } }
+
+function loadProjects() {
+  try { return JSON.parse(fs.readFileSync(PROJECTS_FILE, 'utf8')).projects || []; }
+  catch { return []; }   // 空工具：还没纳管任何项目
+}
+// 飞书机器人凭据：按项目隔离，存用户数据目录(不入任何仓库)。{ "<projectId>": {appId, appSecret, domain?} }
+const FEISHU_FILE = path.join(DATA_DIR, 'feishu.json');
+function loadFeishu() { try { return JSON.parse(fs.readFileSync(FEISHU_FILE, 'utf8')) || {}; } catch { return {}; } }
+function saveFeishu(map) { try { fs.writeFileSync(FEISHU_FILE, JSON.stringify(map, null, 2)); return true; } catch { return false; } }
+function projById(id) { const ps = loadProjects(); return ps.find(p => p.id === id) || null; }   // #16：未知/缺失 id 返回 null（不再兜底到第一个项目），避免写操作静默落到错误项目
+function genBoard(projPath) { const bm = path.join(projPath, 'tools/board.mjs'); if (fs.existsSync(bm)) { try { spawnSync('node', [bm], { cwd: projPath }); } catch {} } }   // 同步：避免与连接 body 读取并发 spawn 的 fd 竞态
+function send(res, code, body, type = 'application/json') { res.writeHead(code, { 'Content-Type': type }); res.end(body); }
+function readOr(file, fallback) { try { return fs.readFileSync(file); } catch { return fallback; } }
+// 任务清单(进件批次)模型：规整 + 把旧扁平速记 items 迁进一个"历史速记·手动"批次
+function normalizeTasks(j) {
+  if (!j || typeof j !== 'object') j = {};
+  if (!Array.isArray(j.batches)) j.batches = [];
+  if (Array.isArray(j.items) && j.items.length) {
+    const tasks = j.items.map(it => ({
+      id: String(it.id || ('t' + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36))),
+      title: String(it.text || '').slice(0, 300), status: it.done ? 'done' : 'todo', specRef: '', note: it.pri ? '重要' : ''
+    })).filter(t => t.title);
+    if (tasks.length) {
+      const ts = Math.min(...j.items.map(it => Number(it.ts) || Date.now()));
+      j.batches.push({ id: 'b-legacy-' + ts.toString(36), importedAt: ts, source: { type: 'manual', ref: '历史速记迁移' }, title: '历史速记', tasks });
+    }
+  }
+  j.items = [];
+  return j;
+}
+function sanitizeBatches(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.slice(0, 200).map(b => ({
+    id: String((b && b.id) || ('b' + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36))).slice(0, 40),
+    importedAt: Number(b && b.importedAt) || Date.now(),
+    source: { type: ['feishu', 'cli', 'manual'].includes(((b && b.source) || {}).type) ? b.source.type : 'manual', ref: String(((b && b.source) || {}).ref || '').slice(0, 500) },
+    title: String((b && b.title) || '').replace(/\s+/g, ' ').trim().slice(0, 200),
+    tasks: (Array.isArray(b && b.tasks) ? b.tasks : []).slice(0, 500).map(t => ({
+      id: String((t && t.id) || ('t' + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36))).slice(0, 40),
+      title: String((t && t.title) || '').replace(/\s+/g, ' ').trim().slice(0, 300),
+      status: ['todo', 'doing', 'done'].includes(t && t.status) ? t.status : 'todo',
+      specRef: String((t && t.specRef) || '').slice(0, 40), note: String((t && t.note) || '').slice(0, 300)
+    })).filter(t => t.title)
+  }));
+}
+function chatFile(p) { return path.join(p.path, 'docs/.state/chat.json'); }
+function readChat(p) { try { return JSON.parse(fs.readFileSync(chatFile(p), 'utf8')); } catch { return { messages: [] }; } }
+function appendChat(p, items) { const c = readChat(p); c.messages.push(...items); if (c.messages.length > 200) c.messages = c.messages.slice(-200); try { fs.mkdirSync(path.dirname(chatFile(p)), { recursive: true }); fs.writeFileSync(chatFile(p), JSON.stringify(c)); } catch {} }
+function sessFile(p) { return path.join(p.path, 'docs/.state/session.json'); }
+function readSess(p) { try { return JSON.parse(fs.readFileSync(sessFile(p), 'utf8')).sessionId || null; } catch { return null; } }
+function writeSess(p, id) { try { fs.mkdirSync(path.dirname(sessFile(p)), { recursive: true }); fs.writeFileSync(sessFile(p), JSON.stringify({ sessionId: id })); } catch {} }
+// 每项目挂一个 claude 会话：有会话则 --resume 续聊（AI 记得上次）；resume 失败则回退新会话
+// 生命周期（#8）：同项目同时只允许一个在跑（防双 --resume 会话分叉/历史互覆）；可被 stopRun 中止
+const runningRuns = new Map(); // projId -> child
+function runClaude(p, msg, cb) {
+  if (runningRuns.has(p.id)) return cb({ reply: '', error: '该项目已有一个 AI 任务在运行，请等它结束或先停止' });
+  let done = false;
+  const finish = (r) => { if (done) return; done = true; runningRuns.delete(p.id); cb(r); };
+  const attempt = (resumeId, isRetry) => {
+    const args = ['-p', '--output-format', 'json', ...CLAUDE_EXTRA];
+    if (resumeId) args.push('--resume', resumeId);
+    const child = spawn(CLAUDE_BIN, args, { cwd: p.path, env: childEnv() });
+    runningRuns.set(p.id, child);
+    let out = '', err = '';
+    child.stdout.on('data', d => (out += d));
+    child.stderr.on('data', d => (err += d));
+    child.on('error', e => finish({ reply: '', error: '无法启动 claude：' + e.message }));
+    child.on('close', (code, signal) => {
+      if (signal) return finish({ reply: '', error: '已停止（用户中止）' });   // 被 stopRun kill
+      let reply = '', newSid = resumeId, isErr = false;
+      try { const j = JSON.parse(out); reply = (j.result != null ? String(j.result) : '') || ''; if (j.session_id) newSid = j.session_id; isErr = !!j.is_error; }
+      catch { reply = out.trim(); }
+      if ((isErr || !reply) && resumeId && !isRetry) return attempt(null, true); // resume 失败 → 开新会话重试一次
+      if (!reply) reply = err.trim() || '(无输出)';
+      if (newSid) writeSess(p, newSid);
+      finish({ reply, sessionId: newSid });
+    });
+    child.stdin.write(msg); child.stdin.end();
+  };
+  attempt(readSess(p), false);
+}
+function stopRun(projId) { const c = runningRuns.get(projId); if (c) { try { c.kill('SIGTERM'); } catch {} return true; } return false; }
+// 按需探测 claude 登录态（跑一个极小 -p，带超时；不自动调用，避免 token 成本）
+function probeClaudeLogin(cb) {
+  let done = false; const fin = v => { if (done) return; done = true; cb(v); };
+  let child; try { child = spawn(CLAUDE_BIN, ['-p', 'ok', '--output-format', 'json'], { env: childEnv() }); } catch { return fin('error'); }
+  let out = ''; child.stdout.on('data', d => (out += d)); child.on('error', () => fin('error'));
+  const t = setTimeout(() => { try { child.kill(); } catch {} fin('timeout'); }, 15000);
+  child.on('close', () => { clearTimeout(t); try { const j = JSON.parse(out); fin(j.is_error ? 'error' : 'ok'); } catch { fin(out.trim() ? 'ok' : 'error'); } });
+  try { child.stdin.end(); } catch {}
+}
+
+const server = http.createServer((req, res) => {
+  const url = new URL(req.url, 'http://127.0.0.1');
+  // 跨源/DNS-rebinding 防护（#6）：拒绝非本机 Host、以及任何跨源页面发来的请求。
+  // 同源 GET/HEAD 通常不带 Origin（放行）；同源 POST 带本机 Origin（放行）；跨源 POST 一定带攻击者 Origin（403）。
+  if (!SELF_HOSTS.has(req.headers.host || '')) return send(res, 403, JSON.stringify({ error: 'forbidden host' }));
+  if (req.headers.origin && !SELF_ORIGINS.has(req.headers.origin)) return send(res, 403, JSON.stringify({ error: 'cross-origin forbidden' }));
+  const pid = url.searchParams.get('project');
+  // --- API ---
+  if (url.pathname === '/api/version') {   // 实际运行的"代码版本":git tag(网页/源码) → 否则热更包的 version.json(桌面热更后) → 否则空(回退壳版本)
+    let v = ''; try { const r = spawnSync('git', ['describe', '--tags', '--abbrev=0'], { cwd: ROOT, encoding: 'utf8' }); v = (r.stdout || '').trim(); } catch {}
+    if (!v) { try { v = JSON.parse(fs.readFileSync(path.join(ROOT, 'version.json'), 'utf8')).version || ''; } catch {} }
+    return send(res, 200, JSON.stringify({ version: v }));
+  }
+  if (url.pathname === '/api/projects') return send(res, 200, JSON.stringify({ projects: loadProjects() }));
+  if (url.pathname === '/api/board') {
+    const p = projById(pid); if (!p) return send(res, 200, '{"specs":[]}');
+    const f = path.join(p.path, 'docs/board.json');
+    const finish = () => {
+      let b; try { b = JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return send(res, 200, '{"specs":[]}'); }
+      for (const sp of (b.specs || [])) {   // 从 spec 文件头补 module（board.json 没存，给前端按模块分组用）
+        if (!sp.module && sp.file) { try { const m = fs.readFileSync(path.join(p.path, sp.file), 'utf8').slice(0, 1200).match(/^module:\s*(.+)$/m); if (m) sp.module = m[1].trim(); } catch {} }
+        if (sp.status === 'accepted' && sp.nodes) { for (const n of (b.nodes || [])) sp.nodes[n] = 'pass'; }   // 已验收/已完成 → 各节点全绿
+      }
+      return send(res, 200, JSON.stringify(b));
+    };
+    if (!fs.existsSync(f)) genBoard(p.path);   // 首次惰性生成（同步）
+    return finish();
+  }
+  if (url.pathname === '/api/tasks') { const p = projById(pid); return send(res, 200, p ? readOr(path.join(p.path, 'docs/tasks.json'), '{"groups":[]}') : '{"groups":[]}'); }
+  if (url.pathname === '/api/todos' && req.method === 'POST') {   // v1 速记小任务：整存 items 到 docs/tasks.json(本地·不入库)，保留旧 groups 字段
+    const p = projById(pid); if (!p) return send(res, 400, JSON.stringify({ ok: false, error: '项目不存在' }));
+    let buf = ''; req.on('data', c => (buf += c)); req.on('end', () => {
+      let b = {}; try { b = JSON.parse(buf); } catch {}
+      const items = (Array.isArray(b.items) ? b.items : []).slice(0, 500).map(it => ({
+        id: (String(it.id || '').slice(0, 40)) || ('t' + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36)),
+        text: String(it.text || '').replace(/\s+/g, ' ').trim().slice(0, 300),
+        done: !!it.done, pri: !!it.pri, ts: Number(it.ts) || Date.now()
+      })).filter(it => it.text);
+      const f = path.join(p.path, 'docs/tasks.json');
+      let j = {}; try { j = JSON.parse(fs.readFileSync(f, 'utf8')); } catch { j = { title: '开发清单', groups: [] }; }
+      j.items = items;
+      try { fs.writeFileSync(f, JSON.stringify(j, null, 2)); } catch (e) { return send(res, 500, JSON.stringify({ ok: false, error: String((e && e.message) || e) })); }
+      send(res, 200, JSON.stringify({ ok: true, items }));
+    });
+    return;
+  }
+  if (url.pathname === '/api/batches' && req.method !== 'POST') {   // 任务清单(进件批次)：读 docs/tasks.json，规整 + 迁移旧速记，迁移则落盘一次
+    const p = projById(pid); if (!p) return send(res, 200, JSON.stringify({ batches: [] }));
+    const f = path.join(p.path, 'docs/tasks.json');
+    let j = {}; try { j = JSON.parse(fs.readFileSync(f, 'utf8')); } catch { j = { title: '任务清单', batches: [] }; }
+    const hadItems = Array.isArray(j.items) && j.items.length;
+    j = normalizeTasks(j);
+    if (hadItems) { try { fs.writeFileSync(f, JSON.stringify(j, null, 2)); } catch {} }
+    return send(res, 200, JSON.stringify({ batches: j.batches || [] }));
+  }
+  if (url.pathname === '/api/batches' && req.method === 'POST') {   // 整存批次到 docs/tasks.json(本地·不入库)
+    const p = projById(pid); if (!p) return send(res, 400, JSON.stringify({ ok: false, error: '项目不存在' }));
+    let buf = ''; req.on('data', c => (buf += c)); req.on('end', () => {
+      let b = {}; try { b = JSON.parse(buf); } catch {}
+      const batches = sanitizeBatches(b.batches);
+      const f = path.join(p.path, 'docs/tasks.json');
+      let j = {}, curRaw = ''; try { curRaw = fs.readFileSync(f, 'utf8'); j = JSON.parse(curRaw); } catch { j = { title: '任务清单' }; }
+      // 保险:覆盖前把当前(非空)内容备份到 docs/.state/tasks.bak.json(gitignored)——万一还有 bug 也能一步恢复
+      try { const oldB = Array.isArray(j.batches) ? j.batches.reduce((a, x) => a + ((x.tasks || []).length), 0) : 0; if (curRaw && oldB) { const bd = path.join(p.path, 'docs/.state'); fs.mkdirSync(bd, { recursive: true }); fs.writeFileSync(path.join(bd, 'tasks.bak.json'), curRaw); } } catch {}
+      j.batches = batches; j.items = [];
+      try { fs.writeFileSync(f, JSON.stringify(j, null, 2)); } catch (e) { return send(res, 500, JSON.stringify({ ok: false, error: String((e && e.message) || e) })); }
+      send(res, 200, JSON.stringify({ ok: true, batches }));
+    });
+    return;
+  }
+  if (url.pathname === '/api/model-config') {   // 读模型 API 配置(key 打码，不明文回传，云端可达也安全)
+    const c = readModelCfg();
+    return send(res, 200, JSON.stringify({ provider: c.provider || 'anthropic', model: c.model || '', baseUrl: c.baseUrl || '', keyMask: maskKey(c.apiKey), configured: !!c.apiKey }));
+  }
+  if (url.pathname === '/api/model-config-save' && req.method === 'POST') {
+    let buf = ''; req.on('data', c => (buf += c)); req.on('end', () => {
+      let b = {}; try { b = JSON.parse(buf); } catch {}
+      const cur = readModelCfg();
+      const c = { provider: b.provider || cur.provider || 'anthropic', model: (b.model || '').trim() || cur.model || '', baseUrl: (b.baseUrl || '').trim(), apiKey: (b.apiKey && String(b.apiKey).trim()) ? String(b.apiKey).trim() : cur.apiKey };   // 不传 key 则保留旧的(改模型/地址不用重填 key)
+      writeModelCfg(c);
+      send(res, 200, JSON.stringify({ ok: true, keyMask: maskKey(c.apiKey), configured: !!c.apiKey }));
+    });
+    return;
+  }
+  if (url.pathname === '/api/model-test' && req.method === 'POST') {   // 用表单值(未填 key 用已存)真发一条测连通
+    let buf = ''; req.on('data', c => (buf += c)); req.on('end', async () => {
+      let b = {}; try { b = JSON.parse(buf); } catch {}
+      const cur = readModelCfg();
+      const cfg = { provider: b.provider || cur.provider, model: (b.model || cur.model || '').trim(), baseUrl: (b.baseUrl || cur.baseUrl || '').trim(), apiKey: (b.apiKey && String(b.apiKey).trim()) ? String(b.apiKey).trim() : cur.apiKey };
+      try { const txt = await callModel(cfg, { messages: [{ role: 'user', content: '只回复两个字：正常' }], maxTokens: 16 }); send(res, 200, JSON.stringify({ ok: true, reply: (txt || '').trim().slice(0, 40), model: cfg.model || '(默认)' })); }
+      catch (e) { send(res, 200, JSON.stringify({ ok: false, error: String((e && e.message) || e) })); }
+    });
+    return;
+  }
+  if (url.pathname === '/api/intake-submit' && req.method === 'POST') {   // H5 提交需求/BUG → 写 docs/intake → AI 首轮沟通
+    let buf = ''; req.on('data', c => (buf += c)); req.on('end', async () => {
+      let b = {}; try { b = JSON.parse(buf); } catch { return send(res, 400, JSON.stringify({ ok: false, error: 'bad json' })); }
+      const proj = projById(b.project); if (!proj) return send(res, 400, JSON.stringify({ ok: false, error: '请选择项目' }));
+      const type = b.type === 'bug' ? 'bug' : 'requirement';
+      const id = intakeGenId(proj, type), media = [];
+      try { const mdir = path.join(intakeDir(proj), 'media', id); const imgs = (b.images || []).slice(0, 6); if (imgs.length) fs.mkdirSync(mdir, { recursive: true }); imgs.forEach((du, i) => { const m = /^data:image\/\w+;base64,(.+)$/.exec(du || ''); if (m) { fs.writeFileSync(path.join(mdir, `img-${i + 1}.png`), Buffer.from(m[1], 'base64')); media.push(`media/${id}/img-${i + 1}.png`); } }); } catch {}
+      const d = new Date(); const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      const e = { id, type, project: proj.id, module: b.module || '', title: (b.title || '').trim(), priority: b.priority || '中', severity: b.severity || '', scope: b.scope || '', env: b.env || '', freq: b.freq || '', reporter: (b.reporter || '').trim(), role: b.role || '', contact: (b.contact || '').trim(), bg: b.bg || '', reqDesc: b.reqDesc || '', scene: b.scene || '', accept: b.accept || '', relate: b.relate || '', desc: b.desc || '', errorInfo: b.errorInfo || '', steps: b.steps || '', expectResult: b.expectResult || '', media, status: '待处理', submittedAt: stamp, chat: [] };
+      saveIntake(proj, e);
+      const ai = await intakeAI(proj, e);
+      e.chat.push({ role: 'assistant', text: ai.reply, ts: Date.now() });
+      if (ai.configured) e.status = '沟通中';
+      saveIntake(proj, e);
+      send(res, 200, JSON.stringify({ ok: true, id, no: id, reply: ai.reply, configured: ai.configured, status: e.status }));
+    });
+    return;
+  }
+  if (url.pathname === '/api/intake-reply' && req.method === 'POST') {   // 提交人回复 AI 的澄清 → AI 继续
+    let buf = ''; req.on('data', c => (buf += c)); req.on('end', async () => {
+      let b = {}; try { b = JSON.parse(buf); } catch {}
+      const proj = projById(b.project); if (!proj) return send(res, 400, JSON.stringify({ ok: false, error: '项目不存在' }));
+      const e = loadIntake(proj, b.id); if (!e) return send(res, 404, JSON.stringify({ ok: false, error: 'not found' }));
+      const msg = (b.message || '').trim(); if (!msg) return send(res, 400, JSON.stringify({ ok: false, error: 'empty' }));
+      e.chat = e.chat || []; e.chat.push({ role: 'user', text: msg, ts: Date.now() }); saveIntake(proj, e);
+      const ai = await intakeAI(proj, e); e.chat.push({ role: 'assistant', text: ai.reply, ts: Date.now() }); saveIntake(proj, e);
+      send(res, 200, JSON.stringify({ ok: true, reply: ai.reply }));
+    });
+    return;
+  }
+  if (url.pathname === '/api/intake-list') { const proj = projById(url.searchParams.get('project')); return send(res, 200, JSON.stringify({ items: proj ? listIntake(proj) : [] })); }
+  if (url.pathname === '/api/intake-detail') { const proj = projById(url.searchParams.get('project')); const e = proj ? loadIntake(proj, url.searchParams.get('id')) : null; return send(res, 200, JSON.stringify({ item: e })); }
+  if (url.pathname === '/api/intake-chat' && req.method === 'POST') {   // 纯对话进件：AI 主导追问，信息够了输出 record 块→归档
+    let buf = ''; req.on('data', c => (buf += c)); req.on('end', async () => {
+      let b = {}; try { b = JSON.parse(buf); } catch { return send(res, 400, JSON.stringify({ ok: false, error: 'bad json' })); }
+      const proj = projById(b.project); if (!proj) return send(res, 400, JSON.stringify({ ok: false, error: '请先选择系统' }));
+      const cfg = readModelCfg(); if (!cfg.apiKey) return send(res, 200, JSON.stringify({ ok: true, reply: '（管理员还没配置模型 API，暂时不能对话。配好后就能用了。）' }));
+      const msgs = (Array.isArray(b.messages) ? b.messages : []).filter(m => m && m.content).slice(-24).map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content).slice(0, 4000) }));
+      if (!msgs.length) return send(res, 400, JSON.stringify({ ok: false, error: 'empty' }));
+      let reply; try { reply = await callModel(cfg, { system: intakeChatSystem(proj), messages: msgs, maxTokens: 800 }); }
+      catch (e) { return send(res, 200, JSON.stringify({ ok: true, reply: '（AI 暂时连不上：' + String((e && e.message) || e) + '，稍后再试。）' })); }
+      // 抽 record 块 → 归档
+      let savedId = '', savedNo = '';
+      const m = /```intake-record\s*([\s\S]*?)```/.exec(reply || '');
+      if (m) { let rec = null; try { rec = JSON.parse(m[1].trim()); } catch {}
+        if (rec && (rec.title || '').trim()) {
+          const type = rec.type === 'bug' ? 'bug' : 'requirement'; const id = intakeGenId(proj, type);
+          const d = new Date(); const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+          const e = { id, type, project: proj.id, module: rec.module || '', title: (rec.title || '').trim(), priority: rec.priority || '中', severity: rec.severity || '', scope: rec.scope || '', env: rec.env || '', freq: rec.freq || '', reporter: (rec.reporter || '').trim(), role: rec.role || '', contact: (rec.contact || '').trim(), bg: rec.bg || '', reqDesc: rec.reqDesc || '', accept: rec.accept || '', relate: rec.relate || '', desc: rec.desc || '', errorInfo: rec.errorInfo || '', steps: rec.steps || '', expectResult: rec.expectResult || '', opinion: rec.opinion || '', media: [], status: '待处理', submittedAt: stamp, chat: msgs.map(x => ({ role: x.role, text: x.content })) };
+          saveIntake(proj, e); savedId = id; savedNo = id;
+        }
+        reply = reply.replace(m[0], '').trim();   // 归档块不给用户看
+      }
+      send(res, 200, JSON.stringify({ ok: true, reply, savedId, savedNo }));
+    });
+    return;
+  }
+  if (url.pathname === '/api/spec-modules') {   // 该项目的 spec 模块清单（进件页模块下拉/datalist）
+    const proj = projById(url.searchParams.get('project')); const set = new Set();
+    if (proj) { try { const d = path.join(proj.path, 'docs', 'specs'); for (const f of fs.readdirSync(d)) { if (!f.endsWith('.md') || f.startsWith('_') || f.toLowerCase() === 'readme.md') continue; const m = (fs.readFileSync(path.join(d, f), 'utf8').match(/^module:\s*(.+)$/m) || [])[1]; if (m && m.trim()) set.add(m.trim()); } } catch {} }
+    return send(res, 200, JSON.stringify({ modules: [...set] }));
+  }
+  if (url.pathname === '/api/feishu-config') {   // 读某项目飞书配置（本地工具：回传 secret 以便控制台「查看密钥」，仅 localhost）
+    const m = loadFeishu(), c = m[pid] || {};
+    return send(res, 200, JSON.stringify({ appId: c.appId || '', appSecret: c.appSecret || '', domain: c.domain || '', hasSecret: !!c.appSecret }));
+  }
+  if (url.pathname === '/api/feishu-config-save' && req.method === 'POST') {   // 存某项目飞书机器人凭据（按项目隔离·不入库）
+    let buf = ''; req.on('data', c => (buf += c)); req.on('end', () => {
+      let b = {}; try { b = JSON.parse(buf); } catch {}
+      const id = String(b.project || '').trim(); if (!id) return send(res, 400, JSON.stringify({ ok: false, error: '缺少项目' }));
+      const m = loadFeishu(); const cur = m[id] || {};
+      const appId = String(b.appId || '').trim();
+      const domain = String(b.domain || cur.domain || '').trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+      let appSecret = '';
+      if (!appId) { delete m[id]; }                                   // appId 留空 = 清除该项目配置
+      else { appSecret = (b.appSecret == null || b.appSecret === '') ? (cur.appSecret || '') : String(b.appSecret).trim(); m[id] = { appId, appSecret, domain }; }   // secret 留空=保留原值（编辑场景）
+      const ok = saveFeishu(m);
+      send(res, ok ? 200 : 500, JSON.stringify({ ok, appId, domain, hasSecret: !!appSecret }));
+    });
+    return;
+  }
+  if (url.pathname === '/api/feishu-test' && req.method === 'POST') {   // 测试连接：用表单(或已存)凭据真连飞书拿 tenant_access_token
+    let buf = ''; req.on('data', c => (buf += c)); req.on('end', async () => {
+      let b = {}; try { b = JSON.parse(buf); } catch {}
+      const id = String(b.project || '').trim(); const cur = id ? (loadFeishu()[id] || {}) : {};
+      const appId = String(b.appId || cur.appId || '').trim();
+      const appSecret = (b.appSecret && String(b.appSecret).trim()) || cur.appSecret || '';
+      const domain = String(b.domain || cur.domain || '');
+      if (!appId || !appSecret) return send(res, 200, JSON.stringify({ ok: false, error: '缺 App ID / App Secret' }));
+      const base = /larksuite|larkoffice/i.test(domain) ? 'https://open.larksuite.com' : 'https://open.feishu.cn';
+      try {
+        const r = await fetch(base + '/open-apis/auth/v3/tenant_access_token/internal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ app_id: appId, app_secret: appSecret }) });
+        const j = await r.json();
+        if (j.code === 0) return send(res, 200, JSON.stringify({ ok: true }));
+        return send(res, 200, JSON.stringify({ ok: false, error: `飞书返回 ${j.code}: ${j.msg}` }));
+      } catch (e) { return send(res, 200, JSON.stringify({ ok: false, error: '连接飞书失败：' + ((e && e.message) || e) })); }
+    });
+    return;
+  }
+  if (url.pathname === '/api/spec') {
+    const p = projById(pid), id = (url.searchParams.get('id') || '').trim();
+    if (!p) return send(res, 404, JSON.stringify({ error: '项目不存在' }));
+    if (!/^[A-Za-z0-9_-]+$/.test(id)) return send(res, 400, JSON.stringify({ error: '非法 spec id' }));
+    const dir = path.join(p.path, 'docs/specs');
+    let file = ''; try { file = fs.readdirSync(dir).find(f => f.endsWith('.md') && (f === id + '.md' || f.startsWith(id + '-') || f.startsWith(id + ' '))); } catch {}
+    if (!file) return send(res, 404, JSON.stringify({ error: '找不到 spec 文件' }));
+    let content = ''; try { content = fs.readFileSync(path.join(dir, file), 'utf8'); } catch (e) { return send(res, 500, JSON.stringify({ error: e.message })); }
+    return send(res, 200, JSON.stringify({ id, file, content }));
+  }
+  if (url.pathname === '/api/fs-list') {   // 服务端目录浏览（本地工具，给"选文件夹"用——浏览器拿不到绝对路径）
+    let dir = url.searchParams.get('path') || os.homedir();
+    try { dir = path.resolve(dir); } catch {}
+    if (!fs.existsSync(dir)) dir = os.homedir();
+    const wantFiles = url.searchParams.get('files') === '1';
+    let dirs = [], files = [];
+    try {
+      const ents = fs.readdirSync(dir, { withFileTypes: true });
+      dirs = ents
+        .filter(d => { try { return d.isDirectory() || (d.isSymbolicLink() && fs.statSync(path.join(dir, d.name)).isDirectory()); } catch { return false; } })
+        .map(d => d.name).filter(n => !n.startsWith('.')).sort((a, b) => a.localeCompare(b));
+      if (wantFiles) files = ents
+        .filter(d => { try { return d.isFile() || (d.isSymbolicLink() && fs.statSync(path.join(dir, d.name)).isFile()); } catch { return false; } })
+        .map(d => d.name).filter(n => !n.startsWith('.')).sort((a, b) => a.localeCompare(b));
+    } catch { return send(res, 200, JSON.stringify({ path: dir, parent: path.dirname(dir), dirs: [], files: [], error: '无法读取该目录' })); }
+    const parent = path.dirname(dir);
+    return send(res, 200, JSON.stringify({ path: dir, parent: parent === dir ? null : parent, dirs, files }));
+  }
+  if (url.pathname === '/api/agents') {
+    const proj = projById(pid);
+    if (!proj) return send(res, 200, JSON.stringify({ agents: [] }));
+    let roster = { agents: [] };
+    try { roster = JSON.parse(fs.readFileSync(path.join(proj.path, 'docs/.state/agents.json'), 'utf8')); } catch {}
+    let board = {};
+    try { board = JSON.parse(fs.readFileSync(path.join(proj.path, 'docs/board.json'), 'utf8')); } catch {}
+    // 从看板节点实时派生“谁在干活”：节点=doing → 对应 agent=running
+    const NA = { dev: ['dev', '开发'], test: ['dev', '测试'] };
+    const doing = {};
+    const STUCK_MS = 8 * 60 * 1000;
+    for (const sp of (board.specs || [])) for (const node of Object.keys(NA)) if ((sp.nodes || {})[node] === 'doing') {
+      let stale = false; try { stale = (Date.now() - fs.statSync(path.join(proj.path, 'docs/.state/' + sp.id + '.json')).mtimeMs) > STUCK_MS; } catch {}
+      doing[NA[node][0]] = (stale ? '⚠ 疑似卡住·' : '正在') + NA[node][1] + '：' + sp.id + ' ' + (sp.title || '');
+    }
+    for (const a of (roster.agents || [])) { if (doing[a.id]) { a.status = 'running'; a.current = doing[a.id]; } else if (a.status === 'running') { a.status = 'idle'; a.current = ''; } }
+    return send(res, 200, JSON.stringify(roster));
+  }
+  if (url.pathname === '/api/chat-history') return send(res, 200, JSON.stringify(readChat(projById(pid))));
+  if (url.pathname === '/api/inbox') {
+    const items = [];
+    for (const proj of loadProjects()) {
+      let b; try { b = JSON.parse(fs.readFileSync(path.join(proj.path, 'docs/board.json'), 'utf8')); } catch { continue; }
+      for (const sp of (b.specs || [])) {
+        const nodes = sp.nodes || {};
+        if (nodes.accept === 'wait') items.push({ project: proj.id, projectName: proj.name, spec: sp.id, title: sp.title || '', kind: 'accept', label: '待最终验收' });
+        else {
+          const failed = Object.keys(nodes).find(n => nodes[n] === 'fail');
+          if (failed) items.push({ project: proj.id, projectName: proj.name, spec: sp.id, title: sp.title || '', kind: 'fail', label: '需介入（' + failed + ' 失败）' });
+          else { const doingNode = ['product', 'dev', 'test', 'review'].find(n => nodes[n] === 'doing'); if (doingNode) { let stale = false; try { stale = (Date.now() - fs.statSync(path.join(proj.path, 'docs/.state/' + sp.id + '.json')).mtimeMs) > 8 * 60 * 1000; } catch {} if (stale) items.push({ project: proj.id, projectName: proj.name, spec: sp.id, title: sp.title || '', kind: 'stuck', label: '疑似卡住（' + doingNode + ' 超 8 分钟无更新）' }); } }
+        }
+      }
+      for (const bk of (b.blockers || [])) items.push({ project: proj.id, projectName: proj.name, spec: '', title: bk, kind: 'decision', label: '需决策' });
+    }
+    return send(res, 200, JSON.stringify({ items }));
+  }
+  if (url.pathname === '/api/accept' && req.method === 'POST') {
+    const p = projById(pid); if (!p) return send(res, 400, JSON.stringify({ ok: false, error: '项目不存在' }));
+    let buf = '';
+    req.on('data', c => (buf += c));
+    req.on('end', () => {
+      let spec = ''; try { spec = (JSON.parse(buf).spec || '').trim(); } catch {}
+      if (!/^[A-Za-z0-9_-]+$/.test(spec)) return send(res, 400, JSON.stringify({ ok: false, error: '非法 spec' }));
+      // 1) spec 头部 status -> accepted（只在 frontmatter 块内替换）
+      const dir = path.join(p.path, 'docs/specs');
+      let file = ''; try { file = fs.readdirSync(dir).find(f => f.endsWith('.md') && (f === spec + '.md' || f.startsWith(spec + '-') || f.startsWith(spec + ' '))); } catch {}
+      if (!file) return send(res, 404, JSON.stringify({ ok: false, error: '找不到 spec 文件' }));
+      const fp = path.join(dir, file);
+      try {
+        let txt = fs.readFileSync(fp, 'utf8');
+        const m = txt.match(/^﻿?(---\r?\n)([\s\S]*?)(\r?\n---)/);   // #19：容 CRLF / UTF-8 BOM，避免 spec 静默无法解析
+        if (m) {
+          let fm = m[2];
+          fm = /^status:/m.test(fm) ? fm.replace(/^status:[ \t]*.*$/m, 'status: accepted') : fm + '\nstatus: accepted';
+          txt = m[1] + fm + m[3] + txt.slice(m[0].length);
+          fs.writeFileSync(fp, txt);
+        }
+      } catch (e) { return send(res, 500, JSON.stringify({ ok: false, error: '写 spec 失败：' + e.message })); }
+      // 2) 状态文件 accept -> pass
+      const sf = path.join(p.path, 'docs/.state', spec + '.json');
+      let st = {}; try { st = JSON.parse(fs.readFileSync(sf, 'utf8')); } catch {}
+      st.nodes = Object.assign({}, st.nodes, { accept: 'pass' });
+      try { fs.mkdirSync(path.dirname(sf), { recursive: true }); fs.writeFileSync(sf, JSON.stringify(st, null, 2)); } catch {}
+      // 3) 重算 board
+      genBoard(p.path);
+      return send(res, 200, JSON.stringify({ ok: true }));
+    });
+    return;
+  }
+  if (url.pathname === '/api/spec-patch' && req.method === 'POST') {   // 直接改 spec frontmatter 的纯数据字段（状态/优先级）；语义后果类操作走预填编排器，不在这里
+    const p = projById(pid);
+    if (!p) return send(res, 400, JSON.stringify({ ok: false, error: '尚未纳管任何项目' }));
+    let buf = ''; req.on('data', c => (buf += c)); req.on('end', () => {
+      let b = {}; try { b = JSON.parse(buf); } catch {}
+      const spec = (b.spec || '').trim(), field = (b.field || '').trim(), value = (b.value || '').trim();
+      if (!/^[A-Za-z0-9_-]+$/.test(spec)) return send(res, 400, JSON.stringify({ ok: false, error: '非法 spec' }));
+      const ALLOW = { status: ['draft', 'ready', 'in-dev', 'testing', 'accepted'], priority: ['P0', 'P1', 'P2', 'P3', 'Must', 'Should', 'Could'] };
+      if (!Object.prototype.hasOwnProperty.call(ALLOW, field)) return send(res, 400, JSON.stringify({ ok: false, error: '该字段不可直接改（语义字段请走编排器）' }));   // #17：用 hasOwnProperty，防 __proto__/constructor 命中原型绕过白名单
+      if (!ALLOW[field].includes(value)) return send(res, 400, JSON.stringify({ ok: false, error: '非法值' }));
+      const dir = path.join(p.path, 'docs/specs');
+      let file = ''; try { file = fs.readdirSync(dir).find(f => f.endsWith('.md') && (f === spec + '.md' || f.startsWith(spec + '-') || f.startsWith(spec + ' '))); } catch {}
+      if (!file) return send(res, 404, JSON.stringify({ ok: false, error: '找不到 spec 文件' }));
+      const fp = path.join(dir, file);
+      try {
+        let txt = fs.readFileSync(fp, 'utf8');
+        const m = txt.match(/^﻿?(---\r?\n)([\s\S]*?)(\r?\n---)/);   // #19：容 CRLF / UTF-8 BOM，避免 spec 静默无法解析
+        if (!m) return send(res, 400, JSON.stringify({ ok: false, error: 'spec 缺少 frontmatter' }));
+        let fm = m[2];
+        const re = new RegExp('^' + field + ':[ \\t]*.*$', 'm');
+        fm = re.test(fm) ? fm.replace(re, field + ': ' + value) : fm + '\n' + field + ': ' + value;
+        txt = m[1] + fm + m[3] + txt.slice(m[0].length);
+        fs.writeFileSync(fp, txt);
+      } catch (e) { return send(res, 500, JSON.stringify({ ok: false, error: '写 spec 失败：' + e.message })); }
+      genBoard(p.path);
+      return send(res, 200, JSON.stringify({ ok: true }));
+    });
+    return;
+  }
+  if (url.pathname === '/api/spec-merge' && req.method === 'POST') {   // 合并 spec：选好目标后，后端直接调 LLM 执行（不经 CLI 窗口）
+    const p = projById(pid);
+    if (!p) return send(res, 400, JSON.stringify({ ok: false, error: '尚未纳管任何项目' }));
+    let buf = ''; req.on('data', c => (buf += c)); req.on('end', () => {
+      let b = {}; try { b = JSON.parse(buf); } catch {}
+      let froms = (Array.isArray(b.from) ? b.from : [b.from]).map(s => (s || '').trim()).filter(Boolean);
+      const to = (b.to || '').trim();
+      if (!/^[A-Za-z0-9_-]+$/.test(to) || !froms.length || froms.some(f => !/^[A-Za-z0-9_-]+$/.test(f))) return send(res, 400, JSON.stringify({ ok: false, error: '非法 spec' }));
+      froms = [...new Set(froms)].filter(f => f !== to);
+      if (!froms.length) return send(res, 400, JSON.stringify({ ok: false, error: '不能只合并到自己' }));
+      // #18：调 LLM 前先确认每个 from / to 的 spec 文件真存在（沿用本文件别处的「按 id 找文件名」约定），缺失就 400，别白烧 token
+      let names = []; try { names = fs.readdirSync(path.join(p.path, 'docs/specs')).filter(f => f.endsWith('.md')); } catch {}
+      const has = id => names.some(f => f === id + '.md' || f.startsWith(id + '-') || f.startsWith(id + ' '));
+      const missing = [to, ...froms].filter(id => !has(id));
+      if (missing.length) return send(res, 400, JSON.stringify({ ok: false, error: 'spec 不存在：' + missing.join('、') }));
+      const fl = froms.join('、');
+      const prompt = `把 spec ${fl} 合并进 spec ${to}，**直接执行改文件，不要只给建议**：\n`
+        + `1) 读 docs/specs 下这些（${fl} 和 ${to}）；按 CLAUDE.md §4.6 算影响面（谁 depends_on 这些源、共享表/接口/同模块）。\n`
+        + `2) 把每个源（${fl}）的范围/AC/接口契约/数据契约/测试要点都合并进 ${to}（去重、保留更严的约束），并更新 ${to} 标题/描述使其涵盖全部。\n`
+        + `3) 所有 depends_on 里指向任一源（${fl}）的改为指向 ${to}。\n`
+        + `4) 删除每个源 ${fl} 的 spec 文件与对应 docs/.state/<id>.json。\n`
+        + `5) 跑 node tools/board.mjs 重算看板。\n`
+        + `最后一句话回我：合并了什么、改了哪些受影响 spec、删了哪些文件。`;
+      runClaude(p, prompt, (out) => {
+        genBoard(p.path); sseBroadcast({ type: 'refresh' });
+        if (out.error) return send(res, 500, JSON.stringify({ ok: false, error: out.error }));
+        send(res, 200, JSON.stringify({ ok: true, reply: out.reply || '' }));
+      });
+    });
+    return;
+  }
+  if (url.pathname === '/api/run-stop' && req.method === 'POST') {   // 中止该项目正在跑的 AI 任务（#8）
+    const p = projById(pid);
+    return send(res, 200, JSON.stringify({ ok: p ? stopRun(p.id) : false }));
+  }
+  if (url.pathname === '/api/lessons') {   // Steward 全局经验库（~/.steward/lessons.md）：查看/编辑
+    if (req.method === 'GET') return send(res, 200, JSON.stringify({ path: LESSONS_FILE, content: fs.existsSync(LESSONS_FILE) ? fs.readFileSync(LESSONS_FILE, 'utf8') : '' }));
+    if (req.method === 'POST') { let buf = ''; req.on('data', c => (buf += c)); req.on('end', () => { try { fs.writeFileSync(LESSONS_FILE, (JSON.parse(buf).content) ?? ''); send(res, 200, JSON.stringify({ ok: true })); } catch (e) { send(res, 500, JSON.stringify({ error: e.message })); } }); return; }
+    return;
+  }
+  if (url.pathname === '/api/health') {   // 上手就绪检查（#5）：工具就绪即时返回；?login=1 才探测 claude 登录
+    const health = { claude: { found: CLAUDE_BIN !== 'claude', bin: CLAUDE_BIN }, codex: { found: !!CODEX_BIN, bin: CODEX_BIN }, engines: Object.values(ENGINES).filter(e => e.available()).map(e => e.id), ttyd: !!TTYD_BIN, tmux: !!TMUX_BIN, node: process.version, projects: loadProjects().length };
+    if (url.searchParams.get('login') === '1') return void probeClaudeLogin(r => send(res, 200, JSON.stringify({ ...health, login: r })));
+    return send(res, 200, JSON.stringify(health));
+  }
+  if (url.pathname === '/api/terminals') return send(res, 200, JSON.stringify({ ttyd: !!TTYD_BIN }));
+  if (url.pathname === '/api/windows') { const pp = url.searchParams.get('project'); const ws = [...openWindows.values()].filter(w => w.projectId === pp).map(w => ({ key: w.key, port: w.port, label: w.label, title: w.title || '', sessionId: w.sessionId, engine: w.engine || 'claude', busy: !!w.busy, confirm: !!w.confirm, done: !!w.done, activity: w.activity || '' })); return send(res, 200, JSON.stringify({ windows: ws })); }
+  if (url.pathname === '/api/attn') {   // 跨项目状态：待确认/干活中/刚完成 → 驱动项目多状态角标 + 浏览器标题
+    const byProject = {}, busyByProject = {}, doneByProject = {}; let total = 0; const now = Date.now();
+    for (const w of openWindows.values()) {
+      if (w.confirm) { byProject[w.projectId] = (byProject[w.projectId] || 0) + 1; total++; }
+      else if (w.busy) busyByProject[w.projectId] = (busyByProject[w.projectId] || 0) + 1;
+      if (w.done && w.doneAt && now - w.doneAt < 120000) doneByProject[w.projectId] = (doneByProject[w.projectId] || 0) + 1;
+    }
+    return send(res, 200, JSON.stringify({ byProject, busyByProject, doneByProject, total }));
+  }
+  if (url.pathname === '/api/window-seen' && req.method === 'POST') { let buf = ''; req.on('data', c => (buf += c)); req.on('end', () => { let k = ''; try { k = String(JSON.parse(buf).key || ''); } catch {} const w = openWindows.get(k); if (w) w.done = false; send(res, 200, JSON.stringify({ ok: true })); }); return; }
+  if (url.pathname === '/api/window-capture') {   // 抓某窗口屏幕文本，供「复制」按钮在父页面写剪贴板(绕开 iframe/OSC52)；full=1 抓全部滚动历史
+    const w = openWindows.get(String(url.searchParams.get('key') || ''));
+    if (!w || !w.tmuxSess || !TMUX_BIN) return send(res, 200, JSON.stringify({ text: '' }));
+    const full = url.searchParams.get('full') === '1';
+    capturePane(w.tmuxSess, full).then(out => {
+      const text = (out || '').split('\n').filter(l => {
+        if (l.includes('⠀') || /\([oO0^._]\.[oO0^._]\)|<\(_\)>/.test(l)) return false;   // ccgotchi 宠物行
+        if (l.includes('⏵⏵')) return false;                          // bypass 模式行
+        if (/^\s*\d+h\s.*\d%/.test(l)) return false;                 // 用量/上下文条
+        return true;
+      }).join('\n').replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n').replace(/^\n+|\n+$/g, '') + '\n';
+      send(res, 200, JSON.stringify({ text }));
+    }).catch(() => send(res, 200, JSON.stringify({ text: '' })));
+    return;
+  }
+  if (url.pathname === '/api/window-send' && req.method === 'POST') {   // 往某终端窗口发命令（等 claude 就绪再发，后台进行，立即返回）
+    let buf = ''; req.on('data', c => (buf += c)); req.on('end', () => {
+      let b = {}; try { b = JSON.parse(buf); } catch {}
+      const w = openWindows.get(String(b.key || '')); const text = String(b.text || ''); const enter = b.enter !== false;
+      if (!w || !w.tmuxSess || !TMUX_BIN || !text) return send(res, 200, JSON.stringify({ ok: false, error: 'no window/text' }));
+      send(res, 200, JSON.stringify({ ok: true, queued: true }));
+      let tries = 0;
+      const trySend = async () => {
+        const pane = await capturePane(w.tmuxSess);   // 必须 await：capturePane 返回 Promise，之前没 await 导致就绪检测永远不命中、死等满轮询才发
+        const ready = /bypass permissions|shift\+tab|❯/.test(pane);
+        if (!ready && tries++ < 40) return void setTimeout(trySend, 400);   // 就绪即发；最多 ~16s 兜底
+        try { spawnSync(TMUX_BIN, ['-L', TMUX_SOCK, 'send-keys', '-t', w.tmuxSess, '-l', text]); } catch {}
+        if (enter) setTimeout(() => { try { spawnSync(TMUX_BIN, ['-L', TMUX_SOCK, 'send-keys', '-t', w.tmuxSess, 'Enter']); } catch {} }, 250);
+      };
+      setTimeout(trySend, 500);
+    });
+    return;
+  }
+  if (url.pathname === '/api/open-window' && req.method === 'POST') {
+    if (!TTYD_BIN) return send(res, 400, JSON.stringify({ error: '未安装 ttyd' }));
+    let buf = ''; req.on('data', c => (buf += c)); req.on('end', () => { let b = {}; try { b = JSON.parse(buf); } catch {} const proj = projById(b.project); if (!proj) return send(res, 400, JSON.stringify({ error: '尚未纳管任何项目，请先「新增项目」' })); let engineId = b.engine || proj.defaultEngine || 'claude'; if (!engineOf(engineId).available()) { if (engineId === 'codex') return send(res, 400, JSON.stringify({ error: '未检测到可用的 codex（未安装或安装损坏），请先修复 codex 再开 codex 窗口' })); engineId = 'claude'; } const r = openWindow(proj, (b.sessionId || '').trim(), b.label || '新对话', engineId); waitForPort(r.port, () => send(res, 200, JSON.stringify(r))); });
+    return;
+  }
+  if (url.pathname === '/api/close-window' && req.method === 'POST') {
+    let buf = ''; req.on('data', c => (buf += c)); req.on('end', () => { let b = {}; try { b = JSON.parse(buf); } catch {} closeWindow(String(b.key || '')); send(res, 200, JSON.stringify({ ok: true })); });
+    return;
+  }
+  if (url.pathname === '/api/claude-sessions') {   // 分引擎历史：engine=codex 读 ~/.codex，否则读 ~/.claude
+    const abs = url.searchParams.get('path') || ''; const engine = url.searchParams.get('engine') || 'claude';
+    const sessions = !abs ? [] : (engine === 'codex' ? listCodexSessions(abs) : listClaudeSessions(abs));
+    return send(res, 200, JSON.stringify({ sessions, engine, codexAvailable: !!CODEX_BIN }));
+  }
+  if (url.pathname === '/api/session-names') { return send(res, 200, JSON.stringify({ names: readNames() })); }   // {sessionId: 自定义名}
+  if (url.pathname === '/api/session-name' && req.method === 'POST') { let buf = ''; req.on('data', c => (buf += c)); req.on('end', () => { let b = {}; try { b = JSON.parse(buf); } catch {} writeName(b.sessionId, b.name); send(res, 200, JSON.stringify({ ok: true })); }); return; }
+  if (url.pathname === '/api/commands') {   // 该项目可用的斜杠命令（读 .claude/commands/*.md 的名字+description）
+    const p = projById(pid); if (!p) return send(res, 200, JSON.stringify({ commands: [] })); const dir = path.join(p.path, '.claude/commands'); const out = [];
+    try { for (const f of fs.readdirSync(dir)) { if (!f.endsWith('.md')) continue; let desc = ''; try { const m = fs.readFileSync(path.join(dir, f), 'utf8').slice(0, 800).match(/^description:\s*(.+)$/m); if (m) desc = m[1].trim(); } catch {} out.push({ name: f.replace(/\.md$/, ''), desc }); } } catch {}
+    out.sort((a, b) => a.name.localeCompare(b.name));
+    return send(res, 200, JSON.stringify({ commands: out }));
+  }
+  if (url.pathname === '/api/claude-session-delete' && req.method === 'POST') {
+    let buf = '';
+    req.on('data', c => (buf += c));
+    req.on('end', () => {
+      let abs = '', id = '', engine = 'claude'; try { const b = JSON.parse(buf); abs = b.path || ''; id = b.id || ''; engine = b.engine || 'claude'; } catch {}
+      if (!abs || !/^[A-Za-z0-9._-]+$/.test(id)) return send(res, 400, JSON.stringify({ ok: false, error: 'bad path/id' }));
+      let fp = '';
+      if (engine === 'codex') {
+        // codex 会话不在扁平目录：按 id（uuid）在 ~/.codex/sessions/** 里找 rollout-*-<id>.jsonl
+        const root = path.join(CODEX_HOME, 'sessions');
+        const find = (d) => { let ents = []; try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return ''; } for (const e of ents) { const p = path.join(d, e.name); if (e.isDirectory()) { const r = find(p); if (r) return r; } else if (e.name.startsWith('rollout-') && e.name.endsWith(id + '.jsonl')) return p; } return ''; };
+        fp = find(root);
+        if (!fp || !fp.startsWith(root + path.sep) || !fs.existsSync(fp)) return send(res, 404, JSON.stringify({ ok: false, error: 'not found' }));
+      } else {
+        const dir = path.join(os.homedir(), '.claude', 'projects', encodeCwd(abs));
+        fp = path.join(dir, id + '.jsonl');
+        if (!fp.startsWith(dir + path.sep) || !fs.existsSync(fp)) return send(res, 404, JSON.stringify({ ok: false, error: 'not found' }));
+      }
+      try { fs.unlinkSync(fp); return send(res, 200, JSON.stringify({ ok: true })); }
+      catch (e) { return send(res, 500, JSON.stringify({ ok: false, error: String(e.message || e) })); }
+    });
+    return;
+  }
+  if (url.pathname === '/api/project-add' && req.method === 'POST') {
+    let buf = ''; req.on('data', c => (buf += c)); req.on('end', () => {
+      let b = {}; try { b = JSON.parse(buf); } catch {}
+      const id = (b.id || '').trim().replace(/[^a-zA-Z0-9_-]/g, ''), name = (b.name || '').trim(), dest = (b.path || '').trim(), sessionId = (b.sessionId || '').trim();
+      const mode = (b.mode || 'existing').trim(), prdPath = (b.prdPath || '').trim(), protoDir = (b.protoDir || '').trim(), gitUrl = (b.gitUrl || '').trim();
+      if (!id || !name || !dest) return send(res, 400, JSON.stringify({ error: 'id / 名称 / 路径 均必填（id 仅限字母数字-_）' }));
+      if (!path.isAbsolute(dest)) return send(res, 400, JSON.stringify({ error: '路径需为绝对路径' }));
+      if (loadProjects().find(p => p.id === id)) return send(res, 400, JSON.stringify({ error: '项目 id 已存在' }));
+      // 老项目可选 Git：填了地址就先 clone 到 dest（异步，不阻塞），成功后再走纳管；不填则走本地已有代码
+      if (gitUrl && mode !== 'greenfield') {
+        if (!/^(https?:\/\/|git@|ssh:\/\/|file:\/\/)/.test(gitUrl)) return send(res, 400, JSON.stringify({ error: 'Git 地址格式不对（需 http(s):// / git@ / ssh:// / file://）' }));
+        let nonEmpty = false; try { nonEmpty = fs.existsSync(dest) && fs.readdirSync(dest).length > 0; } catch {}
+        if (nonEmpty) return send(res, 400, JSON.stringify({ error: '克隆目标目录已存在且非空，请换一个空目录' }));
+        try { fs.mkdirSync(path.dirname(dest), { recursive: true }); } catch {}
+        // GIT_TERMINAL_PROMPT=0：缺凭证时立即失败而不是在后台进程里卡死等输入；抓 stderr 把真实原因回给前端；2 分钟超时兜底
+        let gerr = '', settled = false;
+        const fail = m => { if (settled) return; settled = true; send(res, 500, JSON.stringify({ error: m })); };
+        const git = spawn('git', ['clone', '--progress', gitUrl, dest], { stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: 'echo' } });
+        git.stderr.on('data', d => (gerr += d));
+        git.on('error', e => fail('无法启动 git：' + e.message));
+        const gt = setTimeout(() => { try { git.kill(); } catch {} fail('git clone 超时（>2 分钟）：私有仓库需要凭证时请用已配好 SSH key 的 git@ 地址，或检查网络'); }, 120000);
+        git.on('close', code => { clearTimeout(gt); if (settled) return; if (code !== 0) { const tail = gerr.trim().split('\n').filter(Boolean).slice(-3).join(' / '); return fail('git clone 失败：' + (tail || ('退出码 ' + code) + '（多半是凭证/地址/网络）')); } settled = true; finalize(); });
+        return;
+      }
+      finalize();
+      function finalize() {
+      try {
+        // 判断是否"导入已有代码库"：目录已存在且里面有非脚手架内容（用于决定是否提示扫描建 spec）
+        let existed = false; try { existed = fs.existsSync(dest) && fs.readdirSync(dest).some(n => !['docs', 'tools', '.claude', 'CLAUDE.md', '.git'].includes(n)); } catch {}
+        fs.mkdirSync(dest, { recursive: true });
+        scaffoldProject(dest, name, id);
+        // 绿地：把选好的 PRD/原型拷进项目（PRD→docs/PRD<ext>，原型→docs/prototype/）
+        let prdImported = false, protoImported = 0;
+        if (mode === 'greenfield') {
+          fs.mkdirSync(path.join(dest, 'docs/prototype'), { recursive: true });
+          if (prdPath && path.isAbsolute(prdPath)) { try { if (fs.statSync(prdPath).isFile()) { fs.copyFileSync(prdPath, path.join(dest, 'docs/PRD' + (path.extname(prdPath) || '.md'))); prdImported = true; } } catch {} }
+          if (protoDir && path.isAbsolute(protoDir)) { try { if (fs.statSync(protoDir).isDirectory()) protoImported = copyDirAll(protoDir, path.join(dest, 'docs/prototype')); } catch {} }
+        }
+        if (sessionId) fs.writeFileSync(path.join(dest, 'docs/.state/session.json'), JSON.stringify({ sessionId }));
+        let j = { projects: [] }; try { j = JSON.parse(fs.readFileSync(PROJECTS_FILE, 'utf8')); } catch {}
+        if (!j.projects) j.projects = []; j.projects.push({ id, name, path: dest }); fs.writeFileSync(PROJECTS_FILE, JSON.stringify(j, null, 2));
+        const p = { id, name, path: dest };
+        watchProject(p); genBoard(dest);
+        // 已有 spec 数（团队成员 clone 下来再导入时：specs 已在，无需再 /scan）
+        let specCount = 0; try { specCount = fs.readdirSync(path.join(dest, 'docs/specs')).filter(n => n.endsWith('.md') && !['_TEMPLATE.md', 'README.md'].includes(n)).length; } catch {}
+        send(res, 200, JSON.stringify({ ok: true, id, existed, mode, prdImported, protoImported, specCount }));
+      } catch (e) { send(res, 500, JSON.stringify({ error: e.message })); }
+      }   // end finalize
+    });
+    return;
+  }
+  if (url.pathname === '/api/project-sync-methodology' && req.method === 'POST') {   // 把内置模板的命令+方法论覆盖刷新到该项目(导入老项目/对齐版本用)；CLAUDE.md 保留项目①段、自定义则不动
+    const p = projById(pid); if (!p) return send(res, 400, JSON.stringify({ ok: false, error: '项目不存在' }));
+    const T = path.join(ROOT, 'templates');
+    let cmds = 0, agents = 0, claudeMd = false;
+    try { const sd = path.join(T, '.claude/commands'), dd = path.join(p.path, '.claude/commands'); fs.mkdirSync(dd, { recursive: true }); for (const f of fs.readdirSync(sd)) if (f.endsWith('.md')) { fs.copyFileSync(path.join(sd, f), path.join(dd, f)); cmds++; } } catch {}
+    try { const sd = path.join(T, '.claude/agents'), dd = path.join(p.path, '.claude/agents'); fs.mkdirSync(dd, { recursive: true }); for (const f of fs.readdirSync(sd)) if (f.endsWith('.md')) { fs.copyFileSync(path.join(sd, f), path.join(dd, f)); agents++; } } catch {}
+    try {
+      const tpl = fs.readFileSync(path.join(T, 'CLAUDE.md'), 'utf8'), dest = path.join(p.path, 'CLAUDE.md');
+      const START = '## ① 本项目信息', END = '## 0. 你的角色';
+      const sect = s => { const a = s.indexOf(START), b = s.indexOf(END); return (a >= 0 && b > a) ? s.slice(a, b) : null; };
+      const ti = sect(tpl);
+      let cur = null; try { cur = fs.readFileSync(dest, 'utf8'); } catch {}
+      if (cur === null) { fs.writeFileSync(dest, tpl.split('{{PROJECT_NAME}}').join(p.name || '').split('{{PROJECT_ID}}').join(p.id || '')); claudeMd = true; }
+      else { const ci = sect(cur); if (ti && ci) { fs.writeFileSync(dest, tpl.replace(ti, ci)); claudeMd = true; } }
+    } catch {}
+    genBoard(p.path);
+    return send(res, 200, JSON.stringify({ ok: true, cmds, agents, claudeMd }));
+  }
+  if (url.pathname === '/api/project-remove' && req.method === 'POST') {   // 移除项目 = 取消纳管 + 关该项目终端；不删磁盘文件
+    let buf = ''; req.on('data', c => (buf += c)); req.on('end', () => {
+      let id = ''; try { id = (JSON.parse(buf).id || '').trim(); } catch {}
+      if (!id) return send(res, 400, JSON.stringify({ error: '缺少 id' }));
+      let j = { projects: [] }; try { j = JSON.parse(fs.readFileSync(PROJECTS_FILE, 'utf8')); } catch {}
+      if (!j.projects) j.projects = [];
+      const before = j.projects.length;
+      j.projects = j.projects.filter(p => p.id !== id);
+      if (j.projects.length === before) return send(res, 400, JSON.stringify({ error: '项目不存在' }));
+      try { fs.writeFileSync(PROJECTS_FILE, JSON.stringify(j, null, 2)); } catch (e) { return send(res, 500, JSON.stringify({ error: e.message })); }
+      try { const fm = loadFeishu(); if (fm[id]) { delete fm[id]; saveFeishu(fm); } } catch {}   // 一并清掉该项目的飞书凭据
+      for (const w of [...openWindows.values()]) if (w.projectId === id) closeWindow(w.key);   // 杀该项目的 ttyd + tmux
+      unwatchProject(id);
+      sseBroadcast({ type: 'refresh' });
+      send(res, 200, JSON.stringify({ ok: true, id }));
+    });
+    return;
+  }
+  if (url.pathname === '/api/project-rename' && req.method === 'POST') {   // 改项目显示名(id / path 不变)
+    let buf = ''; req.on('data', c => (buf += c)); req.on('end', () => {
+      let b = {}; try { b = JSON.parse(buf); } catch {}
+      const id = String(b.id || '').trim(), name = String(b.name || '').trim().slice(0, 40);
+      if (!id || !name) return send(res, 400, JSON.stringify({ error: '缺少 id 或名称' }));
+      let j = { projects: [] }; try { j = JSON.parse(fs.readFileSync(PROJECTS_FILE, 'utf8')); } catch {}
+      if (!j.projects) j.projects = [];
+      const p = j.projects.find(x => x.id === id); if (!p) return send(res, 400, JSON.stringify({ error: '项目不存在' }));
+      p.name = name;
+      try { fs.writeFileSync(PROJECTS_FILE, JSON.stringify(j, null, 2)); } catch (e) { return send(res, 500, JSON.stringify({ error: e.message })); }
+      send(res, 200, JSON.stringify({ ok: true, name }));
+    });
+    return;
+  }
+  if (url.pathname === '/api/project-reorder' && req.method === 'POST') {   // 按传入的 id 顺序重排 projects.json(未列出的保留在末尾)
+    let buf = ''; req.on('data', c => (buf += c)); req.on('end', () => {
+      let ids = []; try { ids = JSON.parse(buf).ids || []; } catch {}
+      if (!Array.isArray(ids)) return send(res, 400, JSON.stringify({ error: 'ids 非法' }));
+      let j = { projects: [] }; try { j = JSON.parse(fs.readFileSync(PROJECTS_FILE, 'utf8')); } catch {}
+      if (!j.projects) j.projects = [];
+      const byId = new Map(j.projects.map(p => [p.id, p])); const ordered = [], seen = new Set();
+      for (const id of ids) { const p = byId.get(id); if (p && !seen.has(id)) { ordered.push(p); seen.add(id); } }
+      for (const p of j.projects) if (!seen.has(p.id)) ordered.push(p);
+      j.projects = ordered;
+      try { fs.writeFileSync(PROJECTS_FILE, JSON.stringify(j, null, 2)); } catch (e) { return send(res, 500, JSON.stringify({ error: e.message })); }
+      send(res, 200, JSON.stringify({ ok: true }));
+    });
+    return;
+  }
+  if (url.pathname === '/api/chat-clear' && req.method === 'POST') { const p = projById(pid); try { fs.writeFileSync(chatFile(p), JSON.stringify({ messages: [] })); writeSess(p, null); } catch {} return send(res, 200, JSON.stringify({ ok: true })); }
+  if (url.pathname === '/api/chat-delete' && req.method === 'POST') {
+    const p = projById(pid); let buf = '';
+    req.on('data', c => (buf += c));
+    req.on('end', () => {
+      let idx = -1; try { idx = JSON.parse(buf).index; } catch {}
+      const c = readChat(p);
+      if (Number.isInteger(idx) && idx >= 0 && idx < c.messages.length) {
+        c.messages.splice(idx, 1);
+        try { fs.mkdirSync(path.dirname(chatFile(p)), { recursive: true }); fs.writeFileSync(chatFile(p), JSON.stringify(c)); } catch {}
+        return send(res, 200, JSON.stringify({ ok: true, count: c.messages.length }));
+      }
+      return send(res, 400, JSON.stringify({ ok: false, error: 'bad index' }));
+    });
+    return;
+  }
+  if (url.pathname === '/api/prompt-file') {   // 查看/编辑内置提示词：命令 .md / agent .md / CLAUDE.md（白名单 + 防穿越）
+    const p = projById(pid); if (!p) return send(res, 400, JSON.stringify({ error: '尚未纳管任何项目' }));
+    const kind = (url.searchParams.get('kind') || '').trim();
+    const name = (url.searchParams.get('name') || '').replace(/[^a-z0-9_-]/gi, '');
+    let rel = '';
+    if (kind === 'command' && name) rel = '.claude/commands/' + name + '.md';
+    else if (kind === 'agent' && name) rel = '.claude/agents/' + name + '.md';
+    else if (kind === 'manual') rel = 'CLAUDE.md';
+    else if (kind === 'lessons') rel = 'docs/lessons.md';   // 项目级经验库
+    else return send(res, 400, JSON.stringify({ error: '参数错误' }));
+    const f = path.join(p.path, rel);
+    if (req.method === 'GET') return send(res, 200, JSON.stringify({ rel, content: fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '' }));
+    if (req.method === 'POST') {
+      let buf = ''; req.on('data', c => (buf += c)); req.on('end', () => {
+        try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, (JSON.parse(buf).content) ?? ''); send(res, 200, JSON.stringify({ ok: true })); }
+        catch (e) { send(res, 500, JSON.stringify({ error: e.message })); }
+      });
+      return;
+    }
+    return;
+  }
+  if (url.pathname === '/api/agent-file') {
+    const p = projById(pid);
+    if (!p) return send(res, 400, JSON.stringify({ error: '项目不存在' }));
+    const id = (url.searchParams.get('id') || '').replace(/[^a-z0-9_-]/gi, '');   // 防路径穿越
+    if (!id) return send(res, 400, JSON.stringify({ error: 'bad id' }));
+    const f = path.join(p.path, '.claude/agents/' + id + '.md');
+    if (req.method === 'GET') return send(res, 200, JSON.stringify({ id, path: '.claude/agents/' + id + '.md', content: fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '' }));
+    if (req.method === 'POST') {
+      let buf = '';
+      req.on('data', c => (buf += c));
+      req.on('end', () => {
+        try {
+          const body = JSON.parse(buf);
+          fs.mkdirSync(path.dirname(f), { recursive: true });
+          fs.writeFileSync(f, body.content ?? '');
+          send(res, 200, JSON.stringify({ ok: true }));
+        } catch (e) { send(res, 500, JSON.stringify({ error: e.message })); }
+      });
+      return;
+    }
+  }
+  if (url.pathname === '/api/events') {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+    res.write('retry: 3000\n\n');
+    sseClients.add(res); req.on('close', () => sseClients.delete(res));
+    return;
+  }
+  if (url.pathname === '/api/chat' && req.method === 'POST') {
+    const p = projById(pid);
+    let buf = '';
+    req.on('data', c => (buf += c));
+    req.on('end', () => {
+      let msg = '';
+      try { msg = JSON.parse(buf).message || ''; } catch {}
+      if (!msg) return send(res, 400, JSON.stringify({ error: 'empty message' }));
+      send(res, 200, JSON.stringify({ started: true }));   // 立即返回，输出走 SSE 流式推送
+      const sid = readSess(p);
+      const args = ['-p', '--output-format', 'stream-json', '--verbose', ...CLAUDE_EXTRA];
+      if (sid) args.push('--resume', sid);
+      const child = spawn(CLAUDE_BIN, args, { cwd: p.path, env: childEnv() });
+      let finalReply = '', newSid = sid, lineBuf = '';
+      const emit = (kind, text) => sseBroadcast({ type: 'chat', project: p.id, kind, text });
+      child.stdout.on('data', d => {
+        lineBuf += d; let i;
+        while ((i = lineBuf.indexOf('\n')) >= 0) {
+          const line = lineBuf.slice(0, i).trim(); lineBuf = lineBuf.slice(i + 1);
+          if (!line) continue;
+          let ev; try { ev = JSON.parse(line); } catch { continue; }
+          if (ev.session_id) newSid = ev.session_id;
+          if (ev.type === 'assistant' && ev.message && Array.isArray(ev.message.content)) {
+            for (const b of ev.message.content) {
+              if (b.type === 'text' && b.text && b.text.trim()) { emit('text', b.text.trim()); finalReply = b.text.trim(); }
+              else if (b.type === 'tool_use') { const sub = b.input && b.input.subagent_type ? ' · ' + b.input.subagent_type : ''; emit('tool', '🔧 ' + (b.name || 'tool') + sub); }
+            }
+          } else if (ev.type === 'result' && ev.result) { finalReply = ev.result; }
+        }
+      });
+      child.on('error', e => { emit('done', '无法启动 claude：' + e.message); });
+      child.on('close', () => {
+        if (newSid) writeSess(p, newSid);
+        appendChat(p, [{ role: 'user', text: msg, ts: Date.now() }, { role: 'ai', text: finalReply || '(完成)', ts: Date.now() }]);
+        emit('done', finalReply || '(完成)');
+      });
+      child.stdin.write(msg); child.stdin.end();
+    });
+    return;
+  }
+  // --- 静态（dashboard 从宿主目录）---
+  let rel = url.pathname === '/' ? '/dashboard/index.html' : url.pathname;
+  const file = path.join(ROOT, rel);
+  if (file.startsWith(ROOT) && fs.existsSync(file) && fs.statSync(file).isFile()) {   // no-store：改了 UI 立刻生效，不吃浏览器旧缓存（#9）
+    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
+    return res.end(fs.readFileSync(file));
+  }
+  send(res, 404, 'Not Found', 'text/plain');
+});
+
+// 监听项目 docs/ 变更 → 重算该项目 board + SSE 推送（忽略 board.* 防回环）
+let _deb = null;
+const watchers = new Map(); // projectId -> FSWatcher（移除项目时关掉）
+function watchProject(p) {
+  try {
+    const w = fs.watch(path.join(p.path, 'docs'), { recursive: true }, (ev, fn) => {
+      if (fn && /board\.(json|md)$/.test(fn)) return;
+      clearTimeout(_deb);
+      _deb = setTimeout(() => { genBoard(p.path); sseBroadcast({ type: 'refresh' }); }, 300);
+    });
+    watchers.set(p.id, w);
+  } catch {}
+}
+function unwatchProject(id) { const w = watchers.get(id); if (w) { try { w.close(); } catch {} watchers.delete(id); } }
+for (const p of loadProjects()) watchProject(p);
+
+// 启动期的子进程 spawn（genBoard / adopt 起 ttyd）放在 server.listen 之前：
+// 避免「spawn 子进程」与「监听 socket 接受连接」在同一瞬间抢 fd，导致该实例后续请求体处理异常（间歇 400）。
+for (const p of loadProjects()) genBoard(p.path);
+adoptWindows();   // 接管上次遗留/重启前存活的 tmux 会话
+server.on('clientError', (err, socket) => { try { console.error('[clientError]', err?.code, err?.message, 'bytesParsed=', err?.bytesParsed, 'rawPacket=', err?.rawPacket ? JSON.stringify(err.rawPacket.toString('utf8').slice(0, 200)) : ''); } catch {} try { if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n'); } catch {} });
+server.listen(PORT, '127.0.0.1', () => {
+  console.log(`\n  Steward 控制台（多项目）： http://127.0.0.1:${PORT}`);
+  console.log(TTYD_BIN ? '  内嵌终端(ttyd) 就绪：每个项目可开多个对话窗口' : '  内嵌终端未启用：未找到 ttyd（brew install ttyd 后重启）');
+  console.log('  (Ctrl+C 退出)\n');
+});

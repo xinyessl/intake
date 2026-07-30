@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>医院管理 · 收件 intake</title>
+<link rel="stylesheet" href="/vendor/tabler/tabler-icons.min.css">
+<link rel="stylesheet" href="/assets/theme.css">
+<script src="/assets/ui.js" defer></script>
+<script src="/assets/shell.js" defer></script>
+<style>
+  /* 抽屉内关联产品行（原型无对应类，页面内自带；用 theme token）：一个产品一张卡，卡内展开该产品子系统清单，各子系统勾选 + 各自版本 */
+  #edProdRows{display:flex;flex-direction:column;gap:10px}
+  #edProdRows .prow{display:flex;flex-direction:column;gap:8px;border:1px solid var(--color-border);border-radius:8px;padding:10px}
+  #edProdRows .prow .prow-hd{display:flex;gap:8px;align-items:center}
+  #edProdRows .prow .cprod{flex:1;min-width:0}
+  #edProdRows .prow .btn-del{flex:0 0 auto}
+  /* 子系统清单：每个子系统一行 [☑勾选] 子系统中文名 [版本下拉] */
+  .subsyslist{display:flex;flex-direction:column;gap:6px;padding-left:2px}
+  .subsysrow{display:flex;align-items:center;gap:10px}
+  .subsysrow .subck{flex:0 0 auto;display:flex;align-items:center;gap:6px;min-width:120px;cursor:pointer;font-size:13px}
+  .subsysrow .subck input{cursor:pointer}
+  .subsysrow .subname{font-weight:500}
+  .subsysrow .cver{flex:1;min-width:0;max-width:220px}
+  .subsysrow.off .subname{color:var(--color-text-tertiary)}
+  .subsysrow.off .cver{opacity:.5}
+  .subsysempty{font-size:12.5px;color:var(--color-text-tertiary);padding:6px 8px;border:1px dashed var(--color-border-strong);border-radius:6px;text-align:center}
+  .prodempty{font-size:12.5px;color:var(--color-text-tertiary);padding:9px 10px;border:1px dashed var(--color-border-strong);border-radius:6px;text-align:center}
+  /* 上线产品·子系统·版本单元格标签 */
+  .vtag{display:inline-flex;align-items:center;gap:4px;margin:2px 4px 2px 0}
+  .vtag .vv{font-weight:600}
+  .vtag .vv.none{color:var(--color-text-tertiary);font-weight:400}
+  /* 负责实施单元格 */
+  .implcell{display:flex;align-items:center;gap:8px}
+  .implcell .implname{font-size:13px;font-weight:500}
+  .implcell .implphone{font-size:12px;color:var(--color-text-tertiary)}
+  .implcell .implnone{color:var(--color-text-tertiary)}
+</style>
+</head>
+<body data-shell="admin" data-nav="customers" data-breadcrumb="主体管理 > 医院管理" data-content-layout="list">
+
+<div class="card">
+  <div class="filter-bar" style="display:flex;align-items:center;gap:12px;padding:10px 14px">
+    <div class="filter-grid" style="flex:1">
+      <div class="filter-field"><label>负责实施</label><select class="select" id="fImpl"><option value="">全部实施</option></select></div>
+      <div class="filter-field"><label>等级</label><select class="select" id="fLevel"><option value="">全部等级</option><option value="三甲">三甲</option><option value="三乙">三乙</option><option value="二甲">二甲</option><option value="医共体">医共体</option></select></div>
+      <div class="filter-field"><label>状态</label><select class="select" id="fStatus"><option value="">全部状态</option><option value="已开通">已开通</option><option value="未开通">未开通</option></select></div>
+      <div class="filter-field"><label>关键词</label><div class="input-with-icon"><i class="ti ti-search"></i><input class="input" id="fKw" placeholder="医院名，回车搜索"></div></div>
+    </div>
+    <button class="btn btn-primary" id="btnAdd"><i class="ti ti-plus"></i>新增医院</button>
+  </div>
+</div>
+
+<div class="card" style="flex:1;min-height:0;display:flex;flex-direction:column;padding:0">
+    <div class="table-wrap" style="flex:1;min-height:0">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>医院</th>
+            <th style="width:200px">负责实施</th>
+            <th>上线产品 · 版本</th>
+            <th style="width:92px">状态</th>
+            <th style="width:74px">工单数</th>
+            <th style="width:160px">操作</th>
+          </tr>
+        </thead>
+        <tbody id="custBody"></tbody>
+      </table>
+    </div>
+    <div class="pagination">
+      <div class="page-info">共 <b id="totalCount">0</b> 家医院</div>
+      <div class="flex items-center gap-12"><select class="select page-size-select" id="pageSize"><option value="8">8 条/页</option><option value="20">20 条/页</option></select><div class="pager" id="pager"></div></div>
+    </div>
+  </div>
+
+<!-- 新增/编辑抽屉（部署 shell.js 无 UI.openDrawer，自实现开关；参考 accounts.html/inbox.html） -->
+<div class="drawer-mask" id="drawerMask"></div>
+<div class="drawer wide" id="editDrawer">
+  <div class="drawer-header">
+    <div><div class="drawer-title" id="edTitle">新增医院</div><div class="drawer-subtitle">关联产品与各自版本，实施端从台账认领医院</div></div>
+    <span class="modal-close" data-close-drawer="editDrawer"><i class="ti ti-x"></i></span>
+  </div>
+  <div class="drawer-body">
+    <div class="grid grid-cols-2 gap-12">
+      <div class="form-group"><label>医院名称 <span class="req">*</span> <span class="field-counter" id="edNameCount">0/60</span></label><input class="input" id="edName" maxlength="60" placeholder="如 山东省立医院"></div>
+      <div class="form-group"><label>等级 <span class="req">*</span></label><select class="select" id="edLevel"><option value="三甲">三甲</option><option value="三乙">三乙</option><option value="二甲">二甲</option><option value="医共体">医共体</option></select></div>
+    </div>
+    <div class="form-group"><label>状态</label><select class="select" id="edStatus"><option value="已开通">已开通</option><option value="未开通">未开通</option></select></div>
+    <div class="form-group">
+      <label>负责实施人 <span class="text-tertiary" style="font-weight:400;font-size:12px">手机号在账号管理维护</span></label>
+      <select class="select" id="edImplName"><option value="">（未指定实施人）</option></select>
+    </div>
+    <div class="form-group">
+      <div class="flex items-center justify-between mb-8">
+        <label style="margin:0">关联产品 + 各自版本</label>
+        <button class="btn btn-sm" id="btnAddProd"><i class="ti ti-plus"></i>添加产品</button>
+      </div>
+      <div id="edProdRows"></div>
+    </div>
+  </div>
+  <div class="drawer-footer"><button class="btn" data-close-drawer="editDrawer">取消</button><button class="btn btn-primary" id="btnSave"><i class="ti ti-check"></i>保存</button></div>
+</div>
+
+<div class="toast-container" id="toastHost"></div>
+
+<script>
+const $=s=>document.querySelector(s);
+const $$=s=>Array.prototype.slice.call(document.querySelectorAll(s));
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+/* —— toast（部署 shell.js 无 toast，自实现；用 theme.css .toast-container/.toast.show） —— */
+function toast(msg,type){ const host=$('#toastHost'); if(!host)return; const el=document.createElement('div'); el.className='toast '+(type||''); const ic=type==='success'?'ti-circle-check':type==='error'?'ti-alert-circle':type==='warning'?'ti-alert-triangle':'ti-info-circle'; el.innerHTML=`<i class="ti ${ic}"></i><span>${esc(msg)}</span>`; host.appendChild(el); requestAnimationFrame(()=>el.classList.add('show')); setTimeout(()=>{ el.classList.remove('show'); setTimeout(()=>el.remove(),300); },2400); }
+
+/* —— 抽屉开关（部署 shell.js 无 UI.openDrawer，自实现；用 theme.css .drawer.open/.drawer-mask.open） —— */
+function openDrawer(id){ const d=document.getElementById(id); if(!d)return; $('#drawerMask').classList.add('open'); d.classList.add('open'); }
+function closeDrawer(id){ const d=document.getElementById(id); if(d)d.classList.remove('open'); if(!document.querySelector('.drawer.open')) $('#drawerMask').classList.remove('open'); }
+document.addEventListener('click', e=>{ const c=e.target.closest('[data-close-drawer]'); if(c) closeDrawer(c.getAttribute('data-close-drawer')); });
+$('#drawerMask').addEventListener('click',()=>{ $$('.drawer.open').forEach(d=>d.classList.remove('open')); $('#drawerMask').classList.remove('open'); });
+
+let PROJECTS=[], CUSTOMERS=[], IMPL_ACCOUNTS=[], editId=null;
+let state={ page:1, size:8, filters:{region:'',level:'',status:'',kw:''} };
+const pname=id=>{ const p=PROJECTS.find(x=>x.id===id); return p?p.name:id; };
+
+/* ---------- 筛选（选择型即选即查，关键词回车） ---------- */
+function initRegionOptions(){
+  const fi=$('#fImpl'); const cur=fi.value;
+  const names=[...new Set([...IMPL_ACCOUNTS.map(a=>(a.name||a.username||'').trim()), ...CUSTOMERS.map(c=>((c.impl&&c.impl.name)||'').trim())].filter(Boolean))].sort();
+  fi.innerHTML='<option value="">全部实施</option>'+names.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
+  if(names.includes(cur)) fi.value=cur;
+}
+function collectFilters(){ state.filters={ impl:$('#fImpl').value, level:$('#fLevel').value, status:$('#fStatus').value, kw:$('#fKw').value.trim() }; }
+function getFiltered(){
+  const f=state.filters;
+  return CUSTOMERS.filter(c=> (!f.impl||((c.impl&&c.impl.name)||'')===f.impl) && (!f.level||(c.level||'')===f.level) && (!f.status||(c.status||'')===f.status) && (!f.kw||(c.name||'').includes(f.kw)) );
+}
+
+/* ---------- 列表 ---------- */
+function render(){
+  const list=getFiltered();
+  const total=list.length;
+  const pages=Math.max(1, Math.ceil(total/state.size));
+  if(state.page>pages) state.page=pages;
+  const pageData=list.slice((state.page-1)*state.size, state.page*state.size);
+  const body=$('#custBody');
+  body.innerHTML = pageData.length ? pageData.map(c=>{
+    const prods=(c.products||[]);
+    // 上线产品·版本单元格：新形状（含 subsystems）显「产品 · N 个子系统」；旧形状（产品级 version）显「产品 版本」。
+    const prodCell = prods.length
+      ? prods.map(p=>{
+          if(Array.isArray(p.subsystems)){
+            const n=p.subsystems.length;
+            return `<span class="tag tag-info vtag">${esc(pname(p.project))}<b class="vv${n?'':' none'}">${n?(n+' 个子系统'):'未选子系统'}</b></span>`;
+          }
+          return `<span class="tag tag-info vtag">${esc(pname(p.project))}<b class="vv mono${p.version?'':' none'}">${p.version?esc(p.version):'未指定'}</b></span>`;
+        }).join('')
+      : '<span class="text-tertiary">—</span>';
+    const impl=c.impl||{};
+    // 实施人电话取自账号（单一来源）：按姓名匹配 IMPL_ACCOUNTS，取其 phone；匹配不到则不显电话。姓名仍是 impl.name。
+    const implAcc = impl.name ? IMPL_ACCOUNTS.find(a=>(a.name||a.username)===impl.name) : null;
+    const implPhone = implAcc && implAcc.phone ? implAcc.phone : '';
+    const implCell = impl.name
+      ? `<div class="implcell"><div class="avatar avatar-sm">${esc((impl.name||'?').charAt(0))}</div><div><div class="implname">${esc(impl.name)}</div>${implPhone?`<div class="implphone mono">${esc(implPhone)}</div>`:'<div class="implphone text-tertiary">—</div>'}</div></div>`
+      : '<span class="implnone">—</span>';
+    const on = (c.status||'已开通')==='已开通';
+    const tc = c.ticketCount||0;
+    return `<tr>
+      <td><div class="flex items-center gap-8"><div class="cell-strong">${esc(c.name)}</div><span class="tag ${c.level==='三甲'?'tag-primary':'tag-gray'}">${esc(c.level||'—')}</span></div><div class="cell-sub mono">${esc(c.id)}</div></td>
+      <td>${implCell}</td>
+      <td>${prodCell}</td>
+      <td><span class="tag ${on?'tag-success':'tag-gray'} tag-dot">${esc(c.status||'—')}</span></td>
+      <td><span class="mono ${tc?'text-link':'text-tertiary'}" data-tickets="${esc(c.name)}">${tc}</span></td>
+      <td>
+        <div class="row-actions">
+          <span class="row-action" data-act="edit" data-id="${esc(c.id)}">编辑</span>
+          <span class="divider"></span>
+          <span class="row-action danger" data-act="del" data-id="${esc(c.id)}">删除</span>
+        </div>
+      </td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="7"><div class="empty"><div class="empty-illu"><i class="ti ti-building-hospital"></i></div><div class="empty-title">${CUSTOMERS.length?'没有匹配的医院':'还没有医院，点右上角「新增医院」'}</div></div></td></tr>`;
+  $('#totalCount').textContent=total;
+  renderPager(pages);
+}
+function renderPager(pages){
+  let html=`<button class="pager-btn" ${state.page===1?'disabled':''} data-go="${state.page-1}"><i class="ti ti-chevron-left"></i></button>`;
+  for(let i=1;i<=pages;i++) html+=`<button class="pager-btn ${i===state.page?'active':''}" data-go="${i}">${i}</button>`;
+  html+=`<button class="pager-btn" ${state.page===pages?'disabled':''} data-go="${state.page+1}"><i class="ti ti-chevron-right"></i></button>`;
+  $('#pager').innerHTML=html;
+}
+
+/* ---------- 抽屉：产品行 ---------- */
+function prodOptions(sel){ return '<option value="">选择产品</option>'+PROJECTS.map(p=>`<option value="${esc(p.id)}"${p.id===sel?' selected':''}>${esc(p.name)}</option>`).join(''); }
+function syncProdEmpty(){ const box=$('#edProdRows'); const has=box.querySelector('.prow'); let e=box.querySelector('.prodempty'); if(!has){ if(!e){ e=document.createElement('div'); e.className='prodempty'; e.textContent='还没关联产品，点「添加产品」。'; box.appendChild(e);} } else if(e){ e.remove(); } }
+
+/* 产品 id → 运营 tag 版本数组（/api/versions?project= 结果缓存，最新在前）；仿 field.html ensureVersions */
+const VER_CACHE={};
+function fetchVersions(pid, cb){
+  if(!pid){ cb([]); return; }
+  if(VER_CACHE[pid]){ cb(VER_CACHE[pid]); return; }
+  fetch('/api/versions?project='+encodeURIComponent(pid)).then(r=>r.json()).then(r=>{
+    const vs=Array.isArray(r&&r.versions)?r.versions:[];   // 最新在前（后端已倒序）
+    VER_CACHE[pid]=vs; cb(vs);
+  }).catch(()=>{ VER_CACHE[pid]=[]; cb([]); });
+}
+/* 填 .cver 版本下拉选项：首项「未指定」(value='')；候选=该产品 tag 版本；cur 不在候选里则作为「历史值」选项保留（避免下拉丢值/保存被清空）；无版本则加禁用提示项。选完回写 value 并派发 change 让 ui.js 自定义下拉重同步。 */
+function fillVerOptions(sel, versions, cur){
+  cur=cur||'';
+  const vs=Array.isArray(versions)?versions:[];
+  let html='<option value="">未指定</option>';
+  html+=vs.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');
+  if(cur && vs.indexOf(cur)<0) html+=`<option value="${esc(cur)}">${esc(cur)}（历史值）</option>`;   // 保留不在 tag 列表里的历史手输版本
+  if(!vs.length && !cur) html+='<option value="" disabled>该产品暂无版本</option>';
+  sel.innerHTML=html;
+  sel.value=cur;                                              // 命中「未指定」/tag/历史值；value setter 被 ui.js 覆盖会同步触发器
+  sel.dispatchEvent(new Event('change',{bubbles:true}));      // 通知 ui.js 自定义下拉重同步动态填充的 options
+}
+/* 产品 id → 该产品定义的子系统数组 [{name, desc}]（name=英文/原始 name=过滤键与后端校验键，desc=中文优先显示）；无则空 */
+function subsystemsOf(pid){
+  const p=PROJECTS.find(x=>x.id===pid); if(!p||!Array.isArray(p.subsystems)) return [];
+  return p.subsystems.map(s=> typeof s==='string' ? {name:s,desc:s} : {name:(s.name||''),desc:(s.desc||s.name||'')}).filter(o=>o.name);
+}
+/* 建一个子系统行：[☑勾选] 子系统中文名 [版本下拉]。checked=是否上线，version=已维护版本。版本下拉复用 fetchVersions/fillVerOptions（被 ui.js 增强）。 */
+function makeSubsysRow(pid, sub, checked, version){
+  const row=document.createElement('div'); row.className='subsysrow'+(checked?'':' off'); row.dataset.sub=sub.name;
+  const lab=document.createElement('label'); lab.className='subck';
+  const ck=document.createElement('input'); ck.type='checkbox'; ck.className='subck-in'; ck.checked=!!checked;
+  const nm=document.createElement('span'); nm.className='subname'; nm.textContent=sub.desc||sub.name;
+  lab.appendChild(ck); lab.appendChild(nm);
+  const v=document.createElement('select'); v.className='select cver'; v.innerHTML='<option value="">未指定</option>'; v.value=version||'';
+  ck.addEventListener('change',()=>{ row.classList.toggle('off',!ck.checked); });
+  row.appendChild(lab); row.appendChild(v);
+  // 拉该产品版本填充版本下拉，选中已维护版本（历史值不在 tag 列表也保留）
+  fetchVersions(pid, vs=>fillVerOptions(v, vs, version||''));
+  return row;
+}
+/* 按产品重建子系统清单：checkedMap={子系统name:version}（回填时该医院已维护的子系统→版本；新产品/未指定则全空=默认不勾） */
+function buildSubsysList(pid, box, checkedMap){
+  box.innerHTML='';
+  const subs=subsystemsOf(pid);
+  if(!pid){ box.innerHTML='<div class="subsysempty">先选择产品，再勾选上线子系统。</div>'; return; }
+  if(!subs.length){ box.innerHTML='<div class="subsysempty">该产品未定义子系统（保存后实施端按产品整体处理）。</div>'; return; }
+  checkedMap=checkedMap||null;
+  subs.forEach(sub=>{
+    const has = checkedMap && Object.prototype.hasOwnProperty.call(checkedMap, sub.name);
+    box.appendChild(makeSubsysRow(pid, sub, has, has?checkedMap[sub.name]:''));
+  });
+}
+/* 建一个产品卡（产品下拉 + 下方子系统清单）。checkedMap=回填的 {子系统name:version}（新形状）；null=新增空行。 */
+function addProdRow(project, checkedMap){
+  const box=$('#edProdRows');
+  const row=document.createElement('div'); row.className='prow';
+  const hd=document.createElement('div'); hd.className='prow-hd';
+  const s=document.createElement('select'); s.className='select cprod'; s.innerHTML=prodOptions(project||'');
+  const del=document.createElement('button'); del.className='btn btn-icon btn-sm btn-del'; del.type='button'; del.title='移除'; del.innerHTML='<i class="ti ti-trash" style="color:var(--color-danger)"></i>';
+  del.addEventListener('click',()=>{ row.remove(); syncProdEmpty(); });
+  hd.appendChild(s); hd.appendChild(del);
+  const list=document.createElement('div'); list.className='subsyslist';
+  row.appendChild(hd); row.appendChild(list);
+  // 换产品 → 重建子系统清单（新产品的子系统，全不勾）
+  s.addEventListener('change',()=>{ buildSubsysList(s.value, list, null); });
+  box.appendChild(row); syncProdEmpty();
+  buildSubsysList(project||'', list, checkedMap||null);
+}
+/* 收集：每个产品卡 → { project, subsystems:[{name,version}] }（只收勾选的子系统）。无勾选子系统的产品仍保留（subsystems=[]），实施端兜底显全部，避免误删。
+   ⚠️ 必须用 `select.cprod`/`select.cver`（明确选原生 <select>）——ui.js 自定义下拉增强器会把附带 class（.cprod/.cver）复制到它生成的包裹 <div class="ui-sel-wrap cprod/cver"> 上，
+   且该 wrapper 在 DOM 顺序里排在原生 select 前面；若用裸 `.cprod`/`.cver`，querySelector 会先命中那个 DIV（无 .value → undefined），导致 pid/version 全落空、产品被清空（2026-07-23 保存失败回归根因）。
+   同时对结果判空、缺元素跳过（不抛），保证 collectProducts 恒不抛。 */
+function collectProducts(){ const out=[], seen=new Set();
+  $$('#edProdRows .prow').forEach(r=>{
+    const prodSel=r.querySelector('select.cprod');          // 只取原生 select，绕开 ui.js 复制了同名 class 的 wrapper DIV
+    const pid=prodSel ? (prodSel.value||'').trim() : '';
+    if(!pid || seen.has(pid)) return; seen.add(pid);
+    const subs=[];
+    r.querySelectorAll('.subsysrow').forEach(sr=>{
+      const ck=sr.querySelector('.subck-in');
+      if(ck && ck.checked){
+        const verSel=sr.querySelector('select.cver');       // 同理只取原生 select
+        subs.push({ name:sr.dataset.sub, version:verSel ? (verSel.value||'').trim() : '' });
+      }
+    });
+    out.push({ project:pid, subsystems:subs });
+  });
+  return out; }
+
+/* ---------- 抽屉：打开/保存 ---------- */
+function fillImplSelect(cur){
+  const sel=$('#edImplName'); const names=[];
+  IMPL_ACCOUNTS.forEach(a=>{ const nm=a.name||a.username; if(nm && !names.includes(nm)) names.push(nm); });
+  if(cur && !names.includes(cur)) names.unshift(cur);   // 保留旧的自由文本值，不丢
+  sel.innerHTML='<option value="">（未指定实施人）</option>'+names.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
+  sel.value = cur||'';
+}
+function openEdit(c){
+  editId = c ? c.id : null;
+  $('#edTitle').textContent = c ? '编辑医院' : '新增医院';
+  $('#edName').value = c ? (c.name||'') : '';
+  $('#edLevel').value = c ? (c.level||'三甲') : '三甲';
+  $('#edStatus').value = c ? (c.status||'已开通') : '已开通';
+  fillImplSelect(c && c.impl ? (c.impl.name||'') : '');
+  countName();
+  $('#edProdRows').innerHTML='';
+  // 回填每个产品的子系统勾选 + 版本：
+  //   · 新形状 {project,subsystems:[{name,version}]} → 勾选并回填各子系统版本（checkedMap={name:version}）；
+  //   · 旧形状 {project,version}（无 subsystems 字段）→ 默认勾选该产品全部子系统，各版本预填旧产品级 version（保存即无损升级、保持现状「全部子系统」行为）。
+  (c && c.products || []).forEach(p=>{
+    let checkedMap;
+    if(p && Array.isArray(p.subsystems)){
+      checkedMap={}; p.subsystems.forEach(ms=>{ if(ms && ms.name) checkedMap[ms.name]=ms.version||''; });
+    }else{
+      checkedMap={}; subsystemsOf(p.project).forEach(sub=>{ checkedMap[sub.name]=(p&&p.version)||''; });   // 旧形状：全部子系统 @ 产品级版本
+    }
+    addProdRow(p.project, checkedMap);
+  });
+  syncProdEmpty();
+  $('#edName').classList.remove('invalid');
+  openDrawer('editDrawer'); $('#edName').focus();
+}
+function countName(){ $('#edNameCount').textContent = `${$('#edName').value.length}/60`; }
+
+async function saveCustomer(){
+  const name=$('#edName').value.trim();
+  if(!name){ $('#edName').classList.add('invalid'); toast('请填写医院名称','warning'); return; } $('#edName').classList.remove('invalid');
+  $('#btnSave').disabled=true;
+  try{
+    // collectProducts 放 try 内：即便前端收集逻辑抛异常也被捕获 → toast 可见 + finally 恢复按钮，绝不静默失败（2026-07-23 防回归）
+    const products=collectProducts();
+    // 防清空护栏（数据保护 · 2026-07-23）：编辑已有客户时，若收集到 0 产品、而该客户原本有关联产品 → 二次确认，避免（如收集 bug/误删）静默清空医院已关联产品。
+    //   新增客户、或原本就无产品的编辑，不拦。
+    const orig=editId ? CUSTOMERS.find(c=>c.id===editId) : null;
+    const origCount=(orig && Array.isArray(orig.products)) ? orig.products.length : 0;
+    if(editId && products.length===0 && origCount>0){
+      const ok=await uiConfirm('该医院原有 '+origCount+' 个关联产品，本次保存将清空为「无关联产品」，确定继续？',{title:'确认清空关联产品',danger:true,okText:'仍要清空'});
+      if(!ok) return;   // 取消 → 中止保存（finally 恢复按钮）
+    }
+    const payload={ id:editId||'', name, level:$('#edLevel').value, region:(CUSTOMERS.find(c=>c.id===editId)||{}).region||'', status:$('#edStatus').value,
+      impl:{ name:$('#edImplName').value.trim(), phone:((CUSTOMERS.find(c=>c.id===editId)||{}).impl||{}).phone||'' }, products };
+    const r=await (await fetch('/api/customer-save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})).json();
+    if(!r.ok){ toast(r.error||'保存失败','error'); return; }
+    CUSTOMERS=r.customers||[]; initRegionOptions(); render();
+    toast(editId?'医院信息已更新':'医院已新增','success'); closeDrawer('editDrawer');
+  }catch(e){ toast('保存失败：'+e.message,'error'); }
+  finally{ $('#btnSave').disabled=false; }
+}
+
+async function delCustomer(c){
+  if(!(await uiConfirm('删除医院「'+c.name+'」？',{title:'删除医院',danger:true,okText:'删除'}))) return;
+  try{
+    const r=await (await fetch('/api/customer-delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:c.id})})).json();
+    if(!r.ok){ toast('删除失败：'+(r.error||''),'error'); return; }
+    CUSTOMERS=r.customers||[]; if(editId===c.id) closeDrawer('editDrawer'); initRegionOptions(); render();
+    toast('已删除','success');
+  }catch(e){ toast('删除失败：'+e.message,'error'); }
+}
+
+/* ---------- 事件绑定 ---------- */
+$('#btnAdd').addEventListener('click',()=>openEdit(null));
+$('#btnAddProd').addEventListener('click',()=>addProdRow('',null));
+$('#btnSave').addEventListener('click',saveCustomer);
+$('#edName').addEventListener('input',countName);
+$('#custBody').addEventListener('click',e=>{
+  const t=e.target.closest('[data-tickets]'); if(t){ if(t.classList.contains('text-link')) location.href='/inbox.html'; return; }
+  const a=e.target.closest('[data-act]'); if(!a)return; const c=CUSTOMERS.find(x=>x.id===a.dataset.id); if(!c)return;
+  if(a.dataset.act==='edit') openEdit(c);
+  else if(a.dataset.act==='del') delCustomer(c);
+});
+/* 选择型即选即查 */
+['fImpl','fLevel','fStatus'].forEach(id=>$('#'+id).addEventListener('change',()=>{ collectFilters(); state.page=1; render(); }));
+$('#fKw').addEventListener('keydown',e=>{ if(e.key==='Enter'){ collectFilters(); state.page=1; render(); } });
+$('#pageSize').addEventListener('change',()=>{ state.size=+$('#pageSize').value; state.page=1; render(); });
+$('#pager').addEventListener('click',e=>{ const b=e.target.closest('[data-go]'); if(!b||b.disabled)return; state.page=+b.dataset.go; render(); });
+
+async function load(){
+  try{ PROJECTS=(await (await fetch('/api/projects')).json()).projects||[]; }catch(e){}
+  try{ CUSTOMERS=(await (await fetch('/api/customers')).json()).customers||[]; }catch(e){}
+  try{ const as=(await (await fetch('/api/accounts')).json()).accounts||[]; IMPL_ACCOUNTS=as.filter(a=>(a.role==='impl'||a.role==='pm')&&a.enabled!==0); }catch(e){}
+  initRegionOptions(); render();
+}
+load();
+</script>
+</body>
+</html>

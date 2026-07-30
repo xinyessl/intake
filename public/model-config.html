@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>模型配置 · 收件 intake</title>
+<link rel="stylesheet" href="/vendor/tabler/tabler-icons.min.css">
+<link rel="stylesheet" href="/assets/theme.css">
+<script src="/assets/ui.js" defer></script>
+<script src="/assets/shell.js" defer></script>
+</head>
+<body data-shell="admin" data-nav="model-config" data-breadcrumb="AI 引擎 > 模型配置">
+
+<div class="alert alert-warning mb-16"><i class="ti ti-shield-lock"></i><div><b>安全说明：</b>API Key 仅存储于服务本机 <code class="mono">data/model-api.json</code>、<b>不入库</b>，页面仅回显掩码。切换主备、测试连通均在服务端完成。</div></div>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title"><i class="ti ti-cpu"></i>模型列表<span class="text-12 text-tertiary" id="recCount" style="margin-left:4px;font-weight:400"></span></div>
+      <div style="display:flex;align-items:center;gap:16px">
+        <div class="text-12 text-tertiary">当前主模型：<b id="primaryName" style="color:var(--color-primary)">—</b></div>
+        <button class="btn btn-primary" id="addBtn"><i class="ti ti-plus"></i>新增模型</button>
+      </div>
+    </div>
+    <div class="table-wrap" style="max-height:none">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th style="width:70px">主 / 备</th>
+            <th style="width:170px">模型</th>
+            <th style="width:110px">服务商</th>
+            <th style="width:160px">API Key</th>
+            <th>接口地址</th>
+            <th style="width:100px">连通状态</th>
+            <th style="width:250px">操作</th>
+          </tr>
+        </thead>
+        <tbody id="modelBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+<!-- ============ 新增 / 编辑抽屉 ============ -->
+<div class="drawer-mask" id="drawerMask"></div>
+<div class="drawer" id="editDrawer">
+  <div class="drawer-header">
+    <div>
+      <div class="drawer-title" id="edTitle">新增模型</div>
+      <div class="drawer-subtitle">Key 仅存本机，不入库；保存后仅回显掩码</div>
+    </div>
+    <span class="modal-close" data-close-drawer="editDrawer"><i class="ti ti-x"></i></span>
+  </div>
+  <div class="drawer-body">
+    <div class="form-group">
+      <label>服务商 <span class="req">*</span></label>
+      <div class="seg-group w-full" id="edProvider" style="display:flex">
+        <div class="seg-item active" data-v="anthropic" style="flex:1;text-align:center;justify-content:center">Anthropic（Claude 原生）</div>
+        <div class="seg-item" data-v="openai" style="flex:1;text-align:center;justify-content:center">OpenAI 兼容</div>
+      </div>
+      <div class="form-hint">OpenAI 兼容：GPT / 通义千问 / DeepSeek 等 OpenAI 协议端点。</div>
+    </div>
+    <div class="form-group">
+      <label>模型名 <span class="req">*</span></label>
+      <input class="input mono" id="edModel" list="modelSuggest" placeholder="如 claude-opus-4-8 / deepseek-chat">
+      <datalist id="modelSuggest"><option value="claude-opus-4-8"><option value="claude-sonnet-4-6"><option value="claude-haiku-4-5"><option value="gpt-4o"><option value="gpt-4o-mini"><option value="deepseek-chat"><option value="qwen-plus"><option value="qwen-max"></datalist>
+      <div class="form-hint" id="edModelHint">留空用默认 claude-sonnet-4-6</div>
+    </div>
+    <div class="form-group">
+      <label>接口地址 Base URL <span class="req">*</span></label>
+      <div class="input-with-icon"><i class="ti ti-link"></i><input class="input mono" id="edEndpoint" placeholder="https://api.anthropic.com"></div>
+      <div class="form-hint">留空用官方默认地址；填代理 / 兼容端点。</div>
+    </div>
+    <div class="form-group">
+      <label>API Key <span class="req" id="edKeyReq">*</span></label>
+      <div class="input-with-icon"><i class="ti ti-key"></i><input class="input mono" id="edKey" placeholder="sk-..." type="password" autocomplete="off"></div>
+      <div class="form-hint" id="edKeyHint">Anthropic：<code class="mono">sk-ant-…</code>；OpenAI 兼容：<code class="mono">sk-…</code>。</div>
+    </div>
+    <div class="form-group">
+      <label>主 / 备</label>
+      <div class="flex gap-16">
+        <label class="radio"><input type="radio" name="edRole" value="备" checked>备用</label>
+        <label class="radio"><input type="radio" name="edRole" value="主">设为主</label>
+      </div>
+    </div>
+  </div>
+  <div class="drawer-footer">
+    <button class="btn" id="edTestBtn"><i class="ti ti-plug-connected"></i>测试连通</button>
+    <div style="flex:1"></div>
+    <button class="btn" data-close-drawer="editDrawer">取消</button>
+    <button class="btn btn-primary" id="edSaveBtn"><i class="ti ti-check"></i>保存</button>
+  </div>
+</div>
+
+<div class="toast-container" id="toastHost"></div>
+
+<script>
+const $=s=>document.querySelector(s), $$=s=>Array.from(document.querySelectorAll(s));
+const DEF={anthropic:'claude-sonnet-4-6',openai:'gpt-4o'};
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+/* —— toast（部署 shell.js 无 toast helper，自建；用 theme.css .toast-container/.toast.show） —— */
+function toast(msg,type){ const host=$('#toastHost'); if(!host)return; const el=document.createElement('div'); el.className='toast '+(type||''); const ic=type==='success'?'ti-circle-check':type==='error'?'ti-alert-circle':type==='warning'?'ti-alert-triangle':'ti-info-circle'; el.innerHTML=`<i class="ti ${ic}"></i><span>${esc(msg)}</span>`; host.appendChild(el); requestAnimationFrame(()=>el.classList.add('show')); setTimeout(()=>{ el.classList.remove('show'); setTimeout(()=>el.remove(),300); },2600); }
+/* —— 抽屉开关（部署 shell.js 无 openDrawer helper，自实现；用 theme.css .drawer.open/.drawer-mask.open） —— */
+function openDrawer(id){ const d=document.getElementById(id); if(!d)return; $('#drawerMask').classList.add('open'); d.classList.add('open'); }
+function closeDrawer(id){ const d=document.getElementById(id); if(d)d.classList.remove('open'); if(!document.querySelector('.drawer.open')) $('#drawerMask').classList.remove('open'); }
+document.addEventListener('click',e=>{ const c=e.target.closest('[data-close-drawer]'); if(c) closeDrawer(c.getAttribute('data-close-drawer')); });
+$('#drawerMask').addEventListener('click',()=>{ $$('.drawer.open').forEach(d=>d.classList.remove('open')); $('#drawerMask').classList.remove('open'); });
+
+/* MODELS：{provider,model,baseUrl,keyMask,configured,primary,_newKey?,_status?}
+   _status = 'ok'|'bad'|undefined（连通状态：测试后会话内内存态，不落文件） */
+let MODELS=[], editingIdx=null;
+const STATUS_TAG={ ok:'<span class="tag tag-success tag-dot">正常</span>', bad:'<span class="tag tag-danger tag-dot">异常</span>' };
+
+function render(){
+  const primary=MODELS.find(m=>m.primary);
+  $('#primaryName').textContent=primary?(primary.model||('默认 '+DEF[primary.provider||'anthropic'])):'未设置';
+  $('#recCount').textContent=MODELS.length?('（共 '+MODELS.length+' 个）'):'';
+  const tb=$('#modelBody');
+  if(!MODELS.length){ tb.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--color-text-tertiary);padding:40px 10px">还没有模型，点右上「新增模型」添加</td></tr>'; return; }
+  tb.innerHTML=MODELS.map((m,i)=>{
+    const prov=m.provider==='openai'?'OpenAI 兼容':'Anthropic';
+    const modelName=m.model||('默认 '+DEF[m.provider||'anthropic']);
+    const keyCell=m.configured?esc(m.keyMask):(m._newKey?'<span class="text-tertiary">新 Key（待保存）</span>':'<span class="text-tertiary">无 Key</span>');
+    const url=m.baseUrl?esc(m.baseUrl):'官方默认地址';
+    const st=m._status?STATUS_TAG[m._status]:'<span class="tag tag-gray tag-dot">未测试</span>';
+    return `<tr data-i="${i}">
+      <td><span class="tag ${m.primary?'tag-primary':'tag-gray'}" style="min-width:34px;justify-content:center">${m.primary?'主':'备'}</span></td>
+      <td class="mono cell-strong" title="${esc(modelName)}">${esc(modelName)}</td>
+      <td>${prov}</td>
+      <td class="mono text-12">${keyCell}</td>
+      <td class="mono text-12" style="max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${url}">${url}</td>
+      <td data-st>${st}</td>
+      <td><div class="row-actions">
+        ${m.primary?'<span class="row-action muted">已是主</span>':`<span class="row-action" data-act="primary">设为主</span>`}
+        <span class="divider"></span>
+        <span class="row-action" data-act="test">测试连通</span>
+        <span class="divider"></span>
+        <span class="row-action" data-act="edit">编辑</span>
+        <span class="divider"></span>
+        <span class="row-action danger" data-act="del">删除</span>
+      </div></td>
+    </tr>`;
+  }).join('');
+}
+
+function buildPayload(){ return { models: MODELS.map(m=>({ provider:m.provider, model:m.model||'', baseUrl:m.baseUrl||'', primary:!!m.primary, apiKey:m._newKey||'', mask:m.keyMask||'' })) }; }
+async function persist(){
+  try{ const r=await (await fetch('/api/model-config-save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(buildPayload())})).json();
+    if(!r.ok){ toast('保存失败：'+(r.error||''),'error'); return false; }
+    // 保留会话内连通状态：按模型名匹配旧 _status
+    const prevStatus={}; MODELS.forEach(m=>{ if(m._status) prevStatus[(m.provider||'')+'|'+(m.model||'')]=m._status; });
+    MODELS=(r.models||[]).map(m=>{ const s=prevStatus[(m.provider||'')+'|'+(m.model||'')]; return s?{...m,_status:s}:{...m}; });
+    render(); return true;
+  }catch(e){ toast('保存失败：'+e.message,'error'); return false; }
+}
+
+/* —— 抽屉：新增 / 编辑 —— */
+function setProvider(v){ $$('#edProvider .seg-item').forEach(el=>el.classList.toggle('active',el.getAttribute('data-v')===v)); $('#edModelHint').textContent='留空用默认 '+DEF[v]; }
+$$('#edProvider .seg-item').forEach(el=>el.addEventListener('click',()=>setProvider(el.getAttribute('data-v'))));
+function curProvider(){ const a=$('#edProvider .seg-item.active'); return a?a.getAttribute('data-v'):'anthropic'; }
+
+function openEdit(i){
+  editingIdx=(i==null?null:i);
+  const m=(i==null)?null:MODELS[i];
+  $('#edTitle').textContent=m?'编辑模型':'新增模型';
+  setProvider(m?(m.provider||'anthropic'):'anthropic');
+  $('#edModel').value=m?(m.model||''):'';
+  $('#edEndpoint').value=m?(m.baseUrl||''):'';
+  $('#edKey').value='';
+  $$('#editDrawer .input').forEach(el=>el.classList.remove('invalid'));
+  // 主/备单选：编辑取当前，新增默认备用
+  $$('input[name="edRole"]').forEach(r=>r.checked=(r.value===(m?(m.primary?'主':'备'):'备')));
+  if(m&&m.configured){ $('#edKey').placeholder='留空 = 保留已配置的 Key（'+esc(m.keyMask)+'）'; $('#edKeyReq').style.display='none'; $('#edKeyHint').innerHTML='已配置 <b style="color:var(--color-success)">'+esc(m.keyMask)+'</b>，留空保留；重填则更换。'; }
+  else{ $('#edKey').placeholder='sk-...'; $('#edKeyReq').style.display=''; $('#edKeyHint').innerHTML='Anthropic：<code class="mono">sk-ant-…</code>；OpenAI 兼容：<code class="mono">sk-…</code>。'; }
+  openDrawer('editDrawer');
+}
+$('#addBtn').addEventListener('click',()=>openEdit(null));
+
+$('#edSaveBtn').addEventListener('click',async()=>{
+  const prov=curProvider(), model=$('#edModel').value.trim(), base=$('#edEndpoint').value.trim(), key=$('#edKey').value.trim();
+  const role=(($('input[name="edRole"]:checked')||{}).value)||'备';
+  $$('#editDrawer .input').forEach(el=>el.classList.remove('invalid'));
+  if(!model){ $('#edModel').classList.add('invalid'); return toast('请填写模型名','warning'); }
+  if(!base){ $('#edEndpoint').classList.add('invalid'); return toast('请填写接口地址','warning'); }
+  if(editingIdx===null){
+    if(!key){ $('#edKey').classList.add('invalid'); return toast('请填写 API Key','warning'); }
+    const m={provider:prov,model,baseUrl:base,keyMask:'',configured:false,primary:false,_newKey:key};
+    MODELS.push(m);
+    if(role==='主'){ MODELS.forEach(x=>x.primary=false); m.primary=true; }
+    else if(MODELS.length===1){ m.primary=true; }   // 首个必须为主（唯一主约束）
+  } else {
+    const m=MODELS[editingIdx]; if(!m){ closeDrawer('editDrawer'); return; }
+    m.provider=prov; m.model=model; m.baseUrl=base;
+    if(key){ m._newKey=key; m.configured=true; m._status=undefined; }   // 换 Key → 连通状态失效
+    if(!m.configured && !m._newKey){ $('#edKey').classList.add('invalid'); return toast('该模型还没有 Key，请填','warning'); }
+    if(role==='主'){ MODELS.forEach(x=>x.primary=false); m.primary=true; }
+  }
+  $('#edSaveBtn').disabled=true;
+  const ok=await persist();
+  $('#edSaveBtn').disabled=false;
+  if(ok){ toast(editingIdx===null?'模型已新增':'模型已更新','success'); closeDrawer('editDrawer'); }
+});
+
+/* —— 测试连通：抽屉内 & 单行共用 —— */
+async function doTest(p){ return (await (await fetch('/api/model-test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})).json()); }
+
+$('#edTestBtn').addEventListener('click',async()=>{
+  const model=$('#edModel').value.trim();
+  const key=$('#edKey').value.trim();
+  const mask=(editingIdx!==null&&MODELS[editingIdx])?(MODELS[editingIdx].keyMask||''):'';
+  if(!key && !mask){ $('#edKey').classList.add('invalid'); return toast('请先填 API Key 再测试','warning'); }
+  const p={ provider:curProvider(), model, baseUrl:$('#edEndpoint').value.trim(), apiKey:key, mask };
+  $('#edTestBtn').disabled=true; toast('正在测试连通…','info');
+  try{ const r=await doTest(p);
+    if(r.ok) toast('连通正常（模型 '+(r.model||'')+'）','success');
+    else toast('连不通：'+String(r.error||'').slice(0,80),'error');
+  }catch(e){ toast('测试失败：'+e.message,'error'); }
+  $('#edTestBtn').disabled=false;
+});
+
+/* —— 行内操作：设为主 / 测试 / 编辑 / 删除 —— */
+$('#modelBody').addEventListener('click',async e=>{
+  const btn=e.target.closest('[data-act]'); if(!btn)return;
+  const tr=btn.closest('tr'), i=+tr.dataset.i, act=btn.dataset.act, m=MODELS[i];
+  if(!m)return;
+  if(act==='primary'){ if(m.primary)return; MODELS.forEach((x,j)=>x.primary=(j===i)); render(); if(await persist()) toast('已设为主模型','success'); return; }
+  if(act==='edit'){ openEdit(i); return; }
+  if(act==='del'){
+    if(!(await uiConfirm('删除这个模型？',{title:'删除模型',danger:true,okText:'删除'})))return;
+    MODELS.splice(i,1);
+    if(MODELS.length&&!MODELS.some(x=>x.primary))MODELS[0].primary=true;   // 删主 → 剩余第一个成新主
+    if(editingIdx===i)editingIdx=null;
+    render(); if(await persist()) toast('模型已删除','success'); return;
+  }
+  if(act==='test'){
+    const cell=tr.querySelector('[data-st]');
+    cell.innerHTML='<span class="tag tag-gray tag-dot">测试中…</span>';
+    const p={ provider:m.provider, model:m.model||'', baseUrl:m.baseUrl||'', apiKey:m._newKey||'', mask:m.keyMask||'' };
+    try{ const r=await doTest(p);
+      if(r.ok){ m._status='ok'; cell.innerHTML=STATUS_TAG.ok; toast('「'+(m.model||'默认')+'」连通正常','success'); }
+      else{ m._status='bad'; cell.innerHTML=STATUS_TAG.bad; toast('「'+(m.model||'默认')+'」连不通：'+String(r.error||'').slice(0,60),'error'); }
+    }catch(err){ m._status='bad'; cell.innerHTML=STATUS_TAG.bad; toast('测试失败','error'); }
+    return;
+  }
+});
+
+async function load(){ try{ const c=await (await fetch('/api/model-config')).json(); MODELS=(c.models||[]).map(m=>({...m})); render(); }catch(e){ toast('读取配置失败：'+e.message,'error'); } }
+load();
+</script>
+</body>
+</html>

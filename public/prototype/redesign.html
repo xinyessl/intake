@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>intake 改版原型 · 实施端 / 后台维护端</title>
+<link rel="stylesheet" href="/vendor/tabler/tabler-icons.min.css">
+<link rel="stylesheet" href="/assets/app.css">
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg,#F4F6F9);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;color:var(--t,#1F2733)}
+  /* 顶部切换条 */
+  .proto-bar{position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:14px;background:#0F2744;color:#fff;padding:10px 20px}
+  .proto-bar b{font-size:14px;font-weight:700}
+  .proto-bar .seg{margin-left:8px;display:inline-flex;background:rgba(255,255,255,.1);border-radius:9px;padding:3px}
+  .proto-bar .seg button{border:none;background:transparent;color:rgba(255,255,255,.72);font-size:13px;font-weight:600;padding:7px 16px;border-radius:7px;cursor:pointer}
+  .proto-bar .seg button.on{background:#fff;color:#0F2744}
+  .proto-bar .hint{margin-left:auto;font-size:12px;color:rgba(255,255,255,.6)}
+  .proto-view{display:none}.proto-view.on{display:block}
+  /* 注释气泡 */
+  .note{position:relative;display:inline-flex;align-items:center;gap:5px;background:#FFF6E5;border:1px solid #F0D8A0;color:#8A6A1E;font-size:11.5px;font-weight:600;border-radius:20px;padding:3px 10px}
+  .note i{font-size:13px}
+
+  /* ============ 通用卡片/标签 ============ */
+  .card{background:#fff;border:1px solid var(--line,#E6EAF0);border-radius:12px;box-shadow:0 1px 2px rgba(15,39,68,.04)}
+  .tag{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;padding:2px 9px;border-radius:20px}
+  .tag.blue{background:#EAF2FB;color:#1A6DBE}.tag.green{background:#E6F5EC;color:#1E8E4E}.tag.orange{background:#FDF0DD;color:#B9791C}
+  .tag.gray{background:#EEF1F5;color:#5B6673}.tag.red{background:#FCEBEA;color:#C0392B}.tag.purple{background:#F1ECF8;color:#7A5BA6}
+
+  /* ============ 实施端（steward 风格：顶部医院 tab + 左清单 右对话）============ */
+  .f-top{display:flex;align-items:center;gap:4px;background:#0F2744;color:#fff;padding:0 14px;height:52px}
+  .f-brand{font-weight:800;font-size:15px;display:flex;align-items:center;gap:8px;color:#fff;padding-right:8px;white-space:nowrap;flex:0 0 auto}
+  .f-brand .lg{width:28px;height:28px;border-radius:7px;background:linear-gradient(135deg,#1A6DBE,#4A8FD4);color:#fff;display:grid;place-items:center;font-size:15px}
+  .f-brand small{font-size:10px;font-weight:600;color:rgba(255,255,255,.45);display:block;line-height:1}
+  .f-htabs{display:flex;gap:3px;align-items:center;overflow-x:auto;scrollbar-width:none;flex:1;min-width:0}
+  .f-htabs::-webkit-scrollbar{height:0}
+  .f-htab{padding:7px 14px;border-radius:8px;font-size:13px;font-weight:600;color:rgba(255,255,255,.74);cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
+  .f-htab:hover{background:rgba(255,255,255,.1);color:#fff}
+  .f-htab.on{background:#fff;color:#0F2744}
+  .f-htab.add{color:#8FC0EA;border:1px dashed rgba(255,255,255,.34)}
+  .f-top .r{display:flex;align-items:center;gap:13px;font-size:12.5px;color:rgba(255,255,255,.68);flex:0 0 auto;white-space:nowrap}
+  .f-top .r i{font-size:16px}
+  .f-av{width:30px;height:30px;border-radius:50%;background:rgba(255,255,255,.16);color:#fff;display:grid;place-items:center;font-size:12.5px;font-weight:700}
+  .f-body{display:flex;gap:14px;padding:14px 16px;height:calc(100vh - 98px);box-sizing:border-box}
+  .f-left{flex:0 0 40%;display:flex;flex-direction:column;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .f-right{flex:1;min-width:0;display:flex;flex-direction:column;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .f-ph{display:flex;align-items:center;gap:9px;padding:12px 15px;border-bottom:1px solid var(--line)}
+  .f-ph b{font-size:14.5px;font-weight:700;color:#0F2744}
+  .f-ph .cnt{font-size:12px;color:var(--t3)}
+  .f-tabs2{display:flex;gap:3px;margin-left:4px}
+  .f-tab2{font-size:12.5px;font-weight:600;color:var(--sub);padding:4px 11px;border-radius:20px;cursor:pointer}
+  .f-tab2.on{background:#EAF2FB;color:#1A6DBE}
+  .f-ph .prod{margin-left:auto;display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:8px;padding:5px 10px;font-size:12.5px;color:var(--sub);cursor:pointer}
+  .f-list{flex:1;overflow:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+  .f-item{border:1px solid var(--line);border-radius:10px;padding:11px 13px;cursor:pointer}
+  .f-item:hover{border-color:#C7DCF1;background:#FAFCFE}
+  .f-item .l1{display:flex;align-items:center;gap:8px}
+  .f-item .l1 .q{font-weight:600;font-size:13.5px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .f-item .l2{display:flex;gap:8px;align-items:center;margin-top:6px;font-size:11.5px;color:var(--t3)}
+  .f-item .ckbox{width:15px;height:15px;border:1.5px solid var(--line-s);border-radius:4px;flex:0 0 auto}
+  /* 批次分组 */
+  .f-batch{border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .f-bhd{display:flex;align-items:center;gap:8px;padding:10px 12px;cursor:pointer;background:#FAFBFC}
+  .f-batch.open .f-bhd{background:#F4F9FE}
+  .f-bhd .chev{color:var(--t3);font-size:16px;flex:0 0 auto;transition:transform .15s}
+  .f-batch:not(.open) .f-bhd .chev{transform:rotate(-90deg)}
+  .f-bhd .bname{font-weight:700;font-size:13px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-flex;align-items:center;gap:5px}
+  .f-bhd .bcnt{font-size:11.5px;color:var(--t3);flex:0 0 auto}
+  .f-bhd .bmeta{font-size:11px;color:var(--t3);flex:0 0 auto;display:inline-flex;align-items:center;gap:3px}
+  .f-bhd .bpack{flex:0 0 auto;border:1px solid #C7DCF1;background:#EAF2FB;color:#1A6DBE;border-radius:7px;padding:4px 10px;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;gap:4px}
+  .f-bhd .bpack:hover{background:#1A6DBE;color:#fff;border-color:#1A6DBE}
+  .f-bhd .bpack.ghost{background:#fff;color:var(--sub);border-color:var(--line)}
+  .f-bhd .bpack.ghost:hover{background:var(--alt);color:var(--t);border-color:var(--t3)}
+  .f-bbody{display:none;padding:8px;border-top:1px solid var(--line);flex-direction:column;gap:7px;background:#fff}
+  .f-batch.open .f-bbody{display:flex}
+  /* 可下载批次：下载包 + 版本提示 */
+  .f-dlbar{display:flex;align-items:center;gap:11px;padding:11px 12px;background:linear-gradient(135deg,#EAF2FB,#F4F9FE);border:1px solid #C7DCF1;border-radius:10px}
+  .f-dlbar .ic{width:38px;height:38px;border-radius:9px;background:#1A6DBE;color:#fff;display:grid;place-items:center;font-size:20px;flex:0 0 auto}
+  .f-dlbar .t{flex:1;min-width:0}.f-dlbar .t b{font-size:13.5px;display:block;color:#0F2744}.f-dlbar .t span{font-size:11.5px;color:var(--sub)}
+  .f-dlbar .notes{font-size:12px;color:#1A6DBE;font-weight:600;cursor:pointer;display:inline-flex;gap:4px;align-items:center;white-space:nowrap}
+  .f-dlbar .dl{border:none;background:#1A6DBE;color:#fff;border-radius:8px;padding:8px 14px;font-size:12.5px;font-weight:700;cursor:pointer;display:inline-flex;gap:5px;align-items:center;white-space:nowrap}
+  .f-dlbar .dl.done{background:#1E8E4E}
+  .f-vbump{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px;color:#8A6A1E;background:#FDF6E9;border:1px solid #F0D8A0;border-radius:9px;padding:9px 12px;line-height:1.6}
+  .f-vbump .ti-alert-triangle{color:#E0A93B}
+  .f-vbump a{color:#1A6DBE;font-weight:700;cursor:pointer;margin-left:auto;white-space:nowrap}
+  .f-rtool{display:flex;align-items:center;gap:9px;padding:11px 15px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .f-toggle{display:inline-flex;background:var(--alt);border:1px solid var(--line-s);border-radius:8px;padding:2px}
+  .f-toggle button{border:none;background:transparent;color:var(--sub);font-size:12.5px;font-weight:600;padding:6px 13px;border-radius:6px;cursor:pointer;display:inline-flex;gap:5px;align-items:center}
+  .f-toggle button.on{background:#fff;box-shadow:0 1px 2px rgba(15,39,68,.12);color:#1A6DBE}
+  .f-ctx{display:inline-flex;align-items:center;gap:6px;background:#F4F9FE;border:1px solid #C7DCF1;color:#1A6DBE;border-radius:8px;padding:5px 11px;font-size:12.5px;font-weight:600}
+  .f-rtool .newc{margin-left:auto;border:1px solid #C7DCF1;background:#F4F9FE;color:#1A6DBE;border-radius:8px;padding:6px 12px;font-size:12.5px;font-weight:600;cursor:pointer;display:inline-flex;gap:5px;align-items:center}
+  .f-chat-b{flex:1;overflow:auto;padding:20px;background:#F7F9FB}
+  .f-msg{display:flex;gap:10px;margin-bottom:16px;max-width:84%}
+  .f-msg .av{width:30px;height:30px;border-radius:8px;flex:0 0 auto;display:grid;place-items:center;font-size:11px;font-weight:700;color:#fff}
+  .f-msg.ai .av{background:#1A6DBE}.f-msg.me{margin-left:auto;flex-direction:row-reverse}.f-msg.me .av{background:#9AA5B1}
+  .f-msg .bub{padding:11px 15px;border-radius:12px;font-size:14px;line-height:1.6}
+  .f-msg.ai .bub{background:#fff;border:1px solid var(--line)}.f-msg.me .bub{background:#1A6DBE;color:#fff}
+  .f-chat-f{display:flex;gap:10px;padding:12px 15px;border-top:1px solid var(--line)}
+  .f-chat-f input{flex:1;height:44px;border:1px solid var(--line);border-radius:10px;padding:0 14px;font-size:14px}
+  .f-chat-f .send{border:none;border-radius:10px;background:linear-gradient(135deg,#1A6DBE,#155A9E);color:#fff;font-weight:700;padding:0 22px;cursor:pointer}
+  /* 产品筛选下拉（展开态）*/
+  .f-ph{position:relative}
+  .f-proddd{display:none;position:absolute;top:46px;right:12px;z-index:20;width:196px;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 32px rgba(15,39,68,.16);padding:5px}
+  .f-proddd.open{display:block}
+  .f-proddd .ttl{font-size:11px;color:var(--t3);padding:6px 10px 4px}
+  .f-proddd .opt{display:flex;align-items:center;padding:8px 11px;border-radius:7px;font-size:13px;cursor:pointer}
+  .f-proddd .opt:hover{background:var(--alt)}
+  .f-proddd .opt.on{color:#1A6DBE;font-weight:600;background:#F4F9FE}
+  .f-proddd .opt .ti{margin-left:auto}
+  /* 添加医院 / 产品 弹窗（展开态）*/
+  .proto-view{position:relative}
+  .f-modal-mask{display:none;position:absolute;inset:0;background:rgba(15,39,68,.16);align-items:center;justify-content:center;z-index:60}
+  .f-modal-mask.open{display:flex}
+  .f-modal{width:min(560px,90%);background:#fff;border-radius:14px;box-shadow:0 24px 70px rgba(15,39,68,.3);display:flex;flex-direction:column;max-height:88%}
+  .f-modal-h{display:flex;align-items:center;gap:9px;padding:16px 20px;border-bottom:1px solid var(--line);font-weight:700;font-size:15.5px;color:#0F2744}
+  .f-modal-h .x{margin-left:auto;color:var(--t3);cursor:pointer;font-size:22px}
+  .f-modal-b{padding:18px 20px;overflow:auto}
+  .f-msec{margin-bottom:20px}.f-msec:last-child{margin-bottom:0}
+  .f-mlabel{font-size:13px;font-weight:700;color:#0F2744;margin-bottom:9px}
+  .f-search{height:40px;border:1px solid var(--line);border-radius:9px;display:flex;align-items:center;gap:8px;padding:0 12px;color:var(--t3);font-size:13.5px;margin-bottom:10px}
+  .f-hlist,.f-plist{display:flex;flex-direction:column;gap:7px}
+  .f-hopt{display:flex;align-items:center;gap:9px;padding:10px 12px;border:1px solid var(--line);border-radius:9px;font-size:13.5px;cursor:pointer}
+  .f-hopt .ti-building-hospital{color:#1A6DBE}
+  .f-hopt.added{background:#F7FBF8}
+  .f-hopt.sel{border-color:#1A6DBE;background:#F4F9FE}
+  .f-hopt .tag{margin-left:auto}.f-hopt .add-ic{margin-left:auto;color:#1A6DBE;font-size:18px}
+  .f-popt{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--line);border-radius:9px;font-size:13.5px;cursor:pointer}
+  .f-popt .ck{width:18px;height:18px;border:1.5px solid var(--line-s);border-radius:5px;display:grid;place-items:center;font-size:12px;color:#fff;flex:0 0 auto}
+  .f-popt .ck.on{background:#1A6DBE;border-color:#1A6DBE}
+  .f-modal-f{display:flex;gap:10px;padding:14px 20px;border-top:1px solid var(--line)}
+  .f-modal-f .save{flex:1;background:linear-gradient(135deg,#1A6DBE,#155A9E);color:#fff;border:none;border-radius:9px;height:42px;font-weight:700;cursor:pointer}
+  .f-modal-f .cancel{border:1px solid var(--line);background:#fff;color:var(--sub);border-radius:9px;height:42px;padding:0 20px;cursor:pointer;font-weight:600}
+
+  /* ============ 后台维护端 ============ */
+  .a-shell{display:flex;height:calc(100vh - 46px)}
+  /* 深色分组侧边栏 */
+  .a-side{width:234px;flex:0 0 auto;background:#0F2744;color:#fff;display:flex;flex-direction:column}
+  .a-side .brand{display:flex;align-items:center;gap:10px;padding:15px 16px;border-bottom:1px solid rgba(255,255,255,.07)}
+  .a-side .brand .lg{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#12B6A3,#0E8C97);display:grid;place-items:center;font-size:16px;font-weight:800;flex:0 0 auto}
+  .a-side .brand .bt{line-height:1.25}.a-side .brand .bt b{font-size:15.5px;font-weight:800}.a-side .brand .bt small{display:block;font-size:11px;color:rgba(255,255,255,.5);margin-top:1px}
+  .a-scroll{flex:1;min-height:0;overflow-y:auto;padding:6px 12px}
+  .a-grp{font-size:11px;font-weight:700;color:rgba(255,255,255,.32);letter-spacing:.6px;padding:15px 10px 6px}
+  .a-nav{display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:9px;color:rgba(255,255,255,.72);font-size:13.5px;font-weight:500;cursor:pointer;margin-bottom:2px}
+  .a-nav:hover{background:rgba(255,255,255,.08);color:#fff}
+  .a-nav.on{background:#1A6DBE;color:#fff;font-weight:600;box-shadow:0 3px 12px rgba(26,109,190,.4)}
+  .a-nav .ti{font-size:18px}
+  .a-nav .badge{margin-left:auto;background:#C0392B;color:#fff;font-size:11px;font-weight:700;border-radius:10px;padding:1px 7px}
+  .a-nav.on .badge{background:rgba(255,255,255,.25)}
+  .a-ver{padding:11px 18px;font-size:11.5px;color:rgba(255,255,255,.32);border-top:1px solid rgba(255,255,255,.07);display:flex;align-items:center;gap:6px}
+  .a-main{flex:1;min-width:0;display:flex;flex-direction:column;min-height:0}
+  /* 顶栏：面包屑 + 用户 */
+  .a-topbar{display:flex;align-items:center;gap:10px;padding:0 22px;height:56px;background:#fff;border-bottom:1px solid var(--line);flex:0 0 auto}
+  .a-crumb{font-size:14px;color:var(--sub)}.a-crumb b{color:#0F2744;font-weight:700}
+  .a-topbar .sp{flex:1}
+  .a-dept{display:inline-flex;align-items:center;gap:6px;background:#EAF6F5;color:#0E8C97;border:1px solid #BFE7E2;border-radius:20px;padding:5px 12px;font-size:12.5px;font-weight:600}
+  .a-topbar .tic{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;color:var(--sub);cursor:pointer;font-size:18px;position:relative}
+  .a-topbar .tic:hover{background:var(--alt)}
+  .a-topbar .tic .dot{position:absolute;top:7px;right:8px;width:7px;height:7px;border-radius:50%;background:#C0392B}
+  .a-uinfo{display:flex;align-items:center;gap:9px;cursor:pointer;padding-left:4px}
+  .a-uinfo .av{width:34px;height:34px;border-radius:9px;background:#1A6DBE;color:#fff;display:grid;place-items:center;font-size:12.5px;font-weight:800}
+  .a-uinfo .ut{line-height:1.25}.a-uinfo .ut b{font-size:13.5px}.a-uinfo .ut small{display:block;font-size:11px;color:var(--t3)}
+  /* 多标签工作区 */
+  .a-tabbar{display:flex;align-items:center;gap:4px;padding:8px 16px 0;background:#EEF2F6;border-bottom:1px solid var(--line);overflow-x:auto;flex:0 0 auto;scrollbar-width:none}
+  .a-tabbar::-webkit-scrollbar{height:0}
+  .a-tab{display:inline-flex;align-items:center;gap:7px;padding:9px 14px;border-radius:9px 9px 0 0;font-size:13px;font-weight:600;color:var(--sub);cursor:pointer;white-space:nowrap}
+  .a-tab:hover{background:rgba(15,39,68,.05);color:var(--t)}
+  .a-tab.on{background:#fff;color:#1A6DBE;box-shadow:0 -2px 0 #1A6DBE inset}
+  .a-tab .ti{font-size:15px}
+  .a-tab .close{font-size:14px;color:var(--t3);border-radius:4px;margin-left:1px}
+  .a-tab .close:hover{background:var(--line);color:var(--danger)}
+  /* 页头（在标签下，去掉面包屑，留标题+新增）*/
+  .a-head{display:flex;align-items:center;gap:12px;padding:16px 24px 12px}
+  .a-head .crumb{display:none}
+  .a-head h1{margin:0;font-size:19px;font-weight:800;color:#0F2744}
+  .a-head .crumb{font-size:12.5px;color:var(--t3)}
+  /* 状态流水线 */
+  .a-pipe{display:flex;align-items:center;gap:3px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:7px 10px;overflow-x:auto}
+  .a-pipe .stg{display:inline-flex;align-items:center;gap:7px;padding:8px 13px;border-radius:9px;font-size:13px;font-weight:600;color:var(--sub);cursor:pointer;white-space:nowrap}
+  .a-pipe .stg:hover{background:var(--alt)}
+  .a-pipe .stg.on{background:#EAF2FB;color:#1A6DBE}
+  .a-pipe .stg .n{background:#EEF1F5;color:var(--sub);border-radius:20px;padding:0 8px;font-size:11.5px;font-weight:700}
+  .a-pipe .stg.on .n{background:#1A6DBE;color:#fff}
+  .a-pipe .arw{color:var(--t3);font-size:14px;flex:0 0 auto}
+  /* 工单处理抽屉：摘要 + 决策 */
+  .a-tk{background:var(--alt);border:1px solid var(--line);border-radius:10px;padding:13px 15px;margin-bottom:14px}
+  .a-tk .th{display:flex;align-items:center;gap:8px;font-weight:700;font-size:14px;margin-bottom:8px;line-height:1.4}
+  .a-tk .meta{font-size:12px;color:var(--sub);display:flex;flex-wrap:wrap;gap:12px;margin-bottom:9px}
+  .a-tk .meta i{margin-right:3px}
+  .a-tk .desc{font-size:13px;line-height:1.65;color:var(--t)}
+  .a-ai{background:#F1ECF8;border:1px solid #E0D4F0;border-radius:9px;padding:10px 12px;font-size:12.5px;color:#5A4680;line-height:1.6;margin-bottom:18px}
+  .a-dec{font-size:13.5px;font-weight:700;color:#0F2744;margin-bottom:10px}
+  .a-choice{border:1.5px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px;cursor:pointer}
+  .a-choice.on{border-color:#1A6DBE;background:#F4F9FE}
+  .a-choice .ch-h{display:flex;align-items:center;gap:10px;font-weight:700;font-size:13.5px}
+  .a-choice .ch-h .radio{width:18px;height:18px;border-radius:50%;border:2px solid var(--line-s);flex:0 0 auto;box-sizing:border-box}
+  .a-choice.on .ch-h .radio{border-color:#1A6DBE;border-width:5px}
+  .a-choice .ch-b{margin-top:10px;padding-left:28px;display:none}
+  .a-choice.on .ch-b{display:block}
+  .a-choice .ch-tip{font-size:12px;color:var(--sub);margin-bottom:8px;line-height:1.6}
+  .a-choice .ch-sel{height:38px;border:1px solid var(--line);border-radius:8px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;font-size:13px;background:#fff;cursor:pointer}
+  .a-choice textarea{width:100%;border:1px solid var(--line);border-radius:8px;padding:9px 11px;font-size:13px;min-height:58px;font-family:inherit;box-sizing:border-box}
+  .a-head .sp{flex:1}
+  .a-primary{display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,#1A6DBE,#155A9E);color:#fff;border:none;border-radius:9px;padding:9px 16px;font-size:13.5px;font-weight:700;cursor:pointer}
+  .a-body{flex:1;min-height:0;padding:0 26px 26px;display:flex;flex-direction:column;gap:14px}
+  /* 筛选条 */
+  .a-filter{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .a-fitem{display:flex;flex-direction:column;gap:5px}
+  .a-fitem label{font-size:12px;font-weight:600;color:var(--sub)}
+  .a-fsel{height:38px;min-width:150px;border:1px solid var(--line);border-radius:9px;background:#fff;padding:0 12px;font-size:13.5px;display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;color:var(--t)}
+  .a-fsel .ti{color:var(--t3)}
+  .a-search{height:38px;min-width:220px;border:1px solid var(--line);border-radius:9px;background:#fff;padding:0 12px;font-size:13.5px;display:flex;align-items:center;gap:8px;color:var(--t3)}
+  .a-fsp{flex:1}
+  .a-fbtn{height:38px;border:1px solid var(--line);background:#fff;border-radius:9px;padding:0 14px;font-size:13px;font-weight:600;color:var(--sub);cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+  /* 表格 */
+  .a-tablewrap{flex:1;min-height:0;background:#fff;border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;overflow:hidden}
+  .a-tabhead{display:flex;align-items:center;padding:12px 18px;border-bottom:1px solid var(--line)}
+  .a-tabhead b{font-size:14px}
+  .a-tabhead .cnt{margin-left:8px;font-size:12px;color:var(--t3)}
+  .a-tabscroll{flex:1;min-height:0;overflow:auto}
+  table.data-table{width:100%;border-collapse:collapse;font-size:13px}
+  table.data-table thead th{position:sticky;top:0;background:#F7F9FB;color:var(--sub);font-weight:600;font-size:12px;text-align:left;padding:12px 18px;border-bottom:1px solid var(--line);white-space:nowrap}
+  table.data-table tbody td{padding:16px 18px;border-bottom:1px solid #F0F3F7;vertical-align:middle}
+  table.data-table tbody tr:hover{background:#F6FAFE}
+  /* 富信息单元格：头像 + 两行 */
+  .cell-u{display:flex;align-items:center;gap:10px}
+  .cell-u .av{width:34px;height:34px;border-radius:50%;color:#fff;display:grid;place-items:center;font-size:13px;font-weight:700;flex:0 0 auto}
+  .cell-u .u1{font-weight:600;font-size:13.5px}.cell-u .u2{font-size:11.5px;color:var(--t3);margin-top:1px}
+  .cell-name{display:flex;align-items:center;gap:8px;font-weight:700;font-size:14px}
+  .st-on{color:#1E8E4E;font-weight:600;font-size:12.5px}.st-off{color:var(--t3);font-weight:600;font-size:12.5px}
+  .rowbtn{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);background:#fff;border-radius:8px;padding:5px 11px;font-size:12.5px;color:var(--sub);cursor:pointer;font-weight:600}
+  .rowbtn:hover{border-color:var(--pri-border);color:var(--pri)}
+  .rowic{width:32px;height:30px;border:1px solid var(--line);background:#fff;border-radius:8px;display:inline-grid;place-items:center;color:var(--t3);cursor:pointer}
+  .rowic:hover{border-color:var(--pri-border);color:var(--pri)}
+  .rowic.danger:hover{color:var(--danger);border-color:var(--danger-l)}
+  table.data-table .id{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--t3)}
+  table.data-table .ttl{font-weight:600;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  table.data-table .rowact{display:flex;gap:6px}
+  table.data-table .rowact a{color:#1A6DBE;font-size:12.5px;font-weight:600;cursor:pointer;text-decoration:none}
+  table.data-table .rowact a.danger{color:#C0392B}
+  /* 分页 */
+  .a-pager{display:flex;align-items:center;gap:8px;padding:11px 18px;border-top:1px solid var(--line);font-size:12.5px;color:var(--sub)}
+  .a-pager .sp{flex:1}
+  .a-pager .pg{width:30px;height:30px;border:1px solid var(--line);border-radius:7px;display:grid;place-items:center;cursor:pointer;background:#fff}
+  .a-pager .pg.on{background:#1A6DBE;color:#fff;border-color:#1A6DBE;font-weight:700}
+  /* 抽屉 */
+  .a-mask{display:none;position:absolute;inset:0;background:rgba(15,39,68,.32);z-index:40}
+  .a-mask.open{display:block}
+  .a-drawer{display:none;position:absolute;top:0;right:0;bottom:0;width:min(540px,92%);background:#fff;box-shadow:-12px 0 40px rgba(15,39,68,.2);flex-direction:column;z-index:41}
+  .a-drawer.open{display:flex}
+  .a-drawer-h{display:flex;align-items:center;gap:9px;padding:16px 20px;border-bottom:1px solid var(--line);font-weight:700;font-size:15.5px}
+  .a-drawer-h .x{margin-left:auto;color:var(--t3);cursor:pointer;font-size:22px}
+  .a-drawer-b{flex:1;overflow:auto;padding:20px}
+  .a-drawer-f{display:flex;gap:10px;padding:14px 20px;border-top:1px solid var(--line)}
+  .a-field{margin-bottom:16px}
+  .a-field label{display:block;font-size:13px;font-weight:600;margin-bottom:6px}
+  .a-field label .req{color:#C0392B}
+  .a-input{width:100%;height:40px;border:1px solid var(--line);border-radius:9px;padding:0 12px;font-size:14px}
+  .a-input.sel{display:flex;align-items:center;justify-content:space-between;cursor:pointer;color:var(--t)}
+  .a-prodrow{display:flex;gap:8px;margin-bottom:8px}
+  .a-prodrow .a-input:first-child{flex:1}.a-prodrow .ver{width:110px}
+  .a-prodrow .rm{width:40px;height:40px;border:1px solid var(--line);border-radius:9px;color:var(--t3);display:grid;place-items:center;cursor:pointer}
+  .a-addp{border:1px dashed #C7DCF1;background:#F4F9FE;color:#1A6DBE;border-radius:9px;height:36px;font-size:12.5px;font-weight:600;padding:0 12px;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+  .a-drawer-f .save{flex:1;background:linear-gradient(135deg,#1A6DBE,#155A9E);color:#fff;border:none;border-radius:9px;height:42px;font-weight:700;cursor:pointer}
+  .a-drawer-f .cancel{border:1px solid var(--line);background:#fff;color:var(--sub);border-radius:9px;height:42px;padding:0 20px;cursor:pointer;font-weight:600}
+  .a-rel{position:relative;flex:1;min-height:0;display:flex;flex-direction:column}
+  /* 后台多页视图切换 */
+  .a-view{display:none;flex:1;min-height:0;flex-direction:column}
+  .a-view.on{display:flex}
+  /* 左右式主从（产品/客户/模型配置，铺满不留空）*/
+  .a-md{flex:1;min-height:0;display:grid;grid-template-columns:380px minmax(0,1fr);gap:14px}
+  .a-form{padding:18px 20px;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:12px}
+  .a-form h3{margin:0 0 3px;font-size:14.5px;font-weight:700;color:#0F2744}
+  .a-form .sub{color:var(--sub);font-size:12px;margin:0 0 14px}
+  /* 工作台统计卡 */
+  .a-stats{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:14px;flex:0 0 auto}
+  .a-stat{background:#fff;border:1px solid var(--line);border-radius:12px;padding:15px 18px}
+  .a-stat .num{font-size:26px;font-weight:800;line-height:1}
+  .a-stat .lbl{font-size:12.5px;color:var(--sub);margin-top:6px}
+  @media(max-width:1100px){.a-stats{grid-template-columns:repeat(3,1fr)}.a-md{grid-template-columns:340px minmax(0,1fr)}}
+</style>
+</head>
+<body>
+
+<div class="proto-bar">
+  <b>intake 改版原型</b>
+  <div class="seg">
+    <button data-v="field" class="on">① 实施端（现场提交）</button>
+    <button data-v="admin">② 后台维护端（运营后台）</button>
+  </div>
+  <span class="hint">原型 · 顶部切两端；「添加医院/产品」「全部产品」「查看/处理」可点开关</span>
+</div>
+
+<!-- ================= 实施端 ================= -->
+<div class="proto-view on" id="v-field">
+  <!-- 顶部：品牌 + 医院 tab（以医院项目为主）+ 右侧工具 -->
+  <div class="f-top">
+    <div class="f-brand"><span class="lg"><i class="ti ti-clipboard-check"></i></span> <span>收件·实施端<small>我负责的医院</small></span></div>
+    <div class="f-htabs">
+      <span class="f-htab on"><i class="ti ti-building-hospital"></i> 山东省立医院</span>
+      <span class="f-htab">郑州人民医院</span>
+      <span class="f-htab">杭州一院</span>
+      <span class="f-htab">宁波二院</span>
+      <span class="f-htab add"><i class="ti ti-plus"></i> 添加医院 / 产品</span>
+    </div>
+    <div class="r"><span><i class="ti ti-bell"></i> 待办 2</span><span><i class="ti ti-book"></i> 经验库</span><span class="f-av">张</span></div>
+  </div>
+
+  <div class="f-body">
+    <!-- 左：该医院的提交清单 -->
+    <div class="f-left">
+      <div class="f-ph">
+        <b>提交清单</b>
+        <div class="f-tabs2"><span class="f-tab2 on">按批次</span><span class="f-tab2">按类型</span></div>
+        <span class="prod">全部产品 <i class="ti ti-chevron-down"></i></span>
+        <!-- 产品筛选下拉（展开态）：只列该医院上了的产品 -->
+        <div class="f-proddd">
+          <div class="ttl">该医院已上产品</div>
+          <div class="opt on">全部产品 <i class="ti ti-check"></i></div>
+          <div class="opt">药师工作站</div>
+          <div class="opt">合理用药</div>
+          <div class="opt">接口服务</div>
+        </div>
+      </div>
+      <div class="f-list">
+        <!-- 本周批次（按产品·跨医院·一周一包）：收集中 -->
+        <div class="f-batch open">
+          <div class="f-bhd"><i class="chev ti ti-chevron-down"></i><span class="bname"><i class="ti ti-package" style="color:#1A6DBE"></i> 药师工作站 · 第37周（07-14~07-20）</span><span class="tag gray">本周·收集中</span><span class="bcnt">2 条</span><span class="bmeta">周日截止 → 开发会议</span></div>
+          <div class="f-bbody">
+            <div class="f-item"><div class="l1"><span class="tag red">BUG</span><span class="q">审方任务推送偶发丢失，药师端看不到新任务</span></div><div class="l2"><span class="tag orange">待评审</span><span>审方 · 山东省立医院</span><span>07-16</span></div></div>
+            <div class="f-item"><div class="l1"><span class="tag blue">需求</span><span class="q">审方列表支持按开方科室筛选</span></div><div class="l2"><span class="tag orange">待评审</span><span>审方 · 郑州人民医院</span><span>07-16</span></div></div>
+          </div>
+        </div>
+        <!-- 上周批次：会议已定落实，steward 开发中 -->
+        <div class="f-batch">
+          <div class="f-bhd"><i class="chev ti ti-chevron-down"></i><span class="bname"><i class="ti ti-package" style="color:#1A6DBE"></i> 药师工作站 · 第36周</span><span class="tag blue">开发中</span><span class="bcnt">3 条</span><span class="bmeta"><i class="ti ti-cpu"></i> steward 开发中</span></div>
+          <div class="f-bbody">
+            <div class="f-item"><div class="l1"><span class="tag blue">需求</span><span class="q">抗菌药物上报增加批量导出</span></div><div class="l2"><span class="tag blue">开发中</span><span>抗网上报 · 全部医院</span><span>steward UC-16</span></div></div>
+            <div class="f-item"><div class="l1"><span class="tag red">BUG</span><span class="q">药学门诊排班保存后偶发丢失</span></div><div class="l2"><span class="tag blue">开发中</span><span>药学门诊</span><span>steward UC-17</span></div></div>
+          </div>
+        </div>
+        <!-- 第35周：steward 已发包 → 可下载 + 版本提示 -->
+        <div class="f-batch open">
+          <div class="f-bhd"><i class="chev ti ti-chevron-down"></i><span class="bname"><i class="ti ti-package" style="color:#1E8E4E"></i> 药师工作站 · 第35周</span><span class="tag green">可下载</span><span class="bcnt">3 条</span></div>
+          <div class="f-bbody">
+            <div class="f-dlbar">
+              <div class="ic"><i class="ti ti-package"></i></div>
+              <div class="t"><b>药师工作站 v2.1 更新包</b><span>steward 发包 · 07-13 · 12.4 MB</span></div>
+              <a class="notes"><i class="ti ti-file-text"></i> 更新说明</a>
+              <button class="dl"><i class="ti ti-download"></i> 下载更新包</button>
+            </div>
+            <div class="f-vbump"><i class="ti ti-alert-triangle"></i> 更新现场后，记得改版本号：<b>山东省立医院</b> v2.0→<b>v2.1</b>、<b>郑州人民医院</b> v2.0→<b>v2.1</b> <a>一键改版本</a></div>
+            <div class="f-item"><div class="l1"><span class="tag blue">需求</span><span class="q">审方增加不良反应联动提示</span></div><div class="l2"><span class="tag green">本包已含</span><span>审方</span></div></div>
+          </div>
+        </div>
+        <!-- 另一产品的批次：待开发会议 -->
+        <div class="f-batch">
+          <div class="f-bhd"><i class="chev ti ti-chevron-down"></i><span class="bname"><i class="ti ti-package" style="color:#B9791C"></i> 合理用药 · 第37周</span><span class="tag orange">待开发会议</span><span class="bcnt">4 条</span><span class="bmeta">已进收件箱</span></div>
+          <div class="f-bbody"><div class="f-item"><div class="l1"><span class="tag blue">需求</span><span class="q">点评报告支持导出 PDF</span></div><div class="l2"><span class="tag orange">待评审</span><span>点评</span></div></div></div>
+        </div>
+        <!-- 咨询答疑：不发包 -->
+        <div class="f-batch">
+          <div class="f-bhd"><i class="chev ti ti-chevron-down"></i><span class="bname"><i class="ti ti-message-2" style="color:#7A5BA6"></i> 咨询答疑（不发包）</span><span class="bcnt">5 条</span></div>
+          <div class="f-bbody"><div class="f-item"><div class="l1"><span class="tag purple">咨询</span><span class="q">审方的整体流程是怎么样的？</span></div><div class="l2"><span class="tag green">已答复</span><span>审方</span></div></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右：提交入口 = AI 对话框（当前已做的） -->
+    <div class="f-right">
+      <div class="f-rtool">
+        <div class="f-toggle"><button class="on"><i class="ti ti-pencil-plus"></i> 提需求 / 报BUG</button><button><i class="ti ti-message-question"></i> 咨询答疑</button></div>
+        <span class="f-ctx"><i class="ti ti-folder"></i> 药师工作站 · 审方 · v2.0</span>
+        <span class="newc"><i class="ti ti-plus"></i> 新对话</span>
+      </div>
+      <div class="f-chat-b">
+        <div class="f-msg ai"><div class="av">AI</div><div class="bub">你好！直接说说你想要的功能 / 改进，或者遇到的问题都行——我来判断是需求还是 BUG，帮你按标准理清楚、整理好归档到「山东省立医院」。</div></div>
+        <div class="f-msg me"><div class="av">张</div><div class="bub">审方规则大于5级进来处方，药师都在线但没拿到任务</div></div>
+        <div class="f-msg ai"><div class="av">AI</div><div class="bub">这听起来是【审方】任务推送的 BUG。大概率是 <b>8893 端口未开放</b> → WebSocket 连不上 → 药师端收不到推送。我按 BUG 归档：现象/复现/影响都补齐了，归到 药师工作站·审方 v2.0、客户 山东省立医院，对吗？</div></div>
+      </div>
+      <div class="f-chat-f"><input placeholder="说说想要的功能改进，或遇到的问题…回车发送"><button class="send">发送</button></div>
+    </div>
+  </div>
+
+  <!-- 「添加医院 / 产品」弹窗（展开态）：实施人员自助维护自己负责的范围 -->
+  <div class="f-modal-mask">
+    <div class="f-modal">
+      <div class="f-modal-h"><i class="ti ti-plus" style="color:#1A6DBE"></i> 添加我负责的医院 / 产品 <span class="x">×</span></div>
+      <div class="f-modal-b">
+        <div class="f-msec">
+          <div class="f-mlabel">① 选择医院（来自公司客户台账）</div>
+          <div class="f-search"><i class="ti ti-search"></i> 搜索医院名…</div>
+          <div class="f-hlist">
+            <div class="f-hopt added"><i class="ti ti-building-hospital"></i> 山东省立医院 <span class="tag green">已负责</span></div>
+            <div class="f-hopt added"><i class="ti ti-building-hospital"></i> 郑州人民医院 <span class="tag green">已负责</span></div>
+            <div class="f-hopt sel"><i class="ti ti-building-hospital"></i> 上海市第六人民医院 <i class="ti ti-circle-plus add-ic"></i></div>
+            <div class="f-hopt"><i class="ti ti-building-hospital"></i> 温州医科大附一 <i class="ti ti-circle-plus add-ic" style="color:#9AA5B1"></i></div>
+          </div>
+        </div>
+        <div class="f-msec">
+          <div class="f-mlabel">② 勾选我负责「上海市第六人民医院」的产品</div>
+          <div class="f-plist">
+            <label class="f-popt"><span class="ck on"><i class="ti ti-check"></i></span> 药师工作站</label>
+            <label class="f-popt"><span class="ck on"><i class="ti ti-check"></i></span> 合理用药</label>
+            <label class="f-popt"><span class="ck"></span> 接口服务</label>
+          </div>
+        </div>
+      </div>
+      <div class="f-modal-f"><button class="save">保存，加到我的医院</button><button class="cancel">取消</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 后台维护端 ================= -->
+<div class="proto-view" id="v-admin">
+  <div class="a-shell">
+    <!-- 深色分组侧边栏 -->
+    <div class="a-side">
+      <div class="brand"><span class="lg"><i class="ti ti-clipboard-check"></i></span><div class="bt"><b>收件运营</b><small>需求·BUG 收件平台 · 运营后台</small></div></div>
+      <div class="a-scroll">
+        <div class="a-grp">概览</div>
+        <div class="a-nav" data-page="dashboard"><i class="ti ti-chart-pie"></i> 运营工作台</div>
+        <div class="a-grp">工单</div>
+        <div class="a-nav on" data-page="tickets"><i class="ti ti-ticket"></i> 工单管理 <span class="badge">6</span></div>
+        <div class="a-grp">主体管理</div>
+        <div class="a-nav" data-page="products"><i class="ti ti-folders"></i> 产品管理</div>
+        <div class="a-nav" data-page="customers"><i class="ti ti-building-hospital"></i> 客户 / 医院管理</div>
+        <div class="a-grp">知识库</div>
+        <div class="a-nav" data-page="kb"><i class="ti ti-book"></i> 经验库</div>
+        <div class="a-grp">AI 引擎</div>
+        <div class="a-nav" data-page="models"><i class="ti ti-cpu"></i> 模型配置</div>
+        <div class="a-grp">系统</div>
+        <div class="a-nav" data-page="accounts"><i class="ti ti-users"></i> 账号管理</div>
+      </div>
+      <div class="a-ver"><i class="ti ti-info-circle"></i> v1.0 · build 2026.07</div>
+    </div>
+
+    <!-- 主区 -->
+    <div class="a-main">
+      <!-- 顶栏：面包屑 + 用户 -->
+      <div class="a-topbar">
+        <div class="a-crumb" id="a-crumb"><b>工单</b> · 工单管理</div>
+        <div class="sp"></div>
+        <span class="a-dept"><i class="ti ti-shield-check"></i> 收件运营部</span>
+        <span class="tic"><i class="ti ti-help-circle"></i></span>
+        <span class="tic"><i class="ti ti-bell"></i><span class="dot"></span></span>
+        <div class="a-uinfo"><span class="av">郑</span><div class="ut"><b>郑明远</b><small>运营管理员</small></div><i class="ti ti-chevron-down" style="color:var(--t3)"></i></div>
+      </div>
+      <!-- 多标签工作区 -->
+      <div class="a-tabbar" id="a-tabbar">
+        <div class="a-tab" data-page="dashboard"><i class="ti ti-chart-pie"></i> 运营工作台</div>
+        <div class="a-tab on" data-page="tickets"><i class="ti ti-ticket"></i> 工单管理 <i class="ti ti-x close"></i></div>
+        <div class="a-tab" data-page="customers"><i class="ti ti-building-hospital"></i> 客户 / 医院管理 <i class="ti ti-x close"></i></div>
+        <div class="a-tab" data-page="products"><i class="ti ti-folders"></i> 产品管理 <i class="ti ti-x close"></i></div>
+      </div>
+      <div class="a-rel">
+      <!-- ===== 工单管理 ===== -->
+      <div class="a-view on" data-page="tickets">
+      <div class="a-head">
+        <div><div class="crumb">工单 / 工单管理</div><h1>工单管理</h1></div>
+        <div class="sp"></div>
+        <span class="note"><i class="ti ti-route"></i> 处理流程：待评审 → 开发会议决策 → 落实进批次 → steward 开发 → 交付</span>
+      </div>
+      <div class="a-body">
+        <!-- 状态流水线：一眼看清工单在处理链路的哪一环 -->
+        <div class="a-pipe">
+          <span class="stg on">全部 <span class="n">35</span></span><span class="arw">·</span>
+          <span class="stg">待评审 <span class="n">6</span></span><i class="arw ti ti-chevron-right"></i>
+          <span class="stg">已落实·排期 <span class="n">4</span></span><i class="arw ti ti-chevron-right"></i>
+          <span class="stg">开发中 <span class="n">8</span></span><i class="arw ti ti-chevron-right"></i>
+          <span class="stg">已交付 <span class="n">12</span></span><span class="arw">·</span>
+          <span class="stg">已答复/关闭 <span class="n">5</span></span>
+        </div>
+        <!-- 筛选条：选择型即选即查 -->
+        <div class="a-filter">
+          <div class="a-fitem"><label>产品</label><div class="a-fsel">药师工作站 <i class="ti ti-chevron-down"></i></div></div>
+          <div class="a-fitem"><label>子系统</label><div class="a-fsel">审方（audit） <i class="ti ti-chevron-down"></i></div></div>
+          <div class="a-fitem"><label>类型</label><div class="a-fsel">全部 <i class="ti ti-chevron-down"></i></div></div>
+          <div class="a-fitem"><label>状态</label><div class="a-fsel">处理中 <i class="ti ti-chevron-down"></i></div></div>
+          <div class="a-fitem"><label>客户</label><div class="a-fsel">山东省立医院 <i class="ti ti-chevron-down"></i></div></div>
+          <div class="a-fitem"><label>关键词</label><div class="a-search"><i class="ti ti-search"></i> 搜标题 / 编号…</div></div>
+          <div class="a-fsp"></div>
+          <button class="a-fbtn"><i class="ti ti-chevron-down"></i> 展开更多</button>
+          <button class="a-fbtn"><i class="ti ti-refresh"></i> 重置</button>
+        </div>
+
+        <!-- 列表 -->
+        <div class="a-tablewrap">
+          <div class="a-tabhead"><b>工单列表</b><span class="cnt">共 42 条</span></div>
+          <div class="a-tabscroll">
+            <table class="data-table">
+              <thead><tr>
+                <th>编号</th><th>类型</th><th>标题</th><th>子系统</th><th>客户</th><th>版本</th><th>状态</th><th>提交人</th><th>更新时间</th><th>操作</th>
+              </tr></thead>
+              <tbody>
+                <tr><td class="id">BUG-20260716-03</td><td><span class="tag red">BUG</span></td><td class="ttl">审方任务推送偶发丢失，药师端看不到新任务</td><td>审方</td><td>山东省立医院</td><td>v2.0</td><td><span class="tag orange">待评审</span></td><td>张工</td><td>07-16 17:25</td><td><div class="rowact"><a class="proc" data-open="ticket">处理</a></div></td></tr>
+                <tr><td class="id">XQ-20260716-02</td><td><span class="tag blue">需求</span></td><td class="ttl">审方列表支持按开方科室筛选</td><td>审方</td><td>山东省立医院</td><td>v2.0</td><td><span class="tag orange">待评审</span></td><td>张工</td><td>07-16 15:02</td><td><div class="rowact"><a class="proc" data-open="ticket">处理</a></div></td></tr>
+                <tr><td class="id">XQ-20260716-01</td><td><span class="tag blue">需求</span></td><td class="ttl">审方增加不良反应联动提示</td><td>审方</td><td>山东省立医院</td><td>v2.0</td><td><span class="tag blue">已落实·第37周</span></td><td>张工</td><td>07-16 10:02</td><td><div class="rowact"><a>查看</a></div></td></tr>
+                <tr><td class="id">XQ-20260715-04</td><td><span class="tag blue">需求</span></td><td class="ttl">抗菌药物上报增加批量导出</td><td>抗网上报</td><td>杭州一院</td><td>v1.8</td><td><span class="tag blue">开发中 · UC-16</span></td><td>李工</td><td>07-15 11:40</td><td><div class="rowact"><a>查看</a></div></td></tr>
+                <tr><td class="id">BUG-20260715-05</td><td><span class="tag red">BUG</span></td><td class="ttl">redis2db-server 医嘱明细偶发漏落库</td><td>redis2db</td><td>山东省立医院</td><td>v2.0</td><td><span class="tag green">已交付</span></td><td>王工</td><td>07-15 20:11</td><td><div class="rowact"><a>查看</a></div></td></tr>
+                <tr><td class="id">ZX-20260716-01</td><td><span class="tag purple">咨询</span></td><td class="ttl">审方的整体流程是怎么样的？</td><td>审方</td><td>杭州一院</td><td>—</td><td><span class="tag gray">已答复</span></td><td>李工</td><td>07-16 13:37</td><td><div class="rowact"><a>查看</a></div></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="a-pager"><span>第 1–6 条 / 共 42 条</span><div class="sp"></div><span class="pg">‹</span><span class="pg on">1</span><span class="pg">2</span><span class="pg">3</span><span class="pg">›</span><span style="margin-left:8px">每页 20 条</span></div>
+        </div>
+      </div>
+
+      </div><!-- /工单管理 -->
+
+      <!-- ===== 工作台 ===== -->
+      <div class="a-view" data-page="dashboard">
+        <div class="a-head"><div><div class="crumb">工单 / 工作台</div><h1>工作台</h1></div><div class="sp"></div><span class="note"><i class="ti ti-calendar"></i> 第37周 · 07-14~07-20</span></div>
+        <div class="a-body">
+          <div class="a-stats">
+            <div class="a-stat"><div class="num" style="color:#B9791C">6</div><div class="lbl">待评审</div></div>
+            <div class="a-stat"><div class="num" style="color:#1A6DBE">4</div><div class="lbl">已落实·排期</div></div>
+            <div class="a-stat"><div class="num" style="color:#1A6DBE">8</div><div class="lbl">开发中</div></div>
+            <div class="a-stat"><div class="num" style="color:#7A5BA6">3</div><div class="lbl">本周待发包批次</div></div>
+            <div class="a-stat"><div class="num" style="color:#1E8E4E">12</div><div class="lbl">本月已交付</div></div>
+          </div>
+          <div class="a-tablewrap">
+            <div class="a-tabhead"><b>最近工单</b><span class="cnt">按更新时间</span></div>
+            <div class="a-tabscroll"><table class="data-table"><thead><tr><th>类型</th><th>标题</th><th>客户</th><th>状态</th><th>更新</th></tr></thead><tbody>
+              <tr><td><span class="tag red">BUG</span></td><td class="ttl">审方任务推送偶发丢失</td><td>山东省立医院</td><td><span class="tag orange">待评审</span></td><td>07-16 17:25</td></tr>
+              <tr><td><span class="tag blue">需求</span></td><td class="ttl">抗菌药物上报增加批量导出</td><td>杭州一院</td><td><span class="tag blue">开发中·UC-16</span></td><td>07-15 11:40</td></tr>
+              <tr><td><span class="tag red">BUG</span></td><td class="ttl">redis2db 医嘱明细偶发漏落库</td><td>山东省立医院</td><td><span class="tag green">已交付</span></td><td>07-15 20:11</td></tr>
+            </tbody></table></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 产品管理（左右式·铺满）===== -->
+      <div class="a-view" data-page="products">
+        <div class="a-head"><div><div class="crumb">基础数据 / 产品管理</div><h1>产品管理</h1></div><div class="sp"></div><button class="a-primary" data-open="product"><i class="ti ti-plus"></i> 新增产品</button></div>
+        <div class="a-body">
+          <div class="a-tablewrap">
+            <div class="a-tabhead"><b>已登记产品</b><span class="cnt">共 3 个</span></div>
+            <div class="a-tabscroll"><table class="data-table"><thead><tr><th>id</th><th>产品名</th><th>子系统</th><th>最新提交</th><th>版本</th><th>操作</th></tr></thead><tbody>
+              <tr><td class="id">psp</td><td class="ttl">药师工作站</td><td>4（抗网上报/药学门诊…）</td><td class="id">249aaa6 · 07-16</td><td>未打 tag</td><td class="rowact"><a>同步</a><a data-open="product">编辑</a><a class="danger">删除</a></td></tr>
+              <tr><td class="id">hlyy</td><td class="ttl">合理用药</td><td>5（审方/点评/报表…）</td><td class="id">e5d5ba3 · 07-16</td><td>未打 tag</td><td class="rowact"><a>同步</a><a data-open="product">编辑</a><a class="danger">删除</a></td></tr>
+              <tr><td class="id">etl</td><td class="ttl">接口服务</td><td>2（代理/实施集成…）</td><td class="id">f8ed1e7 · 07-02</td><td>未打 tag</td><td class="rowact"><a>同步</a><a data-open="product">编辑</a><a class="danger">删除</a></td></tr>
+            </tbody></table></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 客户管理（左右式·铺满）===== -->
+      <div class="a-view" data-page="customers">
+        <div class="a-head"><div><div class="crumb">基础数据 / 客户管理</div><h1>客户管理</h1></div><div class="sp"></div><button class="a-primary" data-open="customer"><i class="ti ti-plus"></i> 新增客户</button></div>
+        <div class="a-body">
+          <div class="a-tablewrap">
+            <div class="a-tabhead"><b>已登记客户</b><span class="cnt">共 4 个</span></div>
+            <div class="a-tabscroll"><table class="data-table"><thead><tr><th>医院</th><th>地区</th><th>负责实施</th><th>上线产品 · 版本</th><th>状态</th><th>工单</th><th>操作</th></tr></thead><tbody>
+              <tr><td><span class="cell-name">山东省立医院 <span class="tag gray">三甲</span></span></td><td>山东省济南市</td><td><div class="cell-u"><span class="av" style="background:#1A6DBE">张</span><div><div class="u1">张工</div><div class="u2">138 0010 0100</div></div></div></td><td><span class="tag blue">药师工作站 v2.0</span> <span class="tag blue">合理用药 v1.3</span></td><td><span class="st-on"><i class="ti ti-circle-check-filled"></i> 已开通</span></td><td>6</td><td><div class="rowact"><span class="rowbtn" data-open="customer"><i class="ti ti-edit"></i> 编辑</span><span class="rowic"><i class="ti ti-refresh"></i></span><span class="rowic danger"><i class="ti ti-ban"></i></span></div></td></tr>
+              <tr><td><span class="cell-name">郑州人民医院 <span class="tag gray">三甲</span></span></td><td>河南省郑州市</td><td><div class="cell-u"><span class="av" style="background:#1A6DBE">张</span><div><div class="u1">张工</div><div class="u2">138 0020 0200</div></div></div></td><td><span class="tag blue">药师工作站 v2.0</span></td><td><span class="st-on"><i class="ti ti-circle-check-filled"></i> 已开通</span></td><td>3</td><td><div class="rowact"><span class="rowbtn" data-open="customer"><i class="ti ti-edit"></i> 编辑</span><span class="rowic"><i class="ti ti-refresh"></i></span><span class="rowic danger"><i class="ti ti-ban"></i></span></div></td></tr>
+              <tr><td><span class="cell-name">杭州一院 <span class="tag gray">三甲</span></span></td><td>浙江省杭州市</td><td><div class="cell-u"><span class="av" style="background:#7A5BA6">李</span><div><div class="u1">李工</div><div class="u2">138 0030 0300</div></div></div></td><td><span class="tag blue">合理用药 v1.3</span> <span class="tag blue">接口服务 v1.8</span></td><td><span class="st-on"><i class="ti ti-circle-check-filled"></i> 已开通</span></td><td>4</td><td><div class="rowact"><span class="rowbtn" data-open="customer"><i class="ti ti-edit"></i> 编辑</span><span class="rowic"><i class="ti ti-refresh"></i></span><span class="rowic danger"><i class="ti ti-ban"></i></span></div></td></tr>
+              <tr><td><span class="cell-name">宁波二院 <span class="tag gray">三乙</span></span></td><td>浙江省宁波市</td><td><div class="cell-u"><span class="av" style="background:#1E8E4E">赵</span><div><div class="u1">赵工</div><div class="u2">138 0040 0400</div></div></div></td><td><span class="tag blue">药师工作站 v1.9</span></td><td><span class="st-off"><i class="ti ti-circle-x"></i> 未开通</span></td><td>2</td><td><div class="rowact"><span class="rowbtn" data-open="customer"><i class="ti ti-edit"></i> 编辑</span><span class="rowic"><i class="ti ti-refresh"></i></span><span class="rowic danger"><i class="ti ti-ban"></i></span></div></td></tr>
+            </tbody></table></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 经验库（列表 + 筛选）===== -->
+      <div class="a-view" data-page="kb">
+        <div class="a-head"><div><div class="crumb">知识与配置 / 经验库</div><h1>经验库</h1></div><div class="sp"></div><button class="a-primary"><i class="ti ti-plus"></i> 新增经验</button></div>
+        <div class="a-body">
+          <div class="a-filter">
+            <div class="a-fitem"><label>产品</label><div class="a-fsel">合理用药 <i class="ti ti-chevron-down"></i></div></div>
+            <div class="a-fitem"><label>子系统</label><div class="a-fsel">全部子系统 <i class="ti ti-chevron-down"></i></div></div>
+            <div class="a-fitem"><label>来源</label><div class="a-fsel">全部 <i class="ti ti-chevron-down"></i></div></div>
+            <div class="a-fitem"><label>关键词</label><div class="a-search"><i class="ti ti-search"></i> 搜问题 / 解法…</div></div>
+            <div class="a-fsp"></div>
+          </div>
+          <div class="a-tablewrap">
+            <div class="a-tabhead"><b>经验条目</b><span class="cnt">共 28 条</span></div>
+            <div class="a-tabscroll"><table class="data-table"><thead><tr><th>问题</th><th>子系统</th><th>来源</th><th>时间</th><th>操作</th></tr></thead><tbody>
+              <tr><td class="ttl">审方规则大于5级进来处方，药师在线但没拿到任务</td><td>审方</td><td><span class="tag purple">答疑</span></td><td>07-16 13:37</td><td class="rowact"><a>查看</a><a>编辑</a><a class="danger">删除</a></td></tr>
+              <tr><td class="ttl">redis2db 消费落库：任务主记录写入但医嘱明细漏落</td><td>redis2db</td><td><span class="tag red">BUG沉淀</span></td><td>07-15 21:02</td><td class="rowact"><a>查看</a><a>编辑</a><a class="danger">删除</a></td></tr>
+              <tr><td class="ttl">药学门诊排班配置步骤</td><td>药学门诊</td><td><span class="tag gray">人工</span></td><td>07-14 09:40</td><td class="rowact"><a>查看</a><a>编辑</a><a class="danger">删除</a></td></tr>
+            </tbody></table></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 账号管理（表格）===== -->
+      <div class="a-view" data-page="accounts">
+        <div class="a-head"><div><div class="crumb">知识与配置 / 账号管理</div><h1>账号管理</h1></div><div class="sp"></div><button class="a-primary"><i class="ti ti-user-plus"></i> 新增账号</button></div>
+        <div class="a-body"><div class="a-tablewrap">
+          <div class="a-tabhead"><b>账号</b><span class="cnt">共 7 个</span></div>
+          <div class="a-tabscroll"><table class="data-table"><thead><tr><th>用户名</th><th>姓名</th><th>角色</th><th>负责医院</th><th>状态</th><th>操作</th></tr></thead><tbody>
+            <tr><td class="id">admin</td><td>管理员</td><td><span class="tag purple">管理员</span></td><td>—</td><td><span class="tag green">启用</span></td><td class="rowact"><a>编辑</a><a>改密</a></td></tr>
+            <tr><td class="id">zhang</td><td>张工</td><td><span class="tag blue">实施工程师</span></td><td>山东省立、郑州人民</td><td><span class="tag green">启用</span></td><td class="rowact"><a>编辑</a><a>改密</a><a class="danger">停用</a></td></tr>
+            <tr><td class="id">li</td><td>李工</td><td><span class="tag blue">实施工程师</span></td><td>杭州一院</td><td><span class="tag green">启用</span></td><td class="rowact"><a>编辑</a><a>改密</a><a class="danger">停用</a></td></tr>
+            <tr><td class="id">wang</td><td>王工</td><td><span class="tag orange">开发</span></td><td>—</td><td><span class="tag green">启用</span></td><td class="rowact"><a>编辑</a><a>改密</a><a class="danger">停用</a></td></tr>
+          </tbody></table></div>
+        </div></div>
+      </div>
+
+      <!-- ===== 模型配置（左右式·主备）===== -->
+      <div class="a-view" data-page="models">
+        <div class="a-head"><div><div class="crumb">知识与配置 / 模型配置</div><h1>模型配置</h1></div><div class="sp"></div><button class="a-primary" data-open="model"><i class="ti ti-plus"></i> 添加模型</button></div>
+        <div class="a-body">
+          <div class="a-tablewrap">
+            <div class="a-tabhead"><b>模型记录</b><span class="cnt">主挂自动按序切备用</span></div>
+            <div class="a-tabscroll"><table class="data-table"><thead><tr><th>主/备</th><th>模型</th><th>服务商</th><th>Key</th><th>接口地址</th><th>操作</th></tr></thead><tbody>
+              <tr><td><span class="tag blue"><i class="ti ti-star-filled"></i> 主</span></td><td class="ttl">claude-opus-4-8</td><td>Anthropic</td><td class="id">sk-…8868</td><td class="id">proxy.diandasoft.com</td><td class="rowact"><a>测试</a><a data-open="model">编辑</a></td></tr>
+              <tr><td><span class="tag gray">备1</span></td><td class="ttl">gpt-4o</td><td>OpenAI 兼容</td><td class="id">sk-…a2f0</td><td class="id">proxy.example.com</td><td class="rowact"><a>设为主</a><a>测试</a><a data-open="model">编辑</a></td></tr>
+              <tr><td><span class="tag gray">备2</span></td><td class="ttl">deepseek-chat</td><td>OpenAI 兼容</td><td class="id">sk-…7b31</td><td class="id">api.deepseek.com</td><td class="rowact"><a>设为主</a><a>测试</a><a data-open="model">编辑</a></td></tr>
+            </tbody></table></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 抽屉：工单处理（开发会议决策）——点行内「处理」打开，这就是"处理逻辑" -->
+      <div class="a-mask"></div>
+      <div class="a-drawer" data-drawer="ticket">
+        <div class="a-drawer-h"><i class="ti ti-clipboard-check" style="color:#1A6DBE"></i> 工单处理 · BUG-20260716-03 <span class="x">×</span></div>
+        <div class="a-drawer-b">
+          <!-- 工单摘要 -->
+          <div class="a-tk">
+            <div class="th"><span class="tag red">BUG</span> 审方任务推送偶发丢失，药师端看不到新任务</div>
+            <div class="meta"><span><i class="ti ti-user"></i> 张工</span><span><i class="ti ti-building-hospital"></i> 山东省立医院</span><span><i class="ti ti-folder"></i> 药师工作站 / 审方 · v2.0</span><span>07-16 17:25</span></div>
+            <div class="desc">审方规则大于5级进来处方，药师都在线但没拿到任务；多个现场偶发。AI 已按标准补全现象/复现/影响。</div>
+          </div>
+          <div class="a-ai"><b>AI 初判：</b>疑似 8893 端口未开放 → WebSocket 连不上 → 任务推送丢失。多现场共性，建议立项修复。</div>
+
+          <div class="a-dec">开发会议决策 —— 选一种处理方式</div>
+          <!-- ① 落实开发 -->
+          <div class="a-choice on">
+            <div class="ch-h"><span class="radio"></span> ✅ 落实开发（立项）</div>
+            <div class="ch-b">
+              <div class="ch-tip">归入「产品 · 周批次」，steward 会自动取本周落实清单开发；开发/交付进度回写工单。</div>
+              <div class="ch-sel">归入批次：药师工作站 · 第37周（07-14~07-20） <i class="ti ti-chevron-down"></i></div>
+            </div>
+          </div>
+          <!-- ② 直接答复 -->
+          <div class="a-choice">
+            <div class="ch-h"><span class="radio"></span> 💬 直接答复（不进开发）</div>
+            <div class="ch-b"><div class="ch-tip">属使用问题 / 已有功能 / 配置即可解决时，直接回复提交人并关闭。</div><textarea placeholder="回复提交人…"></textarea></div>
+          </div>
+          <!-- ③ 暂缓/驳回 -->
+          <div class="a-choice">
+            <div class="ch-h"><span class="radio"></span> ⏸ 暂缓 / 驳回</div>
+            <div class="ch-b"><div class="ch-tip">优先级低、需求不清或重复时。</div><textarea placeholder="原因…"></textarea></div>
+          </div>
+        </div>
+        <div class="a-drawer-f"><button class="save">确认处理</button><button class="cancel">取消</button></div>
+      </div>
+
+      <!-- 产品抽屉 -->
+      <div class="a-drawer" data-drawer="product">
+        <div class="a-drawer-h"><i class="ti ti-folders" style="color:#1A6DBE"></i> 新增 / 编辑产品 <span class="x">×</span></div>
+        <div class="a-drawer-b">
+          <div class="a-field"><label>Git 地址<span class="req">*</span></label><input class="a-input" placeholder="https://gitlab…/steward/psp"></div>
+          <div class="a-field"><label>产品 id</label><input class="a-input" placeholder="解析后自动填"></div>
+          <div class="a-field"><label>产品名</label><input class="a-input" placeholder="解析后自动填"></div>
+          <div class="a-field"><label>已发现子系统</label><div style="display:flex;flex-wrap:wrap;gap:6px"><span class="tag blue">kwsb·抗网上报</span><span class="tag blue">adr</span><span class="tag blue">ysmz·药学门诊</span><span class="tag blue">pwrs·药师工作站</span></div></div>
+        </div>
+        <div class="a-drawer-f"><button class="save"><i class="ti ti-search"></i> 解析并保存</button><button class="cancel">取消</button></div>
+      </div>
+
+      <!-- 客户抽屉 -->
+      <div class="a-drawer" data-drawer="customer">
+        <div class="a-drawer-h"><i class="ti ti-building-hospital" style="color:#1A6DBE"></i> 新增 / 编辑客户 <span class="x">×</span></div>
+        <div class="a-drawer-b">
+          <div class="a-field"><label>客户名称<span class="req">*</span></label><input class="a-input" value="山东省立医院"></div>
+          <div class="a-field"><label>关联产品 / 版本</label>
+            <div class="a-prodrow"><div class="a-input sel">药师工作站 <i class="ti ti-chevron-down"></i></div><input class="a-input ver" value="v2.0"><div class="rm"><i class="ti ti-x"></i></div></div>
+            <div class="a-prodrow"><div class="a-input sel">合理用药 <i class="ti ti-chevron-down"></i></div><input class="a-input ver" value="v1.3"><div class="rm"><i class="ti ti-x"></i></div></div>
+            <button class="a-addp"><i class="ti ti-plus"></i> 添加产品</button>
+          </div>
+          <div class="a-field"><label>负责实施</label><div class="a-input sel">张工 <i class="ti ti-chevron-down"></i></div></div>
+        </div>
+        <div class="a-drawer-f"><button class="save">保存</button><button class="cancel">取消</button></div>
+      </div>
+
+      <!-- 模型抽屉 -->
+      <div class="a-drawer" data-drawer="model">
+        <div class="a-drawer-h"><i class="ti ti-key" style="color:#1A6DBE"></i> 添加 / 编辑模型 <span class="x">×</span></div>
+        <div class="a-drawer-b">
+          <div class="a-field"><label>服务商</label><div class="a-input sel">Anthropic（Claude） <i class="ti ti-chevron-down"></i></div></div>
+          <div class="a-field"><label>API Key</label><input class="a-input" type="password" value="••••••••••"></div>
+          <div class="a-field"><label>模型 <span style="color:var(--t3);font-weight:400">选填</span></label><input class="a-input" placeholder="默认 claude-sonnet-4-6"></div>
+          <div class="a-field"><label>接口地址 <span style="color:var(--t3);font-weight:400">选填</span></label><input class="a-input" placeholder="默认官方"></div>
+          <div class="a-field"><label>设为</label><div style="display:flex;gap:8px"><span class="tag blue">主模型</span><span class="tag gray">备用</span></div></div>
+        </div>
+        <div class="a-drawer-f"><button class="save">保存</button><button class="cancel">取消</button><button class="a-fbtn"><i class="ti ti-plug-connected"></i> 测试连通</button></div>
+      </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const $=s=>document.querySelector(s), $$=s=>Array.from(document.querySelectorAll(s));
+  const actGroup=(sel)=>$$(sel).forEach(el=>el.addEventListener('click',()=>{ $$(sel).forEach(x=>x.classList.remove('on')); el.classList.add('on'); }));
+
+  // 顶部两端切换
+  $$('.proto-bar .seg button').forEach(b=>b.addEventListener('click',()=>{
+    $$('.proto-bar .seg button').forEach(x=>x.classList.toggle('on',x===b));
+    $('#v-field').classList.toggle('on',b.dataset.v==='field');
+    $('#v-admin').classList.toggle('on',b.dataset.v==='admin');
+    window.scrollTo(0,0);
+  }));
+
+  // —— 实施端 —— 各种 tab / 切换
+  actGroup('#v-field .f-htab:not(.add)');
+  actGroup('#v-field .f-tab2');
+  actGroup('#v-field .f-toggle button');
+
+  // 批次分组：点批次头折叠/展开
+  $$('#v-field .f-bhd').forEach(h=>h.addEventListener('click',()=>h.parentElement.classList.toggle('open')));
+  // 下载更新包：点击变"已下载"
+  $$('#v-field .f-dlbar .dl').forEach(b=>b.addEventListener('click',e=>{ e.stopPropagation(); b.classList.add('done'); b.innerHTML='<i class="ti ti-check"></i> 已下载'; }));
+
+  // 产品筛选下拉
+  const prodBtn=$('#v-field .prod'), prodDD=$('#v-field .f-proddd');
+  prodBtn && prodBtn.addEventListener('click',e=>{ e.stopPropagation(); prodDD.classList.toggle('open'); });
+  $$('#v-field .f-proddd .opt').forEach(o=>o.addEventListener('click',e=>{ e.stopPropagation();
+    $$('#v-field .f-proddd .opt').forEach(x=>{ x.classList.remove('on'); const c=x.querySelector('.ti'); if(c)c.remove(); });
+    o.classList.add('on'); const i=document.createElement('i'); i.className='ti ti-check'; o.appendChild(i);
+    prodBtn.firstChild.nodeValue=o.textContent.trim()+' '; prodDD.classList.remove('open');
+  }));
+  document.addEventListener('click',()=>prodDD&&prodDD.classList.remove('open'));
+
+  // 添加医院/产品 弹窗
+  const addTab=$('#v-field .f-htab.add'), modal=$('#v-field .f-modal-mask');
+  addTab && addTab.addEventListener('click',()=>modal.classList.add('open'));
+  modal && modal.addEventListener('click',e=>{ if(e.target===modal) modal.classList.remove('open'); });
+  $$('#v-field .f-modal .x, #v-field .f-modal-f .cancel, #v-field .f-modal-f .save').forEach(b=>b.addEventListener('click',()=>modal.classList.remove('open')));
+  $$('#v-field .f-hopt:not(.added)').forEach(h=>h.addEventListener('click',()=>{ $$('#v-field .f-hopt:not(.added)').forEach(x=>x.classList.remove('sel')); h.classList.add('sel'); }));
+  $$('#v-field .f-popt').forEach(p=>p.addEventListener('click',()=>{ const ck=p.querySelector('.ck'); ck.classList.toggle('on'); ck.innerHTML=ck.classList.contains('on')?'<i class="ti ti-check"></i>':''; }));
+
+  // —— 后台端 —— 抽屉：按 data-open 打开对应 data-drawer
+  const amask=$('#v-admin .a-mask');
+  const closeDrawers=()=>{ amask.classList.remove('open'); $$('#v-admin .a-drawer').forEach(d=>d.classList.remove('open')); };
+  $$('#v-admin [data-open]').forEach(t=>t.addEventListener('click',()=>{ const id=t.dataset.open; amask.classList.add('open'); $$('#v-admin .a-drawer').forEach(d=>d.classList.toggle('open',d.dataset.drawer===id)); }));
+  $$('#v-admin .a-drawer .x, #v-admin .a-drawer-f .cancel, #v-admin .a-drawer-f .save').forEach(b=>b.addEventListener('click',closeDrawers));
+  amask.addEventListener('click',closeDrawers);
+  // —— 后台端 —— 统一页面切换：联动 侧边栏 / 多标签 / 面包屑 / 视图
+  const PAGE={dashboard:['概览','运营工作台','ti-chart-pie'],tickets:['工单','工单管理','ti-ticket'],products:['主体管理','产品管理','ti-folders'],customers:['主体管理','客户 / 医院管理','ti-building-hospital'],kb:['知识库','经验库','ti-book'],models:['AI 引擎','模型配置','ti-cpu'],accounts:['系统','账号管理','ti-users']};
+  const tabbar=$('#v-admin #a-tabbar');
+  function ensureTab(pg){ let t=tabbar.querySelector(`.a-tab[data-page="${pg}"]`); if(!t){ t=document.createElement('div'); t.className='a-tab'; t.dataset.page=pg; t.innerHTML=`<i class="ti ${PAGE[pg][2]}"></i> ${PAGE[pg][1]} <i class="ti ti-x close"></i>`; tabbar.appendChild(t); } return t; }
+  function showPage(pg){ if(!PAGE[pg])return;
+    $$('#v-admin .a-nav').forEach(x=>x.classList.toggle('on',x.dataset.page===pg));
+    $$('#v-admin .a-view').forEach(v=>v.classList.toggle('on',v.dataset.page===pg));
+    ensureTab(pg); $$('#v-admin .a-tab').forEach(t=>t.classList.toggle('on',t.dataset.page===pg));
+    $('#v-admin #a-crumb').innerHTML=`<b>${PAGE[pg][0]}</b> · ${PAGE[pg][1]}`;
+    closeDrawers();
+  }
+  $$('#v-admin .a-nav').forEach(n=>n.addEventListener('click',()=>showPage(n.dataset.page)));
+  tabbar.addEventListener('click',e=>{
+    const close=e.target.closest('.close'); const tab=e.target.closest('.a-tab'); if(!tab)return;
+    if(close){ e.stopPropagation(); const was=tab.classList.contains('on'); const nxt=tab.nextElementSibling||tab.previousElementSibling; tab.remove(); if(was&&nxt)showPage(nxt.dataset.page); return; }
+    showPage(tab.dataset.page);
+  });
+  actGroup('#v-admin .a-pipe .stg');
+  // 工单处理：三选一决策
+  $$('#v-admin .a-choice').forEach(c=>c.addEventListener('click',()=>{ $$('#v-admin .a-choice').forEach(x=>x.classList.remove('on')); c.classList.add('on'); }));
+  $$('#v-admin .a-pager .pg').forEach(p=>{ if(/^\d+$/.test(p.textContent)) p.addEventListener('click',()=>{ $$('#v-admin .a-pager .pg').forEach(x=>{if(/^\d+$/.test(x.textContent))x.classList.remove('on');}); p.classList.add('on'); }); });
+</script>
+</body>
+</html>

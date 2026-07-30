@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>经验库 · 收件 intake</title>
+<link rel="stylesheet" href="/vendor/tabler/tabler-icons.min.css">
+<link rel="stylesheet" href="/assets/theme.css">
+<link rel="stylesheet" href="/assets/app.css">
+<script src="/assets/ui.js" defer></script>
+<script src="/assets/shell.js" defer></script>
+<style>
+  /* 来源徽标（沿用真实派生 from → UI 标签配色，仅 3 类） */
+  .src-manual { background:#EEF1F5; color:var(--color-text-secondary); }
+  .src-consult { background:#F1ECF8; color:#7A5BA6; }
+  .src-auto { background:var(--color-primary-light); color:var(--color-primary); }
+  .cell-q { max-width:460px; }
+  .evidence-quote { border-left:3px solid var(--color-primary); background:var(--color-primary-light); padding:12px 14px; border-radius:0 6px 6px 0; font-size:13.5px; line-height:1.7; }
+  .evidence-quote code { background:var(--color-bg); padding:1px 5px; border-radius:4px; font-family:var(--font-num),monospace; font-size:12px; }
+  .evidence-quote strong { font-weight:700; }
+</style>
+</head>
+<body data-shell="admin" data-nav="kb" data-breadcrumb="知识库 > 经验库" data-content-layout="list">
+
+<div class="card">
+  <div class="filter-bar" style="display:flex;align-items:center;gap:12px;padding:10px 14px">
+    <div class="filter-grid" style="flex:1">
+      <div class="filter-field"><label>产品</label><select class="select" id="fProduct"></select></div>
+      <div class="filter-field"><label>子系统</label><select class="select" id="fSub"><option value="">全部子系统</option></select></div>
+      <div class="filter-field"><label>来源</label><select class="select" id="fSource"><option value="">全部来源</option><option value="manual">人工</option><option value="consult">答疑</option><option value="auto">自动</option></select></div>
+      <div class="filter-field"><label>关键词</label>
+        <div class="input-with-icon"><i class="ti ti-search"></i><input class="input" id="fKw" placeholder="问题 / 解法 / 子系统 / 模块，回车搜索"></div>
+      </div>
+    </div>
+    <button class="btn btn-primary" id="addBtn"><i class="ti ti-plus"></i>新增经验</button>
+  </div>
+</div>
+
+<div class="card" style="flex:1;min-height:0;display:flex;flex-direction:column">
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>问题 / 现象</th>
+            <th style="width:130px">子系统</th>
+            <th style="width:96px">来源</th>
+            <th style="width:160px">标签</th>
+            <th style="width:130px">时间</th>
+            <th style="width:150px">操作</th>
+          </tr>
+        </thead>
+        <tbody id="kBody"></tbody>
+      </table>
+    </div>
+    <div class="pagination">
+      <div class="page-info">共 <b id="totalCount">0</b> 条经验<span id="filterHint"></span></div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <select class="select page-size-select" id="pageSize" style="width:auto;height:30px;font-size:12.5px"><option value="8">8 条/页</option><option value="20">20 条/页</option><option value="50">50 条/页</option></select>
+        <div class="pager" id="pager"></div>
+      </div>
+    </div>
+  </div>
+
+<!-- 查看抽屉 -->
+<div class="drawer-mask" id="drawerMask"></div>
+<div class="drawer" id="viewDrawer">
+  <div class="drawer-header">
+    <div><div class="drawer-title">经验详情</div><div class="drawer-subtitle" id="vdSub">—</div></div>
+    <span class="modal-close" data-close-drawer="viewDrawer"><i class="ti ti-x"></i></span>
+  </div>
+  <div class="drawer-body" id="viewBody"></div>
+  <div class="drawer-footer"><button class="btn" data-close-drawer="viewDrawer">关闭</button><button class="btn btn-primary" id="vdEditBtn"><i class="ti ti-edit"></i>编辑</button></div>
+</div>
+
+<!-- 新增/编辑抽屉 -->
+<div class="drawer" id="editDrawer">
+  <div class="drawer-header">
+    <div><div class="drawer-title" id="edTitle">新增经验</div><div class="drawer-subtitle">解法支持 Markdown（**加粗**、`代码`）</div></div>
+    <span class="modal-close" data-close-drawer="editDrawer"><i class="ti ti-x"></i></span>
+  </div>
+  <div class="drawer-body">
+    <div class="form-group"><label>问题 / 现象 <span class="req">*</span> <span class="field-counter" id="edQCount">0/100</span></label><input class="input" id="edQ" maxlength="100" placeholder="如：审方提示两个药冲突但其实可联用"></div>
+    <div class="grid grid-cols-2 gap-12">
+      <div class="form-group"><label>子系统</label><select class="select" id="edSub"><option value="">不限</option></select></div>
+      <div class="form-group"><label>模块</label><input class="input" id="edModule" placeholder="如 用药审查规则"></div>
+    </div>
+    <div class="grid grid-cols-2 gap-12">
+      <div class="form-group"><label>来源</label><select class="select" id="edSource"><option value="manual">人工</option><option value="consult">答疑</option><option value="auto">自动</option></select></div>
+      <div class="form-group"><label>来源工单 <span class="field-counter" style="float:none;font-weight:400">选填</span></label><input class="input" id="edSrcTicket" placeholder="如 BUG-1024（可空）"></div>
+    </div>
+    <div class="form-group"><label>标签</label><input class="input" id="edTags" placeholder="逗号分隔，如 白名单,免审,配置"></div>
+    <div class="form-group"><label>解法 / 答复 <span class="req">*</span></label><textarea class="textarea" id="edAnswer" style="min-height:180px" placeholder="怎么解决 / 怎么做 / 先查什么（支持 **加粗**、`代码`）"></textarea></div>
+    <div class="form-hint error hidden" id="edMsg"></div>
+  </div>
+  <div class="drawer-footer"><button class="btn" data-close-drawer="editDrawer">取消</button><button class="btn btn-primary" id="edSaveBtn"><i class="ti ti-check"></i>保存</button></div>
+</div>
+
+<div class="toast-container" id="toastHost"></div>
+
+<script>
+const $=s=>document.querySelector(s);
+const $$=s=>Array.prototype.slice.call(document.querySelectorAll(s));
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function fmtTime(v){ if(!v)return '—'; if(typeof v==='string'&&/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(v)) return v; let d=(typeof v==='number')?new Date(v):new Date(String(v).replace(' ','T')); if(isNaN(d)) return String(v); const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+
+/* —— toast —— */
+function toast(msg,type){ const host=$('#toastHost'); if(!host)return; const el=document.createElement('div'); el.className='toast '+(type||''); const ic=type==='success'?'ti-circle-check':type==='error'?'ti-alert-circle':type==='warning'?'ti-alert-triangle':'ti-info-circle'; el.innerHTML=`<i class="ti ${ic}"></i><span>${esc(msg)}</span>`; host.appendChild(el); requestAnimationFrame(()=>el.classList.add('show')); setTimeout(()=>{ el.classList.remove('show'); setTimeout(()=>el.remove(),300); },2400); }
+
+/* —— 抽屉开关（部署 shell.js 无抽屉 helper，自实现；用 theme.css .drawer.open/.drawer-mask.open，见 L-004） —— */
+function openDrawer(id){ const d=document.getElementById(id); if(!d)return; $('#drawerMask').classList.add('open'); d.classList.add('open'); }
+function closeDrawer(id){ const d=document.getElementById(id); if(d)d.classList.remove('open'); if(!document.querySelector('.drawer.open')) $('#drawerMask').classList.remove('open'); }
+
+/* —— 数据状态 —— */
+let ENTRIES=[], PROJECTS=[], editing=null;
+let state={ page:1, size:8, kw:'', sub:'', source:'' };
+function pid(){ return $('#fProduct').value; }
+function subsOf(id){ const p=PROJECTS.find(x=>x.id===id); return ((p&&p.subsystems)||[]).map(s=>typeof s==='string'?{name:s,desc:''}:{name:(s&&s.name)||'',desc:(s&&s.desc)||''}).filter(s=>s.name); }
+function subLabel(name){ const s=subsOf(pid()).find(x=>x.name===name); return s&&s.desc?s.desc:name; }
+function subOptions(headText, sel){ return `<option value="">${esc(headText)}</option>`+subsOf(pid()).map(s=>{ const label=s.desc?`${s.desc}（${s.name}）`:s.name; return `<option value="${esc(s.name)}"${s.name===(sel||'')?' selected':''}>${esc(label)}</option>`; }).join(''); }
+
+/* 真实内存 from → UI 来源分类（manual/consult/其余→auto） */
+function srcKind(from){ return from==='manual'?'manual':from==='consult'?'consult':'auto'; }
+function srcLabel(from){ return {manual:'人工',consult:'答疑',auto:'自动'}[srcKind(from)]; }
+function srcCls(from){ return {manual:'src-manual',consult:'src-consult',auto:'src-auto'}[srcKind(from)]; }
+/* 自动沉淀的来源工单号：from 为工单 id（非 manual/consult/auto） */
+function srcTicket(from){ return (from&&from!=='manual'&&from!=='consult'&&from!=='auto')?from:''; }
+
+async function loadProjects(){
+  try{ PROJECTS=(await (await fetch('/api/projects')).json()).projects||[]; }catch(e){ PROJECTS=[]; }
+  $('#fProduct').innerHTML=PROJECTS.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')||'<option value="">无项目</option>';
+  syncSub();
+}
+function syncSub(){ $('#fSub').innerHTML=subOptions('全部子系统', state.sub); }
+async function loadKB(){
+  if(!pid()){ ENTRIES=[]; render(); return; }
+  try{ ENTRIES=(await (await fetch('/api/kb-list?project='+encodeURIComponent(pid()))).json()).entries||[]; }catch(e){ ENTRIES=[]; }
+  render();
+}
+function kbPrev(a){ return String(a==null?'':a).replace(/```[\s\S]*?```/g,' ').replace(/\[([^\]]+)\]\([^)]*\)/g,'$1').replace(/[#>*`_~|]|^\s*[-–•]\s/gm,'').replace(/\s+/g,' ').trim().slice(0,120); }
+
+function getFiltered(){
+  const kw=state.kw.toLowerCase();
+  return ENTRIES.filter(e=>
+    (!state.sub || (e.subsystem||'')===state.sub) &&
+    (!state.source || srcKind(e.from)===state.source) &&
+    (!kw || ((e.q||'')+(e.a||'')+(e.subsystem||'')+(e.module||'')).toLowerCase().includes(kw))
+  );
+}
+
+function render(){
+  const list=getFiltered();
+  const total=list.length;
+  const pages=Math.max(1, Math.ceil(total/state.size));
+  if(state.page>pages) state.page=pages;
+  const pageData=list.slice((state.page-1)*state.size, state.page*state.size);
+  $('#kBody').innerHTML=pageData.length ? pageData.map(k=>{
+    const t=srcTicket(k.from);
+    return `<tr class="clickable" data-view="${esc(k.id)}">
+      <td><div class="cell-strong cell-q">${esc(k.q)}</div><div class="cell-sub">${esc(kbPrev(k.a))}</div></td>
+      <td>${k.subsystem?esc(subLabel(k.subsystem)):'<span class="cell-sub">—</span>'}</td>
+      <td><span class="tag ${srcCls(k.from)}">${srcLabel(k.from)}</span>${t?`<div class="cell-sub" style="font-family:var(--font-num)">${esc(t)}</div>`:''}</td>
+      <td>${(k.tags||[]).slice(0,2).map(x=>`<span class="tag tag-gray" style="margin:1px 3px 1px 0">${esc(x)}</span>`).join('')||'<span class="cell-sub">—</span>'}</td>
+      <td class="cell-time">${esc(fmtTime(k.at))}</td>
+      <td data-stop><div class="row-actions">
+        <span class="row-action" data-view="${esc(k.id)}">查看</span><span class="divider"></span>
+        <span class="row-action" data-edit="${esc(k.id)}">编辑</span><span class="divider"></span>
+        <span class="row-action danger" data-del="${esc(k.id)}">删除</span>
+      </div></td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="6"><div class="empty"><div class="empty-illu"><i class="ti ti-book-off"></i></div><div class="empty-title">${pid()?(total===0&&ENTRIES.length?'没有匹配的经验条目':'该产品暂无经验条目'):'先在上方选择产品'}</div><div class="empty-desc">${pid()?'点右上「新增经验」，或等工单解决自动沉淀':''}</div></div></td></tr>`;
+  $('#totalCount').textContent=ENTRIES.length;
+  $('#filterHint').textContent=(state.kw||state.sub||state.source)?`（筛出 ${total}）`:'';
+  renderPager(pages);
+}
+function renderPager(pages){
+  let html=`<button class="pager-btn" ${state.page===1?'disabled':''} data-page="${state.page-1}"><i class="ti ti-chevron-left"></i></button>`;
+  const win=[]; for(let i=1;i<=pages;i++) win.push(i);
+  html+=win.map(i=>`<button class="pager-btn ${i===state.page?'active':''}" data-page="${i}">${i}</button>`).join('');
+  html+=`<button class="pager-btn" ${state.page===pages?'disabled':''} data-page="${state.page+1}"><i class="ti ti-chevron-right"></i></button>`;
+  $('#pager').innerHTML=html;
+}
+
+/* —— 查看抽屉 —— */
+function openView(id){
+  const k=ENTRIES.find(x=>x.id===id); if(!k)return;
+  const proj=PROJECTS.find(p=>p.id===pid());
+  const t=srcTicket(k.from);
+  $('#vdSub').textContent=`${k.id} · ${(proj&&proj.name)||pid()}${k.subsystem?' · '+subLabel(k.subsystem):''}`;
+  $('#viewBody').innerHTML=`
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><span class="tag ${srcCls(k.from)}">${srcLabel(k.from)}</span>${t?`<span class="tag tag-info" style="font-family:var(--font-num)"><i class="ti ti-ticket" style="font-size:13px"></i> ${esc(t)}</span>`:''}</div>
+    <div style="font-size:16px;font-weight:600;margin-bottom:6px">${esc(k.q)}</div>
+    <div class="cell-sub" style="margin-bottom:16px">${k.module?esc(k.module)+' · ':''}更新于 ${esc(fmtTime(k.at))}</div>
+    <div class="evidence-quote">${(window.mdToHtml||esc)(k.a)}</div>
+    <div style="margin-top:16px">${(k.tags||[]).map(x=>`<span class="tag tag-gray" style="margin:2px 5px 2px 0">#${esc(x)}</span>`).join('')}</div>`;
+  $('#vdEditBtn').onclick=()=>{ closeDrawer('viewDrawer'); openEdit(id); };
+  openDrawer('viewDrawer');
+}
+
+/* —— 新增/编辑抽屉 —— */
+function openEdit(id){
+  editing=id||null;
+  const k=id?ENTRIES.find(x=>x.id===id):null;
+  $('#edTitle').textContent=id?'编辑经验':'新增经验';
+  $('#edSub').innerHTML=subOptions('不限', k?k.subsystem:''); $('#edSub').value=k?(k.subsystem||''):'';
+  $('#edQ').value=k?(k.q||''):'';
+  $('#edModule').value=k?(k.module||''):'';
+  $('#edTags').value=k?(k.tags||[]).join(','):'';
+  $('#edAnswer').value=k?(k.a||''):'';
+  $('#edSource').value=k?srcKind(k.from):'manual';
+  $('#edSrcTicket').value=k?srcTicket(k.from):'';
+  $('#edQ').classList.remove('invalid'); $('#edAnswer').classList.remove('invalid');
+  $('#edMsg').classList.add('hidden'); $('#edMsg').textContent='';
+  countQ();
+  openDrawer('editDrawer'); setTimeout(()=>$('#edQ').focus(),240);
+}
+function countQ(){ $('#edQCount').textContent=`${$('#edQ').value.length}/100`; }
+async function saveK(){
+  const q=$('#edQ').value.trim(), a=$('#edAnswer').value.trim();
+  $('#edQ').classList.toggle('invalid', !q); $('#edAnswer').classList.toggle('invalid', !a);
+  if(!q||!a){ const m=$('#edMsg'); m.textContent='问题和解法都要填'; m.classList.remove('hidden'); return; }
+  $('#edMsg').classList.add('hidden');
+  const source=$('#edSource').value, from_ref=$('#edSrcTicket').value.trim();
+  const body={ project:pid(), id:editing||undefined, q, a,
+    subsystem:$('#edSub').value.trim(), module:$('#edModule').value.trim(),
+    tags:$('#edTags').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean),
+    source, ...(from_ref?{from_ref}:{}) };
+  const btn=$('#edSaveBtn'); btn.disabled=true;
+  try{
+    const r=await (await fetch('/api/kb-save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(r.ok){ ENTRIES=r.entries||ENTRIES; closeDrawer('editDrawer'); render(); toast(editing?'经验已更新':'经验已新增','success'); }
+    else { const m=$('#edMsg'); m.textContent=r.error||'保存失败'; m.classList.remove('hidden'); }
+  }catch(e){ const m=$('#edMsg'); m.textContent='保存失败：'+e.message; m.classList.remove('hidden'); }
+  finally{ btn.disabled=false; }
+}
+async function delK(id){
+  const k=ENTRIES.find(x=>x.id===id); if(!k)return;
+  const ok=await uiConfirm(`确定删除「${k.q}」？`,{title:'删除经验',danger:true,okText:'删除'});
+  if(!ok)return;
+  try{
+    const r=await (await fetch('/api/kb-delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({project:pid(),id})})).json();
+    if(r.ok){ ENTRIES=r.entries||[]; render(); toast('已删除','success'); }
+    else toast(r.error||'删除失败','error');
+  }catch(e){ toast('删除失败：'+e.message,'error'); }
+}
+
+/* —— 事件绑定 —— */
+$('#kBody').addEventListener('click', e=>{
+  const del=e.target.closest('[data-del]'); if(del){ e.stopPropagation(); delK(del.getAttribute('data-del')); return; }
+  const ed=e.target.closest('[data-edit]'); if(ed){ e.stopPropagation(); openEdit(ed.getAttribute('data-edit')); return; }
+  const vw=e.target.closest('[data-view]'); if(vw){ openView(vw.getAttribute('data-view')); return; }
+});
+$('#pager').addEventListener('click', e=>{ const b=e.target.closest('[data-page]'); if(!b||b.disabled)return; const p=+b.getAttribute('data-page'); if(p>=1){ state.page=p; render(); } });
+$('#addBtn').addEventListener('click', ()=>openEdit(null));
+$('#edSaveBtn').addEventListener('click', saveK);
+$('#edQ').addEventListener('input', countQ);
+$('#fProduct').addEventListener('change', ()=>{ state.sub=''; state.source=''; state.kw=''; state.page=1; $('#fKw').value=''; $('#fSource').value=''; syncSub(); loadKB(); });
+$('#fSub').addEventListener('change', ()=>{ state.sub=$('#fSub').value; state.page=1; render(); });
+$('#fSource').addEventListener('change', ()=>{ state.source=$('#fSource').value; state.page=1; render(); });
+$('#fKw').addEventListener('keydown', e=>{ if(e.key==='Enter'){ state.kw=$('#fKw').value.trim(); state.page=1; render(); } });
+$('#pageSize').addEventListener('change', ()=>{ state.size=+$('#pageSize').value; state.page=1; render(); });
+document.addEventListener('click', e=>{ const c=e.target.closest('[data-close-drawer]'); if(c) closeDrawer(c.getAttribute('data-close-drawer')); });
+$('#drawerMask').addEventListener('click', ()=>{ $$('.drawer.open').forEach(d=>d.classList.remove('open')); $('#drawerMask').classList.remove('open'); });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape'){ const o=document.querySelector('.drawer.open'); if(o) closeDrawer(o.id); } });
+
+(async()=>{ await loadProjects(); await loadKB(); })();
+</script>
+</body>
+</html>

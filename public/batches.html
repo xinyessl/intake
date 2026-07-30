@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>批次管理 · 收件 intake</title>
+<link rel="stylesheet" href="/vendor/tabler/tabler-icons.min.css">
+<link rel="stylesheet" href="/assets/theme.css">
+<script src="/assets/ui.js" defer></script>
+<script src="/assets/shell.js" defer></script>
+<style>
+  /* 批次卡列表（原型无对应类，页面内自带；用 theme token） */
+  .blist{display:flex;flex-direction:column;gap:10px}
+  .bcard{display:flex;align-items:center;gap:14px;border:1px solid var(--color-border);border-radius:10px;padding:12px 14px;cursor:pointer;transition:border-color .12s,box-shadow .12s}
+  .bcard:hover{border-color:var(--color-primary);box-shadow:0 1px 6px rgba(15,39,68,.08)}
+  .bcard .bno{font-weight:700;font-family:var(--font-num,monospace);font-size:15px;min-width:64px}
+  .bcard .bmeta{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+  .bcard .bprod{font-weight:600}
+  .bcard .bsub{font-size:12.5px;color:var(--color-text-tertiary);display:flex;gap:12px;flex-wrap:wrap}
+  .bcard .bsub .mono{font-family:var(--font-num,monospace)}
+  .bempty{font-size:13px;color:var(--color-text-tertiary);padding:40px 10px;text-align:center;border:1px dashed var(--color-border-strong);border-radius:10px}
+  .bempty .ti{font-size:34px;display:block;margin-bottom:8px;color:var(--color-text-tertiary)}
+  /* 详情抽屉：子系统分组 */
+  .dsec{margin-bottom:16px}
+  .dsec .dlab{font-size:12px;color:var(--color-text-tertiary);margin-bottom:6px}
+  .dsec .dval{font-size:14px}
+  .hospchips{display:flex;flex-wrap:wrap;gap:6px}
+  .subgrp{border:1px solid var(--color-border);border-radius:8px;margin-bottom:10px;overflow:hidden}
+  .subgrp .subgrp-hd{background:var(--color-bg-subtle,#f5f7fa);padding:8px 12px;font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px}
+  .subgrp .subgrp-hd .cnt{font-weight:400;color:var(--color-text-tertiary);font-size:12px}
+  .subgrp .trow{display:flex;align-items:center;gap:10px;padding:8px 12px;border-top:1px solid var(--color-border)}
+  .subgrp .trow .tid{font-family:var(--font-num,monospace);font-size:12px;color:var(--color-text-tertiary);min-width:96px}
+  .subgrp .trow .ttitle{flex:1;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .subgrp .trow .tmeta{font-size:12px;color:var(--color-text-tertiary);display:flex;gap:8px;flex-shrink:0}
+  /* 定档建批小 modal */
+  #arrangeBox .form-group{margin-bottom:0}
+  /* 详情抽屉动作条 + 上传包表单 + 包信息 */
+  .dactions{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+  .relbox{border:1px solid var(--color-border);border-radius:8px;padding:12px 14px;margin-bottom:16px;background:var(--color-bg-subtle,#f5f7fa)}
+  .relbox .rlhd{font-weight:600;font-size:13px;margin-bottom:10px;display:flex;align-items:center;gap:6px}
+  .relbox .form-group{margin-bottom:10px}
+  .relbox .form-group:last-of-type{margin-bottom:0}
+  .relbox label{font-size:12px;color:var(--color-text-tertiary);display:block;margin-bottom:4px}
+  .relbox input,.relbox textarea{width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid var(--color-border);border-radius:6px;font-size:13px;font-family:inherit}
+  .relbox textarea{min-height:56px;resize:vertical}
+  .pkgbox .prow{display:flex;gap:8px;font-size:13px;padding:5px 0;border-top:1px solid var(--color-border)}
+  .pkgbox .prow:first-child{border-top:none}
+  .pkgbox .prow .k{color:var(--color-text-tertiary);min-width:72px;flex-shrink:0}
+  .pkgbox .prow .v{flex:1;min-width:0;word-break:break-all}
+  .pkgbox .prow .v.mono{font-family:var(--font-num,monospace)}
+</style>
+</head>
+<body data-shell="admin" data-nav="batches" data-breadcrumb="交付管理 > 批次管理" data-content-layout="list">
+
+<div class="card">
+  <div class="filter-bar" style="display:flex;align-items:center;gap:12px;padding:10px 14px">
+    <div class="filter-grid" style="flex:1">
+      <div class="filter-field"><label>产品</label><select class="select" id="fProduct"><option value="">全部产品</option></select></div>
+      <div class="filter-field"><label>状态</label><select class="select" id="fStatus"><option value="">全部状态</option><option value="开发中">开发中</option><option value="可下载">可下载</option><option value="已交付">已交付</option></select></div>
+    </div>
+    <button class="btn btn-primary" id="btnArrange"><i class="ti ti-package"></i>定档建批</button>
+  </div>
+</div>
+
+<div class="card" style="flex:1;min-height:0;display:flex;flex-direction:column">
+  <div class="table-wrap" style="flex:1;min-height:0;padding:4px">
+    <div class="blist" id="blist"></div>
+  </div>
+  <div class="pagination">
+    <div class="page-info">共 <b id="totalCount">0</b> 个批次</div>
+  </div>
+</div>
+
+<!-- 定档建批 modal（选产品 → 确认建批） -->
+<div class="drawer-mask" id="drawerMask"></div>
+<div class="modal" id="arrangeModal">
+  <div class="modal-header"><div class="modal-title">定档建批</div><span class="modal-close" data-close-modal="arrangeModal"><i class="ti ti-x"></i></span></div>
+  <div class="modal-body" id="arrangeBox">
+    <div class="form-group">
+      <label>选择产品 <span class="req">*</span></label>
+      <select class="select" id="arProduct"><option value="">请选择产品</option></select>
+    </div>
+    <div class="form-group" style="margin-top:12px">
+      <label>排期时间（计划交付）</label>
+      <input type="date" id="arSchedule" style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid var(--color-border);border-radius:6px;font-size:13px;font-family:inherit">
+      <div class="text-tertiary" style="font-size:12px;margin-top:4px">可留空，之后在批次详情里补设/修改。</div>
+    </div>
+    <div class="text-tertiary" style="font-size:12.5px;margin-top:10px;line-height:1.6">
+      将该产品当前所有<b>「已落实」且未归批</b>的工单（跨全部医院合并）归成一个新批次，内部按子系统分组，初始状态「开发中」。
+    </div>
+  </div>
+  <div class="modal-footer"><button class="btn" data-close-modal="arrangeModal">取消</button><button class="btn btn-primary" id="btnArrangeOk"><i class="ti ti-check"></i>确认建批</button></div>
+</div>
+
+<!-- 批次详情抽屉 -->
+<div class="drawer wide" id="detailDrawer">
+  <div class="drawer-header">
+    <div><div class="drawer-title" id="dTitle">批次详情</div><div class="drawer-subtitle" id="dSubtitle"></div></div>
+    <span class="modal-close" data-close-drawer="detailDrawer"><i class="ti ti-x"></i></span>
+  </div>
+  <div class="drawer-body" id="detailBody"></div>
+  <div class="drawer-footer"><button class="btn" data-close-drawer="detailDrawer">关闭</button></div>
+</div>
+
+<!-- 开发清单预览 modal（json 结构化预览） -->
+<div class="modal wide" id="previewModal">
+  <div class="modal-header"><div class="modal-title" id="previewTitle">清单预览</div><span class="modal-close" data-close-modal="previewModal"><i class="ti ti-x"></i></span></div>
+  <div class="modal-body" id="previewBody" style="max-height:60vh;overflow:auto"></div>
+  <div class="modal-footer"><button class="btn" data-close-modal="previewModal">关闭</button></div>
+</div>
+
+<div class="toast-container" id="toastHost"></div>
+
+<script>
+const $=s=>document.querySelector(s);
+const $$=s=>Array.prototype.slice.call(document.querySelectorAll(s));
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+/* —— 时间统一格式 yyyy-MM-dd HH:mm（全局规范⑫；兼容 ISO 串 / 时间戳 / 已格式化值），空值 — —— */
+function fmtTime(v){
+  if(v==null||v==='') return '—';
+  // 已是「yyyy-MM-dd HH:mm」或「yyyy-MM-dd」直接用（nowStamp 产出）
+  if(typeof v==='string' && /^\d{4}-\d{2}-\d{2}( \d{2}:\d{2})?$/.test(v)) return v;
+  let d;
+  if(typeof v==='number') d=new Date(v);
+  else { const s=String(v); d=new Date(/^\d+$/.test(s)?Number(s):s); }
+  if(isNaN(d.getTime())) return String(v);
+  const p=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/* —— toast（部署 shell.js 无 toast，自实现；用 theme.css .toast-container/.toast.show） —— */
+function toast(msg,type){ const host=$('#toastHost'); if(!host)return; const el=document.createElement('div'); el.className='toast '+(type||''); const ic=type==='success'?'ti-circle-check':type==='error'?'ti-alert-circle':type==='warning'?'ti-alert-triangle':'ti-info-circle'; el.innerHTML=`<i class="ti ${ic}"></i><span>${esc(msg)}</span>`; host.appendChild(el); requestAnimationFrame(()=>el.classList.add('show')); setTimeout(()=>{ el.classList.remove('show'); setTimeout(()=>el.remove(),300); },2400); }
+
+/* —— 抽屉/modal 开关（部署 shell.js 无 UI.openDrawer，自实现；用 theme.css .drawer.open/.modal.open/.drawer-mask.open） —— */
+function openDrawer(id){ const d=document.getElementById(id); if(!d)return; $('#drawerMask').classList.add('open'); d.classList.add('open'); }
+function closeDrawer(id){ const d=document.getElementById(id); if(d)d.classList.remove('open'); if(!document.querySelector('.drawer.open,.modal.open')) $('#drawerMask').classList.remove('open'); }
+function openModal(id){ const m=document.getElementById(id); if(!m)return; $('#drawerMask').classList.add('open'); m.classList.add('open'); }
+function closeModal(id){ const m=document.getElementById(id); if(m)m.classList.remove('open'); if(!document.querySelector('.drawer.open,.modal.open')) $('#drawerMask').classList.remove('open'); }
+document.addEventListener('click', e=>{
+  const cd=e.target.closest('[data-close-drawer]'); if(cd){ closeDrawer(cd.getAttribute('data-close-drawer')); return; }
+  const cm=e.target.closest('[data-close-modal]'); if(cm){ closeModal(cm.getAttribute('data-close-modal')); }
+});
+$('#drawerMask').addEventListener('click',()=>{ $$('.drawer.open,.modal.open').forEach(d=>d.classList.remove('open')); $('#drawerMask').classList.remove('open'); });
+
+let PROJECTS=[], BATCHES=[], CUR_BATCH=null;
+const STATUS_TAG={ '开发中':'tag-primary', '可下载':'tag-info', '已交付':'tag-success' };
+const pname=id=>{ const p=PROJECTS.find(x=>x.id===id); return p?p.name:id; };
+
+/* ---------- 列表 ---------- */
+function render(){
+  const box=$('#blist');
+  box.innerHTML = BATCHES.length ? BATCHES.map(b=>{
+    const tag=STATUS_TAG[b.status]||'tag-gray';
+    return `<div class="bcard" data-id="${esc(b.id)}">
+      <div class="bno">${esc(b.id)}</div>
+      <div class="bmeta">
+        <div class="bprod">${esc(b.productName||pname(b.product))} <span class="tag ${tag}">${esc(b.status||'—')}</span></div>
+        <div class="bsub">
+          <span><i class="ti ti-ticket"></i> ${esc(b.ticketCount||0)} 个工单</span>
+          <span class="mono"><i class="ti ti-clock"></i> ${esc(fmtTime(b.createdAt))}</span>
+          <span class="mono"><i class="ti ti-calendar-event"></i> 排期 ${b.scheduleDate?esc(b.scheduleDate):'<span class="text-tertiary">未排期</span>'}</span>
+        </div>
+      </div>
+      <i class="ti ti-chevron-right text-tertiary"></i>
+    </div>`;
+  }).join('') : `<div class="bempty"><i class="ti ti-package"></i>还没有批次。点右上角「定档建批」，对某产品把已落实工单归成一批。</div>`;
+  $('#totalCount').textContent=BATCHES.length;
+}
+
+/* ---------- 详情抽屉 ---------- */
+async function openDetail(id){
+  $('#dTitle').textContent='批次 '+id;
+  $('#dSubtitle').textContent='';
+  $('#detailBody').innerHTML='<div class="text-tertiary" style="padding:20px;text-align:center">加载中…</div>';
+  openDrawer('detailDrawer');
+  let r;
+  try{ r=await (await fetch('/api/batch-detail?id='+encodeURIComponent(id))).json(); }catch(e){ $('#detailBody').innerHTML='<div class="bempty">加载失败</div>'; return; }
+  if(!r||!r.item){ $('#detailBody').innerHTML='<div class="bempty">批次不存在</div>'; return; }
+  const b=r.item, groups=r.groups||[], hosps=r.hospitals||[];
+  CUR_BATCH=b;
+  const tag=STATUS_TAG[b.status]||'tag-gray';
+  $('#dSubtitle').textContent=(b.productName||pname(b.product))+' · '+(b.status||'');
+  const hospHtml = hosps.length ? hosps.map(h=>`<span class="tag tag-gray">${esc(h)}</span>`).join('') : '<span class="text-tertiary">—</span>';
+  const groupHtml = groups.length ? groups.map(g=>{
+    const rows=(g.tickets||[]).map(t=>`<div class="trow">
+      <span class="tid">${esc(t.id)}</span>
+      <span class="ttitle">${esc(t.title||'（无标题）')}</span>
+      <span class="tmeta">
+        <span class="tag ${t.type==='bug'?'tag-danger':'tag-primary'}">${t.type==='bug'?'BUG':'需求'}</span>
+        ${t.site?`<span>${esc(t.site)}</span>`:''}
+        ${t.version?`<span class="mono">${esc(t.version)}</span>`:''}
+      </span>
+    </div>`).join('');
+    return `<div class="subgrp">
+      <div class="subgrp-hd"><i class="ti ti-stack-2"></i>${esc(g.subsystemLabel||g.subsystem||'（未指定子系统）')} <span class="cnt">${(g.tickets||[]).length} 单</span></div>
+      ${rows}
+    </div>`;
+  }).join('') : '<div class="bempty">该批次暂无覆盖工单</div>';
+  // 动作条：导出开发清单（md 下载）+ 预览（json）——全状态可用
+  const actionsHtml=`<div class="dactions">
+    <a class="btn btn-primary" href="/api/batch-checklist?id=${encodeURIComponent(b.id)}&format=md" target="_blank" rel="noopener"><i class="ti ti-file-download"></i>导出开发清单</a>
+    <button class="btn" id="btnChecklistPreview" data-bid="${esc(b.id)}"><i class="ti ti-eye"></i>预览清单</button>
+  </div>`;
+  // 上传包表单（开发中）/ 包信息（可下载/已交付）
+  let relHtml='';
+  if(b.status==='开发中'){
+    relHtml=`<div class="relbox">
+      <div class="rlhd"><i class="ti ti-package-export"></i>上传包 · 转「可下载」</div>
+      <div class="form-group"><label>包版本 <span class="req">*</span></label><input id="relPkgVersion" placeholder="如 v2.7.1" maxlength="60"></div>
+      <div class="form-group"><label>包地址 <span class="req">*</span></label><input id="relArtifactUrl" placeholder="https://.../pkg.zip" maxlength="500"></div>
+      <div class="form-group"><label>更新说明</label><textarea id="relNote" placeholder="本次更新内容…" maxlength="2000"></textarea></div>
+      <div style="text-align:right"><button class="btn btn-primary" id="btnRelease"><i class="ti ti-cloud-upload"></i>上传包并转可下载</button></div>
+    </div>`;
+  } else if(b.pkgVersion){
+    relHtml=`<div class="relbox pkgbox">
+      <div class="rlhd"><i class="ti ti-package"></i>包信息</div>
+      <div class="prow"><span class="k">包版本</span><span class="v mono">${esc(b.pkgVersion)}</span></div>
+      <div class="prow"><span class="k">包地址</span><span class="v">${b.artifactUrl?`<a href="${esc(b.artifactUrl)}" target="_blank" rel="noopener">${esc(b.artifactUrl)}</a>`:'—'}</span></div>
+      <div class="prow"><span class="k">更新说明</span><span class="v">${esc(b.releaseNote||'—')}</span></div>
+      <div class="prow"><span class="k">上传时间</span><span class="v mono">${esc(fmtTime(b.releaseTime))}</span></div>
+      <div class="prow"><span class="k">下载数</span><span class="v mono">${esc(b.downloads||0)}</span></div>
+    </div>`;
+  }
+  $('#detailBody').innerHTML=`
+    ${actionsHtml}
+    <div class="grid grid-cols-2 gap-12" style="margin-bottom:16px">
+      <div class="dsec"><div class="dlab">产品</div><div class="dval">${esc(b.productName||pname(b.product))}</div></div>
+      <div class="dsec"><div class="dlab">状态</div><div class="dval"><span class="tag ${tag}">${esc(b.status||'—')}</span></div></div>
+      <div class="dsec"><div class="dlab">工单数</div><div class="dval mono">${esc(b.ticketCount||0)}</div></div>
+      <div class="dsec"><div class="dlab">定档时间</div><div class="dval mono">${esc(fmtTime(b.createdAt))}</div></div>
+      <div class="dsec" style="grid-column:1/-1">
+        <div class="dlab">排期时间（计划交付）</div>
+        <div class="dval" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span id="schView" class="mono">${b.scheduleDate?esc(b.scheduleDate):'<span class="text-tertiary">未排期</span>'}</span>
+          <button class="btn btn-sm" id="btnSchEdit"><i class="ti ti-calendar-cog"></i>改排期</button>
+          <span id="schEditBox" style="display:none;align-items:center;gap:6px">
+            <input type="date" id="schInput" value="${esc(b.scheduleDate||'')}" style="padding:5px 8px;border:1px solid var(--color-border);border-radius:6px;font-size:13px;font-family:inherit">
+            <button class="btn btn-sm btn-primary" id="btnSchSave"><i class="ti ti-check"></i>保存</button>
+            <button class="btn btn-sm" id="btnSchCancel">取消</button>
+          </span>
+        </div>
+      </div>
+    </div>
+    ${relHtml}
+    <div class="dsec"><div class="dlab">覆盖医院（${hosps.length}）</div><div class="hospchips">${hospHtml}</div></div>
+    <div class="dsec"><div class="dlab">覆盖工单（按子系统分组）</div></div>
+    ${groupHtml}
+  `;
+  // 绑上传包提交
+  const relBtn=$('#btnRelease'); if(relBtn) relBtn.addEventListener('click',()=>doRelease(b.id));
+  // 绑改排期（内联编辑：改排期→显输入框；保存→batch-update；取消→收起）
+  const schEdit=$('#btnSchEdit'), schBox=$('#schEditBox'), schInput=$('#schInput');
+  if(schEdit) schEdit.addEventListener('click',()=>{ schEdit.style.display='none'; if(schBox) schBox.style.display='inline-flex'; if(schInput) schInput.focus(); });
+  const schCancel=$('#btnSchCancel'); if(schCancel) schCancel.addEventListener('click',()=>{ if(schBox) schBox.style.display='none'; if(schEdit) schEdit.style.display='inline-flex'; if(schInput) schInput.value=b.scheduleDate||''; });
+  const schSave=$('#btnSchSave'); if(schSave) schSave.addEventListener('click',()=>saveSchedule(b.id));
+}
+
+/* ---------- 改排期（batch-update，即点即存 + toast + 刷新） ---------- */
+async function saveSchedule(id){
+  const scheduleDate=($('#schInput')?.value||'').trim();   // <input type=date> 值即 yyyy-MM-dd（或空=清空排期）
+  const btn=$('#btnSchSave'); if(btn) btn.disabled=true;
+  try{
+    const r=await (await fetch('/api/batch-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,scheduleDate})})).json();
+    if(!r.ok){ toast(r.error||'保存排期失败','warning'); return; }
+    toast(scheduleDate?('排期已更新为 '+scheduleDate):'已清除排期','success');
+    await loadBatches();
+    await openDetail(id);   // 刷新详情显示新排期
+  }catch(e){ toast('保存排期失败：'+e.message,'error'); }
+  finally{ if(btn) btn.disabled=false; }
+}
+
+/* ---------- 上传包·转可下载 ---------- */
+async function doRelease(id){
+  const pkgVersion=($('#relPkgVersion')?.value||'').trim();
+  const artifactUrl=($('#relArtifactUrl')?.value||'').trim();
+  const releaseNote=($('#relNote')?.value||'').trim();
+  if(!pkgVersion||!artifactUrl){ toast('包版本/包地址必填','warning'); return; }
+  const btn=$('#btnRelease'); if(btn) btn.disabled=true;
+  try{
+    const r=await (await fetch('/api/batch-release',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,pkgVersion,releaseNote,artifactUrl})})).json();
+    if(!r.ok){ toast(r.error||'上传包失败','warning'); return; }
+    toast('已上传包 '+pkgVersion+'，'+(r.pushed||0)+' 单转已出包','success');
+    await loadBatches();
+    await openDetail(id);   // 刷新详情为「可下载」态
+  }catch(e){ toast('上传包失败：'+e.message,'error'); }
+  finally{ if(btn) btn.disabled=false; }
+}
+
+/* ---------- 预览开发清单（json） ---------- */
+async function previewChecklist(id){
+  try{
+    const r=await (await fetch('/api/batch-checklist?id='+encodeURIComponent(id)+'&format=json')).json();
+    const groups=r.groups||[];
+    const body=groups.length ? groups.map(g=>{
+      const items=(g.items||[]).map(it=>`<div class="trow" style="flex-direction:column;align-items:stretch;gap:4px">
+        <div style="display:flex;gap:8px;align-items:center"><span class="tag ${it.type==='bug'?'tag-danger':'tag-primary'}">${it.type==='bug'?'BUG':'需求'}</span><b>${esc(it.title||'（无标题）')}</b><span class="tid">${esc(it.ticketId)}</span></div>
+        <div style="font-size:12px;color:var(--color-text-tertiary)">医院：${esc((it.hospitals||[]).join('、')||'—')}　版本：${esc(it.siteVersion||'—')}　截图：${(it.media||[]).length} 张</div>
+        <div style="font-size:12.5px;white-space:pre-wrap">描述：${esc(it.desc||'（无）')}</div>
+        <div style="font-size:12.5px;white-space:pre-wrap">验收：${esc(it.accept||'（无）')}</div>
+      </div>`).join('');
+      return `<div class="subgrp"><div class="subgrp-hd"><i class="ti ti-stack-2"></i>${esc(g.subsystemLabel||g.subsystem||'（未指定）')} <span class="cnt">${(g.items||[]).length} 单</span></div>${items}</div>`;
+    }).join('') : '<div class="bempty">该批次暂无覆盖工单</div>';
+    $('#previewBody').innerHTML=body;
+    $('#previewTitle').textContent='清单预览 · '+id;
+    openModal('previewModal');
+  }catch(e){ toast('预览失败：'+e.message,'error'); }
+}
+
+/* ---------- 定档建批 ---------- */
+function fillProductOptions(){
+  const opts='<option value="">全部产品</option>'+PROJECTS.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+  $('#fProduct').innerHTML=opts;
+  $('#arProduct').innerHTML='<option value="">请选择产品</option>'+PROJECTS.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+}
+async function doArrange(){
+  // 读被 ui.js .ui-sel-* 增强的 select 值：用 select.类名（这里按 id 取，直接命中原生 select，无 wrapper 干扰）
+  const pid=$('#arProduct').value;
+  if(!pid){ toast('请先选择产品','warning'); return; }
+  const scheduleDate=($('#arSchedule')?.value||'').trim();   // <input type=date> 原生值即 yyyy-MM-dd（或空）
+  $('#btnArrangeOk').disabled=true;
+  try{
+    const r=await (await fetch('/api/batch-arrange',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({product:pid,scheduleDate})})).json();
+    if(!r.ok){ toast(r.error||'建批失败','warning'); return; }
+    toast('已建批 '+r.item.id+'（'+(r.item.ticketCount||0)+' 单）','success');
+    closeModal('arrangeModal');
+    await loadBatches();
+  }catch(e){ toast('建批失败：'+e.message,'error'); }
+  finally{ $('#btnArrangeOk').disabled=false; }
+}
+
+/* ---------- 加载 ---------- */
+async function loadBatches(){
+  const fp=$('#fProduct').value, fst=$('#fStatus').value;
+  const qs=[]; if(fp) qs.push('product='+encodeURIComponent(fp)); if(fst) qs.push('status='+encodeURIComponent(fst));
+  try{ BATCHES=(await (await fetch('/api/batches'+(qs.length?'?'+qs.join('&'):''))).json()).items||[]; }catch(e){ BATCHES=[]; }
+  render();
+}
+
+/* ---------- 事件绑定 ---------- */
+$('#btnArrange').addEventListener('click',()=>{ $('#arProduct').value=''; $('#arProduct').dispatchEvent(new Event('change',{bubbles:true})); if($('#arSchedule')) $('#arSchedule').value=''; openModal('arrangeModal'); });
+$('#btnArrangeOk').addEventListener('click',doArrange);
+$('#blist').addEventListener('click',e=>{ const c=e.target.closest('[data-id]'); if(c) openDetail(c.dataset.id); });
+$('#detailBody').addEventListener('click',e=>{ const p=e.target.closest('#btnChecklistPreview'); if(p) previewChecklist(p.getAttribute('data-bid')); });
+/* 选择型即选即查 */
+['fProduct','fStatus'].forEach(id=>$('#'+id).addEventListener('change',loadBatches));
+
+async function load(){
+  try{ PROJECTS=(await (await fetch('/api/projects')).json()).projects||[]; }catch(e){}
+  fillProductOptions();
+  await loadBatches();
+}
+load();
+</script>
+</body>
+</html>

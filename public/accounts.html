@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>账号管理 · 收件 intake</title>
+<link rel="stylesheet" href="/vendor/tabler/tabler-icons.min.css">
+<link rel="stylesheet" href="/assets/theme.css">
+<script src="/assets/ui.js" defer></script>
+<script src="/assets/shell.js" defer></script>
+<style>
+  /* 负责医院 / 负责产品多选盒（原型无对应类，页面内自带；用 theme token） */
+  .checklist{border:1px solid var(--color-border-strong);border-radius:6px;padding:8px 10px;max-height:170px;overflow:auto;display:flex;flex-direction:column;gap:2px}
+  .checklist .checkbox{padding:3px 0;font-size:13px}
+  .checklist .region{color:var(--color-text-tertiary);font-size:12px;margin-left:4px}
+  .checklist .empty-line{color:var(--color-text-tertiary);font-size:12.5px;padding:4px 0}
+  .hospcell .tag{margin:1px 4px 1px 0}
+</style>
+</head>
+<body data-shell="admin" data-nav="accounts" data-breadcrumb="系统 > 账号管理" data-content-layout="list">
+
+<div class="card">
+  <div class="filter-bar" style="display:flex;align-items:center;gap:12px;padding:10px 14px">
+    <div class="filter-grid" style="flex:1">
+      <div class="filter-field"><label>角色</label><select class="select" id="fRole"><option value="">全部角色</option><option value="admin">管理员</option><option value="pm">产品经理</option><option value="impl">实施工程师</option></select></div>
+      <div class="filter-field"><label>状态</label><select class="select" id="fStatus"><option value="">全部状态</option><option value="1">启用</option><option value="0">停用</option></select></div>
+      <div class="filter-field"><label>关键词</label><div class="input-with-icon"><i class="ti ti-search"></i><input class="input" id="fKw" placeholder="用户名 / 姓名，回车搜索"></div></div>
+      <div class="filter-field" style="justify-content:flex-end;align-self:flex-end"><button class="btn btn-sm" id="btnReset"><i class="ti ti-rotate"></i>重置</button></div>
+    </div>
+    <button class="btn btn-primary" id="btnAdd"><i class="ti ti-user-plus"></i>新增账号</button>
+  </div>
+</div>
+
+<div class="card" style="flex:1;min-height:0;display:flex;flex-direction:column;padding:0">
+    <div class="table-wrap" style="flex:1;min-height:0">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th style="width:140px">用户名</th>
+            <th style="width:120px">姓名</th>
+            <th style="width:120px">角色</th>
+            <th>负责医院</th>
+            <th style="width:90px">状态</th>
+            <th style="width:150px">创建时间</th>
+            <th style="width:210px">操作</th>
+          </tr>
+        </thead>
+        <tbody id="accBody"></tbody>
+      </table>
+    </div>
+    <div class="pagination">
+      <div class="page-info">共 <b id="totalCount">0</b> 个账号</div>
+      <div class="flex items-center gap-12"><select class="select page-size-select" id="pageSize"><option value="8">8 条/页</option><option value="20">20 条/页</option></select><div class="pager" id="pager"></div></div>
+    </div>
+  </div>
+
+<!-- 新增/编辑抽屉（部署 shell.js 无 UI.openDrawer，自实现开关；参考 inbox.html） -->
+<div class="drawer-mask" id="drawerMask"></div>
+<div class="drawer" id="editDrawer">
+  <div class="drawer-header">
+    <div><div class="drawer-title" id="edTitle">新增账号</div><div class="drawer-subtitle">现场角色须绑定负责医院</div></div>
+    <span class="modal-close" data-close-drawer="editDrawer"><i class="ti ti-x"></i></span>
+  </div>
+  <div class="drawer-body">
+    <div class="grid grid-cols-2 gap-12">
+      <div class="form-group"><label>用户名 <span class="req">*</span> <span class="field-counter" id="edUserCount">0/20</span></label><input class="input mono" id="edUser" maxlength="20" placeholder="登录名"></div>
+      <div class="form-group"><label>姓名 <span class="req">*</span></label><input class="input" id="edName" maxlength="20" placeholder="真实姓名"></div>
+    </div>
+    <div class="form-group"><label>手机号 <span class="text-tertiary" style="font-weight:400;font-size:12px">选填 · 医院管理实施人电话取自此处</span></label><input class="input mono" id="edPhone" maxlength="20" placeholder="选填"></div>
+    <div class="form-group"><label>角色 <span class="req">*</span></label><select class="select" id="edRole"><option value="admin">管理员</option><option value="pm">产品经理</option><option value="impl">实施工程师</option></select></div>
+    <div class="form-group" id="hospitalsGroup">
+      <label>负责医院 <span class="text-tertiary" style="font-weight:400;font-size:12px">可选</span></label>
+      <div class="checklist" id="edHospitals"></div>
+      <div class="form-hint">实施工程师只能看 / 操作自己负责医院的数据。</div>
+    </div>
+    <div class="form-group" id="projGroup">
+      <label>负责产品 <span class="field-counter">多选，限定可见工单产品；不选=不限</span></label>
+      <div class="checklist" id="edProjects"></div>
+    </div>
+    <div class="form-group"><label>状态</label><select class="select" id="edStatus"><option value="1">启用</option><option value="0">停用</option></select></div>
+  </div>
+  <div class="drawer-footer"><button class="btn" data-close-drawer="editDrawer">取消</button><button class="btn btn-primary" id="btnSave"><i class="ti ti-check"></i>保存</button></div>
+</div>
+
+<div class="toast-container" id="toastHost"></div>
+
+<script>
+const $=s=>document.querySelector(s);
+const $$=s=>Array.prototype.slice.call(document.querySelectorAll(s));
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+/* —— 时间统一格式 yyyy-MM-dd HH:mm（全局规范·共享） —— */
+function fmtTime(v){ if(!v) return '—'; let d; if(typeof v==='number') d=new Date(v); else if(/^\d+$/.test(String(v))) d=new Date(+v); else d=new Date(String(v).replace(' ','T')); if(isNaN(d)) return String(v); const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+
+/* —— toast（部署 shell.js 无 toast，自实现；用 theme.css .toast-container/.toast.show） —— */
+function toast(msg,type){ const host=$('#toastHost'); if(!host)return; const el=document.createElement('div'); el.className='toast '+(type||''); const ic=type==='success'?'ti-circle-check':type==='error'?'ti-alert-circle':type==='warning'?'ti-alert-triangle':'ti-info-circle'; el.innerHTML=`<i class="ti ${ic}"></i><span>${esc(msg)}</span>`; host.appendChild(el); requestAnimationFrame(()=>el.classList.add('show')); setTimeout(()=>{ el.classList.remove('show'); setTimeout(()=>el.remove(),300); },2400); }
+
+/* —— 抽屉开关（部署 shell.js 无 UI.openDrawer，自实现；用 theme.css .drawer.open/.drawer-mask.open） —— */
+function openDrawer(id){ const d=document.getElementById(id); if(!d)return; $('#drawerMask').classList.add('open'); d.classList.add('open'); }
+function closeDrawer(id){ const d=document.getElementById(id); if(d)d.classList.remove('open'); if(!document.querySelector('.drawer.open')) $('#drawerMask').classList.remove('open'); }
+document.addEventListener('click', e=>{ const c=e.target.closest('[data-close-drawer]'); if(c) closeDrawer(c.getAttribute('data-close-drawer')); });
+$('#drawerMask').addEventListener('click',()=>{ $$('.drawer.open').forEach(d=>d.classList.remove('open')); $('#drawerMask').classList.remove('open'); });
+
+/* —— 角色映射（部署真实枚举 3 类 admin/pm/impl；admin 存量 role 可能为遗留 dev，用 isAdmin 语义 roleClass 归 admin） —— */
+const ROLE_LABEL={admin:'管理员',pm:'产品经理',impl:'实施工程师'};
+const ROLE_TAG={admin:'tag-primary',pm:'tag-gray',impl:'tag-gray'};
+function roleClass(r){ return (r==='admin'||r==='dev')?'admin':r==='pm'?'pm':'impl'; }   // dev=遗留管理员归 admin
+function roleLabel(r){ return ROLE_LABEL[roleClass(r)]; }
+
+let ACCOUNTS=[], PROJECTS=[], CUSTOMERS=[], ME=null;
+let state={ page:1, size:8, filters:{role:'',status:'',kw:''} };
+let editUsername=null;   // 编辑中的用户名（null=新增）
+
+function isEnabled(a){ return (a.enabled==null?1:(a.enabled?1:0))===1; }   // 展示↔存储：启用↔1、停用↔0；旧行 NULL 兜底为启用
+
+/* —— 负责医院展示：["全部"]→全局绿标；["—"]/空→占位灰；否则逐家灰标签 —— */
+function hospCell(sites){ const s=Array.isArray(sites)?sites:[]; if(s[0]==='全部') return '<span class="tag tag-success">全部（全局）</span>'; if(!s.length||s[0]==='—') return '<span class="text-tertiary">—</span>'; return s.map(h=>`<span class="tag tag-gray">${esc(h)}</span>`).join(''); }
+
+function getFiltered(){ const f=state.filters; return ACCOUNTS.filter(a=>{
+  if(f.role && roleClass(a.role)!==f.role) return false;
+  if(f.status!=='' && (isEnabled(a)?'1':'0')!==f.status) return false;
+  if(f.kw){ const k=f.kw; if(!String(a.username||'').toLowerCase().includes(k) && !String(a.name||'').toLowerCase().includes(k)) return false; }
+  return true;
+}); }
+
+function render(){
+  const list=getFiltered(); const total=list.length;
+  const pages=Math.max(1,Math.ceil(total/state.size));
+  if(state.page>pages) state.page=pages;
+  const pageData=list.slice((state.page-1)*state.size, state.page*state.size);
+  $('#accBody').innerHTML = pageData.length ? pageData.map(a=>{
+    const rc=roleClass(a.role), on=isEnabled(a);
+    return `<tr>
+      <td class="mono cell-strong">${esc(a.username)}</td>
+      <td><div class="flex items-center gap-8"><div class="avatar avatar-sm">${esc((a.name||a.username).charAt(0))}</div><div><div>${esc(a.name||a.username)}</div>${a.phone?`<div class="cell-sub mono">${esc(a.phone)}</div>`:''}</div></div></td>
+      <td><span class="tag ${ROLE_TAG[rc]}">${roleLabel(a.role)}</span></td>
+      <td class="hospcell">${hospCell(a.sites)}</td>
+      <td><span class="tag ${on?'tag-success':'tag-gray'} tag-dot">${on?'启用':'停用'}</span></td>
+      <td class="cell-time">${fmtTime(a.createTime||a.created_at)}</td>
+      <td><div class="row-actions">
+        <span class="row-action" data-edit="${esc(a.username)}">编辑</span><span class="divider"></span>
+        <span class="row-action" data-pw="${esc(a.id)}">改密</span><span class="divider"></span>
+        <span class="row-action ${on?'danger':'muted'}" data-toggle="${esc(a.id)}">${on?'停用':'启用'}</span><span class="divider"></span>
+        <span class="row-action danger" data-del="${esc(a.id)}">删除</span>
+      </div></td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="7"><div class="empty"><div class="empty-illu"><i class="ti ti-user-off"></i></div><div class="empty-title">没有匹配的账号</div></div></td></tr>`;
+  $('#totalCount').textContent=total;
+  renderPager(pages);
+}
+function renderPager(pages){
+  let html=`<button class="pager-btn" ${state.page===1?'disabled':''} data-go="${state.page-1}"><i class="ti ti-chevron-left"></i></button>`;
+  for(let i=1;i<=pages;i++) html+=`<button class="pager-btn ${i===state.page?'active':''}" data-go="${i}">${i}</button>`;
+  html+=`<button class="pager-btn" ${state.page===pages?'disabled':''} data-go="${state.page+1}"><i class="ti ti-chevron-right"></i></button>`;
+  $('#pager').innerHTML=html;
+}
+$('#pager').addEventListener('click',e=>{ const b=e.target.closest('[data-go]'); if(!b||b.disabled)return; state.page=+b.dataset.go; render(); });
+
+/* —— 筛选：选择型即选即查（角色/状态/每页），文本回车触发（全局规范 11） —— */
+$('#fRole').addEventListener('change',()=>{ state.filters.role=$('#fRole').value; state.page=1; render(); });
+$('#fStatus').addEventListener('change',()=>{ state.filters.status=$('#fStatus').value; state.page=1; render(); });
+$('#fKw').addEventListener('keydown',e=>{ if(e.key==='Enter'){ state.filters.kw=$('#fKw').value.trim().toLowerCase(); state.page=1; render(); } });
+$('#pageSize').addEventListener('change',()=>{ state.size=+$('#pageSize').value; state.page=1; render(); });
+$('#btnReset').addEventListener('click',()=>{ $('#fRole').value=''; $('#fStatus').value=''; $('#fKw').value=''; state.filters={role:'',status:'',kw:''}; state.page=1; render(); });
+
+/* —— 多选盒渲染 —— */
+function renderHospitals(selected){
+  const sel=new Set(selected||[]);
+  if(!CUSTOMERS.length){ $('#edHospitals').innerHTML='<div class="empty-line">暂无可选医院（先到「医院管理」维护）</div>'; return; }
+  $('#edHospitals').innerHTML=CUSTOMERS.map(c=>`<label class="checkbox"><input type="checkbox" value="${esc(c.name)}"${sel.has(c.name)?' checked':''}>${esc(c.name)}${c.region?`<span class="region">${esc(c.region)}</span>`:''}</label>`).join('');
+}
+function renderProjects(selected){
+  const sel=new Set((selected||[]).map(String));
+  if(!PROJECTS.length){ $('#edProjects').innerHTML='<div class="empty-line">暂无可选产品</div>'; return; }
+  $('#edProjects').innerHTML=PROJECTS.map(p=>`<label class="checkbox"><input type="checkbox" value="${esc(p.id)}"${sel.has(String(p.id))?' checked':''}>${esc(p.name)}</label>`).join('');
+}
+function checkedValues(box){ return $$(box+' input:checked').map(i=>i.value); }
+
+/* —— 角色 → 负责医院/负责产品 显隐联动（AC-9/20） —— */
+function toggleRoleScopes(){
+  const role=$('#edRole').value;
+  const isImpl=role==='impl';
+  $('#hospitalsGroup').style.display=isImpl?'block':'none';
+  $('#projGroup').style.display=(role==='pm')?'block':'none';   // 仅产品经理有负责产品；实施/管理员无
+}
+$('#edRole').addEventListener('change',toggleRoleScopes);
+$('#edUser').addEventListener('input',()=>{ $('#edUserCount').textContent=`${$('#edUser').value.length}/20`; });
+
+const DEFAULT_PWD='Lc@123456';   // 系统默认初始密码（新增账号用；表单不展示，创建后弹窗告知，登录后强制改密）
+/* —— 新增/编辑抽屉 —— */
+function openEdit(username){
+  editUsername=username||null;
+  const a=username?ACCOUNTS.find(x=>x.username===username):null;
+  $('#edTitle').textContent=username?'编辑账号':'新增账号';
+  $('#edUser').value=a?a.username:''; $('#edUser').disabled=!!username;
+  $('#edName').value=a?(a.name||''):'';
+  $('#edPhone').value=a?(a.phone||''):'';
+  $('#edRole').value=a?roleClass(a.role):'admin';
+  $('#edStatus').value=a?(isEnabled(a)?'1':'0'):'1';
+  $('#edUser').classList.remove('invalid'); $('#edName').classList.remove('invalid');
+  renderHospitals(a && Array.isArray(a.sites) && a.sites[0]!=='全部' && a.sites[0]!=='—' ? a.sites : []);
+  renderProjects(a?a.projects:[]);
+  $('#edUserCount').textContent=`${$('#edUser').value.length}/20`;
+  toggleRoleScopes();
+  openDrawer('editDrawer');
+}
+$('#btnAdd').addEventListener('click',()=>openEdit());
+
+$('#btnSave').addEventListener('click',async()=>{
+  const username=$('#edUser').value.trim(), name=$('#edName').value.trim(), role=$('#edRole').value;
+  if(!/^[A-Za-z0-9_.-]{2,32}$/.test(username)){ $('#edUser').classList.add('invalid'); toast('用户名 2~32 位，限字母/数字/._-','warning'); return; } $('#edUser').classList.remove('invalid');
+  if(!name){ $('#edName').classList.add('invalid'); toast('请填写姓名','warning'); return; } $('#edName').classList.remove('invalid');
+  // 负责医院取值规则（AC-11）：impl→所勾选；admin→["全部"]；pm→["—"]
+  let sites=['—'];
+  if(role==='impl') sites=checkedValues('#edHospitals');   // 负责医院可选（不再强制绑定）
+  else if(role==='admin') sites=['全部'];
+  // 负责产品：仅产品经理写所勾选；实施/管理员存 []
+  const projects = role==='pm' ? checkedValues('#edProjects') : [];
+  const enabled=+$('#edStatus').value;
+  const phone=$('#edPhone').value.trim();
+  const body={username,name,phone,role,projects,sites,enabled};
+  if(!editUsername) body.password=DEFAULT_PWD;   // 新增：系统默认初始密码（表单不展示；创建后弹窗告知）
+  $('#btnSave').disabled=true;
+  try{ const r=await (await fetch('/api/account-save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(r.ok){ const isNew=!editUsername; toast(r.first?'已创建第一个管理员，认证已启用':(editUsername?'账号已更新':'账号已新增'),'success'); closeDrawer('editDrawer');
+      if(r.first){ setTimeout(()=>location.href='/login.html',900); return; } loadAccounts();
+      if(isNew && !r.first) uiAlert(`账号「${name}」创建成功。初始密码：${DEFAULT_PWD}（请告知该用户，首次登录后需修改密码）。`,{title:'创建成功 · 初始密码'}); }
+    else toast(r.error||'保存失败','error');
+  }catch(e){ toast('保存失败：'+e.message,'error'); } finally{ $('#btnSave').disabled=false; }
+});
+
+/* —— 行操作（编辑/改密/停用启用/删除） —— */
+function nameOf(a){ return a.name && a.name!==a.username ? `${a.name}（${a.username}）` : a.username; }
+$('#accBody').addEventListener('click',async e=>{
+  const ed=e.target.closest('[data-edit]'), pw=e.target.closest('[data-pw]'), tg=e.target.closest('[data-toggle]'), del=e.target.closest('[data-del]');
+  if(ed){ openEdit(ed.dataset.edit); return; }
+  if(pw){ const a=ACCOUNTS.find(x=>x.id===pw.dataset.pw); if(a) doResetPw(a); return; }
+  if(tg){ const a=ACCOUNTS.find(x=>x.id===tg.dataset.toggle); if(!a) return; const to=isEnabled(a)?'停用':'启用';
+    if(await uiConfirm(`确定${to}账号「${nameOf(a)}」？${to==='停用'?'停用后该账号将无法登录。':''}`,{title:to+'账号',danger:to==='停用',okText:to})) doToggle(a); return; }
+  if(del){ const a=ACCOUNTS.find(x=>x.id===del.dataset.del); if(!a) return;
+    if(await uiConfirm(`确定删除账号「${nameOf(a)}」？删除后不可恢复，建议优先「停用」。`,{title:'删除账号',danger:true,okText:'删除'})) doDelete(a.id); return; }
+});
+// NH-3 改密：管理员重置「他人」密码 → 专用端点 /api/account-reset-password（重设 salt/hash + must_change=1）。
+async function doResetPw(a){
+  const np=await uiPrompt(`为账号「${nameOf(a)}」设置新密码（8-20 位，含字母与数字）：\n对方下次登录将被要求改密。`,{title:'重置密码',inputType:'password',placeholder:'输入新密码',okText:'重置'});
+  if(np==null) return;   // 取消/Esc/点遮罩 → null
+  const v=String(np).trim();
+  if(v.length<8||v.length>20||!/[A-Za-z]/.test(v)||!/[0-9]/.test(v)){ toast('密码需 8-20 位且含字母与数字','warning'); return; }
+  try{ const r=await (await fetch('/api/account-reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:a.id,password:v})})).json();
+    if(r.ok){ toast(`已重置「${nameOf(a)}」的密码`,'success'); loadAccounts(); } else toast(r.error||'重置失败','error');
+  }catch(e){ toast('重置失败：'+e.message,'error'); }
+}
+// 停用/启用：account-save 带 enabled，回传原 role/name/projects/sites 仅改 enabled（不传密码=不改密）。后端拦最后一个启用管理员。
+async function doToggle(a){
+  const enabled=isEnabled(a)?0:1;
+  const body={username:a.username,role:a.role,name:a.name,projects:a.projects||[],sites:a.sites||[],enabled};
+  try{ const r=await (await fetch('/api/account-save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(r.ok){ loadAccounts(); toast(enabled?'账号已启用':'账号已停用','success'); } else toast(r.error||'操作失败','error');
+  }catch(e){ toast('操作失败：'+e.message,'error'); }
+}
+async function doDelete(id){
+  try{ const r=await (await fetch('/api/account-delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})})).json();
+    if(r.ok){ loadAccounts(); toast('账号已删除','success'); } else toast(r.error||'删除失败','error');
+  }catch(e){ toast('删除失败：'+e.message,'error'); }
+}
+
+/* —— 数据加载 —— */
+async function loadAccounts(){ try{ const r=await (await fetch('/api/accounts')).json(); ACCOUNTS=r.accounts||[]; }catch(e){ ACCOUNTS=[]; } render(); }
+async function loadProjects(){ try{ const r=await (await fetch('/api/projects')).json(); PROJECTS=(r.projects||[]).map(p=>({id:p.id,name:p.name||p.id})); }catch(e){ PROJECTS=[]; } }
+async function loadCustomers(){ try{ const r=await (await fetch('/api/customers')).json(); CUSTOMERS=(r.customers||[]).map(c=>({name:c.name,region:c.region||''})); }catch(e){ CUSTOMERS=[]; } }
+
+(async()=>{
+  await Promise.all([loadProjects(), loadCustomers()]);
+  await loadAccounts();
+  try{ ME=(await (await fetch('/api/me')).json()).me; }catch(e){}
+})();
+</script>
+</body>
+</html>

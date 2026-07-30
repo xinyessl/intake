@@ -1,0 +1,2786 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>收件 · 实施端</title>
+<link rel="stylesheet" href="/vendor/tabler/tabler-icons.min.css">
+<link rel="stylesheet" href="/assets/theme.css">
+<style>
+/* ============ FS-01 实施端外壳 · 登录门 · 顶栏维度切换 ============
+   仅复用 theme.css 设计系统 token/组件（藏青 #0F2744、CTA 蓝 .btn-primary）；
+   不套后台 shell.js（那是运营端外壳）。本页是独立实施端单页外壳。 */
+html, body { height: 100%; }
+body { margin: 0; overflow: hidden; background: var(--color-bg); }
+.f-shell { display: flex; flex-direction: column; height: 100vh; box-sizing: border-box; overflow: hidden; }
+
+/* ---------- 登录门（gate 遮罩） ---------- */
+.f-login {
+  position: fixed; inset: 0; z-index: 500;
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+  background: linear-gradient(135deg, #0F2744 0%, #1B3A5C 60%, #21456B 100%);
+}
+.f-login.done { display: none; }
+.f-login-card { width: 100%; max-width: 400px; background: var(--color-surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-modal); padding: 30px 30px 26px; }
+.f-login-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+.f-login-logo { width: 44px; height: 44px; border-radius: 12px; background: var(--color-primary); color: #fff; display: grid; place-items: center; font-size: 24px; flex: 0 0 auto; }
+.f-login-brand .t1 { font-size: 19px; font-weight: 700; color: var(--color-text); line-height: 1.2; }
+.f-login-brand .t2 { font-size: 12.5px; color: var(--color-text-tertiary); margin-top: 2px; }
+.f-login-card .f-lg-sub { font-size: 13px; color: var(--color-text-secondary); margin: 14px 0 20px; line-height: 1.6; }
+.f-login-card .form-group { margin-bottom: 15px; }
+.f-login-err { display: none; margin-top: 4px; font-size: 12.5px; color: var(--color-danger); background: var(--color-danger-light); border: 1px solid var(--color-danger-border); border-radius: var(--radius); padding: 8px 11px; line-height: 1.5; }
+.f-login-err.on { display: block; }
+.f-login-btn { width: 100%; margin-top: 4px; }
+.f-login-note { margin-top: 18px; font-size: 12px; color: var(--color-text-tertiary); line-height: 1.7; border-top: 1px solid var(--color-border); padding-top: 14px; }
+.pw-field { position: relative; }
+.pw-field .input { padding-right: 40px; }
+.pw-eye { position: absolute; top: 0; right: 4px; height: 100%; width: 32px; display: flex; align-items: center; justify-content: center; padding: 0; border: none; background: transparent; color: var(--color-text-tertiary); cursor: pointer; font-size: 17px; line-height: 1; }
+.pw-eye:hover { color: var(--color-primary); }
+
+/* ---------- 顶栏（f-top，深色） ---------- */
+.f-top { flex: 0 0 auto; height: 56px; display: flex; align-items: center; gap: 14px; padding: 0 18px; background: var(--sidebar-bg); color: #fff; box-shadow: 0 1px 0 rgba(0,0,0,.15); }
+.f-brand { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+.f-brand .logo { width: 30px; height: 30px; border-radius: 8px; background: rgba(255,255,255,.14); display: grid; place-items: center; font-size: 17px; color: #fff; }
+.f-brand .nm { font-size: 15px; font-weight: 600; letter-spacing: .3px; white-space: nowrap; }
+
+/* 维度选择器（下拉：描边 + chevron + 弹菜单） */
+.f-mode { position: relative; flex: 0 0 auto; }
+.f-mode-cur { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px; border-radius: var(--radius); border: 1px solid rgba(255,255,255,.28); background: rgba(255,255,255,.06); color: #fff; font-size: 13px; font-weight: 500; cursor: pointer; user-select: none; }
+.f-mode-cur:hover { background: rgba(255,255,255,.12); }
+.f-mode-cur .chev { font-size: 15px; opacity: .8; transition: transform .15s; }
+.f-mode.open .f-mode-cur .chev { transform: rotate(180deg); }
+.f-mode-menu { display: none; position: absolute; top: 38px; left: 0; min-width: 148px; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-card-hover); padding: 5px; z-index: 60; }
+.f-mode.open .f-mode-menu { display: block; }
+.f-mode-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: var(--radius); font-size: 13px; color: var(--color-text); cursor: pointer; }
+.f-mode-item:hover { background: var(--color-bg); }
+.f-mode-item.active { color: var(--color-primary); font-weight: 600; background: var(--color-primary-light); }
+.f-mode-item .ti { font-size: 16px; }
+
+/* 竖分隔线 */
+.f-topdiv { flex: 0 0 auto; width: 1px; align-self: stretch; margin: 12px 2px; background: rgba(255,255,255,.18); }
+
+/* 实体 tab（平铺实心高亮） */
+.f-htabs { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; overflow-x: auto; }
+.f-htab { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 13px; border-radius: var(--radius-pill); font-size: 13px; font-weight: 500; color: rgba(255,255,255,.72); background: transparent; border: none; cursor: pointer; white-space: nowrap; }
+.f-htab:hover { color: #fff; background: rgba(255,255,255,.1); }
+.f-htab.active { color: var(--sidebar-bg); background: #fff; font-weight: 600; }
+.f-htab .ti { font-size: 15px; }
+.f-htab-note { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 11px; font-size: 12px; color: rgba(255,255,255,.42); cursor: default; white-space: nowrap; user-select: none; }
+.f-htab-note .ti { font-size: 14px; }
+
+/* 右侧工具区 */
+.f-tools { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; margin-left: auto; }
+.f-tool-btn { width: 34px; height: 34px; border-radius: var(--radius); border: none; background: transparent; color: rgba(255,255,255,.82); cursor: pointer; position: relative; display: inline-flex; align-items: center; justify-content: center; }
+.f-tool-btn:hover { background: rgba(255,255,255,.12); color: #fff; }
+.f-tool-btn .ti { font-size: 19px; }
+.f-tool-btn .dot { position: absolute; top: 7px; right: 8px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px; background: var(--color-danger); color: #fff; font-size: 10px; font-weight: 700; display: none; align-items: center; justify-content: center; border: 1.5px solid var(--sidebar-bg); box-sizing: border-box; }
+.f-tool-btn .dot.on { display: inline-flex; }
+
+/* 待办 popover（本条只建空壳挂载点，数据由 FS-05 填充） */
+.f-todo-pop { display: none; position: absolute; top: 46px; right: 0; width: 320px; max-height: 60vh; overflow: auto; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-card-hover); z-index: 60; padding: 6px; }
+.f-todo-pop.open { display: block; }
+.f-todo-hd { padding: 8px 10px 6px; font-size: 12.5px; font-weight: 600; color: var(--color-text); border-bottom: 1px solid var(--color-border); }
+.f-todo-empty { padding: 26px 14px; text-align: center; color: var(--color-text-tertiary); font-size: 12.5px; }
+
+/* 用户区 */
+.f-user { position: relative; flex: 0 0 auto; }
+.f-user-trigger { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 8px 0 8px; border-radius: var(--radius-pill); cursor: pointer; user-select: none; }
+.f-user-trigger:hover { background: rgba(255,255,255,.1); }
+.f-user-avatar { width: 28px; height: 28px; border-radius: 50%; background: rgba(255,255,255,.18); color: #fff; display: grid; place-items: center; font-size: 12.5px; font-weight: 600; flex: 0 0 auto; }
+.f-user-meta { line-height: 1.15; }
+.f-user-meta .un { font-size: 13px; font-weight: 500; color: #fff; }
+.f-user-meta .ur { font-size: 11px; color: rgba(255,255,255,.6); }
+.f-user-menu { display: none; position: absolute; top: 44px; right: 0; min-width: 168px; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-card-hover); padding: 5px; z-index: 60; }
+.f-user-menu.open { display: block; }
+.f-user-menu .um-item { display: flex; align-items: center; gap: 9px; padding: 9px 11px; border-radius: var(--radius); font-size: 13px; color: var(--color-text); cursor: pointer; }
+.f-user-menu .um-item:hover { background: var(--color-bg); }
+.f-user-menu .um-item.danger { color: var(--color-danger); }
+.f-user-menu .um-item .ti { font-size: 17px; }
+
+/* ---------- 经验库检索面板（FS-07 · 抽屉，自实现 open/close，复用 theme.css .drawer/.drawer-mask） ---------- */
+.f-kb-drawer { width: 560px; max-width: calc(100vw - 60px); }
+.f-kb-search { display: flex; gap: 8px; margin-bottom: 4px; }
+.f-kb-search .input { flex: 1; }
+.f-kb-hint { font-size: 12px; color: var(--color-text-tertiary); margin: 8px 0 14px; line-height: 1.6; }
+.f-kb-results { display: flex; flex-direction: column; gap: 10px; }
+.f-kb-item { border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface); overflow: hidden; }
+.f-kb-hd { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; cursor: pointer; }
+.f-kb-hd:hover { background: var(--color-bg); }
+.f-kb-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.f-kb-prod { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 9px; border-radius: var(--radius-pill); font-size: 11.5px; font-weight: 600; background: var(--color-primary-light); color: var(--color-primary); border: 1px solid var(--color-primary-border); }
+.f-kb-sub { font-size: 11.5px; color: var(--color-text-tertiary); }
+/* 来源徽标（沿用 KB-01 的 .src-* 配色，3 类：人工/答疑/自动） */
+.f-kb-src { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: var(--radius-pill); font-size: 11.5px; font-weight: 600; }
+.f-kb-src.src-manual { background: #EEF1F5; color: var(--color-text-secondary); }
+.f-kb-src.src-consult { background: #F1ECF8; color: #7A5BA6; }
+.f-kb-src.src-auto { background: var(--color-primary-light); color: var(--color-primary); }
+.f-kb-q { font-size: 14px; font-weight: 600; color: var(--color-text); line-height: 1.5; display: flex; align-items: flex-start; gap: 6px; }
+.f-kb-q .chev { font-size: 16px; color: var(--color-text-tertiary); flex: 0 0 auto; transition: transform .15s; margin-top: 1px; }
+.f-kb-item.open .f-kb-q .chev { transform: rotate(90deg); }
+.f-kb-body { display: none; padding: 0 14px 14px; }
+.f-kb-item.open .f-kb-body { display: block; }
+.f-kb-answer { border-left: 3px solid var(--color-primary); background: var(--color-primary-light); padding: 12px 14px; border-radius: 0 6px 6px 0; font-size: 13.5px; line-height: 1.7; color: var(--color-text); white-space: normal; }
+.f-kb-answer code { background: var(--color-bg); padding: 1px 5px; border-radius: 4px; font-family: var(--font-num), monospace; font-size: 12px; }
+.f-kb-answer strong { font-weight: 700; }
+.f-kb-empty { text-align: center; padding: 40px 20px; color: var(--color-text-tertiary); }
+.f-kb-empty .ti { font-size: 40px; opacity: .5; }
+.f-kb-empty .t { font-size: 14px; font-weight: 500; color: var(--color-text-secondary); margin: 10px 0 4px; }
+.f-kb-empty .d { font-size: 12.5px; margin-bottom: 16px; }
+.f-kb-hollow { text-align: center; padding: 46px 20px; color: var(--color-text-tertiary); font-size: 13px; }
+
+/* ---------- 工作空间容器（FS-02 提交清单 · 左；FS-04 AI 对话 · 右留占位） ---------- */
+.f-workspace { flex: 1 1 auto; min-height: 0; overflow: hidden; display: flex; }
+.f-ws-placeholder { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: var(--color-text-tertiary); gap: 8px; padding: 40px; }
+.f-ws-placeholder .ti { font-size: 44px; opacity: .5; }
+.f-ws-placeholder .t { font-size: 15px; font-weight: 500; color: var(--color-text-secondary); }
+.f-ws-placeholder .d { font-size: 13px; }
+.f-ws-scope { font-size: 12.5px; color: var(--color-text-secondary); background: var(--color-surface-alt); border: 1px solid var(--color-border); border-radius: var(--radius-pill); padding: 4px 12px; margin-top: 4px; }
+
+/* ========== FS-02 · 提交清单（医院视图左栏） ========== */
+.f-submit-pane { flex: 0 0 420px; max-width: 72%; min-width: 300px; display: flex; flex-direction: column; min-height: 0; background: var(--color-surface); }
+/* 左右可拖分隔条：7px 抓取区 + 1px 视觉线，hover/拖拽变主色 */
+.f-splitter { flex: 0 0 auto; width: 7px; cursor: col-resize; background: transparent; position: relative; z-index: 5; align-self: stretch; }
+.f-splitter::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: var(--color-border); transition: background .12s, width .12s, left .12s; }
+.f-splitter:hover::after, .f-splitter.dragging::after { background: var(--color-primary); width: 2px; left: 2px; }
+/* 子控件条 .f-ph：标题 + 按批次/按类型 f-tabs2 + 全部子项目下拉触发器 .prod */
+.f-ph { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--color-border); }
+.f-ph-title { font-size: 14px; font-weight: 700; color: var(--color-text); flex: 0 0 auto; }
+.f-tabs2 { display: inline-flex; align-items: center; background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius-pill); padding: 2px; }
+.f-tab2 { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 13px; border-radius: var(--radius-pill); font-size: 12.5px; font-weight: 500; color: var(--color-text-secondary); background: transparent; border: none; cursor: pointer; white-space: nowrap; }
+.f-tab2.on { background: var(--color-primary); color: #fff; font-weight: 600; }
+/* 全部子项目下拉 */
+.f-proddd-wrap { position: relative; margin-left: auto; flex: 0 0 auto; }
+.prod { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--color-border-strong); background: var(--color-surface); color: var(--color-text); font-size: 12.5px; cursor: pointer; user-select: none; max-width: 200px; }
+.prod:hover { border-color: var(--color-primary); }
+.prod .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prod .chev { font-size: 15px; opacity: .7; transition: transform .15s; flex: 0 0 auto; }
+.f-proddd-wrap.open .prod .chev { transform: rotate(180deg); }
+.f-proddd { display: none; position: absolute; top: 36px; right: 0; min-width: 220px; max-height: 340px; overflow: auto; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-card-hover); padding: 5px; z-index: 60; }
+.f-proddd-wrap.open .f-proddd { display: block; }
+.f-proddd .grp, .f-sysdd-list .grp { padding: 8px 10px 4px; font-size: 11px; font-weight: 700; color: var(--color-text-tertiary); text-transform: none; }
+.f-proddd .opt, .f-sysdd-list .opt { display: flex; align-items: center; gap: 7px; padding: 8px 10px; border-radius: var(--radius); font-size: 13px; color: var(--color-text); cursor: pointer; }
+.f-proddd .opt:hover, .f-sysdd-list .opt:hover { background: var(--color-bg); }
+.f-proddd .opt.on, .f-sysdd-list .opt.on { color: var(--color-primary); font-weight: 600; background: var(--color-primary-light); }
+.f-proddd .opt.sub, .f-sysdd-list .opt.sub { padding-left: 20px; }
+.f-proddd-empty { padding: 14px 12px; font-size: 12px; color: var(--color-text-tertiary); line-height: 1.6; }
+/* 清单主体（内部滚动） */
+.f-list-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 12px 16px 20px; }
+.f-list-empty { text-align: center; padding: 44px 20px; color: var(--color-text-tertiary); }
+.f-list-empty .ti { font-size: 40px; opacity: .5; }
+.f-list-empty .t { font-size: 14px; font-weight: 500; color: var(--color-text-secondary); margin: 10px 0 4px; }
+.f-list-empty .d { font-size: 12.5px; }
+/* 按类型分组 */
+.f-type-grp { margin-bottom: 18px; }
+.f-type-grp:last-child { margin-bottom: 0; }
+.f-type-ghd { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.f-type-ghd .gname { font-size: 13px; font-weight: 700; color: var(--color-text); }
+.f-type-ghd .gcount { font-size: 11.5px; color: var(--color-text-tertiary); background: var(--color-bg); border-radius: var(--radius-pill); padding: 1px 8px; }
+/* 组内条目 .f-item */
+.f-item { border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface); padding: 11px 13px; margin-bottom: 8px; }
+.f-item:last-child { margin-bottom: 0; }
+/* 咨询记录可点击续聊（问题②）：hover 提示可交互 */
+.f-item.clickable { cursor: pointer; transition: border-color .12s, box-shadow .12s; }
+.f-item.clickable:hover { border-color: var(--ticket-consult, #7A5BA6); box-shadow: 0 1px 6px rgba(122, 91, 166, .12); }
+.f-item-top { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-bottom: 5px; }
+.f-item-title { font-size: 13.5px; font-weight: 600; color: var(--color-text); line-height: 1.45; margin-bottom: 5px; }
+.f-item-ctx { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 11.5px; color: var(--color-text-tertiary); }
+.f-item-ctx .sep { opacity: .4; }
+/* 计划交付（排期时间）醒目 chip：顶行状态标签之后，浅青底 + 强调色字（与 tag-warning/primary 等状态标签配色分明，一眼可见） */
+.f-sched-chip { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 8px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 600; color: var(--color-accent, #0E8F86); background: var(--color-accent-light, #E1F3F1); border: 1px solid var(--color-accent-border, #A8DAD3); white-space: nowrap; }
+.f-sched-chip .ti { font-size: 12px; }
+/* 类型描边标签（复用 theme.css --ticket-* 语义） */
+.f-tk { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 600; border: 1px solid; }
+.f-tk.req { color: var(--ticket-req, #2F6FB5); border-color: var(--ticket-req, #2F6FB5); background: rgba(47,111,181,.08); }
+.f-tk.bug { color: var(--ticket-bug, #C0392B); border-color: var(--ticket-bug, #C0392B); background: rgba(192,57,43,.08); }
+.f-tk.consult { color: var(--ticket-consult, #7A5BA6); border-color: var(--ticket-consult, #7A5BA6); background: rgba(122,91,166,.08); }
+
+/* ========== FS-03 · 系统视图（跨医院聚合 · 归档版本模型） ========== */
+/* 系统视图下拉（下拉选择·按产品分组·可搜索·显中文；2026-07-23 裁决：替代平铺系统 tab）——触发器在深色顶栏（参照 .f-mode），面板白底分组（复用 .f-proddd） */
+.f-sysdd { position: relative; flex: 0 0 auto; }
+.f-sysdd-cur { display: inline-flex; align-items: center; gap: 7px; height: 32px; max-width: 240px; padding: 0 12px; border-radius: var(--radius); border: 1px solid rgba(127,209,198,.5); background: rgba(127,209,198,.12); color: #BCECE5; font-size: 13px; font-weight: 500; cursor: pointer; user-select: none; }
+.f-sysdd-cur:hover { background: rgba(127,209,198,.2); }
+.f-sysdd-cur .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.f-sysdd-cur .chev { font-size: 15px; opacity: .85; transition: transform .15s; flex: 0 0 auto; }
+.f-sysdd.open .f-sysdd-cur .chev { transform: rotate(180deg); }
+/* 面板 position:fixed（逃离 #fHtabs 的 overflow 裁剪）；top/left 打开时按触发器位置由 JS 设 */
+.f-sysdd-panel { display: none; position: fixed; width: 260px; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-card-hover); padding: 6px; z-index: 200; }
+.f-sysdd.open .f-sysdd-panel { display: block; }
+.f-sysdd-search { position: relative; margin-bottom: 4px; }
+.f-sysdd-search input { width: 100%; height: 32px; box-sizing: border-box; padding: 0 10px 0 30px; border: 1px solid var(--color-border); border-radius: var(--radius); font-size: 13px; color: var(--color-text); background: var(--color-bg); outline: none; }
+.f-sysdd-search input:focus { border-color: #0E8F86; }
+.f-sysdd-search .ti { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); font-size: 15px; color: var(--color-text-tertiary); pointer-events: none; }
+.f-sysdd-list { max-height: 320px; overflow: auto; }
+/* 医院视图下拉面板内的「🔒 医院由运营端分配」提示（在白底面板内，覆盖深色栏用的 .f-htab-note 浅色，改灰字·顶边分隔） */
+.f-hospdd-lock { height: auto; padding: 8px 10px 4px; margin-top: 4px; border-top: 1px solid var(--color-border); color: var(--color-text-tertiary); font-size: 12px; }
+.f-hospdd-lock .ti { color: var(--color-text-tertiary); }
+/* 跨医院提示条 */
+.f-xnote { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: #0E6F68; background: #E1F3F1; border: 1px solid #A8DAD3; border-radius: 9px; padding: 9px 12px; margin-bottom: 12px; line-height: 1.5; }
+.f-xnote b { color: #0B5F59; }
+.f-xnote .ti { font-size: 16px; flex: 0 0 auto; }
+/* 系统分组（组头系统名 + 条数） */
+.f-sys-grp { margin-bottom: 18px; }
+.f-sys-grp:last-child { margin-bottom: 0; }
+.f-sys-ghd { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.f-sys-ghd .ti { font-size: 15px; color: #0E8F86; }
+.f-sys-ghd .gname { font-size: 13px; font-weight: 700; color: var(--color-text); }
+.f-sys-ghd .gcount { font-size: 11.5px; color: var(--color-text-tertiary); background: var(--color-bg); border-radius: var(--radius-pill); padding: 1px 8px; }
+/* 系统视图条目额外显示医院（跨医院聚合，医院是重要上下文） */
+
+/* ---------- FS-05 · 实施端按批次视图（批次分组 + 更新包卡 + 改版本条 + 逐单验证）---------- */
+.f-batch-grp { border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface); margin-bottom: 14px; overflow: hidden; }
+.f-batch-hd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 11px 13px; background: var(--color-surface-alt); border-bottom: 1px solid var(--color-border); }
+.f-batch-hd .bname { font-size: 13.5px; font-weight: 700; color: var(--color-text); }
+.f-batch-hd .bid { font-size: 11.5px; color: var(--color-text-tertiary); font-family: var(--font-num, monospace); }
+.f-batch-hd .bpkg { font-size: 11.5px; color: var(--color-text-secondary); }
+.f-batch-hd .bsched { font-size: 11.5px; color: var(--color-text-secondary); }
+.f-batch-hd .bsched.none { color: var(--color-text-tertiary); }
+.f-batch-body { padding: 11px 13px; }
+/* 更新包卡（可下载态） */
+.f-pkg-card { border: 1px solid var(--color-primary-border, #C7D6E8); border-radius: var(--radius); background: var(--color-primary-light, #EEF4FB); padding: 11px 13px; margin-bottom: 12px; }
+.f-pkg-card .pk-t { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 700; color: var(--color-primary, #0F2744); margin-bottom: 4px; }
+.f-pkg-card .pk-meta { font-size: 11.5px; color: var(--color-text-secondary); margin-bottom: 6px; }
+.f-pkg-card .pk-note { font-size: 12px; color: var(--color-text-secondary); line-height: 1.5; margin-bottom: 8px; white-space: pre-wrap; }
+.f-dl-btn, .f-bump-btn, .f-verify-btn, .f-reject-btn { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 12px; border-radius: var(--radius-pill); font-size: 12px; font-weight: 600; cursor: pointer; border: 1px solid; background: transparent; transition: background .12s, color .12s, border-color .12s; }
+.f-dl-btn { color: #fff; background: var(--color-btn, #2F6FB5); border-color: var(--color-btn, #2F6FB5); }
+.f-dl-btn:hover { filter: brightness(1.06); }
+.f-dl-btn.done, .f-bump-btn.done { color: var(--color-success, #2E9E5B); background: var(--color-success-light, #E7F6EE); border-color: var(--color-success-border, #B7E3C9); cursor: default; }
+.f-dl-btn[disabled], .f-bump-btn[disabled], .f-verify-btn[disabled], .f-reject-btn[disabled] { opacity: .55; cursor: not-allowed; }
+/* 改版本条 */
+.f-bump-row { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; padding: 8px 10px; border: 1px dashed var(--color-border); border-radius: var(--radius); margin-bottom: 7px; font-size: 12px; }
+.f-bump-row .bp-site { font-weight: 600; color: var(--color-text); }
+.f-bump-row .bp-sub { color: var(--color-text-tertiary); }
+.f-bump-row .bp-ver { color: var(--color-text-secondary); }
+.f-bump-row .bp-ver b { color: var(--color-primary, #0F2744); }
+.f-bump-btn { color: var(--color-btn, #2F6FB5); border-color: var(--color-btn, #2F6FB5); margin-left: auto; }
+.f-bump-btn:hover { background: var(--color-primary-light, #EEF4FB); }
+/* 逐单验证按钮 */
+.f-item-verify { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
+.f-verify-btn { color: var(--color-success, #2E9E5B); border-color: var(--color-success-border, #B7E3C9); }
+.f-verify-btn:hover { background: var(--color-success-light, #E7F6EE); }
+.f-reject-btn { color: var(--color-danger, #C0392B); border-color: var(--color-danger-border, #E8B7B1); }
+.f-reject-btn:hover { background: var(--color-danger-light, #FBECEA); }
+
+/* ---------- FS-04 · 右侧 AI 对话区（f-right = 工具条 f-rtool + 对话流 f-chat-b + 输入 f-chat-f） ---------- */
+.f-right { background: var(--color-surface); }
+/* 工具条 f-rtool（含归档 chip #fCtx + 类型切换 f-toggle + 新对话 newc） */
+.f-rtool { flex: 0 0 auto; display: flex; align-items: center; gap: 9px; flex-wrap: wrap; padding: 10px 16px; border-bottom: 1px solid var(--color-border); background: var(--color-surface-alt); }
+/* 提交类型切换（分段控件；.on 高亮当前模式） */
+.f-toggle { display: inline-flex; background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius); padding: 2px; flex: 0 0 auto; }
+.f-toggle button { border: none; background: transparent; color: var(--color-text-secondary); font-size: 12.5px; font-weight: 600; padding: 6px 13px; border-radius: 6px; cursor: pointer; display: inline-flex; gap: 5px; align-items: center; white-space: nowrap; }
+.f-toggle button.on { background: var(--color-surface); box-shadow: 0 1px 2px rgba(15,39,68,.12); color: var(--color-primary); }
+.f-toggle button .ti { font-size: 15px; }
+/* 深入思考开关（仅咨询答疑模式显示；复用页面小控件风格：off 中性、on 高亮） */
+.f-deep { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--color-border); background: var(--color-bg); color: var(--color-text-secondary); border-radius: var(--radius); padding: 6px 12px; font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap; user-select: none; }
+.f-deep:hover { border-color: var(--color-primary-border); color: var(--color-primary); }
+.f-deep .ti { font-size: 15px; }
+.f-deep.on { border-color: var(--color-primary); background: var(--color-primary); color: #fff; box-shadow: 0 1px 3px rgba(15,39,68,.22); }
+.f-deep.on:hover { border-color: var(--color-primary); color: #fff; }
+.f-deep.on .ti { color: #fff; }
+.f-deep.hide { display: none; }
+/* 新对话 */
+.f-rtool .newc { margin-left: auto; border: 1px solid var(--color-primary-border); background: var(--color-primary-light); color: var(--color-primary); border-radius: var(--radius); padding: 6px 12px; font-size: 12.5px; font-weight: 600; cursor: pointer; display: inline-flex; gap: 5px; align-items: center; flex: 0 0 auto; user-select: none; white-space: nowrap; }
+.f-rtool .newc:hover { background: var(--color-primary); color: #fff; }
+.f-rtool .newc .ti { font-size: 14px; }
+/* 对话流气泡（我 / AI） */
+.f-chat-b { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 20px; background: var(--color-bg); }
+.f-msg { display: flex; gap: 10px; margin-bottom: 16px; max-width: 84%; }
+.f-msg:last-child { margin-bottom: 0; }
+.f-msg .av { width: 30px; height: 30px; border-radius: 8px; flex: 0 0 auto; display: grid; place-items: center; font-size: 11px; font-weight: 700; color: #fff; }
+.f-msg.ai .av { background: var(--color-primary); }
+.f-msg.me { margin-left: auto; flex-direction: row-reverse; }
+.f-msg.me .av { background: var(--color-text-tertiary); }
+.f-msg .bub { padding: 11px 15px; border-radius: 12px; font-size: 14px; line-height: 1.6; word-break: break-word; }
+.f-msg.ai .bub { background: var(--color-surface); border: 1px solid var(--color-border); color: var(--color-text); }
+.f-msg.me .bub { background: var(--color-primary); color: #fff; }
+.f-msg .bub code { background: var(--color-bg); padding: 1px 5px; border-radius: 4px; font-family: var(--font-num), monospace; font-size: 12.5px; }
+.f-msg.me .bub code { background: rgba(255,255,255,.18); color: #fff; }
+.f-msg .bub strong { font-weight: 700; }
+/* 受控 Markdown 块级元素（聊天气泡 + 经验库答复 + 答复内引用条目答案共用；紧凑分节·对齐藏青 token） */
+.f-msg .bub .md-p, .f-kb-answer .md-p, .f-kb-cite-item .a .md-p { margin: 0 0 .5em; }
+.f-msg .bub .md-p:last-child, .f-kb-answer .md-p:last-child, .f-kb-cite-item .a .md-p:last-child { margin-bottom: 0; }
+.f-msg .bub .md-h, .f-kb-answer .md-h, .f-kb-cite-item .a .md-h { font-weight: 700; line-height: 1.4; margin: .4em 0 .2em; }
+.f-msg .bub .md-h:first-child, .f-kb-answer .md-h:first-child, .f-kb-cite-item .a .md-h:first-child { margin-top: 0; }
+.f-msg .bub .md-h1, .f-kb-answer .md-h1, .f-kb-cite-item .a .md-h1 { font-size: 1.18em; }
+.f-msg .bub .md-h2, .f-kb-answer .md-h2, .f-kb-cite-item .a .md-h2 { font-size: 1.1em; }
+.f-msg .bub .md-h3, .f-kb-answer .md-h3, .f-kb-cite-item .a .md-h3 { font-size: 1.04em; }
+.f-msg .bub .md-h4, .f-msg .bub .md-h5, .f-msg .bub .md-h6,
+.f-kb-answer .md-h4, .f-kb-answer .md-h5, .f-kb-answer .md-h6,
+.f-kb-cite-item .a .md-h4, .f-kb-cite-item .a .md-h5, .f-kb-cite-item .a .md-h6 { font-size: 1em; }
+.f-msg .bub .md-ul, .f-msg .bub .md-ol, .f-kb-answer .md-ul, .f-kb-answer .md-ol, .f-kb-cite-item .a .md-ul, .f-kb-cite-item .a .md-ol { margin: .3em 0; padding-left: 1.4em; }
+.f-msg .bub .md-li, .f-kb-answer .md-li, .f-kb-cite-item .a .md-li { margin: .12em 0; line-height: 1.5; }
+/* SSE 流式光标（咨询逐字答复时闪烁） */
+.f-msg .bub.streaming::after { content: '▋'; display: inline; margin-left: 1px; color: var(--color-primary); animation: fBlink 1s steps(2, start) infinite; }
+.f-msg.me .bub.streaming::after { color: #fff; }
+@keyframes fBlink { to { visibility: hidden; } }
+/* 「正在思考中…」等待期动效（AI 气泡在收到首个 token 前显示三点跳动 + 文字；首个 o.v 到达/done/停止/错误即清除，转正常逐字渲染） */
+.f-thinking { display: inline-flex; align-items: center; gap: 8px; color: var(--color-text-secondary); font-size: 13.5px; }
+.f-thinking .txt { user-select: none; }
+.f-thinking .dots { display: inline-flex; gap: 4px; }
+.f-thinking .dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--color-primary); display: inline-block; animation: fThink 1.2s ease-in-out infinite; }
+.f-thinking .dots i:nth-child(2) { animation-delay: .18s; }
+.f-thinking .dots i:nth-child(3) { animation-delay: .36s; }
+@keyframes fThink { 0%, 60%, 100% { transform: translateY(0); opacity: .45; } 30% { transform: translateY(-4px); opacity: 1; } }
+/* 思考态气泡：隐藏流式光标（否则光标 + 三点并存显乱）；有内容后清 .thinking，光标/内容正常 */
+.f-msg .bub.thinking.streaming::after { content: none; }
+/* FS-06 · 答复内「📚 参考经验库」引用区（consult 命中经验库时，答复气泡下方展示所引条目，默认折叠·点开看真实问→答） */
+.f-kb-cite { margin-top: 8px; border: 1px solid var(--color-border); background: var(--color-surface-alt); border-radius: 10px; font-size: 12.5px; overflow: hidden; }
+.f-kb-cite-hd { display: flex; align-items: center; gap: 6px; padding: 8px 12px; cursor: pointer; color: var(--color-text-secondary); font-weight: 600; user-select: none; }
+.f-kb-cite-hd:hover { background: var(--color-bg); }
+.f-kb-cite-hd .ti { font-size: 15px; color: var(--color-primary); flex: 0 0 auto; }
+.f-kb-cite-hd .chev { margin-left: auto; font-size: 15px; color: var(--color-text-tertiary); transition: transform .15s; flex: 0 0 auto; }
+.f-kb-cite.open .f-kb-cite-hd .chev { transform: rotate(90deg); }
+.f-kb-cite-body { display: none; padding: 2px 12px 10px; }
+.f-kb-cite.open .f-kb-cite-body { display: block; }
+.f-kb-cite-item { border-top: 1px dashed var(--color-border); padding: 9px 0 3px; }
+.f-kb-cite-item:first-child { border-top: none; padding-top: 6px; }
+.f-kb-cite-item .q { display: flex; align-items: flex-start; gap: 6px; font-weight: 600; color: var(--color-text); line-height: 1.5; }
+.f-kb-cite-item .q .num { flex: 0 0 auto; color: var(--color-primary); font-family: var(--font-num), monospace; }
+.f-kb-cite-item .meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 4px 18px; font-size: 11px; color: var(--color-text-tertiary); }
+.f-kb-cite-item .a { margin: 4px 0 2px 18px; border-left: 3px solid var(--color-primary); background: var(--color-primary-light); padding: 8px 11px; border-radius: 0 6px 6px 0; color: var(--color-text); line-height: 1.65; }
+.f-kb-cite-item .a code { background: var(--color-bg); padding: 1px 5px; border-radius: 4px; font-family: var(--font-num), monospace; font-size: 12px; }
+.f-kb-cite-item .a strong { font-weight: 700; }
+/* 归档结果卡片（建单成功 + AI 初判） */
+.f-arch { margin-top: 4px; border: 1px solid var(--color-primary-border); background: var(--color-primary-light); border-radius: 10px; padding: 12px 14px; font-size: 13px; line-height: 1.6; }
+.f-arch .hd { display: flex; align-items: center; gap: 6px; font-weight: 700; color: var(--color-primary); margin-bottom: 6px; }
+.f-arch .hd .ti { font-size: 16px; }
+.f-arch .rowk { display: flex; gap: 6px; flex-wrap: wrap; font-size: 12.5px; color: var(--color-text-secondary); }
+.f-arch .rowk b { color: var(--color-text); font-weight: 600; }
+.f-arch .anz { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--color-primary-border); font-size: 12.5px; color: var(--color-text-secondary); }
+.f-arch .anz .cat { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 700; background: var(--color-primary); color: #fff; margin-right: 5px; }
+/* 兜底：人工提交面板（AI 不可用时降级） */
+.f-fallback { margin-top: 6px; border: 1px solid var(--color-warning-border); background: var(--color-warning-light); border-radius: 10px; padding: 12px 14px; }
+.f-fallback .ft { font-size: 12.5px; color: var(--color-warning); font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+.f-fallback .frow { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.f-fallback .frow .input, .f-fallback .frow select.input { flex: 1; min-width: 120px; }
+.f-fallback .ferr { font-size: 12px; color: var(--color-danger); margin: 2px 0 8px; display: none; }
+.f-fallback .ferr.on { display: block; }
+/* 输入区 f-chat-f（缩略图预览条 + 文本框 + 图片/发送） */
+.f-chat-f { flex: 0 0 auto; display: flex; flex-direction: column; gap: 8px; padding: 12px 15px; border-top: 1px solid var(--color-border); background: var(--color-surface); }
+.f-chat-row { display: flex; gap: 10px; align-items: center; }
+.f-chat-f input.input { flex: 1; height: 44px; border: 1px solid var(--color-border); border-radius: 10px; padding: 0 14px; font-size: 14px; }
+.f-chat-f input.input:focus { border-color: var(--color-primary); outline: none; }
+/* 图片入口按钮（选图/粘贴触发） */
+.f-chat-f .f-imgbtn { flex: 0 0 auto; width: 44px; height: 44px; border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-bg); color: var(--color-text-secondary); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; font-size: 19px; }
+.f-chat-f .f-imgbtn:hover { border-color: var(--color-primary); color: var(--color-primary); }
+.f-chat-f .send { border: none; border-radius: 10px; background: var(--color-primary); color: #fff; font-weight: 700; padding: 0 20px; height: 44px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.f-chat-f .send:hover { background: var(--sidebar-bg); }
+.f-chat-f .send:disabled { opacity: .55; cursor: not-allowed; }
+/* 待发送截图缩略图预览条（输入框上方；每张带删除 ×，发送后清空） */
+.f-img-preview { display: none; flex-wrap: wrap; gap: 8px; }
+.f-img-preview.on { display: flex; }
+.f-img-preview .thumb { position: relative; width: 56px; height: 56px; border-radius: 8px; overflow: hidden; border: 1px solid var(--color-border); background: var(--color-bg); flex: 0 0 auto; }
+.f-img-preview .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.f-img-preview .thumb .rm { position: absolute; top: 1px; right: 1px; width: 17px; height: 17px; border-radius: 50%; border: none; background: rgba(0,0,0,.6); color: #fff; font-size: 11px; line-height: 1; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 0; }
+.f-img-preview .thumb .rm:hover { background: var(--color-danger); }
+/* 用户气泡内所附截图缩略图（发出去能看到自己贴了什么） */
+.f-msg .bub .f-bub-imgs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.f-msg .bub .f-bub-imgs a { display: block; width: 62px; height: 62px; border-radius: 7px; overflow: hidden; border: 1px solid rgba(255,255,255,.35); flex: 0 0 auto; }
+.f-msg.ai .bub .f-bub-imgs a { border-color: var(--color-border); }
+.f-msg .bub .f-bub-imgs img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* 空态占位（对话流内） */
+.f-chat-b .f-ws-placeholder { height: 100%; }
+
+/* ---------- 归档上下文 chip（右侧对话上下文条 · FS-03 版本模型） ---------- */
+.f-ctx { position: relative; display: inline-flex; align-items: center; flex-wrap: wrap; gap: 5px; font-size: 12.5px; color: var(--color-text); line-height: 1.5; }
+.f-ctx .ti { font-size: 15px; color: var(--color-primary); }
+.f-ctx b { font-weight: 700; }
+/* 系统视图：运营 tag 版本下拉触发器 + 弹菜单 */
+.f-ctx .f-ver { cursor: pointer; display: inline-flex; align-items: center; gap: 3px; background: var(--color-surface); border: 1px solid var(--color-primary-border); border-radius: 6px; padding: 1px 7px; margin-left: 1px; font-family: var(--font-num), monospace; }
+.f-ctx .f-ver:hover { background: var(--color-primary-light); }
+.f-ver-menu { display: none; position: absolute; top: 30px; left: 0; z-index: 40; min-width: 200px; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 9px; box-shadow: var(--shadow-card-hover); padding: 5px; }
+.f-ver-menu.open { display: block; }
+.f-ver-menu .vm-h { font-size: 11px; color: var(--color-text-tertiary); padding: 6px 9px 5px; line-height: 1.45; }
+.f-ver-menu .opt { display: flex; align-items: center; gap: 6px; padding: 7px 9px; border-radius: 6px; font-size: 12.5px; color: var(--color-text); cursor: pointer; font-family: var(--font-num), monospace; }
+.f-ver-menu .opt:hover { background: var(--color-bg); }
+.f-ver-menu .opt.on { color: var(--color-primary); font-weight: 700; }
+.f-ver-menu .opt .latest { font-size: 10px; background: #E7F4EC; color: #1E8E4E; border-radius: 4px; padding: 0 5px; font-weight: 700; }
+.f-ver-menu .opt .chk { margin-left: auto; font-size: 14px; opacity: 0; }
+.f-ver-menu .opt.on .chk { opacity: 1; }
+.f-ver-empty { font-family: var(--font-num), monospace; color: var(--color-text-tertiary); }
+/* 医院视图「全部子项目」态：版本明细 icon 按钮 + 弹出面板（2026-07-24 问题③；替代平铺全部子系统版本） */
+.f-verdd-btn { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; margin-left: 1px; padding: 0; border: 1px solid var(--color-primary-border); background: var(--color-surface); border-radius: 6px; color: var(--color-primary); cursor: pointer; flex: 0 0 auto; }
+.f-verdd-btn:hover { background: var(--color-primary-light); }
+.f-verdd-btn .ti { font-size: 14px; color: var(--color-primary); }
+/* 面板复用 .f-sysdd-panel（position:fixed 逃 .f-rtool overflow 裁剪，top/left 打开时 JS 按 icon 定位） */
+.f-verdd-panel { width: 260px; max-height: 320px; overflow: auto; z-index: 200; }
+/* 版本明细面板复用 .f-sysdd-panel（display:none），但 .open 加在面板自身而非父级 .f-sysdd → 须自带此规则才显示（问题①：早前漏了，点 icon 无反应） */
+.f-verdd-panel.open { display: block; }
+.f-verdd-grp { padding: 8px 10px 4px; font-size: 12px; font-weight: 700; color: var(--color-text); }
+.f-verdd-grp:not(:first-child) { border-top: 1px solid var(--color-border); margin-top: 4px; }
+.f-verdd-row { display: flex; align-items: baseline; gap: 10px; padding: 4px 10px 4px 18px; font-size: 12.5px; }
+.f-verdd-row .nm { flex: 1 1 auto; color: var(--color-text-secondary); min-width: 0; word-break: break-word; }
+.f-verdd-row .ver { flex: 0 0 auto; color: var(--color-text); font-family: var(--font-num), monospace; }
+.f-verdd-empty { padding: 6px 10px 6px 18px; font-size: 12px; color: var(--color-text-tertiary); }
+</style>
+</head>
+<body>
+
+<!-- 轻提示容器（FS-05：下载/改版本/验证 即点即执行 + toast；复用 theme.css .toast-container/.toast） -->
+<div class="toast-container" id="fToastBox"></div>
+
+<!-- ================= 登录门（gate） ================= -->
+<div class="f-login" id="fLogin">
+  <div class="f-login-card">
+    <div class="f-login-brand">
+      <div class="f-login-logo"><i class="ti ti-clipboard-check"></i></div>
+      <div>
+        <div class="t1">收件 · 实施端</div>
+        <div class="t2">现场提交 · 工作空间</div>
+      </div>
+    </div>
+    <div class="f-lg-sub">登录后进入你负责医院的工作空间。</div>
+    <div class="form-group">
+      <label for="loginUser">账号</label>
+      <input class="input" id="loginUser" autocomplete="username" placeholder="现场账号" />
+    </div>
+    <div class="form-group">
+      <label for="loginPwd">密码</label>
+      <div class="pw-field">
+        <input class="input" id="loginPwd" type="password" autocomplete="current-password" placeholder="密码" />
+        <button type="button" class="pw-eye" id="loginPwdEye" tabindex="-1" aria-label="显示密码"><i class="ti ti-eye"></i></button>
+      </div>
+    </div>
+    <div class="f-login-err" id="loginErr"></div>
+    <button class="btn btn-primary btn-lg f-login-btn" id="loginBtn"><i class="ti ti-login"></i> 登录</button>
+    <div class="f-login-note">
+      现场账号由运营后台开通并绑定你负责的医院；账号之间数据相互独立，你只能看到自己负责医院的数据。
+    </div>
+  </div>
+</div>
+
+<!-- ================= 工作空间外壳 ================= -->
+<div class="f-shell" id="fShell">
+  <!-- 顶栏 f-top -->
+  <header class="f-top" id="fTop">
+    <div class="f-brand">
+      <span class="logo"><i class="ti ti-clipboard-check"></i></span>
+      <span class="nm">收件 · 实施端</span>
+    </div>
+
+    <!-- 维度选择器（下拉） -->
+    <div class="f-mode" id="fMode">
+      <button class="f-mode-cur" id="fModeCur" type="button">
+        <i class="ti ti-building-hospital"></i>
+        <span id="fModeLabel">医院视图</span>
+        <i class="ti ti-chevron-down chev"></i>
+      </button>
+      <div class="f-mode-menu" id="fModeMenu">
+        <div class="f-mode-item active" data-m="hosp"><i class="ti ti-building-hospital"></i> 医院视图</div>
+        <div class="f-mode-item" data-m="sys"><i class="ti ti-stack-2"></i> 系统视图</div>
+      </div>
+    </div>
+
+    <!-- 竖分隔线 -->
+    <div class="f-topdiv"></div>
+
+    <!-- 实体 tab（平铺） -->
+    <div class="f-htabs" id="fHtabs"></div>
+
+    <!-- 右侧工具区 -->
+    <div class="f-tools">
+      <div class="f-user" style="position:relative">
+        <button class="f-tool-btn" id="fTodoBtn" type="button" title="待办"><i class="ti ti-bell"></i><span class="dot" id="fTodoDot"></span></button>
+        <div class="f-todo-pop" id="fTodoPop">
+          <div class="f-todo-hd">待办</div>
+          <div class="f-todo-empty" id="fTodoBody">待办数据由后续版本填充</div>
+        </div>
+      </div>
+      <button class="f-tool-btn" id="fKbBtn" type="button" title="经验库"><i class="ti ti-book-2"></i></button>
+      <div class="f-user" id="fUser">
+        <div class="f-user-trigger" id="fUserTrigger">
+          <span class="f-user-avatar" id="fUserAvatar">?</span>
+          <span class="f-user-meta">
+            <span class="un" id="fUserName">—</span>
+            <span class="ur" id="fUserRole">—</span>
+          </span>
+          <i class="ti ti-chevron-down" style="font-size:15px;opacity:.7"></i>
+        </div>
+        <div class="f-user-menu" id="fUserMenu">
+          <div class="um-item danger f-logout" id="fLogoutBtn"><i class="ti ti-logout"></i> 退出登录</div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- 工作空间容器（FS-02 提交清单 · 左；FS-04 AI 对话 · 右留占位） -->
+  <main class="f-workspace" id="fWorkspace">
+    <!-- 左：提交清单（FS-02） -->
+    <section class="f-submit-pane" id="fSubmitPane">
+      <!-- 子控件条 .f-ph：提交清单标题 + 按批次/按类型 + 全部子项目下拉 -->
+      <div class="f-ph">
+        <span class="f-ph-title">提交清单</span>
+        <div class="f-tabs2" id="fTabs2">
+          <button class="f-tab2" type="button" data-g="batch">按批次</button>
+          <button class="f-tab2 on" type="button" data-g="type">按类型</button>
+        </div>
+        <div class="f-proddd-wrap" id="fProdWrap">
+          <button class="prod" type="button" id="fProdCur">
+            <span class="lbl" id="fProdLabel">全部子项目</span>
+            <i class="ti ti-chevron-down chev"></i>
+          </button>
+          <div class="f-proddd" id="fProdDD"></div>
+        </div>
+      </div>
+      <!-- 清单主体（内部滚动）：fListType（按类型三组·医院视图） / fListBatch（P2 降级占位） / fListSystem（跨医院聚合·系统视图） -->
+      <div class="f-list-body" id="fListBody">
+        <div id="fListType"></div>
+        <div id="fListBatch" style="display:none"></div>
+        <div id="fListSystem" style="display:none"></div>
+      </div>
+    </section>
+    <!-- 左右可拖分隔条 -->
+    <div class="f-splitter" id="fSplitter" title="拖拽调整左右宽度"></div>
+    <!-- 右：AI 对话提交（FS-04）· 对话四步：判类 → 补要素 → 归档确认 → 建单/咨询 -->
+    <div class="f-ai-pane f-right" id="fAiPane" style="flex:1;min-height:0;display:flex;flex-direction:column">
+      <!-- 工具条 f-rtool：首枚归档上下文 chip #fCtx（FS-03 版本模型，只读消费）+ 提交类型切换 f-toggle + 新对话 newc -->
+      <div class="f-rtool" id="fActx">
+        <span class="f-ctx" id="fCtx"><i class="ti ti-dots"></i> —</span>
+        <div class="f-toggle" id="fToggle">
+          <button type="button" class="on" data-k="consult"><i class="ti ti-message-question"></i> 咨询答疑</button>
+          <button type="button" data-k="intake"><i class="ti ti-pencil-plus"></i> 提需求 / 报BUG</button>
+        </div>
+        <!-- 深入思考开关：仅咨询答疑模式显示；开启则 sendConsult 带 deep:true，后端检索源码更深入分析（提需求/报BUG 无此语义、隐藏） -->
+        <button type="button" class="f-deep" id="fDeep" title="开启后结合系统源码更深入分析成因/实现，稍慢；答复以开发确认为准"><i class="ti ti-bulb"></i> 深入思考</button>
+        <span class="newc" id="fNewC" title="清空当前对话，开新会话"><i class="ti ti-plus"></i> 新对话</span>
+      </div>
+      <!-- 对话流 f-chat-b（我 / AI 气泡）；空态占位 fWsScope 显示当前工作范围 -->
+      <div class="f-chat-b" id="fChatB">
+        <div class="f-ws-placeholder" id="fWsPlaceholder">
+          <i class="ti ti-message-chatbot"></i>
+          <div class="t">AI 对话提交</div>
+          <div class="d">用一句大白话说说想要的功能 / 遇到的问题，AI 帮你判类、补要素、归档建单</div>
+          <div class="f-ws-scope" id="fWsScope">—</div>
+        </div>
+      </div>
+      <!-- 输入区 f-chat-f：截图预览条 + 文本框 + 图片入口 + 发送按钮（回车发送；支持选图/粘贴，最多 6 张，每次发送后清空） -->
+      <div class="f-chat-f">
+        <div class="f-img-preview" id="fImgPreview"></div>
+        <div class="f-chat-row">
+          <input class="input" id="fChatInput" autocomplete="off" placeholder="问问这个系统怎么用、遇到的报错原因…回车发送（可贴/选截图）" maxlength="4000">
+          <button class="f-imgbtn" id="fImgBtn" type="button" title="添加截图（也可直接粘贴，最多 6 张）"><i class="ti ti-photo"></i></button>
+          <input type="file" id="fImgInput" accept="image/*" multiple hidden>
+          <button class="send" id="fChatSend" type="button"><i class="ti ti-send"></i> 发送</button>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- ================= 经验库检索面板（FS-07 · 抽屉，自实现 open/close） ================= -->
+<div class="drawer-mask" id="fKbMask"></div>
+<aside class="drawer f-kb-drawer" id="fKbDrawer" aria-hidden="true">
+  <div class="drawer-header">
+    <div>
+      <div class="drawer-title"><i class="ti ti-book-2"></i> 经验库</div>
+      <div class="drawer-subtitle">全公司经验库 · 提单前先自查已知解法</div>
+    </div>
+    <button class="btn btn-icon btn-sm btn-ghost" id="fKbClose" type="button" title="关闭"><i class="ti ti-x"></i></button>
+  </div>
+  <div class="drawer-body">
+    <div class="f-kb-search">
+      <input class="input" id="fKbInput" placeholder="输入关键词，回车或点搜索" autocomplete="off">
+      <button class="btn btn-primary" id="fKbSearchBtn" type="button"><i class="ti ti-search"></i> 搜索</button>
+    </div>
+    <div class="f-kb-hint">跨全公司所有产品检索问题 → 解法（只读）；结果按产品区分。</div>
+    <div class="f-kb-results" id="fKbResults"></div>
+    <div class="f-kb-hollow" id="fKbHollow">输入关键词后开始检索</div>
+  </div>
+</aside>
+
+<script>
+'use strict';
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var api = function (path, opts) {
+    return fetch(path, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts || {}))
+      .then(function (r) { return r.json().then(function (j) { return { status: r.status, body: j }; }); });
+  };
+
+  // ---------- 状态 ----------
+  var state = {
+    me: null, mode: 'hosp', sites: [], curSite: null, subsystems: [], projects: [],
+    // FS-02 提交清单
+    customers: [],          // 客户台账（/api/customers）：按医院名匹配已上产品
+    projMap: {},            // 产品 id → 产品对象（含 subsystems），构建子项目下拉用
+    groupBy: 'type',        // 'type'（P1 默认） / 'batch'（P2 降级）
+    curSub: '',             // 当前所选子系统（空=全部子项目）
+    subOptions: [],         // 当前医院子项目下拉数据：[{ product, subs:[{name,desc}] }]（value=英文 name/display=中文 desc 双键）
+    // FS-03 系统视图 + 归档版本模型
+    systems: [],            // 系统下拉数据（/api/field/systems）：[{ key, name, desc, project, productName }]（全部产品子系统全集）
+    curSys: null,           // 当前所选系统（子系统英文 name；null=全部系统），值/&system=/过滤均用它
+    sysOpen: false,         // 系统视图下拉面板展开态
+    sysQuery: '',           // 系统视图下拉搜索词（按中文 desc 或英文 name 过滤）
+    hospOpen: false,        // 医院视图下拉面板展开态（2026-07-23 裁决：平铺医院 tab → 下拉）
+    hospQuery: '',          // 医院视图下拉搜索词（按医院名过滤）
+    verMap: {},             // 产品 id → 运营 tag 版本数组（/api/versions?project= 结果缓存，最新在前）
+    ctxVer: null,           // 系统视图归档 chip 当前所选 tag 版本（未手动选=默认 versions[0]）
+    verOpen: false,         // tag 版本下拉展开态
+    verDetailOpen: false    // 医院视图「全部子项目」态·版本明细面板展开态（2026-07-24 问题③：icon 弹各子系统版本，替代平铺）
+  };
+
+  // ---------- 登录门 ----------
+  function showGate() { $('fLogin').classList.remove('done'); }
+  function hideGate() { $('fLogin').classList.add('done'); }
+  function setLoginErr(msg) {
+    var el = $('loginErr');
+    if (msg) { el.textContent = msg; el.classList.add('on'); }
+    else { el.textContent = ''; el.classList.remove('on'); }
+  }
+
+  function doLogin() {
+    var username = $('loginUser').value.trim();
+    var password = $('loginPwd').value;
+    if (!username || !password) { setLoginErr('请输入账号和密码'); return; }  // AC-5 前端拦截、不发请求
+    setLoginErr('');
+    $('loginBtn').disabled = true;
+    api('/api/login', { method: 'POST', body: JSON.stringify({ username: username, password: password }) })
+      .then(function (r) {
+        $('loginBtn').disabled = false;
+        if (r.body && r.body.ok) { enterWorkspace(r.body.me); }         // AC-3 成功：复用真实会话 Cookie
+        else { setLoginErr((r.body && r.body.error) || '登录失败'); }   // AC-4/6 内联错误、不弹 toast、不进入
+      })
+      .catch(function () { $('loginBtn').disabled = false; setLoginErr('网络错误，请重试'); });
+  }
+
+  function doLogout() {
+    api('/api/logout', { method: 'GET' }).catch(function () {}).then(function () {
+      // AC-8 清空工作空间状态并重新显示登录门
+      state = { me: null, mode: 'hosp', sites: [], curSite: null, subsystems: [], projects: [], customers: [], projMap: {}, groupBy: 'type', curSub: '', subOptions: [], systems: [], curSys: null, sysOpen: false, sysQuery: '', hospOpen: false, hospQuery: '', verMap: {}, ctxVer: null, verOpen: false, verDetailOpen: false };
+      var lt = $('fListType'), lb = $('fListBatch'), ls = $('fListSystem'); if (lt) lt.innerHTML = ''; if (lb) lb.innerHTML = ''; if (ls) ls.innerHTML = '';
+      $('loginUser').value = ''; $('loginPwd').value = ''; setLoginErr('');
+      $('fHtabs').innerHTML = ''; setTodoCount(0); closeAllMenus();
+      chat.bySystem = {}; chat.lastSystemKey = null;   // FS-04：退出清空各系统会话内存态
+      try { newConversation(); } catch (e) {}   // FS-04：退出清空对话 + 草稿
+      showGate();
+    });
+  }
+
+  // ---------- 恢复登录态（AC-7：刷新凭 Cookie + /api/me） ----------
+  function restore() {
+    api('/api/me', { method: 'GET' }).then(function (r) {
+      var me = r.body && r.body.me;
+      if (me && !me.link && (me.role === 'impl' || me.role === 'pm' || me.role === 'admin' || me.role === 'dev')) {
+        enterWorkspace(me);
+      } else {
+        showGate();  // AC-1 未登录 → 登录门覆盖整端
+      }
+    }).catch(function () { showGate(); });
+  }
+
+  // ---------- 进入工作空间 ----------
+  function enterWorkspace(me) {
+    state.me = me;
+    state.sites = Array.isArray(me.sites) ? me.sites.slice() : [];
+    state.projects = Array.isArray(me.projects) ? me.projects.slice() : [];
+    state.curSite = state.sites.length ? state.sites[0] : null;   // NH-4 默认当前所选（第一家）医院
+    state.groupBy = 'type'; state.curSub = '';
+    hideGate();
+    renderUser();
+    renderTabs();
+    loadTodo();
+    // FS-02：拉客户台账 + 产品目录（子项目下拉精确取数），再按当前医院加载提交清单
+    // FS-04：refData 就绪后恢复对话草稿（AC-23：刷新不丢当前会话输入/未提交内容）
+    // 注：onHospitalChange 会调 syncConversationToSystem，但此刻 lastSystemKey 尚为 null（onHospitalChange 里 curSub 已定）→ 首次同步把当前空会话存进初始桶并置基线键。
+    //   restoreDraft 恢复当前会话后，再把 lastSystemKey 对齐当前 systemKey（草稿恢复的会话属"当前桶"，下次切系统能正确存回该桶）。
+    loadRefData().then(function () {
+      onHospitalChange();
+      restoreDraft();
+      chat.lastSystemKey = systemKey();   // 登录后基线键 = 当前上下文（草稿恢复的会话归属此桶）
+    });
+  }
+
+  // FS-02：客户台账（已上产品）+ 产品目录（子系统），供子项目下拉「按产品分组」精确取数
+  // FS-03：系统 tab 数据（/api/field/systems，全部产品子系统全集）——不硬编码系统常量，一律后端取数（AC-2）
+  function loadRefData() {
+    var pCust = api('/api/customers', { method: 'GET' }).then(function (r) {
+      state.customers = (r.body && Array.isArray(r.body.customers)) ? r.body.customers : [];
+    }).catch(function () { state.customers = []; });
+    var pProj = api('/api/projects', { method: 'GET' }).then(function (r) {
+      var ps = (r.body && Array.isArray(r.body.projects)) ? r.body.projects : [];
+      state.projMap = {};
+      ps.forEach(function (p) { if (p && p.id) state.projMap[p.id] = p; });
+    }).catch(function () { state.projMap = {}; });
+    var pSys = api('/api/field/systems', { method: 'GET' }).then(function (r) {
+      state.systems = (r.body && Array.isArray(r.body.systems)) ? r.body.systems : [];   // [{key,name,project,productName}]，稳定排序
+    }).catch(function () { state.systems = []; });
+    return Promise.all([pCust, pProj, pSys]);
+  }
+
+  // ---------- 用户区 ----------
+  var ROLE_LABEL = { impl: '实施工程师', pm: '产品经理', admin: '管理员', dev: '管理员' };
+  function renderUser() {
+    var me = state.me || {};
+    var nm = me.name || me.username || '—';
+    $('fUserName').textContent = nm;
+    $('fUserRole').textContent = ROLE_LABEL[me.role] || me.role || '';
+    $('fUserAvatar').textContent = (nm || '?').slice(0, 1);
+  }
+
+  // ---------- 顶部维度切换 + 实体 tab ----------
+  function setMode(m) {
+    state.mode = (m === 'sys') ? 'sys' : 'hosp';
+    $('fModeLabel').textContent = state.mode === 'sys' ? '系统视图' : '医院视图';
+    var items = $('fModeMenu').querySelectorAll('.f-mode-item');
+    for (var i = 0; i < items.length; i++) {
+      items[i].classList.toggle('active', items[i].getAttribute('data-m') === state.mode);
+    }
+    if (state.mode === 'sys') {
+      // AC-1：切系统视图 → 默认「全部系统」；AC-15：换视图重置 ctxVer；AC-11：隐藏「按批次/按类型」+「全部子项目」下拉
+      state.curSys = null; state.ctxVer = null; state.verOpen = false;
+      intakeShowSystem(null);        // 隐藏医院视图控件 + 显示系统聚合容器
+      renderTabs();                  // 系统平铺 tab（全部系统 + 各子系统）
+      loadSystemView();              // 跨医院聚合清单
+    } else {
+      // AC-12：切回医院视图 → 恢复「按批次/按类型」+「全部子项目」下拉，回到按类型；FS-02 主场
+      intakeShowHospitalMode();
+      renderTabs();
+      onHospitalChange();   // 内部末尾已调 syncConversationToSystem
+    }
+    updateCtx();
+    syncConversationToSystem();   // FS-04：切视图（sys↔hosp，systemKey 前缀变）→ 保存旧段 + 恢复该上下文会话（幂等：hosp 分支已同步过则 no-op）
+  }
+
+  // AC-11：系统视图隐藏「按批次/按类型」切换（.f-tabs2）与「全部子项目」下拉（.prod）；只显示系统聚合容器
+  function intakeShowSystem(only) {
+    var tabs2 = $('fTabs2'), prodWrap = $('fProdWrap');
+    if (tabs2) tabs2.style.display = 'none';
+    if (prodWrap) prodWrap.style.display = 'none';
+    var lt = $('fListType'), lb = $('fListBatch'), ls = $('fListSystem');
+    if (lt) lt.style.display = 'none';
+    if (lb) lb.style.display = 'none';
+    if (ls) ls.style.display = 'block';
+  }
+  // AC-12：切回医院视图恢复控件（默认按类型）——与 FS-02 一致，本条只做对称恢复
+  function intakeShowHospitalMode() {
+    var tabs2 = $('fTabs2'), prodWrap = $('fProdWrap');
+    if (tabs2) tabs2.style.display = '';
+    if (prodWrap) prodWrap.style.display = '';
+    var ls = $('fListSystem'); if (ls) { ls.style.display = 'none'; ls.innerHTML = ''; }
+    state.groupBy = 'type';
+    var t = $('fTabs2').querySelectorAll('.f-tab2');
+    for (var i = 0; i < t.length; i++) t[i].classList.toggle('on', t[i].getAttribute('data-g') === 'type');
+  }
+
+  function renderTabs() {
+    var box = $('fHtabs');
+    box.innerHTML = '';
+    if (state.mode === 'sys') {
+      // 系统视图：不再平铺系统 tab（2026-07-23 裁决），改为深色顶栏上一枚下拉控件
+      //   （触发器显当前系统中文名 / 面板：搜索框 + 全部系统 + 按产品分组 · 显中文 desc · value 用英文 name 匹配 intakes.subsystem）。
+      box.appendChild(buildSysDropdown());
+    } else {
+      // 医院视图：不再平铺医院 tab（2026-07-23 裁决），改为深色顶栏上一枚下拉控件
+      //   （触发器显当前所选医院 / 面板：搜索框 + 医院列表[无分组、无「全部」聚合项，单选一家] + 底部灰「🔒 医院由运营端分配」提示）。
+      box.appendChild(buildHospDropdown());
+    }
+    updateScope();
+  }
+
+  // 子系统显示名：中文 desc 优先，回退英文 name（值/过滤/curSys/&system= 仍用 name 匹配 intakes.subsystem）
+  function sysLabel(nm){ if(!nm) return nm; for(var i=0;i<state.systems.length;i++){ if(state.systems[i] && state.systems[i].name===nm) return state.systems[i].desc || nm; } return nm; }
+
+  // ---------- 系统视图下拉（触发器 + 面板：搜索 + 全部系统 + 按产品分组）----------
+  // AC-1/2/3/4/5（2026-07-23 裁决）：以下拉替代平铺系统 tab；触发器显当前系统中文名，面板可搜索、按 productName 分组、显中文 desc、值用英文 name。
+  function buildSysDropdown() {
+    var wrap = document.createElement('div');
+    wrap.className = 'f-sysdd' + (state.sysOpen ? ' open' : '');
+    wrap.id = 'fSysDD';
+    // 触发器：显当前选择（默认「全部系统」，选了某系统显中文 sysLabel）
+    var cur = document.createElement('button');
+    cur.type = 'button';
+    cur.className = 'f-sysdd-cur';
+    cur.id = 'fSysCur';
+    cur.innerHTML = '<i class="ti ' + (state.curSys ? 'ti-git-fork' : 'ti-stack-2') + '"></i>' +
+      '<span class="lbl">' + escapeHtml(state.curSys ? sysLabel(state.curSys) : '全部系统') + '</span>' +
+      '<i class="ti ti-chevron-down chev"></i>';
+    cur.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var open = state.sysOpen;
+      closeAllMenus();
+      if (!open) { state.sysOpen = true; wrap.classList.add('open'); var pr = cur.getBoundingClientRect(); panel.style.top = (pr.bottom + 4) + 'px'; panel.style.left = pr.left + 'px'; var si = $('fSysSearch'); if (si) { try { si.focus(); } catch (er) {} } }
+    });
+    wrap.appendChild(cur);
+    // 面板：搜索框（即输即过滤）+ 列表（全部系统 + 按产品分组）
+    var panel = document.createElement('div');
+    panel.className = 'f-sysdd-panel';
+    var sb = document.createElement('div');
+    sb.className = 'f-sysdd-search';
+    sb.innerHTML = '<i class="ti ti-search"></i><input id="fSysSearch" type="text" placeholder="搜索系统（中文名 / 英文名）">';
+    panel.appendChild(sb);
+    var list = document.createElement('div');
+    list.className = 'f-sysdd-list';
+    list.id = 'fSysList';
+    panel.appendChild(list);
+    wrap.appendChild(panel);
+    // 点面板内不冒泡到 document（避免点搜索框/列表就关菜单）
+    panel.addEventListener('click', function (e) { e.stopPropagation(); });
+    // 搜索：即输即过滤（中文 desc 或英文 name 匹配）
+    sb.querySelector('input').addEventListener('input', function () { state.sysQuery = this.value || ''; renderSysList(); });
+    // 首次渲染列表（重建 tab 时 sysQuery 保留状态；关闭菜单时会清空）
+    setTimeout(renderSysList, 0);
+    return wrap;
+  }
+
+  // 渲染下拉列表：首项「全部系统」+ 按产品分组（组头 productName，组内子系统显中文 desc、data-sys=英文 name）；空 → 只「全部系统」+ 空提示
+  function renderSysList() {
+    var list = $('fSysList'); if (!list) return;
+    list.innerHTML = '';
+    var q = (state.sysQuery || '').trim().toLowerCase();
+    // 全部系统（恒首位，搜索时也常驻，便于清除选择）—— 复用 .f-proddd 的 .opt/.opt.on 样式
+    var all = document.createElement('div');
+    all.className = 'opt' + (state.curSys == null ? ' on' : '');
+    all.setAttribute('data-sys', '');
+    all.innerHTML = '<i class="ti ti-stack-2"></i> 全部系统';
+    all.addEventListener('click', function (e) { e.stopPropagation(); onSystemSelect(null); });
+    list.appendChild(all);
+    // 按产品分组（稳定排序：依 /api/field/systems 返回序）
+    var order = [], byProd = {}, seenSys = {};
+    for (var i = 0; i < state.systems.length; i++) {
+      var s0 = state.systems[i]; if (!s0) continue;
+      var nm = s0.name || ''; if (!nm || seenSys[nm]) continue; seenSys[nm] = 1;
+      var label = s0.desc || nm;                          // 显示中文优先
+      if (q && (label.toLowerCase().indexOf(q) < 0 && nm.toLowerCase().indexOf(q) < 0)) continue;   // 搜索按 中文 desc 或 英文 name
+      var pn = s0.productName || s0.project || '其它';
+      if (!byProd[pn]) { byProd[pn] = []; order.push(pn); }
+      byProd[pn].push({ name: nm, label: label });
+    }
+    var anySys = order.length > 0;
+    order.forEach(function (pn) {
+      var gh = document.createElement('div');
+      gh.className = 'grp';
+      gh.textContent = pn;
+      list.appendChild(gh);
+      byProd[pn].forEach(function (it) {
+        (function (sys, label) {
+          var o = document.createElement('div');
+          o.className = 'opt sub' + (state.curSys === sys ? ' on' : '');
+          o.setAttribute('data-sys', sys);
+          o.innerHTML = '<i class="ti ti-git-fork"></i> ' + escapeHtml(label);
+          o.addEventListener('click', function (e) { e.stopPropagation(); onSystemSelect(sys); });
+          list.appendChild(o);
+        })(it.name, it.label);
+      });
+    });
+    // 空提示：无任何系统（AC-2 降级）或搜索无命中
+    if (!anySys) {
+      var em = document.createElement('div');
+      em.className = 'f-proddd-empty';
+      em.textContent = state.systems.length ? '未找到匹配的系统' : '暂无系统';
+      list.appendChild(em);
+    }
+  }
+
+  // AC-5：选某系统 → 更新 curSys（值用 name）、关闭面板、更新触发器中文标签、重建左侧清单；AC-15：切系统时 ctxVer 重置
+  function onSystemSelect(sys) {
+    onSystemTab(sys);
+  }
+  function onSystemTab(sys) {
+    state.curSys = sys || null;
+    state.ctxVer = null; state.verOpen = false;
+    state.sysOpen = false; state.sysQuery = '';
+    renderTabs();
+    updateScope();
+    loadSystemView();     // 跨全部负责医院、只该系统的记录
+    updateCtx();          // 归档 chip 版本模型（sys 分支）
+    syncConversationToSystem();   // FS-04：切系统 → 保存旧段 + 恢复该系统会话
+  }
+
+  // ---------- 医院视图下拉（触发器 + 面板：搜索 + 医院列表 + 🔒 提示）----------
+  // AC-1/2/3/4（2026-07-23 裁决）：以下拉替代平铺医院 tab；触发器显当前所选医院，面板可搜索、单选一家（无分组、无「全部」聚合项）、底部保留「🔒 医院由运营端分配」提示。
+  // 复用系统视图那套 .f-sysdd* 样式（id/state 不同），面板 position:fixed 逃离 #fHtabs 的 overflow 裁剪。
+  function buildHospDropdown() {
+    var wrap = document.createElement('div');
+    wrap.className = 'f-sysdd' + (state.hospOpen ? ' open' : '');
+    wrap.id = 'fHospDD';
+    // 触发器：显当前所选医院；无选中但有 sites 显「选择医院」；无 sites 显「尚未分配医院」
+    var cur = document.createElement('button');
+    cur.type = 'button';
+    cur.className = 'f-sysdd-cur';
+    cur.id = 'fHospCur';
+    var curLabel = state.curSite ? state.curSite : (state.sites.length ? '选择医院' : '尚未分配医院');
+    cur.innerHTML = '<i class="ti ti-building-hospital"></i>' +
+      '<span class="lbl">' + escapeHtml(curLabel) + '</span>' +
+      '<i class="ti ti-chevron-down chev"></i>';
+    cur.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var open = state.hospOpen;
+      closeAllMenus();
+      if (!open) { state.hospOpen = true; wrap.classList.add('open'); var pr = cur.getBoundingClientRect(); panel.style.top = (pr.bottom + 4) + 'px'; panel.style.left = pr.left + 'px'; var hi = $('fHospSearch'); if (hi) { try { hi.focus(); } catch (er) {} } }
+    });
+    wrap.appendChild(cur);
+    // 面板：搜索框（即输即过滤）+ 医院列表 + 底部 🔒 提示
+    var panel = document.createElement('div');
+    panel.className = 'f-sysdd-panel';
+    var sb = document.createElement('div');
+    sb.className = 'f-sysdd-search';
+    sb.innerHTML = '<i class="ti ti-search"></i><input id="fHospSearch" type="text" placeholder="搜索医院">';
+    panel.appendChild(sb);
+    var list = document.createElement('div');
+    list.className = 'f-sysdd-list';
+    list.id = 'fHospList';
+    panel.appendChild(list);
+    // 底部灰「🔒 医院由运营端分配」提示（AC-18 语义保留，放面板内）
+    var lock = document.createElement('div');
+    lock.className = 'f-htab-note f-hospdd-lock';
+    lock.innerHTML = '<i class="ti ti-lock"></i> 医院由运营端分配';
+    panel.appendChild(lock);
+    wrap.appendChild(panel);
+    // 点面板内不冒泡到 document（避免点搜索框/列表就关菜单）
+    panel.addEventListener('click', function (e) { e.stopPropagation(); });
+    // 搜索：即输即过滤（按医院名匹配）
+    sb.querySelector('input').addEventListener('input', function () { state.hospQuery = this.value || ''; renderHospList(); });
+    // 首次渲染列表（重建 tab 时 hospQuery 保留状态；关闭菜单时会清空）
+    setTimeout(renderHospList, 0);
+    return wrap;
+  }
+
+  // 渲染医院列表：me.sites 平铺（无分组、无「全部」聚合项）；空 sites → 「尚未分配医院，请联系运营端」；搜索无命中 → 「未找到匹配的医院」
+  function renderHospList() {
+    var list = $('fHospList'); if (!list) return;
+    list.innerHTML = '';
+    var q = (state.hospQuery || '').trim().toLowerCase();
+    // 无分配医院（AC-4 语义）
+    if (!state.sites.length) {
+      var em0 = document.createElement('div');
+      em0.className = 'f-proddd-empty';
+      em0.textContent = '尚未分配医院，请联系运营端';
+      list.appendChild(em0);
+      return;
+    }
+    var any = false;
+    for (var i = 0; i < state.sites.length; i++) {
+      (function (site) {
+        if (q && String(site).toLowerCase().indexOf(q) < 0) return;   // 搜索按医院名过滤
+        any = true;
+        var o = document.createElement('div');
+        o.className = 'opt' + (state.curSite === site ? ' on' : '');
+        o.setAttribute('data-hosp', site);
+        o.innerHTML = '<i class="ti ti-building-hospital"></i> ' + escapeHtml(site);
+        o.addEventListener('click', function (e) { e.stopPropagation(); onHospSelect(site); });
+        list.appendChild(o);
+      })(state.sites[i]);
+    }
+    // 搜索无命中
+    if (!any) {
+      var em = document.createElement('div');
+      em.className = 'f-proddd-empty';
+      em.textContent = '未找到匹配的医院';
+      list.appendChild(em);
+    }
+  }
+
+  // AC-3：选某医院 → curSite=该医院、关闭面板、重建 tab + 左侧清单按该医院重新加载（即选即查，切医院逻辑同原 tab 点击一字不改）
+  function onHospSelect(site) {
+    state.curSite = site;
+    state.hospOpen = false; state.hospQuery = '';
+    renderTabs();
+    updateScope();
+    onHospitalChange();   // 内部末尾已调 syncConversationToSystem（切医院会重置 curSub → 键随之变）
+  }
+
+  function updateScope() {
+    var el = $('fWsScope');
+    if (!el) return;
+    if (state.mode === 'sys') {
+      el.textContent = '系统视图 · ' + (state.curSys ? sysLabel(state.curSys) : '全部系统');
+    } else {
+      el.textContent = state.curSite ? ('医院视图 · ' + state.curSite) : '医院视图 · 未分配医院';
+    }
+  }
+
+  // ---------- 待办（本条只挂载点，FS-05 填数据；此处只读 /api/notifications 计数示意） ----------
+  function loadTodo() {
+    api('/api/notifications', { method: 'GET' }).then(function (r) {
+      var n = (r.body && typeof r.body.count === 'number') ? r.body.count : 0;
+      setTodoCount(n);
+    }).catch(function () { setTodoCount(0); });
+  }
+  function setTodoCount(n) {
+    var dot = $('fTodoDot');
+    if (n > 0) { dot.textContent = n > 99 ? '99+' : String(n); dot.classList.add('on'); }
+    else { dot.textContent = ''; dot.classList.remove('on'); }
+  }
+
+  // ---------- 菜单开关 ----------
+  function closeAllMenus() {
+    $('fMode').classList.remove('open');
+    $('fUserMenu').classList.remove('open');
+    $('fTodoPop').classList.remove('open');
+    var pw = $('fProdWrap'); if (pw) pw.classList.remove('open');   // FS-02 子项目下拉
+    var vm = $('fVerMenu'); if (vm) vm.classList.remove('open');    // FS-03 归档 tag 版本下拉
+    state.verOpen = false;
+    var vd = $('fVerDetail'); if (vd) vd.classList.remove('open');  // 医院视图「全部子项目」态·版本明细面板
+    state.verDetailOpen = false;
+    // FS-03 系统视图下拉：关面板 + 清搜索词（下次打开从全量列表起）
+    var sd = $('fSysDD');
+    if (sd && (state.sysOpen || sd.classList.contains('open'))) {
+      state.sysOpen = false; state.sysQuery = '';
+      sd.classList.remove('open');
+      var sl = $('fSysList'); if (sl) renderSysList();   // 清掉搜索过滤态
+    }
+    // FS-02 医院视图下拉：关面板 + 清搜索词（2026-07-23 裁决：平铺医院 tab → 下拉）
+    var hd = $('fHospDD');
+    if (hd && (state.hospOpen || hd.classList.contains('open'))) {
+      state.hospOpen = false; state.hospQuery = '';
+      hd.classList.remove('open');
+      var hl = $('fHospList'); if (hl) renderHospList();   // 清掉搜索过滤态
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  // FS-05：轻提示 toast（复用 theme.css .toast-container/.toast；field.html 无 ui.js，自实现）。kind∈success/error/''
+  function showToast(msg, kind) {
+    var box = $('fToastBox'); if (!box) return;
+    var t = document.createElement('div');
+    t.className = 'toast' + (kind ? ' ' + kind : '');
+    var icon = kind === 'error' ? 'ti-alert-triangle' : (kind === 'success' ? 'ti-circle-check' : 'ti-info-circle');
+    t.innerHTML = '<i class="ti ' + icon + '"></i><span>' + escapeHtml(msg) + '</span>';
+    box.appendChild(t);
+    requestAnimationFrame(function () { t.classList.add('show'); });
+    setTimeout(function () { t.classList.remove('show'); setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 320); }, 2600);
+  }
+
+  // ========== FS-02 · 提交清单（医院视图左栏） ==========
+  var pane = function () { return $('fSubmitPane'); };
+
+  // 共享时间格式化（全局规范⑫：yyyy-MM-dd HH:mm）；兼容 ISO / 时间戳 / 'yyyy-MM-dd HH:mm'；空→「—」
+  function fmtTime(v) {
+    if (v == null || v === '') return '—';
+    var s = String(v);
+    // 已是 'yyyy-MM-dd HH:mm' 或更长（后端 nowStamp 即此格式）→ 截到分钟
+    var m = s.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+    if (m) return m[1] + '-' + m[2] + '-' + m[3] + ' ' + m[4] + ':' + m[5];
+    var mDate = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (mDate) return s;   // 纯日期无时间部分 → 只到 yyyy-MM-dd
+    var d = new Date(typeof v === 'number' ? v : s);
+    if (isNaN(d.getTime())) return s;
+    var p = function (n) { return String(n).padStart(2, '0'); };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+
+  var TYPE_META = {
+    requirement: { cls: 'req', label: '需求' },
+    bug: { cls: 'bug', label: 'BUG' },
+    consult: { cls: 'consult', label: '咨询' }
+  };
+
+  // 当前所选医院变化：仅医院视图有提交清单（系统视图 FS-03），重建子项目下拉 + 加载清单
+  function onHospitalChange() {
+    if (state.mode !== 'hosp') return;
+    state.curSub = '';                 // 换医院清空子系统筛选
+    buildSubOptions();                 // 按当前医院已上产品重建下拉
+    setProdLabel('全部子项目');
+    renderProdDD();
+    loadSubmissions();
+    updateCtx();                       // AC-18：医院视图归档 chip 现场版本跟随所选医院刷新
+    syncConversationToSystem();        // FS-04：切医院（curSite/curSub 变）→ 保存旧段 + 恢复该系统会话
+  }
+
+  // 精确取数（已裁决 2026-07-22）：当前所选医院 → customers.name 匹配 → products[].project → projById.subsystems[]，按产品分组。
+  //   子系统「双键语义」（同系统视图 sysLabel，见 lessons）：value=英文 name（过滤匹配 intakes.subsystem），display=中文 desc||name。
+  function buildSubOptions() {
+    state.subOptions = [];
+    var site = state.curSite;
+    if (!site) return;
+    var cust = null;
+    for (var i = 0; i < state.customers.length; i++) {
+      if ((state.customers[i].name || '').trim() === String(site).trim()) { cust = state.customers[i]; break; }
+    }
+    if (!cust || !Array.isArray(cust.products)) return;   // 台账无该医院 / 无 products → 空（下拉只有「全部子项目」）
+    var seenProd = {};
+    cust.products.forEach(function (pr) {
+      var pid = pr && pr.project; if (!pid || seenProd[pid]) return; seenProd[pid] = 1;
+      var proj = state.projMap[pid]; if (!proj) return;
+      // 产品目录里该产品定义的全部子系统（name→desc 映射源；desc 中文优先）
+      var catalog = (Array.isArray(proj.subsystems) ? proj.subsystems : []).map(function (s) {
+        var nm = typeof s === 'string' ? s : (s && s.name) || '';
+        var dc = typeof s === 'string' ? '' : (s && s.desc) || '';
+        return { name: nm, desc: dc || nm };
+      }).filter(function (o) { return o.name; });
+      var subs;
+      if (pr.subsystems && Array.isArray(pr.subsystems)) {
+        // 新形状：只列该医院实际维护的子系统，各自带 version（desc 从产品目录 catalog 查 name→desc）
+        var descOf = {}; catalog.forEach(function (o) { descOf[o.name] = o.desc; });
+        subs = pr.subsystems.map(function (ms) {
+          var nm = (ms && ms.name) || '';
+          return { name: nm, desc: descOf[nm] || nm, version: (ms && ms.version) || '' };
+        }).filter(function (o) { return o.name; });
+      } else {
+        // 旧形状（无 subsystems 字段）：兜底列该产品全部子系统，各 version 预填产品级 version（保持现状「全部子系统」行为）
+        var pv = pr.version || '';
+        subs = catalog.map(function (o) { return { name: o.name, desc: o.desc, version: pv }; });
+      }
+      if (subs.length) state.subOptions.push({ product: proj.name || pid, subs: subs });
+    });
+  }
+  // 英文子系统 name → 该医院维护的 version 映射（查当前 subOptions；无则空串）。供归档条/renderHospChip 取所选子系统版本。
+  function subVersion(nm) {
+    if (!nm) return '';
+    for (var i = 0; i < state.subOptions.length; i++) {
+      var subs = state.subOptions[i].subs || [];
+      for (var j = 0; j < subs.length; j++) { if (subs[j].name === nm) return subs[j].version || ''; }
+    }
+    return '';
+  }
+
+  // 英文子系统 name → 中文 desc 映射（查当前 subOptions；无则回退原名）。用于选中标签/空态显示中文。
+  function subLabel(nm) {
+    if (!nm) return nm;
+    for (var i = 0; i < state.subOptions.length; i++) {
+      var subs = state.subOptions[i].subs || [];
+      for (var j = 0; j < subs.length; j++) { if (subs[j].name === nm) return subs[j].desc || nm; }
+    }
+    return nm;
+  }
+
+  function setProdLabel(txt) { var el = $('fProdLabel'); if (el) el.textContent = txt; }
+
+  // 渲染子项目下拉：首项「全部子项目」+ 按产品分组 .grp + 组内 .opt.sub；台账空 → 空提示
+  function renderProdDD() {
+    var dd = $('fProdDD'); if (!dd) return;
+    dd.innerHTML = '';
+    var all = document.createElement('div');
+    all.className = 'opt' + (state.curSub === '' ? ' on' : '');
+    all.setAttribute('data-sub', '');
+    all.innerHTML = '<i class="ti ti-list"></i> 全部子项目';
+    all.addEventListener('click', function () { selectSub(''); });
+    dd.appendChild(all);
+    if (!state.subOptions.length) {
+      var em = document.createElement('div');
+      em.className = 'f-proddd-empty';
+      em.textContent = '运营端未维护该医院上线产品';
+      dd.appendChild(em);
+      return;
+    }
+    state.subOptions.forEach(function (g) {
+      var gh = document.createElement('div');
+      gh.className = 'grp';
+      gh.textContent = g.product;
+      dd.appendChild(gh);
+      g.subs.forEach(function (sub) {
+        var nm = sub.name, label = sub.desc || sub.name;   // data-sub=英文 name（过滤键不变）、显示中文 desc
+        var o = document.createElement('div');
+        o.className = 'opt sub' + (state.curSub === nm ? ' on' : '');
+        o.setAttribute('data-sub', nm);
+        o.innerHTML = '<i class="ti ti-box"></i> ' + escapeHtml(label);
+        o.addEventListener('click', function () { selectSub(nm); });   // 传英文 name（过滤值不变）
+        dd.appendChild(o);
+      });
+    });
+  }
+
+  // AC-7/8：选子系统即选即筛（无需点查询）；选「全部子项目」清除过滤。curSub 存英文 name（过滤键），标签显中文 desc。
+  function selectSub(sub) {
+    state.curSub = sub || '';
+    setProdLabel(state.curSub ? subLabel(state.curSub) : '全部子项目');
+    $('fProdWrap').classList.remove('open');
+    renderProdDD();
+    loadSubmissions();
+    updateCtx();                   // 问题①：切子系统 → 归档条随所选子系统刷新（医院视图归档条显所选子系统中文名）
+    syncConversationToSystem();   // FS-04：切子系统 → 保存旧段 + 恢复该系统会话
+  }
+
+  // AC-9/15：按批次/按类型切换（选择即刷新）。点「按批次」按钮就切过去、不回弹；批次未上线 → 空态提示（见 loadSubmissions 降级分支）
+  function setGroupBy(g) {
+    state.groupBy = (g === 'batch') ? 'batch' : 'type';
+    var tabs = $('fTabs2').querySelectorAll('.f-tab2');
+    for (var i = 0; i < tabs.length; i++) tabs[i].classList.toggle('on', tabs[i].getAttribute('data-g') === state.groupBy);
+    loadSubmissions();
+  }
+
+  // 加载提交清单（服务端按 sites+projects 收敛，忽略越权传参；越权 hospitalId 后端裁掉）
+  //   groupBy=type → /api/field/submissions（三桶）；groupBy=batch → /api/field/batches（FS-05 按批次视图·真实渲染）。
+  function loadSubmissions() {
+    if (state.mode !== 'hosp') return;
+    var listType = $('fListType'), listBatch = $('fListBatch');
+    // AC-4：无分配医院 → 空态占位，不发越权请求
+    if (!state.curSite) {
+      listBatch.style.display = 'none'; listType.style.display = 'block';
+      listType.innerHTML = emptyHtml('ti-building-hospital', '暂无分配医院', '请联系运营端为你分配负责医院');
+      return;
+    }
+    if (state.groupBy === 'batch') { loadBatchView(); return; }   // FS-05：按批次视图走独立数据源
+    var qs = '?dimension=hosp&groupBy=type' +
+      '&hospitalId=' + encodeURIComponent(state.curSite) +
+      (state.curSub ? '&subsystem=' + encodeURIComponent(state.curSub) : '');
+    listType.innerHTML = '<div class="f-list-empty"><div class="d">加载中…</div></div>';
+    listBatch.style.display = 'none'; listType.style.display = 'block';
+    api('/api/field/submissions' + qs, { method: 'GET' }).then(function (r) {
+      var b = r.body || {};
+      renderTypeView(b.groups || []);
+    }).catch(function () {
+      listType.innerHTML = emptyHtml('ti-alert-triangle', '加载失败', '请稍后重试');
+    });
+  }
+
+  // ========== FS-05 · 按批次视图（替换旧降级占位）：下载 / 一键改版本 / 逐单验证 ==========
+  //   数据源 /api/field/batches（当前账号相关批次 + 该账号 sites 范围内覆盖工单，服务端隔离）。
+  //   仍无相关批次 → 友好空态（保留旧占位口径，别报错）。
+  function loadBatchView() {
+    var listType = $('fListType'), listBatch = $('fListBatch');
+    listType.style.display = 'none'; listBatch.style.display = 'block';
+    listBatch.innerHTML = '<div class="f-list-empty"><div class="d">加载中…</div></div>';
+    var qs = state.curSite ? ('?hospitalId=' + encodeURIComponent(state.curSite)) : '';
+    api('/api/field/batches' + qs, { method: 'GET' }).then(function (r) {
+      var groups = (r.body && Array.isArray(r.body.groups)) ? r.body.groups : [];
+      renderBatchView(groups);
+    }).catch(function () {
+      listBatch.innerHTML = emptyHtml('ti-alert-triangle', '加载失败', '请稍后重试');
+    });
+  }
+
+  // 渲染按批次视图：每批一卡（批次号/产品/状态徽标/包版本）+（可下载）更新包卡 +（已下载）改版本条 + 组内逐单验证。
+  function renderBatchView(groups) {
+    var box = $('fListBatch');
+    box.innerHTML = '';
+    if (!groups.length) {
+      // 无相关批次 → 保留友好空态（不报错，AC-H 兜底口径）
+      box.innerHTML = emptyHtml('ti-calendar-stats', '暂无相关批次', '当前没有覆盖你负责医院的批次，运营端发布更新包后会出现在这里');
+      return;
+    }
+    groups.forEach(function (g) { box.appendChild(mkBatchGroup(g)); });
+  }
+
+  var BATCH_TAG = { '开发中': 'tag-primary', '可下载': 'tag-info', '已交付': 'tag-success' };
+  function mkBatchGroup(g) {
+    var wrap = document.createElement('div');
+    wrap.className = 'f-batch-grp';
+    wrap.setAttribute('data-batch', g.batchId);
+    var tag = BATCH_TAG[g.status] || 'tag-gray';
+    var hd = document.createElement('div');
+    hd.className = 'f-batch-hd';
+    hd.innerHTML = '<span class="bname">' + escapeHtml(g.productName || g.product || '') + '</span>' +
+      '<span class="bid">' + escapeHtml(g.batchId || '') + '</span>' +
+      '<span class="tag ' + tag + '">' + escapeHtml(g.status || '') + '</span>' +
+      (g.pkgVersion ? '<span class="bpkg">包版本 ' + escapeHtml(g.pkgVersion) + '</span>' : '') +
+      (g.scheduleDate ? '<span class="bsched">计划交付 ' + escapeHtml(g.scheduleDate) + '</span>' : '<span class="bsched none">未排期</span>');
+    wrap.appendChild(hd);
+    var body = document.createElement('div');
+    body.className = 'f-batch-body';
+    // 更新包卡（可下载/已交付态且有包版本）
+    if ((g.status === '可下载' || g.status === '已交付') && g.pkgVersion) body.appendChild(mkPkgCard(g));
+    // 逐子系统分组 + 逐单
+    (g.subGroups || []).forEach(function (sg) {
+      var gh = document.createElement('div');
+      gh.className = 'f-type-ghd';
+      gh.innerHTML = '<span class="gname">' + escapeHtml(sg.subsystemLabel || sg.subsystem || '（未指定子系统）') + '</span>' +
+        '<span class="gcount">' + (sg.tickets || []).length + '</span>';
+      body.appendChild(gh);
+      (sg.tickets || []).forEach(function (t) { body.appendChild(mkBatchItem(t, g)); });
+    });
+    wrap.appendChild(body);
+    return wrap;
+  }
+
+  // 更新包卡：产品·包版本·发布时间·更新说明 + 「下载更新包」按钮（已下载 → .done「已下载」）
+  function mkPkgCard(g) {
+    var card = document.createElement('div');
+    card.className = 'f-pkg-card';
+    card.innerHTML = '<div class="pk-t"><i class="ti ti-package"></i> ' + escapeHtml(g.productName || g.product) + ' · 更新包 ' + escapeHtml(g.pkgVersion || '') + '</div>' +
+      '<div class="pk-meta">发布时间：' + escapeHtml(fmtTime(g.releaseTime)) + '</div>' +
+      (g.releaseNote ? '<div class="pk-note">' + escapeHtml(g.releaseNote) + '</div>' : '');
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'f-dl-btn' + (g.downloadedByMe ? ' done' : '');
+    btn.innerHTML = g.downloadedByMe ? '<i class="ti ti-circle-check"></i> 已下载' : '<i class="ti ti-download"></i> 下载更新包';
+    if (!g.downloadedByMe) btn.addEventListener('click', function () { doBatchDownload(g, btn, card); });
+    card.appendChild(btn);
+    // 已下载过 → 直接渲染改版本条（重进/刷新后仍显）
+    if (g.downloadedByMe) renderBumpRows(card, g, null);
+    return card;
+  }
+
+  // 下载更新包：调 batch-download → downloads+1（幂等）+ 覆盖单转待验证 + 返回 bumps → 渲染改版本条 + 刷新列表状态
+  function doBatchDownload(g, btn, card) {
+    btn.disabled = true;
+    api('/api/batch-download', { method: 'POST', body: JSON.stringify({ batchId: g.batchId }) }).then(function (r) {
+      var b = r.body || {};
+      if (!b.ok) { btn.disabled = false; showToast(b.error || '下载失败', 'error'); return; }
+      btn.classList.add('done'); btn.innerHTML = '<i class="ti ti-circle-check"></i> 已下载';
+      g.downloadedByMe = true;
+      if (b.artifactUrl) { try { window.open(b.artifactUrl, '_blank', 'noopener'); } catch (e) {} showToast('更新包已开始下载', 'success'); }
+      else showToast('已记录下载，更新包地址待运营发布', 'success');
+      renderBumpRows(card, g, b.bumps || []);
+      // 覆盖单已转待验证 → 重新拉批次视图刷新逐单验证入口
+      loadBatchView();
+    }).catch(function () { btn.disabled = false; showToast('下载失败，请重试', 'error'); });
+  }
+
+  // 渲染改版本条：我负责的每家医院 × 子系统一条「<医院> <子系统> v_old→v_new」+「一键改版本」；bumps 为空则重进后按当前医院/覆盖医院兜底不渲染。
+  function renderBumpRows(card, g, bumps) {
+    // 去掉旧的改版本区（幂等：重复下载/刷新不重复插）
+    var old = card.querySelector('.f-bump-zone'); if (old) old.parentNode.removeChild(old);
+    if (!bumps || !bumps.length) return;   // 无 bumps（如重进无回传）→ 不渲染，避免臆造
+    var zone = document.createElement('div');
+    zone.className = 'f-bump-zone';
+    zone.style.marginTop = '10px';
+    bumps.forEach(function (bp) {
+      var row = document.createElement('div');
+      row.className = 'f-bump-row';
+      var subTxt = bp.subsystemLabel || bp.subsystem || '';
+      row.innerHTML = '<span class="bp-site">' + escapeHtml(bp.hospital || bp.site || '') + '</span>' +
+        (subTxt ? '<span class="bp-sub">' + escapeHtml(subTxt) + '</span>' : '') +
+        '<span class="bp-ver">' + escapeHtml(bp.fromVer || '—') + ' → <b>' + escapeHtml(bp.toVer || '—') + '</b></span>';
+      var bbtn = document.createElement('button');
+      bbtn.type = 'button';
+      bbtn.className = 'f-bump-btn';
+      bbtn.innerHTML = '<i class="ti ti-refresh"></i> 一键改版本';
+      bbtn.addEventListener('click', function () { doBumpVersion(bp, bbtn); });
+      row.appendChild(bbtn);
+      zone.appendChild(row);
+    });
+    card.appendChild(zone);
+  }
+
+  // 一键改版本：回写 customers.json 该医院该产品/子系统 v_old→v_new（幂等）；成功 → 按钮转「已改版本」
+  function doBumpVersion(bp, btn) {
+    btn.disabled = true;
+    var body = { site: bp.site || bp.hospital, project: bp.product, version: bp.toVer };
+    if (bp.subsystem) body.subsystem = bp.subsystem;
+    api('/api/customer-version', { method: 'POST', body: JSON.stringify(body) }).then(function (r) {
+      var b = r.body || {};
+      if (!b.ok) { btn.disabled = false; showToast(b.error || '改版本失败', 'error'); return; }
+      btn.classList.add('done'); btn.innerHTML = '<i class="ti ti-circle-check"></i> 已改版本';
+      // 同步刷新台账缓存（改版本后现场版本更新，归档条/renderHospChip 随之正确）
+      api('/api/customers', { method: 'GET' }).then(function (rr) { if (rr.body && Array.isArray(rr.body.customers)) { state.customers = rr.body.customers; buildSubOptions(); } });
+      showToast(b.changed ? ('已回写版本号 ' + (b.toVer || '')) : '已是最新版本', 'success');
+    }).catch(function () { btn.disabled = false; showToast('改版本失败，请重试', 'error'); });
+  }
+
+  // 批次视图逐单：类型标签 + 标题 + 状态 + 上下文（现场·时间）+（待验证态）「确认验证过」✅ /「反馈问题」按钮。
+  function mkBatchItem(t, g) {
+    var el = document.createElement('div');
+    el.className = 'f-item';
+    var tag = TYPE_META[t.type] || { cls: 'req', label: t.type };
+    var stTag = t.statusTag || 'tag-gray';
+    var stLabel = t.statusLabel || t.lifecycle || '';
+    el.innerHTML =
+      '<div class="f-item-top">' +
+        '<span class="f-tk ' + tag.cls + '">' + escapeHtml(tag.label) + '</span>' +
+        '<span class="tag ' + stTag + '">' + escapeHtml(stLabel) + '</span>' +
+      '</div>' +
+      '<div class="f-item-title">' + escapeHtml(t.title || '（无标题）') + '</div>' +
+      '<div class="f-item-ctx">' +
+        '<span>' + escapeHtml(t.site || '—') + '</span>' +
+      '</div>';
+    if (t.canVerify) {
+      var actions = document.createElement('div');
+      actions.className = 'f-item-verify';
+      var vb = document.createElement('button');
+      vb.type = 'button'; vb.className = 'f-verify-btn';
+      vb.innerHTML = '<i class="ti ti-circle-check"></i> 确认验证过';
+      vb.addEventListener('click', function () { doVerify(t, 'pass', null, vb); });
+      var rb = document.createElement('button');
+      rb.type = 'button'; rb.className = 'f-reject-btn';
+      rb.innerHTML = '<i class="ti ti-message-report"></i> 反馈问题';
+      rb.addEventListener('click', function () { promptReject(t); });
+      actions.appendChild(vb); actions.appendChild(rb);
+      el.appendChild(actions);
+    }
+    return el;
+  }
+
+  // 逐单验证 pass/fail：调 intake-verify → 该单转已关闭/已重开 + toast；成功后刷新按批次视图（状态/验证入口/闭环）
+  function doVerify(t, result, note, btn) {
+    if (btn) btn.disabled = true;
+    var body = { project: t.project, id: t.id, result: result };
+    if (note) body.note = note;
+    api('/api/intake-verify', { method: 'POST', body: JSON.stringify(body) }).then(function (r) {
+      var b = r.body || {};
+      if (!b.ok) { if (btn) btn.disabled = false; showToast(b.error || '操作失败', 'error'); return; }
+      if (result === 'pass') showToast(b.batchDelivered ? '已验证过·该批次已交付' : '已确认现场验证过', 'success');
+      else showToast('已反馈打回，工单重新开启', 'success');
+      loadBatchView();   // 刷新：验证过的单移出待验证 / 组头随闭环更新
+    }).catch(function () { if (btn) btn.disabled = false; showToast('操作失败，请重试', 'error'); });
+  }
+
+  // 反馈问题：弹输入 note（field.html 无 ui.js prompt，用就地 AI 气泡引导过重——此处用轻量 window.prompt 承载反馈说明；空/取消不提交）
+  function promptReject(t) {
+    var note = window.prompt('请填写验证不通过的问题说明（将打回工单、通知运营/开发处理）：', '');
+    if (note == null) return;                 // 取消
+    note = String(note).trim();
+    if (!note) { showToast('请填写反馈说明', 'error'); return; }
+    doVerify(t, 'fail', note, null);
+  }
+
+  function emptyHtml(icon, title, desc) {
+    return '<div class="f-list-empty"><i class="ti ' + icon + '"></i>' +
+      '<div class="t">' + escapeHtml(title) + '</div>' +
+      '<div class="d">' + escapeHtml(desc) + '</div></div>';
+  }
+
+  // AC-10/11/12：按类型三组渲染（空组不渲染）
+  function renderTypeView(groups) {
+    var box = $('fListType');
+    var listBatch = $('fListBatch');
+    listBatch.style.display = 'none'; box.style.display = 'block';
+    box.innerHTML = '';
+    // 空态（该医院无记录 / 筛选后为空）
+    var total = 0;
+    groups.forEach(function (g) { total += (g.items || []).length; });
+    if (!total) {
+      var em = document.createElement('div');
+      em.innerHTML = emptyHtml('ti-inbox', '暂无提交记录', state.curSub ? ('「' + subLabel(state.curSub) + '」子项目下暂无记录') : '该医院还没有提交记录');
+      box.appendChild(em);
+      return;
+    }
+    // 组顺序稳定：需求 / BUG / 咨询
+    var order = ['requirement', 'bug', 'consult'];
+    order.forEach(function (key) {
+      var g = null;
+      for (var i = 0; i < groups.length; i++) { if (groups[i].key === key) { g = groups[i]; break; } }
+      if (!g || !(g.items || []).length) return;   // AC-12：空组不渲染
+      box.appendChild(mkTypeGroup(g));
+    });
+  }
+
+  function mkTypeGroup(g) {
+    var meta = TYPE_META[g.key] || { cls: 'req', label: g.label || g.key };
+    var wrap = document.createElement('div');
+    wrap.className = 'f-type-grp';
+    wrap.setAttribute('data-key', g.key);
+    var hd = document.createElement('div');
+    hd.className = 'f-type-ghd';
+    hd.innerHTML = '<span class="gname">' + escapeHtml(g.label || meta.label) + '</span>' +
+      '<span class="gcount">' + (g.count != null ? g.count : (g.items || []).length) + '</span>';
+    wrap.appendChild(hd);
+    (g.items || []).forEach(function (it) { wrap.appendChild(mkItem(it, meta)); });
+    return wrap;
+  }
+
+  // AC-11：类型标签 + 标题 + 状态标签 + 上下文「子系统 · 医院」+ 时间 yyyy-MM-dd HH:mm
+  //   点击「咨询（consult）」记录 → 恢复该会话进右侧对话区、可续问（reopenConsult，同 convId 续存不建重单）。
+  //   需求/BUG 本轮不绑点击（避免续聊建重单风险，后续范畴）。
+  function mkItem(it, meta) {
+    var el = document.createElement('div');
+    el.className = 'f-item' + (isReopenable(it) ? ' clickable' : '');
+    var tag = TYPE_META[it.type] || meta || { cls: 'req', label: it.type };
+    var stTag = it.statusTag || 'tag-gray';
+    var stLabel = it.statusLabel || it.lifecycle || '';
+    var sub = it.subsystem || '—';
+    var site = it.site || '—';
+    var time = fmtTime(it.updatedAt || it.submittedAt);
+    // 归批工单带批次排期 → 顶行加醒目 chip「计划交付 <date>」（纯 yyyy-MM-dd）；无排期不显。放在类型/状态标签之后。
+    var sched = (it.batchSchedule || '').trim();
+    el.innerHTML =
+      '<div class="f-item-top">' +
+        '<span class="f-tk ' + tag.cls + '">' + escapeHtml(tag.label) + '</span>' +
+        '<span class="tag ' + stTag + '">' + escapeHtml(stLabel) + '</span>' +
+        (sched ? '<span class="f-sched-chip"><i class="ti ti-calendar-event"></i> 计划交付 ' + escapeHtml(sched) + '</span>' : '') +
+      '</div>' +
+      '<div class="f-item-title">' + escapeHtml(it.title || '（无标题）') + '</div>' +
+      '<div class="f-item-ctx">' +
+        '<span>' + escapeHtml(sub) + '</span><span class="sep">·</span>' +
+        '<span>' + escapeHtml(site) + '</span><span class="sep">·</span>' +
+        '<span>' + escapeHtml(time) + '</span>' +
+      '</div>';
+    bindReopen(el, it);
+    return el;
+  }
+
+  // 点击某条提交记录能否恢复对话续聊：咨询（consult）恢复 consult 会话；需求/BUG（requirement/bug）恢复 intake 会话、续聊走 intake-reply（append 同单，不建重单）。
+  function isReopenable(it) { return it && (it.type === 'consult' || it.type === 'requirement' || it.type === 'bug') && it.project && it.id; }
+  // 给记录卡片绑定点击 → 按类型分派：consult→reopenConsult；requirement/bug→reopenIntake。mkItem/mkSysItem 两处共用（避免漏系统视图，见 lessons L-026）。
+  function bindReopen(el, it) {
+    if (!isReopenable(it)) return;
+    el.style.cursor = 'pointer';
+    el.addEventListener('click', function () { if (it.type === 'consult') reopenConsult(it); else reopenIntake(it); });
+  }
+
+  // 点击咨询记录 → 拉详情、把该会话恢复进对话区，可继续追问（consult 同 convId 续存，AC-18/22）。
+  //   续聊 project 锁到该 consult 的 project（chat.reopenProject），保证 append 到同一条 consult；不误建新记录。
+  function reopenConsult(it) {
+    if (!it || it.type !== 'consult' || !it.project || !it.id) return;
+    api('/api/intake-detail?project=' + encodeURIComponent(it.project) + '&id=' + encodeURIComponent(it.id), { method: 'GET' }).then(function (r) {
+      var item = (r.body && r.body.item) || null;
+      if (!item) return;
+      // 恢复会话：消息流 + convId + project + kind=consult
+      var msgs = Array.isArray(item.chat) ? item.chat.map(function (m) { return { role: (m.role === 'assistant' ? 'assistant' : 'user'), content: m.text || '' }; }).filter(function (m) { return m.content; }) : [];
+      chat.messages = msgs;
+      chat.convId = item.convId || item.id || '';        // consult 的 convId = 记录 id
+      chat.reopenProject = item.project || it.project;    // 续问归属锁定
+      chat.reopenSubsystem = item.subsystem || '';        // 续问保留原子系统（append 时 subsystem 不被清空 + 续聊不触发咨询必选拦截）
+      chat.savedId = '';                                  // consult 不建工单，不显归档卡
+      chat.analyzed = false; chat.lastQ = ''; chat.lastA = ''; chat.deep = false;   // reopen 续聊默认关深入思考（记录未存 deep 态；用户可再手动开）
+      // 最近一轮问答（供「沉淀经验库」入口）
+      for (var i = msgs.length - 1; i >= 0; i--) { if (!chat.lastA && msgs[i].role === 'assistant') chat.lastA = msgs[i].content; if (!chat.lastQ && msgs[i].role === 'user') chat.lastQ = msgs[i].content; }
+      setSubmitKind('consult');                           // 切到咨询答疑模式
+      // 清空对话流后逐条渲染进气泡（assistant 用 md()，user 纯文本转义——appendBubble 已按 who 区分：ai 走 md、me 走 md 但内容纯文本无 markdown）
+      var box = chatBox(); if (box) box.innerHTML = '';
+      msgs.forEach(function (m) { appendBubble(m.role === 'user' ? 'me' : 'ai', m.content); });
+      clearPendingImages();   // reopen 续聊 → 重置待附截图（输入态）
+      scrollChatBottom();
+      saveDraft();
+    }).catch(function () {});
+  }
+
+  // 点击 需求/BUG 记录 → 拉详情、把该工单沟通记录恢复进对话区，可继续补充。
+  //   安全续聊铁律（杜绝重单）：reopen 的工单 chat.savedId=工单 id + chat.reopenIntakeProject=工单 project；再发言走 intake-reply（append 到同一张单）而非 intake-chat（后者服务端无幂等、会再建单）。见 sendChat 分派。
+  function reopenIntake(it) {
+    if (!it || (it.type !== 'requirement' && it.type !== 'bug') || !it.project || !it.id) return;
+    api('/api/intake-detail?project=' + encodeURIComponent(it.project) + '&id=' + encodeURIComponent(it.id), { method: 'GET' }).then(function (r) {
+      var item = (r.body && r.body.item) || null;
+      if (!item) return;
+      // 恢复会话：把工单 chat（含 user/assistant/dev 多角色）转成气泡流。dev（开发回复）并入 assistant 侧展示。
+      var msgs = Array.isArray(item.chat) ? item.chat.map(function (m) { return { role: (m.role === 'user' ? 'user' : 'assistant'), content: m.text || '' }; }).filter(function (m) { return m.content; }) : [];
+      chat.messages = msgs;
+      chat.convId = '';                                   // intake 不用 convId（intake-reply 靠 project+id 定位）
+      chat.savedId = item.id || it.id;                    // ★ 标记为已建单（工单 id）：续聊走 intake-reply、不再建新单
+      chat.reopenIntakeProject = item.project || it.project; // ★ 锁定工单 project（intake-reply 据此 append 到同一张单）
+      chat.reopenProject = ''; chat.reopenSubsystem = ''; // 清 consult 续聊锁定（本次是 intake reopen，非 consult）
+      chat.analyzed = false; chat.lastQ = ''; chat.lastA = ''; chat.deep = false;
+      for (var i = msgs.length - 1; i >= 0; i--) { if (!chat.lastA && msgs[i].role === 'assistant') chat.lastA = msgs[i].content; if (!chat.lastQ && msgs[i].role === 'user') chat.lastQ = msgs[i].content; }
+      setSubmitKind('intake');                            // 切到提需求/报BUG 模式（intake）
+      var box = chatBox(); if (box) box.innerHTML = '';
+      msgs.forEach(function (m) { appendBubble(m.role === 'user' ? 'me' : 'ai', m.content); });
+      appendArchiveCard({ id: chat.savedId, type: item.type || it.type, site: item.site || '', subsystem: item.subsystem || '', version: item.version || '' });   // 显「已建单 <id>（<类型>）」归档卡片
+      clearPendingImages();
+      scrollChatBottom();
+      saveDraft();
+    }).catch(function () {});
+  }
+
+  // ========== FS-03 · 系统视图（跨医院聚合清单 + 归档版本模型） ==========
+
+  // AC-6~10：加载跨医院聚合清单（选某系统→跨全部负责医院、只该 subsystem；全部系统→各系统分组）。
+  //   数据源 = /api/field/submissions?dimension=sys（服务端按 me.sites 收敛越权数据；边界不信任前端传参）。
+  function loadSystemView() {
+    if (state.mode !== 'sys') return;
+    var box = $('fListSystem'); if (!box) return;
+    box.style.display = 'block';
+    box.innerHTML = '<div class="f-list-empty"><div class="d">加载中…</div></div>';
+    var qs = '?dimension=sys' + (state.curSys ? '&system=' + encodeURIComponent(state.curSys) : '');
+    api('/api/field/submissions' + qs, { method: 'GET' }).then(function (r) {
+      renderSystemView(((r.body || {}).groups) || []);
+    }).catch(function () {
+      box.innerHTML = emptyHtml('ti-alert-triangle', '加载失败', '请稍后重试');
+    });
+  }
+
+  // AC-7/8/9：顶部提示条 .f-xnote（两态文案）+ 各系统分组（组头系统名 + 条数）
+  function renderSystemView(groups) {
+    var box = $('fListSystem'); if (!box) return;
+    box.style.display = 'block';
+    box.innerHTML = '';
+    // 提示条（选某系统 / 全部系统）
+    var note = document.createElement('div');
+    note.className = 'f-xnote';
+    if (state.curSys) {
+      note.innerHTML = '<i class="ti ti-affiliate"></i> 跨你负责的<b>全部医院</b>，只看「<b>' + escapeHtml(sysLabel(state.curSys)) + '</b>」系统的提交记录';
+    } else {
+      note.innerHTML = '<i class="ti ti-affiliate"></i> 已忽略医院维度：聚合你负责的<b>全部医院</b>，按系统查看提交记录';
+    }
+    box.appendChild(note);
+    // 空态
+    var total = 0;
+    groups.forEach(function (g) { total += (g.items || []).length; });
+    if (!total) {
+      var em = document.createElement('div');
+      em.innerHTML = emptyHtml('ti-inbox', '暂无提交记录',
+        state.curSys ? ('「' + state.curSys + '」系统在你负责的医院暂无记录') : '你负责的医院暂无提交记录');
+      box.appendChild(em);
+      return;
+    }
+    // 各系统一分组（后端已按稳定顺序返回；选某系统时只有一组）
+    groups.forEach(function (g) { if ((g.items || []).length) box.appendChild(mkSysGroup(g)); });
+  }
+
+  function mkSysGroup(g) {
+    var wrap = document.createElement('div');
+    wrap.className = 'f-sys-grp';
+    wrap.setAttribute('data-sys', g.key);
+    var hd = document.createElement('div');
+    hd.className = 'f-sys-ghd';
+    hd.innerHTML = '<i class="ti ti-git-fork"></i>' +
+      '<span class="gname">' + escapeHtml(g.label || g.key) + '</span>' +
+      '<span class="gcount">' + (g.count != null ? g.count : (g.items || []).length) + '</span>';
+    wrap.appendChild(hd);
+    // 系统视图条目：跨医院聚合 → 上下文显示「医院 · 时间」（子系统即分组名，无需重复）
+    (g.items || []).forEach(function (it) { wrap.appendChild(mkSysItem(it)); });
+    return wrap;
+  }
+
+  function mkSysItem(it) {
+    var el = document.createElement('div');
+    // 问题②：系统视图记录同样可点击 reopen（镜像 mkItem：consult→reopenConsult、requirement/bug→reopenIntake；it 带 project+id+type，见 server mapItem 两维度复用）
+    el.className = 'f-item' + (isReopenable(it) ? ' clickable' : '');
+    var tag = TYPE_META[it.type] || { cls: 'req', label: it.type };
+    var stTag = it.statusTag || 'tag-gray';
+    var stLabel = it.statusLabel || it.lifecycle || '';
+    var site = it.site || '—';
+    var time = fmtTime(it.updatedAt || it.submittedAt);
+    // 归批工单带批次排期 → 顶行加同款醒目 chip「计划交付 <date>」（同 mkItem，仅非空才显）。
+    var sched = (it.batchSchedule || '').trim();
+    el.innerHTML =
+      '<div class="f-item-top">' +
+        '<span class="f-tk ' + tag.cls + '">' + escapeHtml(tag.label) + '</span>' +
+        '<span class="tag ' + stTag + '">' + escapeHtml(stLabel) + '</span>' +
+        (sched ? '<span class="f-sched-chip"><i class="ti ti-calendar-event"></i> 计划交付 ' + escapeHtml(sched) + '</span>' : '') +
+      '</div>' +
+      '<div class="f-item-title">' + escapeHtml(it.title || '（无标题）') + '</div>' +
+      '<div class="f-item-ctx">' +
+        '<span><i class="ti ti-building-hospital" style="font-size:12px"></i> ' + escapeHtml(site) + '</span><span class="sep">·</span>' +
+        '<span>' + escapeHtml(time) + '</span>' +
+      '</div>';
+    bindReopen(el, it);
+    return el;
+  }
+
+  // ---------- 归档版本模型（AC-13~21，两类务必区分） ----------
+  // SUB_PRODUCT 反查（NH-1）：含该子系统 name 的产品即其所属产品 → 定归档 chip 产品名 + tag 版本集
+  function productOfSystem(sysName) {
+    for (var i = 0; i < state.systems.length; i++) {
+      if (state.systems[i] && state.systems[i].name === sysName) return state.systems[i];   // {key,name,project,productName}
+    }
+    return null;
+  }
+
+  // 运营 tag 版本（/api/versions?project=），带缓存；拿到后回调重渲染 chip。空则占位不报错（AC-17）。
+  function ensureVersions(projId, cb) {
+    if (!projId) { cb([]); return; }
+    if (state.verMap[projId]) { cb(state.verMap[projId]); return; }
+    api('/api/versions?project=' + encodeURIComponent(projId), { method: 'GET' }).then(function (r) {
+      var vs = (r.body && Array.isArray(r.body.versions)) ? r.body.versions : [];   // 最新在前（后端已倒序）
+      state.verMap[projId] = vs;
+      cb(vs);
+    }).catch(function () { state.verMap[projId] = []; cb([]); });
+  }
+
+  // 归档上下文 chip：系统视图=运营 tag 版本下拉；医院视图=现场版本只读并列。两类不混用（AC-21）。
+  function updateCtx() {
+    var ctx = $('fCtx'); if (!ctx) return;
+    state.verOpen = false;
+    if (state.mode === 'sys') {
+      // AC-16：全部系统 → 退化文案，无具体版本下拉
+      if (!state.curSys) { ctx.innerHTML = '<i class="ti ti-stack-2"></i> 全部系统 · 各系统按运营版本'; return; }
+      // AC-13：📦 产品 · 子系统 · 版本▾（版本 = /api/versions?project=<产品id> · git tag）
+      var sys = productOfSystem(state.curSys);
+      var prodName = sys ? (sys.productName || sys.project) : '—';
+      var projId = sys ? sys.project : '';
+      // 先渲染无版本占位（异步拿 tag），拿到后再刷新（避免闪烁前先占位）
+      ensureVersions(projId, function (vers) {
+        if (state.mode !== 'sys' || state.curSys !== (sys ? sys.name : null)) return;   // 期间切了系统 → 丢弃
+        renderSysChip(ctx, prodName, sys ? sys.name : state.curSys, vers);
+      });
+    } else {
+      // AC-18/19/20：🏥 医院 · 现场版本：产品1 ver1 · 产品2 ver2 …（customers.json products[].version，只读、无下拉）
+      renderHospChip(ctx, state.curSite);
+    }
+  }
+
+  // 系统视图归档 chip（tag 版本下拉，最新在前 + 首项「最新」+ 选中打勾 + 头部提示）
+  function renderSysChip(ctx, prodName, sysName, vers) {
+    // AC-15：未手动选或所选已失效 → 默认取 versions[0]（最新）
+    if (!state.ctxVer || vers.indexOf(state.ctxVer) < 0) state.ctxVer = vers.length ? vers[0] : null;
+    var verHtml;
+    if (!vers.length) {
+      // AC-17：无 tag → 占位 —，无下拉，不报错
+      verHtml = '<span class="f-ver-empty" id="fVerEmpty">—</span>';
+    } else {
+      var opts = vers.map(function (v, i) {
+        return '<div class="opt' + (v === state.ctxVer ? ' on' : '') + '" data-v="' + escapeHtml(v) + '">' +
+          escapeHtml(v) + (i === 0 ? ' <span class="latest">最新</span>' : '') +
+          '<i class="ti ti-check chk"></i></div>';
+      }).join('');
+      verHtml = '<span class="f-ver" id="fVer">' + escapeHtml(state.ctxVer) +
+        ' <i class="ti ti-chevron-down" style="font-size:13px;opacity:.7"></i></span>' +
+        '<div class="f-ver-menu' + (state.verOpen ? ' open' : '') + '" id="fVerMenu">' +
+        '<div class="vm-h">运营维护版本(tag) · 提问基于此版本</div>' + opts + '</div>';
+    }
+    ctx.innerHTML = '<i class="ti ti-package"></i> <b>' + escapeHtml(prodName) + '</b> · ' +
+      escapeHtml(sysLabel(sysName)) + ' · ' + verHtml;   // 子系统显中文 desc（audit→审方，sysLabel=desc||name）
+    // 绑定：点版本触发器展开/收起；点某版本项选定
+    var trig = $('fVer');
+    if (trig) trig.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var menu = $('fVerMenu'); if (!menu) return;
+      var open = menu.classList.contains('open');
+      closeAllMenus();
+      if (!open) { menu.classList.add('open'); state.verOpen = true; }
+    });
+    ctx.querySelectorAll('.f-ver-menu [data-v]').forEach(function (o) {
+      o.addEventListener('click', function (e) {
+        e.stopPropagation();
+        state.ctxVer = o.getAttribute('data-v');   // AC-15：选定 → ctxVer 更新、chip 文案更新、下拉收起
+        updateCtx();
+      });
+    });
+  }
+
+  // 医院视图归档 chip（现场版本，只读 · AC-18/19/20）
+  //   ⚠️ 2026-07-24 问题②：归档条不再显示医院名（顶栏已有医院选择器，重复占位），也去前导医院图标 → 各分支直接起头。
+  //   两分支（2026-07-24 问题②/③）：
+  //   ① 选中具体子系统（state.curSub 非空）→ 「系统：<subLabel(curSub)> · 版本：<subVersion(curSub) 或 —>」，
+  //      不再挂产品级「现场版本」列（系统已选定，产品级版本列表冗余且逻辑不对）。版本取 subVersion（该医院该子系统维护的版本；旧形状兜底=产品级 version；空显「—」）。
+  //   ② 未选子系统（全部子项目，curSub 空）→ 「现场版本：<产品名(多产品『、』连接)>」+ 一枚 icon 按钮
+  //      （2026-07-24 问题③：早前把该医院所有子系统+版本平铺并列 → 又长又换行，观感乱。改成只显紧凑产品名摘要，
+  //       点 icon 弹「版本明细」面板逐产品列各子系统版本；数据源同 renderVerDetailRows/新旧形状兼容）。
+  function renderHospChip(ctx, site) {
+    // 2026-07-24 问题②：归档条不再重复显示医院名（顶栏已有医院选择器），也去前导医院图标 → 各分支直接从「现场版本：」/「系统：」起头。
+    //   site 仍用于数据取值（下方 customers 匹配、currentArchive.out.site、&subsystem 过滤一律不动），只是归档条不显示它。
+    if (!site) { ctx.innerHTML = '现场版本：未上线产品'; return; }
+    // 分支①：选中具体子系统 → 只显该子系统 + 其版本，去掉产品级现场版本列
+    if (state.curSub) {
+      var sv = subVersion(state.curSub);
+      ctx.innerHTML = '系统：' + escapeHtml(subLabel(state.curSub)) +
+        ' · 版本：<b>' + escapeHtml(sv || '—') + '</b>';
+      return;
+    }
+    // 分支②：未选子系统（全部子项目）→ 紧凑产品名摘要 + 版本明细 icon（不再平铺所有子系统版本）
+    var cust = null;
+    for (var i = 0; i < state.customers.length; i++) {
+      if ((state.customers[i].name || '').trim() === String(site).trim()) { cust = state.customers[i]; break; }
+    }
+    var hasProd = cust && Array.isArray(cust.products) && cust.products.length;
+    if (!hasProd) {
+      // AC-20：无 products → 「未上线产品」占位，不显 icon（问题②：去医院名，直接从「现场版本：」起头）
+      ctx.innerHTML = '现场版本：未上线产品';
+      return;
+    }
+    // 产品名摘要（多产品用『、』连接；仅产品名，不平铺子系统/版本）
+    var prodNames = cust.products.map(function (pr) {
+      var proj = state.projMap[pr.project];
+      return escapeHtml((proj && proj.name) || pr.project || '');
+    }).filter(Boolean).join('、');
+    // 紧凑摘要 + icon 按钮（title=查看各子系统版本）；点开由 buildVerDetailPanel 逻辑接管（问题②：去医院名，直接从「现场版本：」起头）
+    ctx.innerHTML = '现场版本：' + (prodNames || '—') +
+      ' <button type="button" class="f-verdd-btn" id="fVerDetailBtn" title="查看各子系统版本" aria-label="查看各子系统版本">' +
+      '<i class="ti ti-list-details"></i></button>' +
+      '<div class="f-verdd-panel f-sysdd-panel" id="fVerDetail"></div>';
+    // 绑定 icon 触发器：点开/收起版本明细面板（position:fixed 逃 .f-rtool overflow 裁剪）
+    var vbtn = $('fVerDetailBtn'), vpanel = $('fVerDetail');
+    if (vbtn && vpanel) {
+      vpanel.innerHTML = renderVerDetailRows(cust);
+      vpanel.addEventListener('click', function (e) { e.stopPropagation(); });
+      vbtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var open = state.verDetailOpen && vpanel.classList.contains('open');
+        closeAllMenus();
+        if (!open) {
+          state.verDetailOpen = true;
+          vpanel.classList.add('open');
+          var pr = vbtn.getBoundingClientRect();
+          vpanel.style.top = (pr.bottom + 4) + 'px';
+          // 面板宽 260，靠右对齐 icon 右边、避免溢出视口
+          var left = Math.max(8, pr.right - 260);
+          vpanel.style.left = left + 'px';
+        }
+      });
+    }
+  }
+
+  // 版本明细面板内容：逐产品 → 其各子系统 + 版本（新形状按子系统各自版本；旧形状兜底该产品全部子系统 @ 产品级 version）。
+  //   子系统中文名走 subLabel/产品目录 desc，版本等宽（--font-num）对齐；无任何子系统版本信息 → 占位提示。
+  function renderVerDetailRows(cust) {
+    var out = '';
+    (cust.products || []).forEach(function (pr) {
+      var proj = state.projMap[pr.project];
+      var pn = (proj && proj.name) || pr.project || '';
+      // 该产品目录定义的全部子系统（name→desc 映射 + 旧形状兜底列全部子系统）
+      var catalog = (proj && Array.isArray(proj.subsystems) ? proj.subsystems : []).map(function (s) {
+        var nm = typeof s === 'string' ? s : (s && s.name) || '';
+        var dc = typeof s === 'string' ? '' : (s && s.desc) || '';
+        return { name: nm, desc: dc || nm };
+      }).filter(function (o) { return o.name; });
+      var rows;
+      if (pr.subsystems && Array.isArray(pr.subsystems) && pr.subsystems.length) {
+        // 新形状：列该医院实际维护的子系统 + 各自版本（desc 从产品目录查 name→desc）
+        var descOf = {}; catalog.forEach(function (o) { descOf[o.name] = o.desc; });
+        rows = pr.subsystems.map(function (ms) {
+          var nm = (ms && ms.name) || '';
+          return { label: descOf[nm] || nm, version: (ms && ms.version) || '' };
+        }).filter(function (o) { return o.label; });
+      } else {
+        // 旧形状（或新形状无勾选）：兜底列该产品全部子系统 @ 产品级 version（与 buildSubOptions 一致）
+        var pv = pr.version || '';
+        rows = catalog.map(function (o) { return { label: o.desc, version: pv }; });
+      }
+      out += '<div class="f-verdd-grp">' + escapeHtml(pn) + '</div>';
+      if (rows.length) {
+        out += rows.map(function (r) {
+          return '<div class="f-verdd-row"><span class="nm">' + escapeHtml(r.label) +
+            '</span><span class="ver">' + escapeHtml(r.version || '—') + '</span></div>';
+        }).join('');
+      } else {
+        out += '<div class="f-verdd-empty">暂无子系统版本信息</div>';
+      }
+    });
+    return out || '<div class="f-verdd-empty">暂无子系统版本信息</div>';
+  }
+
+  // ========== FS-04 · AI 对话提交（判类 / 补要素 / 归档 → 建工单 / 咨询） ==========
+  // 对话四步：① 现场自然语言输入 → ② AI 判类型 + 追问补要素 → ③ 归档建议确认 → ④ 建单(intake-chat/intake-submit)/咨询(consult)
+  var chat = {
+    submitKind: 'consult',   // 'intake'（提需求/报BUG，走 intake-chat/intake-submit + analyze）| 'consult'（咨询答疑，走 consult SSE）；2026-07-23 裁决默认咨询答疑
+    messages: [],           // 会话历史 [{role:'user'|'assistant', content}]（传后端 + 恢复草稿）
+    savedId: '',            // 幂等：本会话已建工单 id（非空=已建单，不重复建 · AC-12/22）
+    convId: '',             // 咨询续问会话 id（同 convId 续存不新建 · AC-18/22）
+    analyzed: false,        // 是否已展示过 AI 初判（避免重复 analyze）
+    sending: false,         // 发送中（防并发/防重复）
+    lastQ: '', lastA: '',   // 最近一轮问答（供咨询「沉淀经验库」kb-from-consult）
+    reopenProject: '',      // 点击咨询记录续聊时锁定该 consult 的 project（保证续问 append 到同一条 consult：同 convId + 同 project）
+    reopenSubsystem: '',     // 续聊时锁定该 consult 的原子系统（续问 append 时不清空 subsystem；且续聊不触发咨询必选拦截）
+    reopenIntakeProject: '', // 点击 需求/BUG 记录 reopen 后锁定该工单的 project（续聊走 intake-reply append 到同一张单、绝不建重单；配合 savedId=工单 id）
+    deep: false,             // 「深入思考」开关（默认关=基于 spec+经验库；开=sendConsult 带 deep:true，后端检索源码更深入分析）；仅 consult 生效
+    // FS-04 · 每个"系统上下文"各记一段会话（会话内内存态；切系统时保存旧段 + 恢复新段，未聊过→空会话）
+    bySystem: {},           // 系统上下文键 systemKey() → 会话快照（切系统时存/取；纯内存态，不进任何端存储，刷新丢失可接受——已发咨询可点记录 reopen）
+    lastSystemKey: null      // 上一次同步时的系统上下文键（null=尚未建立基线；首次切换据它把当前会话存进旧桶）
+  };
+
+  // FS-04/FS-06 图片：待发送截图（本次输入态，data URL 数组，≤6）。每次发送后清空。
+  //   纯输入态：不进 per-system 会话快照、不进草稿端存储（避免大对象膨胀），发送后即弃。
+  var pendingImages = [];
+  var IMG_MAX = 6;           // 最多 6 张（对齐后端 b.images.slice(0,6) + MAX_BODY 30MB 上限）
+
+  // 当前"系统上下文"稳定键：医院视图=医院||子系统（curSite||curSub），系统视图='sys||'+子系统（curSys）。
+  //   尾部空串（「全部子项目」/「全部系统」）也是合法会话槽——那里只能发 intake 或空对话（consult 受必选守卫拦截）。
+  function systemKey() {
+    if (state.mode === 'sys') return 'sys||' + (state.curSys || '');
+    return (state.curSite || '') + '||' + (state.curSub || '');
+  }
+
+  // 把当前 chat 相关字段打成一份快照（覆盖会话全量：消息流 + 会话/提交态 + reopen 锁定 + 输入框值）。
+  function snapshotConversation() {
+    var input = $('fChatInput');
+    return {
+      messages: chat.messages.slice(),
+      submitKind: chat.submitKind,
+      convId: chat.convId,
+      savedId: chat.savedId,
+      analyzed: chat.analyzed,
+      lastQ: chat.lastQ,
+      lastA: chat.lastA,
+      reopenProject: chat.reopenProject || '',
+      reopenSubsystem: chat.reopenSubsystem || '',
+      reopenIntakeProject: chat.reopenIntakeProject || '',   // 随系统会话记录：切回 reopen 的工单仍锁 project，续聊仍走 intake-reply（不建重单）
+      deep: !!chat.deep,   // 「深入思考」设置随每个系统会话各记各的，切回恢复
+      input: input ? input.value : ''
+    };
+  }
+
+  // 从快照恢复一段会话到右侧对话区（清空对话流后逐条重渲染：user 走 me、assistant 走 ai，均经 md() 受控渲染）。
+  function restoreConversation(snap) {
+    chat.messages = Array.isArray(snap.messages) ? snap.messages.slice() : [];
+    chat.submitKind = (snap.submitKind === 'intake') ? 'intake' : 'consult';
+    chat.convId = snap.convId || '';
+    chat.savedId = snap.savedId || '';
+    chat.analyzed = !!snap.analyzed;
+    chat.lastQ = snap.lastQ || '';
+    chat.lastA = snap.lastA || '';
+    chat.reopenProject = snap.reopenProject || '';
+    chat.reopenSubsystem = snap.reopenSubsystem || '';
+    chat.reopenIntakeProject = snap.reopenIntakeProject || '';   // 恢复 reopen 的工单锁定 project（切回续聊仍走 intake-reply）
+    chat.deep = !!snap.deep;   // 恢复该系统会话的「深入思考」设置
+    chat.sending = false;
+    setSubmitKind(chat.submitKind);   // 同步类型切换器按钮态 + 输入框 placeholder + 深入思考开关显隐（内部会 syncDeep + saveDraft）
+    var box = chatBox();
+    if (box) {
+      box.innerHTML = '';
+      chat.messages.forEach(function (m) { appendBubble(m.role === 'user' ? 'me' : 'ai', m.content); });
+      if (chat.savedId) appendArchiveCard({ id: chat.savedId, type: '', site: '', subsystem: '', version: '' });
+      if (!chat.messages.length) {
+        // 该桶曾聊过但被清空（如新对话后又切走）→ 复用新对话占位
+        var ph = document.createElement('div'); ph.className = 'f-ws-placeholder'; ph.id = 'fWsPlaceholder';
+        ph.innerHTML = '<i class="ti ti-message-chatbot"></i>' +
+          '<div class="t">AI 对话提交</div>' +
+          '<div class="d">用一句大白话说说想要的功能 / 遇到的问题，AI 帮你判类、补要素、归档建单</div>' +
+          '<div class="f-ws-scope" id="fWsScope">—</div>';
+        box.appendChild(ph);
+      }
+    }
+    var input = $('fChatInput'); if (input) input.value = snap.input || '';
+    clearPendingImages();   // 切系统恢复会话 → 重置待附截图（图片是输入态，不随会话快照带走）
+    setSending(false);
+    updateScope();
+    saveDraft();
+  }
+
+  // 核心：切系统上下文时同步右侧对话（幂等——键没变即 no-op，故可在所有切换点末尾广撒调用，安全）。
+  //   ① 键没变 → 直接返回；② 有旧键 → 把"当前"会话快照存进旧桶（此刻 chat.messages 还是旧系统的，正确）；
+  //   ③ 更新 lastSystemKey；④ 新桶有快照 → restoreConversation；否则 → newConversation（该系统还没聊过 = 全新空会话）。
+  function syncConversationToSystem() {
+    var newKey = systemKey();
+    if (newKey === chat.lastSystemKey) return;
+    if (chat.lastSystemKey != null) chat.bySystem[chat.lastSystemKey] = snapshotConversation();
+    chat.lastSystemKey = newKey;
+    if (chat.bySystem[newKey]) restoreConversation(chat.bySystem[newKey]);
+    else newConversation();
+  }
+
+  // 当前归档上下文（project/subsystem/version/site）——来自 chip（FS-03 版本模型）+ 当前视图。site 服务端会再收敛到 sites。
+  function currentArchive() {
+    var out = { project: '', subsystem: '', version: '', site: '' };
+    // 续聊（点击了某条 consult 记录恢复会话）：project 锁到原 consult 的 project，保证 append 到同一条 consult（同 convId + 同 project）。
+    //   仅 consult 续聊生效（reopenProject 仅在 reopenConsult 里设、newConversation 清）；其余字段仍随当前视图上下文。
+    if (chat.reopenProject && chat.submitKind === 'consult') {
+      out.project = chat.reopenProject;
+      out.subsystem = chat.reopenSubsystem || '';   // 保留原 consult 的子系统：续问 append 时服务端 subsystem: sub 不被清空（修 reopen 续聊丢 subsystem 隐患）
+      out.site = state.curSite || (state.sites.length ? state.sites[0] : '');
+      out.version = state.ctxVer || '';
+      return out;
+    }
+    if (state.mode === 'sys') {
+      // 系统视图：产品=含该子系统的产品；子系统=curSys；版本=ctxVer（运营 tag）
+      var sys = state.curSys ? productOfSystem(state.curSys) : null;
+      if (sys) { out.project = sys.project || ''; out.subsystem = sys.name || ''; }
+      out.version = state.ctxVer || '';
+      out.site = state.curSite || (state.sites.length ? state.sites[0] : '');
+    } else {
+      // 医院视图：site=当前所选医院；产品/版本取该医院已上产品（选了子项目→取拥有该子系统的产品；否则取首个产品）
+      out.site = state.curSite || '';
+      var cust = null;
+      for (var i = 0; i < state.customers.length; i++) {
+        if ((state.customers[i].name || '').trim() === String(out.site).trim()) { cust = state.customers[i]; break; }
+      }
+      var prods = (cust && Array.isArray(cust.products)) ? cust.products : [];
+      var chosen = null;
+      if (state.curSub) {
+        // 选了子项目：找拥有该子系统 name 的产品
+        for (var j = 0; j < prods.length; j++) {
+          var pj = state.projMap[prods[j].project];
+          var subs = (pj && Array.isArray(pj.subsystems)) ? pj.subsystems : [];
+          var hit = subs.some(function (s) { return (typeof s === 'string' ? s : (s && s.name) || '') === state.curSub; });
+          if (hit) { chosen = prods[j]; break; }
+        }
+        out.subsystem = state.curSub;
+      }
+      if (!chosen && prods.length) chosen = prods[0];
+      if (chosen) { out.project = chosen.project || ''; }
+      // 版本：选了具体子系统 → 取该医院对该子系统维护的版本（subVersion，新形状按子系统查、旧形状兜底为产品级 version）；
+      //   未选（全部子项目）→ 回退产品级 version（旧形状），新形状无产品级 version 时空串。
+      if (state.curSub) out.version = subVersion(state.curSub);
+      else if (chosen) out.version = chosen.version || '';
+    }
+    return out;
+  }
+
+  // ---------- 对话流渲染 ----------
+  function chatBox() { return $('fChatB'); }
+  function clearPlaceholder() { var ph = $('fWsPlaceholder'); if (ph && ph.parentNode) ph.parentNode.removeChild(ph); }
+  function scrollChatBottom() { var b = chatBox(); if (b) b.scrollTop = b.scrollHeight; }
+
+  // 追加一条气泡（me/ai）；返回 .bub 节点（供流式增量更新）。streaming=true 加流式光标。
+  //   imgs（可选）= 该消息所附截图 data URL 数组（我方气泡显自己贴了什么；恢复草稿/会话时也回显）。
+  function appendBubble(who, text, streaming, imgs) {
+    clearPlaceholder();
+    var box = chatBox(); if (!box) return null;
+    var msg = document.createElement('div');
+    msg.className = 'f-msg ' + (who === 'me' ? 'me' : 'ai');
+    var av = document.createElement('div'); av.className = 'av';
+    av.textContent = who === 'me' ? ((state.me && (state.me.name || state.me.username) || '我').slice(0, 1)) : 'AI';
+    var bub = document.createElement('div'); bub.className = 'bub' + (streaming ? ' streaming' : '');
+    bub.innerHTML = md(text || '');
+    if (Array.isArray(imgs) && imgs.length) bub.appendChild(bubbleImgs(imgs));   // 气泡内附截图缩略图（点开原图）
+    msg.appendChild(av); msg.appendChild(bub);
+    box.appendChild(msg); scrollChatBottom();
+    return bub;
+  }
+  // 构造气泡内的截图缩略图区（点击在新标签看原图）；imgs = data URL 数组。
+  function bubbleImgs(imgs) {
+    var wrap = document.createElement('div'); wrap.className = 'f-bub-imgs';
+    imgs.forEach(function (du) {
+      var a = document.createElement('a'); a.href = du; a.target = '_blank'; a.rel = 'noopener';
+      var im = document.createElement('img'); im.src = du; im.loading = 'lazy';
+      a.appendChild(im); wrap.appendChild(a);
+    });
+    return wrap;
+  }
+
+  // ---------- 截图附件：选图 / 粘贴 / 压缩 / 预览 / 清空（本次输入态） ----------
+  // 把一批 File（选图或粘贴的图片）读成 data URL 加入 pendingImages（超 6 张提示；单张压缩防炸 MAX_BODY 30MB）。
+  function addImageFiles(files) {
+    var list = Array.prototype.slice.call(files || []).filter(function (f) { return f && /^image\//.test(f.type); });
+    if (!list.length) return;
+    var room = IMG_MAX - pendingImages.length;
+    if (room <= 0) { appendBubble('ai', '最多只能附 ' + IMG_MAX + ' 张截图，请先删掉几张再添加。'); return; }
+    if (list.length > room) { appendBubble('ai', '最多只能附 ' + IMG_MAX + ' 张截图，已保留前 ' + room + ' 张。'); list = list.slice(0, room); }
+    list.forEach(function (f) {
+      compressImage(f, function (du) { if (du && pendingImages.length < IMG_MAX) { pendingImages.push(du); renderImgPreview(); } });
+    });
+  }
+  // 压缩：缩到 ≤1600px 宽再 toDataURL('image/jpeg',0.85)（防单张过大炸 30MB 上限）；失败/无 canvas 回退原始 data URL。
+  function compressImage(file, cb) {
+    var fr = new FileReader();
+    fr.onload = function () {
+      var raw = fr.result;
+      try {
+        var img = new Image();
+        img.onload = function () {
+          try {
+            var MAXW = 1600, w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+            if (w > MAXW) { h = Math.round(h * MAXW / w); w = MAXW; }
+            var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+            var cx = cv.getContext('2d'); cx.drawImage(img, 0, 0, w, h);
+            var out = cv.toDataURL('image/jpeg', 0.85);
+            cb(out && out.length < raw.length ? out : raw);   // 压完更大就用原图（如小图/已是 jpeg）
+          } catch (e) { cb(raw); }
+        };
+        img.onerror = function () { cb(raw); };
+        img.src = raw;
+      } catch (e) { cb(raw); }
+    };
+    fr.onerror = function () { cb(null); };
+    fr.readAsDataURL(file);
+  }
+  // 渲染输入框上方缩略图预览（每张带删除 ×）；无图时隐藏预览条。
+  function renderImgPreview() {
+    var box = $('fImgPreview'); if (!box) return;
+    box.classList.toggle('on', pendingImages.length > 0);
+    box.innerHTML = '';
+    pendingImages.forEach(function (du, i) {
+      var t = document.createElement('div'); t.className = 'thumb';
+      var im = document.createElement('img'); im.src = du;
+      var rm = document.createElement('button'); rm.type = 'button'; rm.className = 'rm'; rm.textContent = '×'; rm.title = '删除';
+      rm.addEventListener('click', function () { pendingImages.splice(i, 1); renderImgPreview(); });
+      t.appendChild(im); t.appendChild(rm); box.appendChild(t);
+    });
+  }
+  // 清空待发送截图（每次发送后调；不落草稿/快照）。
+  function clearPendingImages() { pendingImages = []; renderImgPreview(); }
+
+  // 「正在思考中…」等待期动效：AI 气泡在收到首个 token 前显三点跳动 + 文字（consult 空气泡 + intake 等待期）。
+  //   on=true 挂动效（气泡加 .thinking，内容替为占位）；on=false 清动效（去 .thinking，清空占位 innerHTML 交回逐字/整体渲染）。幂等：重复调用安全。
+  function setThinking(bub, on) {
+    if (!bub) return;
+    if (on) {
+      if (bub._thinking) return;
+      bub.classList.add('thinking');
+      bub.innerHTML = '<span class="f-thinking"><span class="dots"><i></i><i></i><i></i></span><span class="txt">正在思考中…</span></span>';
+      bub._thinking = true;
+    } else {
+      if (!bub._thinking) return;
+      bub.classList.remove('thinking');
+      bub.innerHTML = '';   // 清占位；随后由调用方逐字/整体渲染真实内容
+      bub._thinking = false;
+    }
+  }
+
+  // 归档结果卡片（建单成功 + 可选 AI 初判 analysis）
+  function appendArchiveCard(info) {
+    clearPlaceholder();
+    var box = chatBox(); if (!box) return;
+    var wrap = document.createElement('div'); wrap.className = 'f-msg ai';
+    var av = document.createElement('div'); av.className = 'av'; av.innerHTML = '<i class="ti ti-check"></i>';
+    var card = document.createElement('div'); card.className = 'f-arch'; card.id = 'fArch-' + info.id;
+    var typeLabel = info.type === 'bug' ? 'BUG' : '需求';
+    var rows = '<div class="rowk"><span>已归档为工单 <b>' + escapeHtml(info.id) + '</b>（' + typeLabel + '）</span></div>' +
+      '<div class="rowk">' +
+        (info.site ? '<span>现场：<b>' + escapeHtml(info.site) + '</b></span>' : '') +
+        (info.subsystem ? '<span>· 子系统：<b>' + escapeHtml(info.subsystem) + '</b></span>' : '') +
+        (info.version ? '<span>· 版本：<b>' + escapeHtml(info.version) + '</b></span>' : '') +
+      '</div>';
+    card.innerHTML = '<div class="hd"><i class="ti ti-clipboard-check"></i> 已建单，进入运营端工单流</div>' + rows +
+      '<div class="anz" id="fAnz-' + info.id + '" style="display:none"></div>';
+    var msg = document.createElement('div'); msg.className = 'f-msg ai';
+    msg.appendChild(av); msg.appendChild(card);
+    box.appendChild(msg); scrollChatBottom();
+  }
+
+  // AI 版本感知初判（intake-analyze，建单后即时展示 · NH-3）。未配模型/越权/失败 → 静默不展示（不阻断）。
+  function showAnalyze(archive, savedId) {
+    if (!savedId || chat.analyzed) return;
+    chat.analyzed = true;
+    api('/api/intake-analyze', { method: 'POST', body: JSON.stringify({ project: archive.project, id: savedId }) })
+      .then(function (r) {
+        var b = r.body || {};
+        if (!b.ok || !b.analysis) return;   // 未配模型/无解析 → 不展示（AC 兜底：不阻断）
+        var el = $('fAnz-' + savedId); if (!el) return;
+        var a = b.analysis;
+        var catTxt = a.category || '';
+        var verdict = a.verdict || '';
+        var sugg = a.suggestion === 'file' ? '建议立项开发' : a.suggestion === 'reply' ? '建议直接答复' : (a.suggestion || '');
+        el.innerHTML = '<span class="cat">AI 初判</span>' +
+          (catTxt ? '<b>' + escapeHtml(catTxt) + '</b> ' : '') +
+          (verdict ? escapeHtml(verdict) : '') +
+          (sugg ? '<br><span style="color:var(--color-text-tertiary)">处理建议：' + escapeHtml(sugg) + '</span>' : '') +
+          (a.detail ? '<br>' + md(String(a.detail).slice(0, 400)) : '');
+        el.style.display = 'block';
+        scrollChatBottom();
+      })
+      .catch(function () {});
+  }
+
+  // ---------- 发送（对话主流程） ----------
+  function sendChat() {
+    if (chat.sending) return;
+    var input = $('fChatInput'); if (!input) return;
+    var text = input.value.trim();
+    if (!text && !pendingImages.length) return;   // 空文本 + 无图 → 不发
+    if (!state.curSite && state.mode === 'hosp' && !state.sites.length) {   // 无分配医院 → 不发（服务端也会收敛掉）
+      appendBubble('ai', '你还没有被分配负责医院，暂时无法提交。请联系运营端为你分配医院后再试。');
+      return;
+    }
+    // 咨询必选子系统（2026-07-23 裁决）：新咨询若归档上下文无子系统（全部系统/全部子项目）→ 拦住并引导选择；不清空输入以便选完再发。
+    //   仅 consult 生效；reopen 续聊带 reopenSubsystem 不被拦；提需求/报BUG（intake）走 AI 自动判子系统、不强制手选。
+    if (chat.submitKind === 'consult' && guardConsultSubsystem()) return;
+    var imgs = pendingImages.slice();   // 本轮附的截图（发出后即清空输入态，不进草稿/快照）
+    clearPendingImages();
+    input.value = '';
+    saveDraft();
+    appendBubble('me', text || '（截图）', false, imgs);   // 我方气泡显文本 + 所附截图缩略图
+    chat.messages.push({ role: 'user', content: text || '（截图）' });
+    chat.lastQ = text;
+    setSending(true);
+    if (chat.submitKind === 'consult') sendConsult(imgs);
+    // 安全续聊（杜绝重单）：reopen 的已建单（intake 模式 + savedId + 锁定的工单 project）→ 走 intake-reply append 同一张单，绝不走 intake-chat 再建新单。
+    else if (chat.savedId && chat.reopenIntakeProject) sendIntakeReply(text);
+    else sendIntake(imgs);
+  }
+
+  function setSending(on) {
+    chat.sending = on;
+    var btn = $('fChatSend'); if (btn) btn.disabled = on;
+  }
+
+  // 提需求 / 报BUG → intake-chat（合并模式，AI 判需求/BUG + 边聊边补，够了输出 record 自动建单）。imgs=本轮附的截图（多模态 + 建单存图）。
+  function sendIntake(imgs) {
+    var archive = currentArchive();
+    var thinking = appendBubble('ai', '', true);
+    setThinking(thinking, true);   // intake 也是「等待期空气泡」（非流式，等整体回复）→ 同款思考动效，回复到达即清（下方 finish 分支 setThinking(...,false)）
+    api('/api/intake-chat', {
+      method: 'POST',
+      body: JSON.stringify({
+        project: archive.project, type: 'intake', version: archive.version,
+        site: archive.site, subsystem: archive.subsystem, messages: chat.messages,
+        images: (Array.isArray(imgs) && imgs.length) ? imgs : undefined   // 附图 → 后端多模态看图 + 建 record 时落 media
+      })
+    }).then(function (r) {
+      setSending(false);
+      var b = r.body || {};
+      var reply = b.reply || '（未收到回复）';
+      if (thinking) { setThinking(thinking, false); thinking.classList.remove('streaming'); thinking.innerHTML = md(reply); }
+      chat.messages.push({ role: 'assistant', content: reply });
+      chat.lastA = reply;
+      // AC-11/12/22：AI 产出 record 且服务端建单 → savedId 非空；同会话已建单则不重复建
+      if (b.savedId && !chat.savedId) {
+        chat.savedId = b.savedId;
+        var info = { id: b.savedId, type: (archive._recType || ''), site: archive.site, subsystem: archive.subsystem, version: archive.version };
+        // 建单后回读类型：从 intake-list 拿不划算，直接据 chip 展示；type 由 analyze 卡补充。默认按当前视图无法判 req/bug → 用中性展示
+        appendArchiveCard({ id: b.savedId, type: info.type, site: archive.site, subsystem: archive.subsystem, version: archive.version });
+        showAnalyze(archive, b.savedId);   // NH-3：建单后即时 AI 初判
+        refreshLeftList();                 // 建单后刷新左侧提交清单（可回链）
+      }
+      scrollChatBottom();
+      saveDraft();
+    }).catch(function () {
+      setSending(false);
+      if (thinking) { setThinking(thinking, false); thinking.classList.remove('streaming'); thinking.innerHTML = md('（网络异常，请稍后重试）'); }
+      // AI/网络不可用 → 展示人工兜底面板（AC-14），不阻断
+      offerFallback();
+    });
+  }
+
+  // 安全续聊：reopen 的已建工单再发言 → intake-reply（把补充 append 到同一张单 + AI 继续答），绝不建重单（区别于 sendIntake 的 intake-chat 会再建单）。
+  //   入参锁定：project=chat.reopenIntakeProject（reopen 时锁的工单 project）、id=chat.savedId（工单 id）、message=本轮文本。
+  function sendIntakeReply(text) {
+    var thinking = appendBubble('ai', '', true);
+    setThinking(thinking, true);
+    api('/api/intake-reply', {
+      method: 'POST',
+      body: JSON.stringify({ project: chat.reopenIntakeProject, id: chat.savedId, message: text })
+    }).then(function (r) {
+      setSending(false);
+      var b = r.body || {};
+      var reply = b.reply || '（未收到回复）';
+      if (thinking) { setThinking(thinking, false); thinking.classList.remove('streaming'); thinking.innerHTML = md(reply); }
+      chat.messages.push({ role: 'assistant', content: reply });
+      chat.lastA = reply;
+      scrollChatBottom();
+      saveDraft();
+    }).catch(function () {
+      setSending(false);
+      if (thinking) { setThinking(thinking, false); thinking.classList.remove('streaming'); thinking.innerHTML = md('（网络异常，请稍后重试）'); }
+    });
+  }
+
+  // 咨询必选子系统守卫：新咨询归档上下文无子系统 → 拦住 + 就地气泡引导选择；返回 true 表示拦截（外层 return 不发）。
+  //   reopen 续聊（chat.reopenProject 非空）永不拦——续问要 append 到原 consult，且原子系统由 reopenSubsystem 保留。
+  function guardConsultSubsystem() {
+    if (chat.reopenProject) return false;   // 续聊不拦（保留原子系统、不误建）
+    var arch = currentArchive();
+    if (arch.subsystem) return false;       // 已有子系统 → 放行
+    // 无子系统 → 引导：医院视图展开「全部子项目」下拉；系统视图展开系统下拉去选一个具体系统
+    if (state.mode === 'hosp') {
+      appendBubble('ai', '发咨询前请先选择这条咨询所属的子系统——已为你展开「子项目」下拉，选一个具体子系统后再发送。');
+      var pw = $('fProdWrap'); if (pw) { closeAllMenus(); pw.classList.add('open'); }
+    } else {
+      appendBubble('ai', '发咨询前请先选择这条咨询所属的子系统——请在顶部「系统」下拉里选一个具体系统（不能停在「全部系统」），再发送。');
+      var sc = $('fSysCur'); if (sc && !state.sysOpen) { try { sc.click(); } catch (e) {} }   // 展开系统下拉（点击触发器含面板定位；已展开则不重复点）
+    }
+    return true;
+  }
+
+  // 咨询答疑 → consult（SSE 流式，逐字追加）；结束落 type=consult，不进批次；可沉淀经验库。imgs=本轮附的截图（多模态 + 咨询存图）。
+  function sendConsult(imgs) {
+    var archive = currentArchive();
+    var bub = appendBubble('ai', '', true);
+    setThinking(bub, true);   // 等待首个 token 前显「正在思考中…」动效（深入思考更耗时，动效更该有）；首个 o.v/done/停止/错误即清除
+    var acc = '';
+    var url = '/api/consult';
+    var payload = {
+      project: archive.project, version: archive.version, site: archive.site,
+      subsystem: archive.subsystem, messages: chat.messages, convId: chat.convId || undefined,
+      deep: !!chat.deep,   // FS-06：「深入思考」开启 → 后端检索源码更深入分析（默认关走 spec+经验库）
+      images: (Array.isArray(imgs) && imgs.length) ? imgs : undefined   // 附图 → 后端多模态看图 + 咨询落 media
+    };
+    fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+      .then(function (resp) {
+        if (!resp.body || !resp.body.getReader) {   // 无流式支持 → 退化为整体读取
+          return resp.text().then(function (t) { parseSSEChunk(t, function (o) { if (o.kb) renderKbCite(bub, o.kb); onConsultEvent(o, bub, function (v) { acc += v; }); }); finishConsult(bub, acc); });
+        }
+        var reader = resp.body.getReader();
+        var dec = new TextDecoder();
+        var buf = '';
+        function pump() {
+          return reader.read().then(function (res) {
+            if (res.done) { finishConsult(bub, acc); return; }
+            buf += dec.decode(res.value, { stream: true });
+            var idx;
+            while ((idx = buf.indexOf('\n\n')) >= 0) {
+              var chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
+              parseSSEChunk(chunk + '\n\n', function (o) {
+                if (o.kb) renderKbCite(bub, o.kb);   // FS-06：命中经验库→答复气泡下方渲染「📚 参考经验库」引用区（kb 事件在流式前先到，占位在下方、答复继续逐字流入不受影响）
+                if (o.v != null) { setThinking(bub, false); acc += o.v; bub.innerHTML = md(acc); scrollChatBottom(); }   // 首个流式字符到达 → 清思考动效，转正常逐字渲染
+                if (o.done) { chat.convId = o.convId || chat.convId; }
+              });
+            }
+            return pump();
+          });
+        }
+        return pump();
+      })
+      .catch(function () { finishConsult(bub, acc || '（AI 暂时连不上，请稍后重试）'); });
+  }
+
+  // 解析一段 SSE 文本（可能含多条 data: 行）
+  function parseSSEChunk(text, onObj) {
+    String(text || '').split('\n').forEach(function (line) {
+      line = line.trim();
+      if (line.indexOf('data:') !== 0) return;
+      var payload = line.slice(5).trim(); if (!payload) return;
+      var o = null; try { o = JSON.parse(payload); } catch { return; }
+      if (o) onObj(o);
+    });
+  }
+  function onConsultEvent(o, bub, addAcc) { if (o.kb) renderKbCite(bub, o.kb); if (o.v != null) { setThinking(bub, false); addAcc(o.v); bub.innerHTML = md((bub._acc = (bub._acc || '') + o.v)); } if (o.done) chat.convId = o.convId || chat.convId; }
+
+  // FS-06：在答复气泡所在消息下方插入一个紧凑的「📚 参考经验库(N)」引用区（默认折叠，点开看每条真实「问→答」；答案用 md() 渲染，KB 答案含 markdown）。
+  //   幂等：同一 bub 只渲染一次（kb 事件只发一次，但流式重入/退化路径均可能触发，故用 bub._kbCite 兜底）；kb 空则不渲染。
+  function renderKbCite(bub, kb) {
+    if (!bub || bub._kbCite || !Array.isArray(kb) || !kb.length) return;
+    var msg = bub.parentNode; if (!msg || !msg.parentNode) return;   // .f-msg（av + bub）→ 插到它后面，视觉上挂在答复下方
+    var wrap = document.createElement('div');
+    wrap.className = 'f-kb-cite';
+    var hd = document.createElement('div'); hd.className = 'f-kb-cite-hd';
+    hd.innerHTML = '<i class="ti ti-book-2"></i><span>参考经验库（' + kb.length + ' 条）</span><i class="ti ti-chevron-right chev"></i>';
+    var body = document.createElement('div'); body.className = 'f-kb-cite-body';
+    body.innerHTML = kb.map(function (h, i) {
+      var meta = [(h.subsystemLabel || h.subsystem || ''), h.module].filter(Boolean).map(escapeHtml).join(' · ');   // 子系统显中文 desc（subsystemLabel）优先，回退英文 name（2026-07-23）
+      return '<div class="f-kb-cite-item">' +
+        '<div class="q"><span class="num">' + (i + 1) + '.</span><span>' + escapeHtml(String(h.q || '')) + '</span></div>' +
+        (meta ? '<div class="meta">' + meta + '</div>' : '') +
+        '<div class="a">' + md(String(h.a || '')) + '</div>' +
+        '</div>';
+    }).join('');
+    hd.addEventListener('click', function () { wrap.classList.toggle('open'); });
+    wrap.appendChild(hd); wrap.appendChild(body);
+    msg.parentNode.insertBefore(wrap, msg.nextSibling);   // 插在答复消息之后
+    bub._kbCite = wrap;
+    scrollChatBottom();
+  }
+
+  function finishConsult(bub, acc) {
+    setSending(false);
+    if (bub) { setThinking(bub, false); bub.classList.remove('streaming'); if (acc) bub.innerHTML = md(acc); }   // done/停止/错误兜底清思考动效（首个 token 未到就结束时也清）
+    var replyText = acc || (bub && bub.textContent) || '';
+    if (replyText) { chat.messages.push({ role: 'assistant', content: replyText }); chat.lastA = replyText; }
+    // 咨询「已解决 → 沉淀经验库」入口（AC-19-KB）：结束后在气泡下追加一枚小按钮
+    if (replyText && chat.lastQ) appendKbSink();
+    scrollChatBottom();
+    saveDraft();
+  }
+
+  // AC-19-KB：咨询「解决了/沉淀经验库」→ kb-from-consult（带 project/q/a）
+  function appendKbSink() {
+    var box = chatBox(); if (!box) return;
+    var archive = currentArchive();
+    var msg = document.createElement('div'); msg.className = 'f-msg ai';
+    var av = document.createElement('div'); av.className = 'av'; av.innerHTML = '<i class="ti ti-bulb"></i>';
+    var card = document.createElement('div'); card.className = 'f-arch';
+    card.innerHTML = '<div class="rowk">这条答疑对你有帮助吗？有价值可沉淀到经验库，帮下一个人少走弯路。</div>';
+    var btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn btn-sm btn-primary'; btn.style.marginTop = '8px';
+    btn.innerHTML = '<i class="ti ti-book-upload"></i> 已解决 · 沉淀经验库';
+    btn.addEventListener('click', function () {
+      btn.disabled = true;
+      api('/api/kb-from-consult', { method: 'POST', body: JSON.stringify({ project: archive.project, q: chat.lastQ, a: chat.lastA }) })
+        .then(function (r) {
+          if (r.body && r.body.ok) { btn.innerHTML = '<i class="ti ti-check"></i> 已沉淀到经验库'; }
+          else { btn.disabled = false; btn.innerHTML = '<i class="ti ti-book-upload"></i> 沉淀失败，重试'; }
+        }).catch(function () { btn.disabled = false; btn.innerHTML = '<i class="ti ti-book-upload"></i> 沉淀失败，重试'; });
+    });
+    card.appendChild(btn);
+    msg.appendChild(av); msg.appendChild(card);
+    box.appendChild(msg); scrollChatBottom();
+  }
+
+  // ---------- AI 兜底：人工提交面板（AC-14/15，走 intake-submit） ----------
+  function offerFallback() {
+    var box = chatBox(); if (!box) return;
+    if ($('fFallback')) return;   // 已展示则不重复
+    var archive = currentArchive();
+    var msg = document.createElement('div'); msg.className = 'f-msg ai';
+    var av = document.createElement('div'); av.className = 'av'; av.innerHTML = '<i class="ti ti-tool"></i>';
+    var fb = document.createElement('div'); fb.className = 'f-fallback'; fb.id = 'fFallback';
+    // 产品下拉（该医院已上产品 / 系统视图当前产品）
+    var prodOpts = fallbackProducts();
+    var prodSel = '<select class="input" id="fFbProj">' + prodOpts.map(function (p) {
+      return '<option value="' + escapeHtml(p.id) + '"' + (p.id === archive.project ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>';
+    }).join('') + '</select>';
+    var typeSel = '<select class="input" id="fFbType"><option value="requirement">需求</option><option value="bug">BUG</option></select>';
+    fb.innerHTML =
+      '<div class="ft"><i class="ti ti-alert-triangle"></i> AI 暂时不可用，可人工填写直接提交（不阻断）</div>' +
+      '<div class="frow">' + prodSel + typeSel + '</div>' +
+      '<div class="frow"><input class="input" id="fFbTitle" maxlength="300" placeholder="标题（必填）"></div>' +
+      '<div class="frow"><input class="input" id="fFbVer" maxlength="60" placeholder="产品版本（报 BUG 必填）" value="' + escapeHtml(archive.version || '') + '"></div>' +
+      '<div class="ferr" id="fFbErr"></div>' +
+      '<button class="btn btn-primary btn-sm" id="fFbSubmit" type="button"><i class="ti ti-send"></i> 人工提交</button>';
+    msg.appendChild(av); msg.appendChild(fb);
+    box.appendChild(msg); scrollChatBottom();
+    $('fFbSubmit').addEventListener('click', submitFallback);
+  }
+
+  function fallbackProducts() {
+    var out = [];
+    if (state.mode === 'sys') {
+      var sys = state.curSys ? productOfSystem(state.curSys) : null;
+      if (sys) out.push({ id: sys.project, name: sys.productName || sys.project });
+    } else {
+      var cust = null;
+      for (var i = 0; i < state.customers.length; i++) { if ((state.customers[i].name || '').trim() === String(state.curSite || '').trim()) { cust = state.customers[i]; break; } }
+      var prods = (cust && Array.isArray(cust.products)) ? cust.products : [];
+      prods.forEach(function (pr) { var pj = state.projMap[pr.project]; out.push({ id: pr.project, name: (pj && pj.name) || pr.project }); });
+    }
+    if (!out.length) { for (var k in state.projMap) if (state.projMap[k]) out.push({ id: k, name: state.projMap[k].name || k }); }
+    return out;
+  }
+
+  function submitFallback() {
+    var archive = currentArchive();
+    var proj = ($('fFbProj') && $('fFbProj').value) || archive.project;
+    var type = ($('fFbType') && $('fFbType').value) || 'requirement';
+    var title = ($('fFbTitle') && $('fFbTitle').value.trim()) || '';
+    var ver = ($('fFbVer') && $('fFbVer').value.trim()) || '';
+    var err = $('fFbErr');
+    function showErr(m) { if (err) { err.textContent = m; err.classList.add('on'); } }
+    if (err) err.classList.remove('on');
+    if (!proj) { showErr('请选择所属产品'); return; }
+    if (!title) { showErr('请填写标题'); return; }
+    if (type === 'bug' && !ver) { showErr('请填/选产品版本（BUG 必填）'); return; }   // AC-15 前端内联提示
+    var desc = chat.messages.filter(function (m) { return m.role === 'user'; }).map(function (m) { return m.content; }).join('\n');
+    $('fFbSubmit').disabled = true;
+    api('/api/intake-submit', {
+      method: 'POST',
+      body: JSON.stringify({ project: proj, type: type, version: ver, site: archive.site, subsystem: archive.subsystem, title: title, desc: desc, reqDesc: type === 'requirement' ? desc : '', errorInfo: type === 'bug' ? desc : '' })
+    }).then(function (r) {
+      var b = r.body || {};
+      if (b.ok && b.id) {
+        chat.savedId = b.id;
+        var fb = $('fFallback'); if (fb && fb.parentNode && fb.parentNode.parentNode) fb.parentNode.parentNode.removeChild(fb.parentNode);
+        if (b.reply) appendBubble('ai', b.reply);   // AC-16：AI 首轮沟通话术作气泡
+        appendArchiveCard({ id: b.id, type: type, site: archive.site, subsystem: archive.subsystem, version: ver });
+        refreshLeftList();
+        saveDraft();
+      } else {
+        $('fFbSubmit').disabled = false;
+        showErr((b && b.error) || '提交失败，请重试');   // AC-15 后端 400（BUG 缺版本）内联展示
+      }
+    }).catch(function () { $('fFbSubmit').disabled = false; showErr('网络异常，请重试'); });
+  }
+
+  // 建单后刷新左侧提交清单（医院视图 loadSubmissions / 系统视图 loadSystemView）
+  function refreshLeftList() {
+    try { if (state.mode === 'sys') loadSystemView(); else loadSubmissions(); } catch (e) {}
+  }
+
+  // ---------- 类型切换 / 新对话 ----------
+  // AC-2：切换提交类型（提需求/报BUG ↔ 咨询答疑）；切换不清空当前会话（仅改后续端点走向），但换 kind 时更新 placeholder
+  function setSubmitKind(k) {
+    chat.submitKind = (k === 'consult') ? 'consult' : 'intake';
+    var btns = $('fToggle').querySelectorAll('button');
+    for (var i = 0; i < btns.length; i++) btns[i].classList.toggle('on', btns[i].getAttribute('data-k') === chat.submitKind);
+    var input = $('fChatInput');
+    if (input) input.placeholder = chat.submitKind === 'consult'
+      ? '问问这个系统怎么用、遇到的报错原因…回车发送'
+      : '说说想要的功能改进，或遇到的问题…回车发送';
+    syncDeep();   // 按 submitKind 显隐「深入思考」开关（仅 consult 可用）+ 刷新按钮态
+    saveDraft();
+  }
+
+  // 「深入思考」开关：仅咨询答疑（submitKind==='consult'）显示/可用；提需求/报BUG（intake）走进件、无 deep 语义 → 隐藏。
+  //   同步开关按钮的高亮态（on）与显隐；不改 chat.deep 值（切模式不丢用户在咨询下的选择，切回仍恢复）。
+  function syncDeep() {
+    var d = $('fDeep'); if (!d) return;
+    var show = chat.submitKind === 'consult';
+    d.classList.toggle('hide', !show);
+    d.classList.toggle('on', show && !!chat.deep);
+  }
+  // 点开关：翻转 chat.deep（仅 consult 生效）+ 刷新按钮态 + 存草稿（刷新恢复）。
+  function toggleDeep() {
+    if (chat.submitKind !== 'consult') return;   // 非咨询模式（开关本已隐藏）不响应
+    chat.deep = !chat.deep;
+    syncDeep();
+    saveDraft();
+  }
+
+  // AC-20：新对话 → 清空对话流/输入、开新会话（新 convId/无 savedId），不影响已提交工单
+  function newConversation() {
+    chat.messages = []; chat.savedId = ''; chat.convId = ''; chat.analyzed = false; chat.sending = false; chat.lastQ = ''; chat.lastA = ''; chat.reopenProject = ''; chat.reopenSubsystem = ''; chat.reopenIntakeProject = ''; chat.deep = false;   // 新对话重置深入思考为关（合理默认：新会话不默认耗时的源码检索）；清 reopenIntakeProject（不再锁旧工单）
+    var box = chatBox();
+    if (box) {
+      box.innerHTML = '';
+      var ph = document.createElement('div'); ph.className = 'f-ws-placeholder'; ph.id = 'fWsPlaceholder';
+      ph.innerHTML = '<i class="ti ti-message-chatbot"></i>' +
+        '<div class="t">AI 对话提交</div>' +
+        '<div class="d">用一句大白话说说想要的功能 / 遇到的问题，AI 帮你判类、补要素、归档建单</div>' +
+        '<div class="f-ws-scope" id="fWsScope">—</div>';
+      box.appendChild(ph);
+    }
+    var input = $('fChatInput'); if (input) input.value = '';
+    clearPendingImages();   // 新对话清掉未发送的待附截图
+    setSending(false);
+    syncDeep();       // 深入思考已重置为关 → 刷新开关按钮态（去高亮）
+    updateScope();
+    clearDraft();
+    // FS-04：清当前系统上下文桶那份会话（否则切走再切回会恢复出已被清掉的旧对话）
+    if (chat.lastSystemKey != null && chat.bySystem) delete chat.bySystem[chat.lastSystemKey];
+  }
+
+  // ---------- 草稿本地暂存（AC-23：刷新不丢当前会话）----------
+  // 用 sessionStorage（当前标签会话内存活、刷新即恢复；FS-01 A5 禁用长效端存储，故不用它，避免存登录态/密码残留）。
+  var DRAFT_KEY = 'intake_field_draft_v1';
+  function saveDraft() {
+    try {
+      var input = $('fChatInput');
+      var d = { kind: chat.submitKind, messages: chat.messages, savedId: chat.savedId, convId: chat.convId, reopenProject: chat.reopenProject || '', reopenSubsystem: chat.reopenSubsystem || '', reopenIntakeProject: chat.reopenIntakeProject || '', deep: !!chat.deep, input: input ? input.value : '', user: (state.me && (state.me.username || state.me.name)) || '' };
+      sessionStorage.setItem(DRAFT_KEY, JSON.stringify(d));
+    } catch (e) {}
+  }
+  function clearDraft() { try { sessionStorage.removeItem(DRAFT_KEY); } catch (e) {} }
+  function restoreDraft() {
+    try {
+      var raw = sessionStorage.getItem(DRAFT_KEY); if (!raw) return;
+      var d = JSON.parse(raw); if (!d) return;
+      // 换了登录用户 → 丢弃旧草稿（避免串号）
+      if (d.user && state.me && (state.me.username || state.me.name) && d.user !== (state.me.username || state.me.name)) { clearDraft(); return; }
+      chat.deep = !!d.deep;   // 先恢复深入思考设置，再 setSubmitKind（内部 syncDeep 会据此点亮开关）
+      setSubmitKind(d.kind || 'intake');
+      chat.savedId = d.savedId || ''; chat.convId = d.convId || ''; chat.reopenProject = d.reopenProject || ''; chat.reopenSubsystem = d.reopenSubsystem || ''; chat.reopenIntakeProject = d.reopenIntakeProject || '';
+      syncDeep();   // 刷新开关显隐/高亮（草稿 kind + deep 都恢复后）
+      if (Array.isArray(d.messages) && d.messages.length) {
+        chat.messages = d.messages.slice();
+        // 重放气泡（含已建单则显示已归档提示；不重复调后端，纯还原视图）
+        clearPlaceholder();
+        chat.messages.forEach(function (m) { appendBubble(m.role === 'user' ? 'me' : 'ai', m.content); });
+        if (chat.savedId) appendArchiveCard({ id: chat.savedId, type: '', site: '', subsystem: '', version: '' });
+      }
+      var input = $('fChatInput'); if (input && d.input) input.value = d.input;
+    } catch (e) {}
+  }
+
+  // ---------- 受控 Markdown（块级 + 行内 · 零依赖 · XSS 安全） ----------
+  // 事实源口径：先整体转义 & < >（转义在前、再套 markdown，杜绝脚本注入），
+  // 再按行判块（标题 # / 无序 -*+ / 有序 1. / 空行 / 段落），块内跑行内规则（**加粗** / `代码`）。
+  function md(src) {
+    var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }); };
+    // 行内规则：在已转义文本上跑（不跨行）——`代码` 与 **加粗**
+    var inline = function (s) {
+      s = s.replace(/`([^`]+)`/g, function (m, c) { return '<code>' + c + '</code>'; });
+      s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      return s;
+    };
+    var lines = esc(src).split('\n');
+    var out = [];       // 已闭合的块 HTML 片段
+    var para = [];      // 当前累积的普通段落行（用 <br> 连内部换行）
+    var listType = '';  // 当前开着的列表：'ul' | 'ol' | ''
+    var listItems = []; // 当前列表的 <li> 内容
+    var flushPara = function () {
+      if (para.length) { out.push('<p class="md-p">' + para.join('<br>') + '</p>'); para = []; }
+    };
+    var flushList = function () {
+      if (listType) {
+        out.push('<' + listType + ' class="md-' + listType + '">' +
+          listItems.map(function (it) { return '<li class="md-li">' + it + '</li>'; }).join('') +
+          '</' + listType + '>');
+        listType = ''; listItems = [];
+      }
+    };
+    for (var i = 0; i < lines.length; i++) {
+      var ln = lines[i];
+      var mH = ln.match(/^(#{1,6})\s+(.*)$/);       // 标题 # ~ ######
+      var mUl = ln.match(/^\s*[-*+]\s+(.*)$/);        // 无序列表 - * +
+      var mOl = ln.match(/^\s*\d+\.\s+(.*)$/);        // 有序列表 1. 2. ...
+      if (mH) {
+        flushPara(); flushList();
+        var lvl = mH[1].length;
+        out.push('<div class="md-h md-h' + lvl + '">' + inline(mH[2]) + '</div>');
+      } else if (mUl) {
+        flushPara();
+        if (listType !== 'ul') { flushList(); listType = 'ul'; }
+        listItems.push(inline(mUl[1]));
+      } else if (mOl) {
+        flushPara();
+        if (listType !== 'ol') { flushList(); listType = 'ol'; }
+        listItems.push(inline(mOl[1]));
+      } else if (ln.trim() === '') {
+        // 空行 = 段落/块分隔：闭合当前段落与列表（间距交给块元素 margin，不堆叠空 <br>）
+        flushPara(); flushList();
+      } else {
+        flushList();
+        para.push(inline(ln));
+      }
+    }
+    flushPara(); flushList();
+    return out.join('');
+  }
+
+  // ---------- 经验库检索面板（FS-07 · AC-1/2/3/4/6/7） ----------
+  var SRC_LABEL = { manual: '人工', consult: '答疑', auto: '自动' };
+  function srcKind(from) { return from === 'manual' ? 'manual' : from === 'consult' ? 'consult' : 'auto'; }
+
+  function openKb() {
+    $('fKbMask').classList.add('open');
+    $('fKbDrawer').classList.add('open');
+    $('fKbDrawer').setAttribute('aria-hidden', 'false');
+    setTimeout(function () { $('fKbInput').focus(); }, 60);
+    kbBrowseAll();   // 打开即浏览全库（非空态 hollow）；输入关键词回车/点搜索 → 走精确检索覆盖
+  }
+
+  // 浏览全库所有条目（all=1）：打开经验库时展示全部，供直接翻阅；真的一条都没有 → 「经验库暂无内容」
+  function kbBrowseAll() {
+    var results = $('fKbResults'), hollow = $('fKbHollow');
+    hollow.style.display = 'block'; hollow.textContent = '加载中…'; results.innerHTML = '';
+    api('/api/kb-search?all=1', { method: 'GET' }).then(function (r) {
+      var entries = (r.body && Array.isArray(r.body.entries)) ? r.body.entries : [];
+      if (!entries.length) { results.innerHTML = ''; hollow.style.display = 'block'; hollow.textContent = '经验库暂无内容'; return; }
+      hollow.style.display = 'none';
+      results.innerHTML = '';
+      entries.forEach(function (e) { results.appendChild(mkKbItem(e)); });
+    }).catch(function () { results.innerHTML = ''; hollow.style.display = 'block'; hollow.textContent = '加载失败，请重试'; });
+  }
+  function closeKb() {
+    $('fKbMask').classList.remove('open');
+    $('fKbDrawer').classList.remove('open');
+    $('fKbDrawer').setAttribute('aria-hidden', 'true');
+  }
+
+  // AC-2：回车或点按钮触发（自由文本框不即输即查，对齐全局规范 #11）；不传 project = 全库所有产品
+  function doKbSearch() {
+    var q = $('fKbInput').value.trim();
+    var results = $('fKbResults');
+    var hollow = $('fKbHollow');
+    if (!q) { kbBrowseAll(); return; }   // 清空关键词 → 回到浏览全部（覆盖上次检索结果）
+    hollow.style.display = 'block'; hollow.textContent = '检索中…'; results.innerHTML = '';
+    api('/api/kb-search?q=' + encodeURIComponent(q), { method: 'GET' })
+      .then(function (r) {
+        var entries = (r.body && Array.isArray(r.body.entries)) ? r.body.entries : [];
+        renderKbResults(entries);
+      })
+      .catch(function () { results.innerHTML = ''; hollow.style.display = 'block'; hollow.textContent = '检索失败，请重试'; });
+  }
+
+  // AC-3：每条显示 所属产品 + 问题 q + 子系统 + 来源徽标；AC-6：空态引导
+  function renderKbResults(entries) {
+    var results = $('fKbResults');
+    var hollow = $('fKbHollow');
+    if (!entries.length) {
+      results.innerHTML = '';
+      hollow.style.display = 'none';
+      // AC-6 空态：未找到相关经验 + 「去 AI 对话提交」入口（FS-04 尚未建 → 占位禁用）
+      var empty = document.createElement('div');
+      empty.className = 'f-kb-empty';
+      empty.innerHTML =
+        '<i class="ti ti-mood-empty"></i>' +
+        '<div class="t">未找到相关经验</div>' +
+        '<div class="d">可去 AI 对话提交，让运营帮你处理</div>';
+      // TODO(FS-04): AI 对话提交页/接口尚未建；此入口先做禁用占位，别臆造 FS-04 的页面/接口
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn btn-primary';
+      btn.disabled = true;
+      btn.title = 'AI 对话提交（FS-04）即将上线';
+      btn.innerHTML = '<i class="ti ti-message-chatbot"></i> 去 AI 对话提交';
+      empty.appendChild(btn);
+      results.appendChild(empty);
+      return;
+    }
+    hollow.style.display = 'none';
+    results.innerHTML = '';
+    entries.forEach(function (e) { results.appendChild(mkKbItem(e)); });
+  }
+
+  function mkKbItem(e) {
+    var item = document.createElement('div');
+    item.className = 'f-kb-item';
+    var prod = e.productName || e.project || '—';
+    var subDisp = e.subsystemLabel || e.subsystem || '';   // 显示用：服务端解析的子系统中文 desc 优先，回退英文 name（子系统显中文，2026-07-23）
+    var subCell = subDisp ? escapeHtml(subDisp) : '—';
+    var kind = srcKind(e.from);
+    var srcTxt = SRC_LABEL[kind] || '自动';
+    var meta =
+      '<span class="f-kb-prod"><i class="ti ti-package"></i>' + escapeHtml(prod) + '</span>' +
+      '<span class="f-kb-src src-' + kind + '">' + srcTxt + '</span>' +
+      '<span class="f-kb-sub">子系统：' + subCell + '</span>';
+    var hd = document.createElement('div');
+    hd.className = 'f-kb-hd';
+    hd.innerHTML =
+      '<div class="f-kb-meta">' + meta + '</div>' +
+      '<div class="f-kb-q"><i class="ti ti-chevron-right chev"></i><span>' + escapeHtml(e.q || '') + '</span></div>';
+    var body = document.createElement('div');
+    body.className = 'f-kb-body';
+    // AC-4：展开显示完整解法 a，受控 Markdown（先转义再解析，防 XSS）
+    body.innerHTML = '<div class="f-kb-answer">' + md(e.a || '') + '</div>';
+    // AC-4：点击标题展开/收起
+    hd.addEventListener('click', function () { item.classList.toggle('open'); });
+    item.appendChild(hd);
+    item.appendChild(body);
+    return item;
+  }
+
+  // ---------- 绑定事件 ----------
+  function bind() {
+    $('loginBtn').addEventListener('click', doLogin);
+    $('loginPwd').addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });
+    $('loginUser').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('loginPwd').focus(); });
+    var pwEye = $('loginPwdEye');
+    if (pwEye) pwEye.addEventListener('click', function () {
+      var pwd = $('loginPwd'); var reveal = pwd.type === 'password';
+      pwd.type = reveal ? 'text' : 'password';
+      pwEye.innerHTML = reveal ? '<i class="ti ti-eye-off"></i>' : '<i class="ti ti-eye"></i>';
+      pwEye.setAttribute('aria-label', reveal ? '隐藏密码' : '显示密码');
+      pwd.focus();
+    });
+
+    // 维度下拉
+    $('fModeCur').addEventListener('click', function (e) {
+      e.stopPropagation();
+      var open = $('fMode').classList.contains('open');
+      closeAllMenus();
+      if (!open) $('fMode').classList.add('open');
+    });
+    var modeItems = $('fModeMenu').querySelectorAll('.f-mode-item');
+    for (var k = 0; k < modeItems.length; k++) {
+      modeItems[k].addEventListener('click', function (e) {
+        e.stopPropagation();
+        setMode(this.getAttribute('data-m'));
+        $('fMode').classList.remove('open');
+      });
+    }
+
+    // 待办 popover
+    $('fTodoBtn').addEventListener('click', function (e) {
+      e.stopPropagation();
+      var open = $('fTodoPop').classList.contains('open');
+      closeAllMenus();
+      if (!open) $('fTodoPop').classList.add('open');
+    });
+
+    // 用户菜单
+    $('fUserTrigger').addEventListener('click', function (e) {
+      e.stopPropagation();
+      var open = $('fUserMenu').classList.contains('open');
+      closeAllMenus();
+      if (!open) $('fUserMenu').classList.add('open');
+    });
+    $('fLogoutBtn').addEventListener('click', function (e) { e.stopPropagation(); doLogout(); });
+
+    // FS-02 提交清单：按批次/按类型 tab（选择即刷新，即选即查）
+    var tabs2 = $('fTabs2').querySelectorAll('.f-tab2');
+    for (var t = 0; t < tabs2.length; t++) {
+      tabs2[t].addEventListener('click', function () { setGroupBy(this.getAttribute('data-g')); });
+    }
+    // FS-02 子项目下拉触发器
+    $('fProdCur').addEventListener('click', function (e) {
+      e.stopPropagation();
+      var open = $('fProdWrap').classList.contains('open');
+      closeAllMenus();
+      if (!open) $('fProdWrap').classList.add('open');
+    });
+
+    // 经验库入口（FS-07 检索面板；抽屉自实现 open/close）
+    $('fKbBtn').addEventListener('click', function (e) { e.stopPropagation(); closeAllMenus(); openKb(); });
+    $('fKbClose').addEventListener('click', closeKb);
+    $('fKbMask').addEventListener('click', closeKb);
+    $('fKbSearchBtn').addEventListener('click', doKbSearch);
+    // AC-2：自由文本框回车触发（不即输即查）
+    $('fKbInput').addEventListener('keydown', function (ev) { if (ev.key === 'Enter') doKbSearch(); });
+    // Esc 关闭面板
+    document.addEventListener('keydown', function (ev) {
+      if (ev.key !== 'Escape') return;
+      if ($('fKbDrawer').classList.contains('open')) { closeKb(); return; }
+      var vd = $('fVerDetail');   // 版本明细面板：Esc 关闭
+      if (vd && (state.verDetailOpen || vd.classList.contains('open'))) { closeAllMenus(); return; }
+      var sd = $('fSysDD');   // FS-03 系统视图下拉：Esc 关闭
+      if (sd && (state.sysOpen || sd.classList.contains('open'))) { closeAllMenus(); return; }
+      var hd = $('fHospDD');  // FS-02 医院视图下拉：Esc 关闭
+      if (hd && (state.hospOpen || hd.classList.contains('open'))) closeAllMenus();
+    });
+
+    // ---------- FS-04 · AI 对话区 ----------
+    // 提交类型切换（提需求/报BUG ↔ 咨询答疑）
+    var togBtns = $('fToggle').querySelectorAll('button');
+    for (var tg = 0; tg < togBtns.length; tg++) {
+      togBtns[tg].addEventListener('click', function () { setSubmitKind(this.getAttribute('data-k')); });
+    }
+    // 深入思考开关（仅咨询答疑显示；开→sendConsult 带 deep:true）
+    var deepBtn = $('fDeep'); if (deepBtn) deepBtn.addEventListener('click', toggleDeep);
+    // 新对话
+    $('fNewC').addEventListener('click', function () { newConversation(); });
+    // 发送：点按钮 + 回车（AC-9/17：自然语言输入回车发送）
+    $('fChatSend').addEventListener('click', sendChat);
+    $('fChatInput').addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendChat(); } });
+    // 未发送内容随输入暂存（AC-23：刷新恢复当前输入）
+    $('fChatInput').addEventListener('input', saveDraft);
+    // 截图附件：点图片按钮 → 打开文件选择器；选中即读入 pendingImages（≤6，压缩后预览）
+    var imgBtn = $('fImgBtn'), imgInput = $('fImgInput');
+    if (imgBtn && imgInput) {
+      imgBtn.addEventListener('click', function () { imgInput.click(); });
+      imgInput.addEventListener('change', function () { addImageFiles(imgInput.files); imgInput.value = ''; });   // 清空 value 以便同一张能再次选
+    }
+    // 粘贴取图（报错截图常直接 Ctrl+V 贴进输入框）：取 clipboardData 里的图片项
+    $('fChatInput').addEventListener('paste', function (e) {
+      var items = (e.clipboardData && e.clipboardData.items) || [];
+      var files = [];
+      for (var i = 0; i < items.length; i++) { if (items[i].kind === 'file' && /^image\//.test(items[i].type)) { var f = items[i].getAsFile(); if (f) files.push(f); } }
+      if (files.length) { e.preventDefault(); addImageFiles(files); }   // 有图片 → 拦截默认粘贴、加入待发送
+    });
+
+    // 点空白关菜单
+    document.addEventListener('click', function () { closeAllMenus(); });
+  }
+
+  // ---------- 启动 ----------
+  bind();
+  restore();
+
+  // 左右面板可拖拽调整宽度（splitter；宽度存 sessionStorage 会话级，避页面禁用的持久存储静态断言）
+  (function initSplitter(){
+    var sp=document.getElementById('fSplitter'), pane=document.getElementById('fSubmitPane'), ws=document.getElementById('fWorkspace');
+    if(!sp||!pane||!ws) return;
+    try{ var saved=sessionStorage.getItem('fieldPaneW'); if(saved){ pane.style.flex='0 0 '+saved+'px'; pane.style.maxWidth='none'; } }catch(e){}
+    var dragging=false;
+    sp.addEventListener('mousedown', function(e){ dragging=true; sp.classList.add('dragging'); document.body.style.cursor='col-resize'; document.body.style.userSelect='none'; e.preventDefault(); });
+    window.addEventListener('mousemove', function(e){ if(!dragging) return; var r=ws.getBoundingClientRect(); var w=e.clientX-r.left; var min=280, max=Math.max(min, r.width-360); w=Math.max(min, Math.min(max, w)); pane.style.flex='0 0 '+w+'px'; pane.style.maxWidth='none'; });
+    window.addEventListener('mouseup', function(){ if(!dragging) return; dragging=false; sp.classList.remove('dragging'); document.body.style.cursor=''; document.body.style.userSelect=''; try{ var b=parseInt(pane.style.flexBasis||pane.getBoundingClientRect().width,10); if(b) sessionStorage.setItem('fieldPaneW', b); }catch(e){} });
+  })();
+
+  // 暴露给测试/调试（不含敏感数据）
+  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, newConversation: newConversation, sendChat: sendChat, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast };
+})();
+</script>
+</body>
+</html>

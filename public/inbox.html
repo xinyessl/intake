@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>工单管理 · 收件 intake</title>
+<link rel="stylesheet" href="/vendor/tabler/tabler-icons.min.css">
+<link rel="stylesheet" href="/assets/theme.css">
+<link rel="stylesheet" href="/assets/app.css">
+<style>
+  /* —— 工单管理页局部微调（复用 theme.css 组件类，仅补页面级细节） —— */
+  /* 操作按钮浮到页头右上；筛选行 5 列（产品/子系统/类型/状态/现场）一排，不再单独占行 */
+  .page-header-actions .seg-item{padding:6px 12px;font-size:12.5px}
+  .filter-grid{grid-template-columns:repeat(5,1fr)}
+  .filter-row-extra .kw-field{grid-column:span 3}
+  .cell-strong .txt{display:inline-block;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
+  .row-unread{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--color-primary);margin-right:6px;vertical-align:middle}
+  .st-map{display:inline-flex;align-items:center;gap:5px}
+  /* 归并视图卡片（保留部署的现象归并能力，原型无、作可选 Tab） */
+  .agg{display:flex;flex-direction:column;gap:12px;padding:4px 0}
+  .gcard{border:1px solid var(--color-border);border-radius:var(--radius-lg);background:var(--color-surface);box-shadow:var(--shadow-card);overflow:hidden}
+  .gcard-head{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--color-border);background:var(--color-surface-alt)}
+  .gcount{flex:0 0 auto;min-width:38px;height:38px;padding:0 8px;border-radius:9px;background:var(--color-primary-light);color:var(--color-primary);font-weight:700;font-size:16px;display:grid;place-items:center}
+  .gtitle{font-weight:700;font-size:14.5px;color:var(--color-text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .gmod{font-size:12px;color:var(--color-text-secondary);background:#fff;border:1px solid var(--color-border);border-radius:var(--radius-pill);padding:2px 10px;white-space:nowrap;flex:0 0 auto}
+  .gcard-body{padding:11px 14px;display:flex;flex-direction:column;gap:9px}
+  .grow{display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap}
+  .grow .gk{font-size:12px;color:var(--color-text-tertiary);font-weight:600;flex:0 0 52px;padding-top:3px}
+  .idchip{font-size:11.5px;padding:2px 9px;border-radius:var(--radius);background:#fff;color:var(--color-text-secondary);border:1px solid var(--color-border-strong);cursor:pointer;font-family:var(--font-num);transition:.12s}
+  .idchip:hover{border-color:var(--color-primary);color:var(--color-primary);background:var(--color-primary-light)}
+  /* 摘要块小项（处理/查看抽屉复用） */
+  .desc-mini{display:grid;grid-template-columns:repeat(2,1fr);gap:0;border:1px solid var(--color-border);border-radius:var(--radius);overflow:hidden;margin-top:10px}
+  .desc-mini .di{display:flex;padding:9px 12px;border-bottom:1px solid var(--color-border);font-size:12.5px}
+  .desc-mini .di.full{grid-column:1 / -1}
+  .desc-mini .dk{width:78px;flex:0 0 auto;color:var(--color-text-secondary)}
+  .desc-mini .dv{flex:1;color:var(--color-text);word-break:break-word}
+  .tl-line{display:flex;flex-direction:column}
+</style>
+<script src="/assets/ui.js" defer></script>
+<script src="/assets/shell.js" defer></script>
+</head>
+<body data-shell="admin" data-nav="inbox" data-breadcrumb="工单 > 工单管理" data-content-layout="list">
+
+<!-- 操作按钮浮到页头右上（与其它页统一：列表/归并·导出·代提） -->
+<div class="page-header">
+  <div class="page-header-actions">
+    <div class="view-seg seg-group" id="viewSeg">
+      <div class="seg-item active" data-v="list"><i class="ti ti-list" style="vertical-align:-2px"></i> 列表</div>
+      <div class="seg-item" data-v="agg"><i class="ti ti-stack-2" style="vertical-align:-2px"></i> 按现象归并</div>
+    </div>
+    <button class="btn btn-sm" id="btnExport" title="导出当前产品工单 CSV"><i class="ti ti-download"></i> 导出</button>
+    <button class="btn btn-sm btn-primary" id="btnCreate"><i class="ti ti-plus"></i> 后台代提工单</button>
+  </div>
+</div>
+
+<!-- 状态流水线 -->
+<div class="pipeline" id="pipeline"></div>
+
+<!-- 工具条 + 筛选 -->
+<div class="card">
+  <div class="filter-bar">
+    <div class="filter-collapsible collapsed" id="filterBox">
+      <div class="filter-grid">
+        <div class="filter-field">
+          <label>产品</label>
+          <select class="select" id="fProduct"></select>
+        </div>
+        <div class="filter-field">
+          <label>子系统</label>
+          <select class="select" id="fSub"><option value="">全部子系统</option></select>
+        </div>
+        <div class="filter-field">
+          <label>类型</label>
+          <select class="select" id="fType"><option value="">全部类型</option><option value="requirement">需求</option><option value="bug">BUG</option><option value="consult">咨询</option></select>
+        </div>
+        <div class="filter-field">
+          <label>状态</label>
+          <select class="select" id="fStatus"><option value="">全部状态</option></select>
+        </div>
+        <div class="filter-field">
+          <label>现场</label>
+          <select class="select" id="fSite"><option value="">全部现场</option></select>
+        </div>
+      </div>
+      <div class="filter-grid filter-row-extra" style="margin-top:10px">
+        <div class="filter-field">
+          <label>版本</label>
+          <select class="select" id="fVersion"><option value="">全部版本</option></select>
+        </div>
+        <div class="filter-field">
+          <label>提交日期</label>
+          <div class="range-box">
+            <i class="ti ti-calendar"></i>
+            <input type="date" id="fDateStart">
+            <span class="range-sep">~</span>
+            <input type="date" id="fDateEnd">
+          </div>
+        </div>
+        <div class="filter-field kw-field">
+          <label>关键词</label>
+          <div class="input-with-icon">
+            <i class="ti ti-search"></i>
+            <input class="input" id="fKeyword" placeholder="标题 / 编号，回车搜索" autocomplete="off">
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="filter-foot">
+      <span class="left-tip"><i class="ti ti-bulb" style="vertical-align:-2px"></i> 选择型条件即选即查，关键词回车触发</span>
+      <div class="filter-actions">
+        <button class="btn btn-sm btn-ghost" id="toggleFilter"><i class="ti ti-chevron-down"></i>展开更多</button>
+        <button class="btn btn-sm" id="btnReset"><i class="ti ti-rotate"></i>重置</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 列表 / 归并 -->
+<div class="card" style="flex:1;min-height:0;display:flex;flex-direction:column">
+  <!-- 列表视图 -->
+  <div class="table-wrap" id="listWrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th style="width:132px">编号</th>
+          <th style="width:64px">类型</th>
+          <th>标题</th>
+          <th style="width:110px">子系统</th>
+          <th style="width:120px">现场</th>
+          <th style="width:82px">版本</th>
+          <th style="width:104px">状态</th>
+          <th style="width:88px">提交人</th>
+          <th style="width:128px">更新时间</th>
+          <th style="width:76px">操作</th>
+        </tr>
+      </thead>
+      <tbody id="ticketBody"></tbody>
+    </table>
+  </div>
+  <!-- 归并视图（可选 Tab，原型无、部署能力保留） -->
+  <div class="table-wrap hidden" id="aggWrap"><div class="agg" id="aggView"></div></div>
+
+  <!-- 分页 -->
+  <div class="pagination" id="pagination">
+    <div class="page-info">共 <b id="totalCount">0</b> 条 · 第 <b id="curPage">1</b> / <b id="totalPages">1</b> 页</div>
+    <div class="flex items-center gap-12">
+      <select class="select page-size-select" id="pageSize">
+        <option value="10">10 条/页</option>
+        <option value="20">20 条/页</option>
+        <option value="50">50 条/页</option>
+      </select>
+      <div class="pager" id="pager"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 处理决策抽屉 ============ -->
+<div class="drawer-mask" id="drawerMask"></div>
+<div class="drawer wide" id="processDrawer">
+  <div class="drawer-header">
+    <div>
+      <div class="drawer-title">工单处理 · 开发会议决策</div>
+      <div class="drawer-subtitle" id="pdSubtitle">—</div>
+    </div>
+    <span class="modal-close" data-close-drawer="processDrawer"><i class="ti ti-x"></i></span>
+  </div>
+  <div class="drawer-body" id="processBody"></div>
+  <div class="drawer-footer">
+    <button class="btn" data-close-drawer="processDrawer">取消</button>
+    <button class="btn btn-primary" id="confirmProcessBtn"><i class="ti ti-check"></i>确认处理</button>
+  </div>
+</div>
+
+<!-- ============ 查看抽屉 ============ -->
+<div class="drawer wide" id="viewDrawer">
+  <div class="drawer-header">
+    <div>
+      <div class="drawer-title" id="vdTitle">工单详情</div>
+      <div class="drawer-subtitle" id="vdSubtitle">—</div>
+    </div>
+    <span class="modal-close" data-close-drawer="viewDrawer"><i class="ti ti-x"></i></span>
+  </div>
+  <div class="drawer-body" id="viewBody"></div>
+  <div class="drawer-footer">
+    <button class="btn" data-close-drawer="viewDrawer">关闭</button>
+    <a class="btn btn-primary" id="vdFullLink" href="#"><i class="ti ti-external-link"></i>查看完整详情</a>
+  </div>
+</div>
+
+<!-- ============ 后台代提工单抽屉 ============ -->
+<div class="drawer" id="createDrawer">
+  <div class="drawer-header">
+    <div><div class="drawer-title">后台代提工单</div><div class="drawer-subtitle">代现场提交需求 / BUG</div></div>
+    <span class="modal-close" data-close-drawer="createDrawer"><i class="ti ti-x"></i></span>
+  </div>
+  <div class="drawer-body">
+    <div class="form-group">
+      <label>类型 <span class="req">*</span></label>
+      <div class="seg-group" id="ctType">
+        <div class="seg-item active" data-v="requirement">需求</div>
+        <div class="seg-item" data-v="bug">BUG</div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>标题 <span class="req">*</span> <span class="field-counter" id="ctTitleCount">0/120</span></label>
+      <input class="input" id="ctTitle" maxlength="120" placeholder="一句话描述问题或需求">
+      <div class="form-hint error hidden" id="ctTitleHint">标题为必填项</div>
+    </div>
+    <div class="grid grid-cols-2 gap-12">
+      <div class="form-group"><label>子系统</label><select class="select" id="ctSub"></select></div>
+      <div class="form-group"><label>现场 / 医院</label><input class="input" id="ctSite" placeholder="如 山东省立医院"></div>
+    </div>
+    <div class="grid grid-cols-2 gap-12">
+      <div class="form-group"><label>版本 <span class="req" id="ctVerReq" style="display:none">*</span></label><input class="input" id="ctVersion" placeholder="如 v1.3（BUG 必填）"></div>
+      <div class="form-group"><label>优先级</label><select class="select" id="ctPriority"><option>中</option><option>高</option><option>紧急</option><option>低</option></select></div>
+    </div>
+    <div class="form-group">
+      <label>描述 <span class="req">*</span> <span class="field-counter" id="ctDescCount">0/1000</span></label>
+      <textarea class="textarea" id="ctDesc" maxlength="1000" placeholder="详细描述现象 / 复现步骤 / 期望"></textarea>
+      <div class="form-hint error hidden" id="ctDescHint">描述为必填项</div>
+    </div>
+  </div>
+  <div class="drawer-footer">
+    <button class="btn" data-close-drawer="createDrawer">取消</button>
+    <button class="btn btn-primary" id="submitCreateBtn"><i class="ti ti-send"></i>提交工单</button>
+  </div>
+</div>
+
+<div class="toast-container" id="toastHost"></div>
+
+<script>
+const $=s=>document.querySelector(s);
+const $$=s=>Array.prototype.slice.call(document.querySelectorAll(s));
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function fmtTime(v){ if(!v)return '—'; let d=(typeof v==='number')?new Date(v):new Date(String(v).replace(' ','T')); if(isNaN(d)) return String(v); const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+
+/* —— toast —— */
+function toast(msg,type){ const host=$('#toastHost'); if(!host)return; const el=document.createElement('div'); el.className='toast '+(type||''); const ic=type==='success'?'ti-circle-check':type==='error'?'ti-alert-circle':type==='warning'?'ti-alert-triangle':'ti-info-circle'; el.innerHTML=`<i class="ti ${ic}"></i><span>${esc(msg)}</span>`; host.appendChild(el); requestAnimationFrame(()=>el.classList.add('show')); setTimeout(()=>{ el.classList.remove('show'); setTimeout(()=>el.remove(),300); },2400); }
+
+/* —— 抽屉开关（部署 shell.js 无 UI.openDrawer，自实现；用 theme.css .drawer.open/.drawer-mask.open） —— */
+function openDrawer(id){ const d=document.getElementById(id); if(!d)return; $('#drawerMask').classList.add('open'); d.classList.add('open'); }
+function closeDrawer(id){ const d=document.getElementById(id); if(d)d.classList.remove('open'); if(!document.querySelector('.drawer.open')) $('#drawerMask').classList.remove('open'); }
+function closeAllDrawers(){ $$('.drawer.open').forEach(d=>d.classList.remove('open')); $('#drawerMask').classList.remove('open'); }
+
+/* ============ 子系统英文 name → 中文 desc（查当前产品 subsystems；查不到回退原 name） ============ */
+// curProjectObj.subsystems = [{key,name,desc,...}]（desc 中文，如 kwsb→抗网上报）。仅供显示，筛选/存值仍用英文 name。
+function subLabel(name){
+  if(!name) return name;
+  const subs=(curProjectObj&&Array.isArray(curProjectObj.subsystems))?curProjectObj.subsystems:[];
+  for(const s of subs){ if(s && (s.name===name || s.key===name)) return s.desc||s.name||name; }
+  return name;   // 工单里出现但产品未定义的子系统 → 回退原 name
+}
+
+/* ============ 类型 / 状态 映射（真实 type 英文、真实 lifecycle → 原型 UI 标签） ============ */
+const TYPE_LABEL={ bug:'BUG', requirement:'需求', consult:'咨询' };
+const TYPE_TAG={ bug:'tag-bug', requirement:'tag-req', consult:'tag-consult' };
+function typeBadge(t){ return `<span class="tag ${TYPE_TAG[t]||'tag-gray'}">${esc(TYPE_LABEL[t]||t||'—')}</span>`; }
+
+// lifecycle → 状态徽标类（theme.css tag-*）
+const LC_TAG={ '待处理':'tag-warning','分析中':'tag-warning','已回复':'tag-info','已立项':'tag-primary','开发中':'tag-accent','已出包':'tag-primary','待验证':'tag-warning','已关闭':'tag-success','已重开':'tag-danger','暂缓':'tag-gray','已驳回':'tag-danger' };
+function stTag(lc){ return `<span class="tag ${LC_TAG[lc]||'tag-gray'} tag-dot">${esc(lc||'—')}</span>`; }
+function priHtml(p){ const m={'紧急':'tag-danger','高':'tag-warning','中':'tag-primary','低':'tag-gray'}; if(!p)return '<span class="text-tertiary">—</span>'; return `<span class="tag ${m[p]||'tag-gray'}">${esc(p)}</span>`; }
+
+// 流水线 5 环 ← lifecycle 集合映射（§5.1）
+const PIPE=[
+  { key:'待评审',      icon:'ti-clipboard-list',  set:['待处理','分析中'] },
+  { key:'已落实·排期', icon:'ti-calendar-check',  set:['已立项'] },
+  { key:'开发中',      icon:'ti-code',            set:['开发中'] },
+  { key:'已交付',      icon:'ti-circle-check',    set:['已出包','待验证'] },
+  { key:'已关闭',      icon:'ti-archive',         set:['已回复','暂缓','已驳回','已关闭','已重开'] },
+];
+function pipeOfLifecycle(lc){ const p=PIPE.find(x=>x.set.includes(lc)); return p?p.key:''; }
+// 待评审态（可「处理」）
+const REVIEW_LC=['待处理','分析中'];
+function isReview(lc){ return REVIEW_LC.includes(lc); }
+
+/* ============ 全局状态 ============ */
+let PROJECTS=[], curProject='', curProjectObj=null, ME=null;
+let allItems=[], allGroups=[];
+let view='list';
+let state={ page:1, size:10, filters:{} };
+let currentTicket=null, selectedDecision=null;
+
+/* ============ 加载产品 ============ */
+async function loadProjects(){
+  try{ const r=await (await fetch('/api/projects')).json(); PROJECTS=r.projects||r||[]; }catch(e){ PROJECTS=[]; }
+  const sel=$('#fProduct');
+  sel.innerHTML=PROJECTS.length?PROJECTS.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join(''):'<option value="">（无产品）</option>';
+  if(PROJECTS.length){ curProject=PROJECTS[0].id; sel.value=curProject; $('#btnExport').disabled=false; await loadProject(curProject); }
+  else{ curProject=''; $('#btnExport').disabled=true; renderList(); renderPipeline(); }
+}
+
+async function loadProject(pid){
+  curProject=pid; curProjectObj=PROJECTS.find(p=>p.id===pid)||null;
+  if(!pid){ allItems=[]; allGroups=[]; render(); return; }
+  try{
+    const [lr,ar]=await Promise.all([
+      fetch('/api/intake-list?project='+encodeURIComponent(pid)).then(r=>r.json()),
+      fetch('/api/intake-aggregate?project='+encodeURIComponent(pid)).then(r=>r.json())
+    ]);
+    allItems=lr.items||[]; allGroups=ar.groups||[];
+  }catch(e){ allItems=[]; allGroups=[]; }
+  buildDynamicFilters();
+  render();
+}
+
+/* ============ 动态筛选下拉（子系统 / 状态 / 现场 / 版本） ============ */
+function buildDynamicFilters(){
+  // 子系统：优先取产品定义的 subsystems，兜底用列表里出现过的
+  const fsub=$('#fSub'); const keepSub=fsub.value;
+  const subs=[];
+  if(curProjectObj && Array.isArray(curProjectObj.subsystems)) curProjectObj.subsystems.forEach(s=>subs.push(s.name||s.key));
+  allItems.forEach(i=>{ if(i.subsystem && !subs.includes(i.subsystem)) subs.push(i.subsystem); });
+  fsub.innerHTML='<option value="">全部子系统</option>'+[...new Set(subs)].filter(Boolean).map(s=>`<option value="${esc(s)}">${esc(subLabel(s))}</option>`).join('');
+  if([...fsub.options].some(o=>o.value===keepSub)) fsub.value=keepSub;
+  // 状态：真实 lifecycle 全集（含新态 暂缓/已驳回）
+  const fst=$('#fStatus'); const keepSt=fst.value;
+  const lcs=['待处理','分析中','已回复','已立项','开发中','已出包','待验证','暂缓','已驳回','已关闭','已重开'];
+  fst.innerHTML='<option value="">全部状态</option>'+lcs.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
+  if([...fst.options].some(o=>o.value===keepSt)) fst.value=keepSt;
+  // 现场
+  const fsite=$('#fSite'); const keepSite=fsite.value;
+  const sites=[...new Set(allItems.map(i=>i.site).filter(Boolean))].sort();
+  fsite.innerHTML='<option value="">全部现场</option>'+sites.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
+  if(sites.includes(keepSite)) fsite.value=keepSite;
+  // 版本
+  const fver=$('#fVersion'); const keepVer=fver.value;
+  const vers=[...new Set(allItems.map(i=>i.version).filter(Boolean))].sort();
+  fver.innerHTML='<option value="">全部版本</option>'+vers.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');
+  if(vers.includes(keepVer)) fver.value=keepVer;
+}
+
+/* ============ 收集筛选 + 过滤 ============ */
+function collectFilters(){
+  const f=state.filters;
+  f.sub=$('#fSub').value; f.type=$('#fType').value;
+  const st=$('#fStatus').value; if(st){ f.status=st; f.pipe=''; } else if(f.status){ f.status=''; }  // 下拉选具体态优先
+  f.site=$('#fSite').value; f.version=$('#fVersion').value;
+  f.dStart=$('#fDateStart').value; f.dEnd=$('#fDateEnd').value;
+  f.kw=($('#fKeyword').value||'').trim().toLowerCase();
+}
+function getFiltered(){
+  const f=state.filters;
+  return allItems.filter(i=>{
+    if(f.sub && i.subsystem!==f.sub) return false;
+    if(f.type && i.type!==f.type) return false;
+    if(f.status && i.lifecycle!==f.status) return false;
+    if(f.pipe){ const p=PIPE.find(x=>x.key===f.pipe); if(p && !p.set.includes(i.lifecycle)) return false; }
+    if(f.site && i.site!==f.site) return false;
+    if(f.version && i.version!==f.version) return false;
+    if(f.kw){ const hay=((i.title||'')+' '+(i.id||'')).toLowerCase(); if(!hay.includes(f.kw)) return false; }
+    const d=(i.submittedAt||'').slice(0,10);
+    if(f.dStart && d && d<f.dStart) return false;
+    if(f.dEnd && d && d>f.dEnd) return false;
+    return true;
+  });
+}
+
+/* ============ 流水线 ============ */
+function renderPipeline(){
+  const counts={}; PIPE.forEach(p=>counts[p.key]=0);
+  allItems.forEach(i=>{ const k=pipeOfLifecycle(i.lifecycle); if(k) counts[k]++; });
+  const cur=state.filters.pipe||'';
+  $('#pipeline').innerHTML=PIPE.map(p=>`
+    <div class="pipeline-step ${cur===p.key?'active':''}" data-pipe="${esc(p.key)}">
+      <div class="ps-count">${counts[p.key]||0}</div>
+      <div class="ps-label"><i class="ti ${p.icon}"></i>${esc(p.key)}</div>
+    </div>`).join('');
+}
+function pipeClick(key){
+  const cur=state.filters.pipe;
+  state.filters.pipe = (cur===key)?'':key;
+  if(state.filters.pipe){ state.filters.status=''; $('#fStatus').value=''; }
+  state.page=1; render();
+}
+
+/* ============ 渲染（列表 / 归并） ============ */
+function render(){ collectSyncPipe(); renderPipeline(); if(view==='list') renderList(); else renderAgg(); }
+// 状态下拉选具体态时，同步高亮对应流水线环
+function collectSyncPipe(){
+  const st=state.filters.status;
+  if(st){ const k=pipeOfLifecycle(st); state.filters.pipe = k || ''; }
+}
+
+function renderList(){
+  $('#listWrap').classList.remove('hidden'); $('#aggWrap').classList.add('hidden'); $('#pagination').classList.remove('hidden');
+  const list=getFiltered().slice().sort((a,b)=>(b.updatedAt||b.submittedAt||'').localeCompare(a.updatedAt||a.submittedAt||''));
+  const total=list.length;
+  const pages=Math.max(1,Math.ceil(total/state.size));
+  if(state.page>pages) state.page=pages; if(state.page<1) state.page=1;
+  const start=(state.page-1)*state.size;
+  const pageData=list.slice(start,start+state.size);
+  const prodName=curProjectObj?curProjectObj.name:'';
+  $('#ticketBody').innerHTML = pageData.length ? pageData.map(i=>{
+    const lc=i.lifecycle||'待处理';
+    const action = isReview(lc)
+      ? `<span class="row-action" data-act="process" data-id="${esc(i.id)}"><i class="ti ti-gavel" style="vertical-align:-2px"></i> 处理</span>`
+      : `<span class="row-action" data-act="view" data-id="${esc(i.id)}">查看</span>`;
+    const sub = i.site ? esc(i.site) : (prodName?esc(prodName):'');
+    return `<tr class="clickable" data-row-id="${esc(i.id)}" data-review="${isReview(lc)?1:0}">
+      <td class="cell-id">${esc(i.id)}</td>
+      <td>${typeBadge(i.type)}</td>
+      <td><div class="cell-strong"><span class="txt">${i.unread?'<span class="row-unread" title="有未读回复"></span>':''}${esc(i.title||'—')}</span></div>${sub?`<div class="cell-sub">${sub}</div>`:''}</td>
+      <td>${i.subsystem?esc(subLabel(i.subsystem)):'<span class="text-tertiary">—</span>'}</td>
+      <td>${i.site?esc(i.site):'<span class="text-tertiary">—</span>'}</td>
+      <td class="mono">${i.version?esc(i.version):'<span class="text-tertiary">—</span>'}</td>
+      <td>${stTag(lc)}</td>
+      <td>${i.reporter?esc(i.reporter):'<span class="text-tertiary">—</span>'}</td>
+      <td class="cell-time">${fmtTime(i.updatedAt||i.submittedAt)}</td>
+      <td>${action}</td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="10"><div class="empty"><div class="empty-illu"><i class="ti ti-file-search"></i></div><div class="empty-title">没有匹配的工单</div><div class="empty-desc">${allItems.length?'调整筛选条件或重置后再试':'该产品暂无工单，等待现场提交'}</div></div></td></tr>`;
+  $('#totalCount').textContent=total; $('#curPage').textContent=state.page; $('#totalPages').textContent=pages;
+  renderPager(pages);
+}
+
+function renderPager(pages){
+  let html=`<button class="pager-btn" ${state.page===1?'disabled':''} data-page="${state.page-1}"><i class="ti ti-chevron-left"></i></button>`;
+  const win=[];
+  for(let i=1;i<=pages;i++){ if(i===1||i===pages||Math.abs(i-state.page)<=1) win.push(i); else if(win[win.length-1]!=='...') win.push('...'); }
+  win.forEach(i=> html += i==='...' ? `<span style="padding:0 4px;color:var(--color-text-tertiary)">…</span>` : `<button class="pager-btn ${i===state.page?'active':''}" data-page="${i}">${i}</button>`);
+  html+=`<button class="pager-btn" ${state.page===pages?'disabled':''} data-page="${state.page+1}"><i class="ti ti-chevron-right"></i></button>`;
+  $('#pager').innerHTML=html;
+}
+
+function renderAgg(){
+  $('#listWrap').classList.add('hidden'); $('#aggWrap').classList.remove('hidden'); $('#pagination').classList.add('hidden');
+  const f=state.filters;
+  const groups=allGroups.filter(g=>{
+    if(f.type && !(g.types||[]).includes(f.type)) return false;
+    if(f.status && !(g.statuses||[]).includes(f.status)) return false;
+    if(f.pipe){ const p=PIPE.find(x=>x.key===f.pipe); if(p && !(g.statuses||[]).some(s=>p.set.includes(s))) return false; }
+    if(f.site && !(g.sites||[]).includes(f.site)) return false;
+    if(f.version && !(g.versions||[]).includes(f.version)) return false;
+    if(f.sub && g.module!==f.sub && !(g.subsystems||[]).includes(f.sub)) return false;
+    if(f.kw){ const hay=((g.title||'')+' '+(g.module||'')).toLowerCase(); if(!hay.includes(f.kw)) return false; }
+    return true;
+  });
+  $('#totalCount').textContent=groups.reduce((n,g)=>n+(g.count||0),0);
+  $('#aggView').innerHTML=groups.length?groups.map(g=>{
+    const types=(g.types||[]).map(t=>typeBadge(t)).join(' ');
+    const sites=(g.sites||[]).length?(g.sites||[]).map(s=>`<span class="chip"><i class="ti ti-map-pin"></i>${esc(s)}</span>`).join(''):'<span class="text-tertiary">未指定</span>';
+    const vers=(g.versions||[]).length?(g.versions||[]).map(v=>`<span class="chip chip-accent"><i class="ti ti-tag"></i>${esc(v)}</span>`).join(''):'<span class="text-tertiary">未指定</span>';
+    const sts=(g.statuses||[]).map(s=>stTag(s)).join('&nbsp;');
+    const ids=(g.ids||[]).map(id=>`<span class="idchip" data-open-id="${esc(id)}">${esc(id)}</span>`).join('');
+    return `<div class="gcard"><div class="gcard-head"><span class="gcount">${g.count}</span><span class="gtitle">${esc(g.title)}</span>${g.module?`<span class="gmod"><i class="ti ti-box"></i>${esc(g.module)}</span>`:''}<span style="flex:0 0 auto">${types}</span></div>
+      <div class="gcard-body">
+        <div class="grow"><span class="gk">现场</span>${sites}</div>
+        <div class="grow"><span class="gk">版本</span>${vers}</div>
+        <div class="grow"><span class="gk">状态</span><span>${sts}</span></div>
+        <div class="grow"><span class="gk">明细</span>${ids}</div>
+      </div></div>`;
+  }).join(''):`<div class="empty"><div class="empty-illu"><i class="ti ti-stack-2"></i></div><div class="empty-title">${allGroups.length?'没有符合筛选的现象归并':'该产品暂无可归并工单'}</div></div>`;
+}
+
+/* ============ 处理决策抽屉 ============ */
+async function openProcess(id){
+  const t=allItems.find(x=>x.id===id); if(!t)return;
+  currentTicket=t; selectedDecision=null;
+  $('#pdSubtitle').textContent=`${t.id} · ${TYPE_LABEL[t.type]||t.type} · ${t.site||(curProjectObj?curProjectObj.name:'')}`;
+  // 先渲染摘要（可能无 analysis，拉详情补 AI 初判）
+  renderProcessBody(t, null);
+  openDrawer('processDrawer');
+  try{ const d=await (await fetch(`/api/intake-detail?project=${encodeURIComponent(curProject)}&id=${encodeURIComponent(id)}`)).json(); if(d.item){ currentTicket=Object.assign({}, t, d.item); renderProcessBody(currentTicket, d.item.analysis); } }catch(e){}
+}
+function renderProcessBody(t, analysis){
+  const aiHtml = analysis && (analysis.verdict||analysis.detail)
+    ? `<div class="ai-judge mt-16"><div class="ai-judge-head"><i class="ti ti-sparkles"></i>AI 初判</div>${analysis.category?`<div class="text-13"><b>类别：</b>${esc(analysis.category)}</div>`:''}${analysis.verdict?`<div class="text-13 mt-4"><b>判断：</b>${esc(analysis.verdict)}</div>`:''}${analysis.detail?`<div class="text-13 mt-4">${esc(analysis.detail)}</div>`:''}</div>`
+    : `<div class="ai-judge mt-16"><div class="ai-judge-head"><i class="ti ti-sparkles"></i>AI 初判</div><div class="text-13 text-tertiary">尚无 AI 初判——可到详情页点「AI 分析初判」生成。</div></div>`;
+  const descText = t.desc || t.reqDesc || t.bg || '';
+  $('#processBody').innerHTML=`
+    <div class="summary-block">
+      <div class="flex items-center gap-8 mb-8">${typeBadge(t.type)}<span class="cell-id">${esc(t.id)}</span><span class="text-tertiary text-12">提交于 ${fmtTime(t.submittedAt)}</span></div>
+      <div style="font-size:15px;font-weight:600;margin-bottom:6px">${esc(t.title||'—')}</div>
+      <div class="desc-mini">
+        <div class="di"><span class="dk">提交人</span><span class="dv">${esc(t.reporter||'—')}</span></div>
+        <div class="di"><span class="dk">现场</span><span class="dv">${esc(t.site||'—')}</span></div>
+        <div class="di"><span class="dk">产品·子系统</span><span class="dv">${esc((curProjectObj?curProjectObj.name:'')+(t.subsystem?(' · '+subLabel(t.subsystem)):''))}</span></div>
+        <div class="di"><span class="dk">版本</span><span class="dv mono">${esc(t.version||'—')}</span></div>
+        <div class="di full"><span class="dk">描述</span><span class="dv">${esc(descText||'—')}</span></div>
+      </div>
+    </div>
+    ${aiHtml}
+    <div class="divider-h"></div>
+    <div style="font-size:14px;font-weight:600;margin-bottom:12px"><i class="ti ti-users-group" style="color:var(--color-primary);vertical-align:-2px"></i> 开发会议决策（三选一）</div>
+
+    <div class="decision-option success" data-d="develop">
+      <div class="decision-option-head"><span class="decision-radio"></span><div class="decision-title"><i class="ti ti-circle-check" style="color:var(--color-success)"></i>落实开发（立项）</div></div>
+      <div class="decision-desc">会议决定开发，归入产品周批次 → 转「已立项」</div>
+      <div class="decision-extra">
+        <label class="text-12 fw-500 text-secondary" style="display:block;margin-bottom:5px">归入批次（选填 · 批次功能上线前可留空）</label>
+        <input class="input" id="pdBatch" placeholder="如 B-3701（BP-01 未上线，可留空）">
+        <label class="text-12 fw-500 text-secondary" style="display:block;margin:10px 0 5px">经办人（选填）</label>
+        <input class="input" id="pdAssignee" placeholder="开发经办人">
+      </div>
+    </div>
+
+    <div class="decision-option" data-d="reply">
+      <div class="decision-option-head"><span class="decision-radio"></span><div class="decision-title"><i class="ti ti-message-2" style="color:var(--color-primary)"></i>直接答复（不开发）</div></div>
+      <div class="decision-desc">使用问题 / 已有功能 / 配置即可解决，回复并关闭 → 转「已回复」（自动沉淀经验库）</div>
+      <div class="decision-extra">
+        <label class="text-12 fw-500 text-secondary" style="display:block;margin-bottom:5px">回复内容 <span style="color:var(--color-danger)">*</span></label>
+        <textarea class="textarea" id="pdReply" placeholder="填写回复内容，可含操作路径 / 截图说明"></textarea>
+      </div>
+    </div>
+
+    <div class="decision-option warning" data-d="hold">
+      <div class="decision-option-head"><span class="decision-radio"></span><div class="decision-title"><i class="ti ti-player-pause" style="color:var(--color-warning)"></i>暂缓 / 驳回</div></div>
+      <div class="decision-desc">优先级低 / 需求不清 / 重复，工单挂起 → 转「暂缓」或「已驳回」</div>
+      <div class="decision-extra">
+        <div class="flex gap-16 mb-8">
+          <label class="radio"><input type="radio" name="holdType" value="暂缓" checked>暂缓</label>
+          <label class="radio"><input type="radio" name="holdType" value="已驳回">驳回</label>
+        </div>
+        <label class="text-12 fw-500 text-secondary" style="display:block;margin-bottom:5px">原因 <span style="color:var(--color-danger)">*</span></label>
+        <textarea class="textarea" id="pdReason" placeholder="填写暂缓 / 驳回原因"></textarea>
+      </div>
+    </div>`;
+  // 决策选中
+  $$('#processBody .decision-option').forEach(el=>el.addEventListener('click',()=>selectDecision(el.getAttribute('data-d'))));
+}
+function selectDecision(d){ selectedDecision=d; $$('#processBody .decision-option').forEach(el=>el.classList.toggle('selected', el.getAttribute('data-d')===d)); }
+
+async function confirmProcess(){
+  if(!currentTicket) return;
+  if(!selectedDecision){ toast('请先选择一项决策','warning'); return; }
+  const id=currentTicket.id;
+  let body={ project:curProject, id };
+  if(selectedDecision==='develop'){
+    body.to='已立项';
+    const bt=($('#pdBatch')?.value||'').trim(); if(bt) body.batch=bt;
+    const asg=($('#pdAssignee')?.value||'').trim(); if(asg) body.assignee=asg;
+  } else if(selectedDecision==='reply'){
+    const reply=($('#pdReply')?.value||'').trim();
+    if(!reply){ toast('请填写回复内容','warning'); return; }
+    body.to='已回复'; body.reply=reply;
+  } else if(selectedDecision==='hold'){
+    const ht=(document.querySelector('input[name="holdType"]:checked')||{}).value||'暂缓';
+    const reason=($('#pdReason')?.value||'').trim();
+    if(!reason){ toast('请填写原因','warning'); return; }
+    body.to=ht; body.note=reason;
+  }
+  const btn=$('#confirmProcessBtn'); btn.disabled=true;
+  try{
+    const r=await (await fetch('/api/intake-transition',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(!r.ok){ toast(r.error||'处理失败','error'); btn.disabled=false; return; }
+    closeDrawer('processDrawer');
+    const msg = selectedDecision==='develop'?'已落实开发，工单转「已立项」' : selectedDecision==='reply'?('已答复并关闭'+(r.kbSunk?'，已沉淀经验库':'')) : (body.to==='已驳回'?'工单已驳回':'工单已暂缓');
+    toast(msg, selectedDecision==='develop'?'success':selectedDecision==='reply'?'success':'warning');
+    await loadProject(curProject);
+  }catch(e){ toast('处理失败：'+e.message,'error'); }
+  finally{ btn.disabled=false; }
+}
+
+/* ============ 查看抽屉 ============ */
+async function openView(id){
+  const t=allItems.find(x=>x.id===id)||{id};
+  $('#vdSubtitle').textContent=`${id} · ${TYPE_LABEL[t.type]||t.type||''}`;
+  $('#vdFullLink').href=`/detail.html?project=${encodeURIComponent(curProject)}&id=${encodeURIComponent(id)}`;
+  $('#viewBody').innerHTML=`<div class="empty" style="padding:36px"><div class="empty-illu"><i class="ti ti-loader"></i></div><div class="empty-title">加载中…</div></div>`;
+  openDrawer('viewDrawer');
+  let e=t;
+  try{ const d=await (await fetch(`/api/intake-detail?project=${encodeURIComponent(curProject)}&id=${encodeURIComponent(id)}`)).json(); if(d.item) e=d.item; }catch(err){}
+  renderViewBody(e);
+}
+function renderViewBody(e){
+  const lc=e.lifecycle||'待处理';
+  const descText=e.desc||e.reqDesc||e.bg||'';
+  let html=`<div class="flex items-center gap-8 mb-12" style="flex-wrap:wrap">${typeBadge(e.type)}${stTag(lc)}${e.batch?`<span class="tag tag-info"><i class="ti ti-package"></i> ${esc(e.batch)}</span>`:''}${e.stewardUC?`<span class="tag"><i class="ti ti-link"></i> ${esc(e.stewardUC)}</span>`:''}</div>
+    <div style="font-size:16px;font-weight:600;margin-bottom:12px">${esc(e.title||'—')}</div>
+    <div class="desc-mini">
+      <div class="di"><span class="dk">提交人</span><span class="dv">${esc(e.reporter||'—')}</span></div>
+      <div class="di"><span class="dk">现场</span><span class="dv">${esc(e.site||'—')}</span></div>
+      <div class="di"><span class="dk">产品·子系统</span><span class="dv">${esc((curProjectObj?curProjectObj.name:'')+(e.subsystem?(' · '+subLabel(e.subsystem)):''))}</span></div>
+      <div class="di"><span class="dk">版本</span><span class="dv mono">${esc(e.version||'—')}</span></div>
+      <div class="di full"><span class="dk">描述</span><span class="dv">${esc(descText||'—')}</span></div>
+    </div>`;
+  const a=e.analysis;
+  if(a && (a.verdict||a.detail)){
+    html+=`<div class="ai-judge mt-16"><div class="ai-judge-head"><i class="ti ti-sparkles"></i>AI 初判</div>${a.category?`<div class="text-13"><b>类别：</b>${esc(a.category)}</div>`:''}${a.verdict?`<div class="text-13 mt-4"><b>判断：</b>${esc(a.verdict)}</div>`:''}${a.detail?`<div class="text-13 mt-4">${esc(a.detail)}</div>`:''}</div>`;
+  }
+  // 决策回复（chat 里 role=dev）
+  const chat=Array.isArray(e.chat)?e.chat:[];
+  const devMsgs=chat.filter(m=>m.role==='dev');
+  if(devMsgs.length){ html+=`<div class="alert alert-info mt-16"><i class="ti ti-message-2"></i><div><b>决策回复：</b>${devMsgs.map(m=>esc(m.text)).join('<br>')}</div></div>`; }
+  // 流转留痕
+  const hist=Array.isArray(e.history)?e.history:[];
+  if(hist.length){
+    html+=`<div class="divider-h"></div><div style="font-size:14px;font-weight:600;margin-bottom:14px"><i class="ti ti-timeline" style="color:var(--color-primary);vertical-align:-2px"></i> 流转留痕</div><div class="timeline">`+
+      hist.map(h=>{ const cls=(h.to==='已关闭'||h.to==='已回复')?'success':(h.to==='已驳回'?'danger':(h.to==='暂缓'?'warning':''));
+        return `<div class="timeline-item ${cls}"><div class="timeline-title">${esc(h.to)}${h.from?` <span class="text-tertiary" style="font-weight:400">← ${esc(h.from)}</span>`:''}</div><div class="timeline-meta">${esc(h.by||'')}${h.byRole?' / '+esc(h.byRole):''} · ${esc(fmtTime(h.at))}</div>${h.note?`<div class="timeline-body">${esc(h.note)}</div>`:''}</div>`; }).join('')+`</div>`;
+  }
+  $('#viewBody').innerHTML=html;
+}
+
+/* ============ 后台代提工单 ============ */
+function openCreate(){
+  // 子系统下拉随当前产品
+  const cs=$('#ctSub'); cs.innerHTML='<option value="">（不指定）</option>';
+  if(curProjectObj && Array.isArray(curProjectObj.subsystems)) curProjectObj.subsystems.forEach(s=>{ const o=document.createElement('option'); o.value=s.name||s.key; o.textContent=s.desc||s.name||s.key; cs.appendChild(o); });
+  $('#ctTitle').value=''; $('#ctDesc').value=''; $('#ctSite').value=''; $('#ctVersion').value=''; $('#ctPriority').value='中';
+  $('#ctTitleCount').textContent='0/120'; $('#ctDescCount').textContent='0/1000';
+  $('#ctTitleHint').classList.add('hidden'); $('#ctDescHint').classList.add('hidden');
+  $('#ctTitle').classList.remove('invalid'); $('#ctDesc').classList.remove('invalid');
+  // 默认需求
+  $$('#ctType .seg-item').forEach((el,i)=>el.classList.toggle('active', i===0));
+  syncCtVerReq();
+  openDrawer('createDrawer');
+}
+function ctType(){ const a=document.querySelector('#ctType .seg-item.active'); return a?a.getAttribute('data-v'):'requirement'; }
+function syncCtVerReq(){ $('#ctVerReq').style.display = ctType()==='bug'?'inline':'none'; }
+async function submitCreate(){
+  const title=$('#ctTitle').value.trim();
+  const desc=$('#ctDesc').value.trim();
+  const type=ctType();
+  const version=$('#ctVersion').value.trim();
+  let bad=false;
+  if(!title){ $('#ctTitle').classList.add('invalid'); $('#ctTitleHint').classList.remove('hidden'); bad=true; } else { $('#ctTitle').classList.remove('invalid'); $('#ctTitleHint').classList.add('hidden'); }
+  if(!desc){ $('#ctDesc').classList.add('invalid'); $('#ctDescHint').classList.remove('hidden'); bad=true; } else { $('#ctDesc').classList.remove('invalid'); $('#ctDescHint').classList.add('hidden'); }
+  if(bad){ toast('请填写必填项','warning'); return; }
+  if(type==='bug' && !version){ $('#ctVersion').classList.add('invalid'); toast('BUG 需填写版本','warning'); return; } else { $('#ctVersion').classList.remove('invalid'); }
+  const body={ project:curProject, type, title, version, site:$('#ctSite').value.trim(), subsystem:$('#ctSub').value, priority:$('#ctPriority').value };
+  // desc 按类型放对字段（后端 e.desc/e.reqDesc 都存 data）
+  if(type==='bug') body.desc=desc; else body.reqDesc=desc;
+  body.desc=body.desc||desc;
+  const btn=$('#submitCreateBtn'); btn.disabled=true;
+  try{
+    const r=await (await fetch('/api/intake-submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(!r.ok){ toast(r.error||'提交失败','error'); btn.disabled=false; return; }
+    closeDrawer('createDrawer');
+    toast('工单已提交，状态：待评审','success');
+    await loadProject(curProject);
+  }catch(e){ toast('提交失败：'+e.message,'error'); }
+  finally{ btn.disabled=false; }
+}
+
+/* ============ 事件绑定 ============ */
+function bindEvents(){
+  // 产品切换 → 重拉
+  $('#fProduct').addEventListener('change', ()=>{ state.page=1; loadProject($('#fProduct').value); });
+  // 选择型即选即查
+  ['#fSub','#fType','#fStatus','#fSite','#fVersion','#fDateStart','#fDateEnd'].forEach(sel=>{
+    $(sel).addEventListener('change', ()=>{ collectFilters(); state.page=1; render(); });
+  });
+  // 关键词回车
+  $('#fKeyword').addEventListener('keydown', e=>{ if(e.key==='Enter'){ collectFilters(); state.page=1; render(); } });
+  // 重置
+  $('#btnReset').addEventListener('click', ()=>{
+    ['#fSub','#fType','#fStatus','#fSite','#fVersion','#fDateStart','#fDateEnd','#fKeyword'].forEach(sel=>$(sel).value='');
+    state.filters={}; state.page=1; render();
+  });
+  // 展开/收起筛选
+  $('#toggleFilter').addEventListener('click', ()=>{
+    const box=$('#filterBox'); box.classList.toggle('collapsed');
+    const collapsed=box.classList.contains('collapsed');
+    $('#toggleFilter').innerHTML = collapsed?'<i class="ti ti-chevron-down"></i>展开更多':'<i class="ti ti-chevron-up"></i>收起';
+  });
+  // 视图切换
+  $('#viewSeg').addEventListener('click', e=>{ const it=e.target.closest('.seg-item'); if(!it)return; const v=it.getAttribute('data-v'); if(v===view)return; view=v; $$('#viewSeg .seg-item').forEach(x=>x.classList.toggle('active', x===it)); render(); });
+  // 流水线点击
+  $('#pipeline').addEventListener('click', e=>{ const s=e.target.closest('.pipeline-step'); if(s) pipeClick(s.getAttribute('data-pipe')); });
+  // 每页数
+  $('#pageSize').addEventListener('change', ()=>{ state.size=+$('#pageSize').value; state.page=1; render(); });
+  // 分页
+  $('#pager').addEventListener('click', e=>{ const b=e.target.closest('.pager-btn'); if(!b||b.disabled)return; const p=+b.getAttribute('data-page'); if(p>=1){ state.page=p; render(); $('#listWrap').scrollTop=0; } });
+  // 行操作 / 行点击
+  $('#ticketBody').addEventListener('click', e=>{
+    const act=e.target.closest('[data-act]');
+    if(act){ e.stopPropagation(); const id=act.getAttribute('data-id'); if(act.getAttribute('data-act')==='process') openProcess(id); else openView(id); return; }
+    const tr=e.target.closest('tr[data-row-id]');
+    if(tr){ const id=tr.getAttribute('data-row-id'); (tr.getAttribute('data-review')==='1')?openProcess(id):openView(id); }
+  });
+  // 归并明细 chip → 查看
+  $('#aggView').addEventListener('click', e=>{ const c=e.target.closest('[data-open-id]'); if(c) openView(c.getAttribute('data-open-id')); });
+  // 抽屉关闭
+  document.addEventListener('click', e=>{ const c=e.target.closest('[data-close-drawer]'); if(c) closeDrawer(c.getAttribute('data-close-drawer')); });
+  $('#drawerMask').addEventListener('click', closeAllDrawers);
+  document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeAllDrawers(); });
+  // 确认处理
+  $('#confirmProcessBtn').addEventListener('click', confirmProcess);
+  // 导出 / 代提
+  $('#btnExport').addEventListener('click', ()=>{ if(!curProject){ toast('请先选择产品','warning'); return; } window.location.href='/api/intake-export?project='+encodeURIComponent(curProject); });
+  $('#btnCreate').addEventListener('click', openCreate);
+  // 代提抽屉内交互
+  $('#ctType').addEventListener('click', e=>{ const it=e.target.closest('.seg-item'); if(!it)return; $$('#ctType .seg-item').forEach(x=>x.classList.toggle('active', x===it)); syncCtVerReq(); });
+  $('#ctTitle').addEventListener('input', ()=>{ $('#ctTitleCount').textContent=$('#ctTitle').value.length+'/120'; });
+  $('#ctDesc').addEventListener('input', ()=>{ $('#ctDescCount').textContent=$('#ctDesc').value.length+'/1000'; });
+  $('#submitCreateBtn').addEventListener('click', submitCreate);
+}
+
+/* ============ 启动 ============ */
+(async()=>{
+  try{ ME=(await (await fetch('/api/me')).json()).me; }catch(e){}
+  bindEvents();
+  await loadProjects();
+  // URL 参数：?status=待处理 或 ?pipe=待评审 或 ?open=<id>
+  const q=new URLSearchParams(location.search);
+  if(q.get('status')){ state.filters.status=q.get('status'); const el=$('#fStatus'); if(el && [...el.options].some(o=>o.value===q.get('status'))) el.value=q.get('status'); render(); }
+  if(q.get('pipe')){ state.filters.pipe=q.get('pipe'); render(); }
+  if(q.get('open')){ const id=q.get('open'); const t=allItems.find(x=>x.id===id); if(t){ isReview(t.lifecycle)?openProcess(id):openView(id); } }
+})();
+</script>
+</body>
+</html>

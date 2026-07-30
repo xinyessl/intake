@@ -1,0 +1,17 @@
+# ───────── 安全红线：数据 / 配置 / 密钥一律不入库（先挡再写代码） ─────────
+# 收件自己的落盘库、模型 API Key、项目登记等全在 data/ 下，永不提交
+/data/
+
+# 依赖 / 日志 / 系统噪音
+node_modules/
+*.log
+npm-debug.log*
+.DS_Store
+
+# 本地 ops 备份（含线上 server.mjs / customers 快照，可能有真实数据）+ 本地草稿（部署配置）——不入库
+/backups/
+/scratch/
+
+# 本地个人化设置（Claude Code）
+.claude/settings.local.json
+.claude/plan/

@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>产品管理 · 收件 intake</title>
+<link rel="stylesheet" href="/vendor/tabler/tabler-icons.min.css">
+<link rel="stylesheet" href="/assets/theme.css">
+<link rel="stylesheet" href="/assets/app.css">
+<style>
+  /* —— 产品管理页局部微调（复用 theme.css 组件类，仅补页面级细节） —— */
+  .pm-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .pm-toolbar .lp-cnt{font-size:12.5px;color:var(--color-text-tertiary);font-weight:500}
+  .pm-toolbar .sp{margin-left:auto}
+
+  /* 表格单元格 */
+  .pm-id{font-family:var(--font-num);font-size:12px;font-weight:600;padding:1px 8px;border-radius:var(--radius);background:var(--color-primary-light);color:var(--color-primary);display:inline-block}
+  .pm-name{font-weight:600;color:var(--color-text)}
+  .pm-git{font-size:11.5px;color:var(--color-text-tertiary);font-family:var(--font-num);margin-top:2px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pm-git.none{font-style:italic}
+  .subcnt{font-size:11.5px;font-weight:600;padding:1px 8px;border-radius:var(--radius);background:var(--color-accent-light);color:var(--color-accent);white-space:nowrap}
+  .subnames{font-size:11.5px;color:var(--color-text-secondary);margin-top:3px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .subnames.none{color:var(--color-text-tertiary);font-style:italic}
+  .commit-cell{font-size:12px;line-height:1.7;font-family:var(--font-num);max-width:340px}
+  .commit-cell .cname{color:var(--color-text-tertiary);font-family:var(--font-sans)}
+  .commit-cell .chash{color:var(--color-primary);font-weight:600}
+  .commit-cell .cdate{color:var(--color-text-tertiary)}
+  .commit-cell .csub{color:var(--color-text-secondary);font-family:var(--font-sans)}
+  .commit-cell .none{color:var(--color-text-tertiary);font-style:italic;font-family:var(--font-sans)}
+  .commit-cell .commit-toggle{color:var(--color-primary);cursor:pointer;font-family:var(--font-sans);font-size:11.5px;user-select:none;display:inline-block;margin-top:3px}
+  .commit-cell .commit-toggle:hover{text-decoration:underline}
+  .vchip{font-size:11px;font-weight:600;padding:1px 8px;border-radius:var(--radius);display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+  .vchip.ok{background:var(--color-success-light);color:var(--color-success)}
+  .vchip.warn{background:var(--color-warning-light);color:var(--color-warning)}
+  .vchip.load{background:var(--color-surface-alt);color:var(--color-text-tertiary)}
+  .synctime{font-size:11.5px;color:var(--color-text-tertiary);margin-top:3px;font-family:var(--font-num)}
+
+  /* 抽屉内子系统预览 */
+  .gitrow{display:flex;gap:9px;align-items:stretch}
+  .gitrow .input{flex:1;min-width:0;font-family:var(--font-num);font-size:12.5px}
+  .gitrow .btn{flex:0 0 auto;white-space:nowrap}
+  .subslist{display:flex;flex-direction:column;gap:6px;border:1px solid var(--color-border);border-radius:var(--radius);padding:9px 11px;background:var(--color-surface-alt);max-height:220px;overflow-y:auto}
+  .subitem{display:flex;align-items:baseline;gap:8px;font-size:12.5px;min-width:0}
+  .subitem .sk{font-weight:600;color:var(--color-primary);font-family:var(--font-num);font-size:12px;flex:0 0 auto;max-width:38%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .subitem .sd{color:var(--color-text-tertiary);flex:0 0 auto}
+  .subitem .sn{color:var(--color-text);min-width:0}
+  .subitem .sdesc{color:var(--color-text-tertiary);font-size:11.5px;margin-left:auto;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 0 auto}
+  .subempty{font-size:12.5px;color:var(--color-text-tertiary);font-style:italic}
+</style>
+<script src="/assets/ui.js" defer></script>
+<script src="/assets/shell.js" defer></script>
+</head>
+<body data-shell="admin" data-nav="projects" data-breadcrumb="主体管理 > 产品管理" data-content-layout="list">
+
+<!-- 工具条 -->
+<div class="card">
+  <div class="filter-bar" style="padding:12px 16px 12px">
+    <div class="pm-toolbar">
+      <div class="flex items-center gap-8">
+        <i class="ti ti-folders text-primary" style="font-size:18px"></i>
+        <span style="font-weight:600;font-size:14px">已登记产品</span>
+        <span class="lp-cnt" id="listCnt"></span>
+      </div>
+      <span class="sp"></span>
+      <button class="btn btn-sm" id="syncAllBtn" title="对每个产品逐一同步（git fetch + reset）"><i class="ti ti-refresh"></i> 全部同步</button>
+      <button class="btn btn-sm" id="gitCfgBtn" title="配置 GitLab host + access token"><i class="ti ti-brand-git"></i> Git 集成</button>
+      <button class="btn btn-sm btn-primary" id="addBtn"><i class="ti ti-plus"></i> 新增产品</button>
+    </div>
+  </div>
+</div>
+
+<!-- 产品列表（整宽 data-table） -->
+<div class="card" style="flex:1;min-height:0;display:flex;flex-direction:column">
+  <div class="table-wrap" id="listWrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th style="width:120px">id</th>
+          <th style="width:200px">产品名</th>
+          <th style="width:200px">子系统</th>
+          <th>最新提交</th>
+          <th style="width:118px">版本</th>
+          <th style="width:150px">操作</th>
+        </tr>
+      </thead>
+      <tbody id="listBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ============ 新增 / 编辑抽屉 ============ -->
+<div class="drawer-mask" id="drawerMask"></div>
+<div class="drawer" id="editDrawer">
+  <div class="drawer-header">
+    <div>
+      <div class="drawer-title" id="edTitle">新增产品</div>
+      <div class="drawer-subtitle">贴 GitLab 组地址「解析」自动带出 id / 名称 / 子系统（含中文描述）</div>
+    </div>
+    <span class="modal-close" data-close-drawer="editDrawer"><i class="ti ti-x"></i></span>
+  </div>
+  <div class="drawer-body">
+    <div class="form-group">
+      <label>Git 地址 <span class="req">*</span></label>
+      <div class="gitrow">
+        <input class="input" id="fGit" placeholder="如 https://gitlab.lcpharmacy.cn/steward/hlyy 或 .../steward/etl/petl.git" autocomplete="off">
+        <button class="btn btn-primary" id="inspectBtn" type="button"><i class="ti ti-search"></i> <span>解析</span></button>
+      </div>
+      <div class="form-hint">贴产品的 GitLab 仓库 / 组地址，点「解析」自动带出 id、名称、子系统（含中文描述）。<b>贴组地址</b> → id 取组名、组下各仓为子系统；<b>贴单个仓</b>（.../xxx.git）→ id 取仓名。保存时后端克隆各仓，用于读版本(git tag) / spec。需先在右上「Git 集成」配 host + token。</div>
+    </div>
+    <div class="form-group">
+      <label>项目 id <span class="req">*</span> <span class="field-counter" id="idCount">0/40</span></label>
+      <input class="input mono" id="fId" maxlength="40" placeholder="解析 Git 后自动填充，如 hlyy" autocomplete="off">
+      <div class="form-hint" id="idHelp">主键，小写字母 / 数字 / 连字符，1~40 位，以字母或数字开头。<b>保存后不可改</b>（改 id = 删旧建新）。</div>
+      <div class="form-hint error hidden" id="idErr"></div>
+    </div>
+    <div class="form-group">
+      <label>项目名 <span class="req">*</span> <span class="field-counter" id="nameCount">0/40</span></label>
+      <input class="input" id="fName" maxlength="40" placeholder="解析 Git 后自动填充，如 合理用药系统" autocomplete="off">
+      <div class="form-hint error hidden" id="nameErr"></div>
+    </div>
+    <div class="form-group hidden" id="subsPreview" style="margin-bottom:0">
+      <label><i class="ti ti-stack-2" style="vertical-align:-2px"></i> 已发现子系统 <span class="text-tertiary" id="subsCntLbl" style="font-weight:400"></span></label>
+      <div class="subslist" id="subsList"></div>
+    </div>
+  </div>
+  <div class="drawer-footer">
+    <button class="btn" data-close-drawer="editDrawer">取消</button>
+    <button class="btn btn-primary" id="saveBtn"><i class="ti ti-check"></i> <span>新增</span></button>
+  </div>
+</div>
+
+<!-- ============ Git 集成配置弹窗 ============ -->
+<div class="modal-mask" id="gcMask"></div>
+<div class="modal narrow" id="gcModal">
+  <div class="modal-header">
+    <div class="modal-title"><i class="ti ti-brand-git" style="color:var(--color-primary)"></i> Git 集成</div>
+    <span class="modal-close" data-close-modal="gcModal"><i class="ti ti-x"></i></span>
+  </div>
+  <div class="modal-body">
+    <div class="alert alert-info mb-16"><i class="ti ti-info-circle"></i><div>配置一次 GitLab <b>host + access token</b>，之后登记产品直接贴 Git 地址即可自动解析 id / 名称 / 子系统仓。</div></div>
+    <div class="form-group">
+      <label>GitLab host baseUrl <span class="req">*</span></label>
+      <input class="input mono" id="gcBase" placeholder="如 https://gitlab.lcpharmacy.cn" autocomplete="off">
+    </div>
+    <div class="form-group" style="margin-bottom:0">
+      <label>Access token <span class="text-tertiary" style="font-weight:400;font-size:12px">留空 = 保留已配置</span></label>
+      <div class="input-with-icon"><i class="ti ti-key"></i><input class="input mono" id="gcToken" type="password" placeholder="留空=保留已配置" autocomplete="off"></div>
+      <div class="form-hint">需 <code>read_api</code> + <code>read_repository</code> 权限。仅存服务端，不回显明文。</div>
+      <div class="form-hint" id="gcState" style="margin-top:8px"></div>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn" data-close-modal="gcModal">关闭</button>
+    <button class="btn btn-primary" id="gcSave"><i class="ti ti-check"></i> 保存</button>
+  </div>
+</div>
+
+<!-- ============ 生成提交链接弹窗 ============ -->
+<div class="modal-mask" id="lMask"></div>
+<div class="modal wide" id="lModal">
+  <div class="modal-header">
+    <div class="modal-title"><i class="ti ti-link" style="color:var(--color-primary)"></i> 生成提交链接</div>
+    <span class="modal-close" data-close-modal="lModal"><i class="ti ti-x"></i></span>
+  </div>
+  <div class="modal-body">
+    <div class="alert alert-info mb-16"><i class="ti ti-info-circle"></i><div>为产品 <b id="lProjName"></b> 生成一条免登录的现场提交链接；现场人员凭链接即可打开提交页提交需求 / BUG。</div></div>
+    <div class="grid grid-cols-2 gap-12">
+      <div class="form-group"><label>现场 / 客户 site</label><input class="input" id="lSite" placeholder="选填，如 某某医院" autocomplete="off"></div>
+      <div class="form-group"><label>产品版本 ver</label><input class="input mono" id="lVer" placeholder="选填，如 v2.3.0" autocomplete="off"></div>
+      <div class="form-group">
+        <label>类型 type</label>
+        <select class="select" id="lType"><option value="">不限</option><option value="requirement">需求</option><option value="bug">BUG</option><option value="consult">咨询</option></select>
+      </div>
+      <div class="form-group"><label>有效天数 days</label><input class="input mono" id="lDays" type="number" min="1" max="3650" placeholder="365" autocomplete="off"></div>
+    </div>
+    <div class="hidden" id="lResult">
+      <div class="form-group" style="margin-bottom:0">
+        <label><i class="ti ti-link" style="vertical-align:-2px"></i> 提交链接 <span class="text-tertiary" id="lDaysNote" style="font-weight:400"></span></label>
+        <div class="gitrow">
+          <input class="input mono" id="lUrl" readonly style="background:var(--color-surface-alt);color:var(--color-primary)">
+          <button class="btn btn-primary" id="lCopy" type="button"><i class="ti ti-copy"></i> 复制</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn" data-close-modal="lModal">关闭</button>
+    <button class="btn btn-primary" id="lGen"><i class="ti ti-link"></i> 生成链接</button>
+  </div>
+</div>
+
+<div class="toast-container" id="toastHost"></div>
+
+<script>
+const $=s=>document.querySelector(s);
+const $$=s=>Array.prototype.slice.call(document.querySelectorAll(s));
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+// 时间统一 yyyy-MM-dd HH:mm（兼容 ISO / "yyyy-MM-dd HH:mm:ss +0800" / 时间戳），空值占位 —
+function fmtTime(v){ if(v==null||v==='')return '—'; let d=(typeof v==='number')?new Date(v):new Date(String(v).replace(' ','T')); if(isNaN(d)){ const s=String(v).slice(0,16); return s||'—'; } const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+const ID_RE=/^[a-z0-9][a-z0-9-]{0,39}$/;
+
+/* —— toast —— */
+function toast(msg,type){ const host=$('#toastHost'); if(!host)return; const el=document.createElement('div'); el.className='toast '+(type||''); const ic=type==='success'?'ti-circle-check':type==='error'?'ti-alert-circle':type==='warning'?'ti-alert-triangle':'ti-info-circle'; el.innerHTML=`<i class="ti ${ic}"></i><span>${esc(msg)}</span>`; host.appendChild(el); requestAnimationFrame(()=>el.classList.add('show')); setTimeout(()=>{ el.classList.remove('show'); setTimeout(()=>el.remove(),300); },2600); }
+
+/* —— 抽屉 / 弹窗开关（部署 shell.js 无 UI.openDrawer，自实现；用 theme.css .drawer.open/.drawer-mask.open） —— */
+function openDrawer(id){ const d=document.getElementById(id); if(!d)return; $('#drawerMask').classList.add('open'); d.classList.add('open'); }
+function closeDrawer(id){ const d=document.getElementById(id); if(d)d.classList.remove('open'); if(!document.querySelector('.drawer.open')) $('#drawerMask').classList.remove('open'); }
+function closeAllDrawers(){ $$('.drawer.open').forEach(d=>d.classList.remove('open')); $('#drawerMask').classList.remove('open'); }
+function openModal(id,maskId){ const m=document.getElementById(id); if(!m)return; document.getElementById(maskId).classList.add('open'); m.classList.add('open'); }
+function closeModal(id,maskId){ const m=document.getElementById(id); if(m)m.classList.remove('open'); document.getElementById(maskId).classList.remove('open'); }
+
+let PROJECTS=[], editingId=null, delId=null, linkId=null, inspected=null;
+
+/* ===================== 列表渲染 ===================== */
+function render(){
+  $('#listCnt').textContent=PROJECTS.length?('共 '+PROJECTS.length+' 个'):'';
+  const body=$('#listBody');
+  if(!PROJECTS.length){
+    body.innerHTML='<tr><td colspan="6"><div class="empty"><div class="empty-illu"><i class="ti ti-folder-off"></i></div><div class="empty-title">还没有产品</div><div class="empty-desc">点右上「新增产品」贴 Git 地址登记一个产品。</div></div></td></tr>';
+    return;
+  }
+  body.innerHTML=PROJECTS.map(p=>{
+    const names=(p.subsystems||[]).map(s=>typeof s==='string'?s:(s&&s.name)||'').filter(Boolean);
+    const descs=(p.subsystems||[]).map(s=>(s&&s.desc)||'').filter(Boolean);
+    // 子系统数（含中文 desc 优先展示的名列表）
+    const subLabels=(p.subsystems||[]).map(s=>{ if(typeof s==='string')return s; const nm=(s&&s.name)||''; const dc=(s&&s.desc)||''; return dc && dc!==nm ? nm+'（'+dc+'）' : nm; }).filter(Boolean);
+    const subCell = names.length
+      ? `<span class="subcnt">${names.length} 子系统</span><div class="subnames" title="${esc(subLabels.join('、'))}">${esc(subLabels.join('、'))}</div>`
+      : `<span class="subnames none">无子系统</span>`;
+    const gitCell = p.gitUrl
+      ? `<div class="pm-git" title="${esc(p.gitUrl)}">${esc(p.gitUrl)}</div>`
+      : `<div class="pm-git none">未接 Git</div>`;
+    const hasRepo=p.gitUrl||(p.subsystems&&p.subsystems.length)||p.repoPath;
+    const verCell = hasRepo
+      ? `<span class="vchip load" data-ver="${esc(p.id)}"><i class="ti ti-loader-2"></i> 读取…</span>`
+      : `<span class="vchip warn"><i class="ti ti-alert-triangle"></i> —</span>`;
+    const commitCell = hasRepo
+      ? `<div class="commit-cell" data-head="${esc(p.id)}"><span class="none">读取中…</span></div><div class="synctime" data-sync="${esc(p.id)}" style="display:none"></div>`
+      : `<div class="commit-cell"><span class="none">未接 Git</span></div>`;
+    return `<tr data-row="${esc(p.id)}">
+      <td><span class="pm-id">${esc(p.id)}</span></td>
+      <td><div class="pm-name" title="${esc(p.name)}">${esc(p.name)}</div>${gitCell}</td>
+      <td>${subCell}</td>
+      <td>${commitCell}</td>
+      <td>${verCell}</td>
+      <td>
+        <div class="row-actions">
+          ${hasRepo?`<span class="row-action" data-act="sync" data-id="${esc(p.id)}" title="同步代码：拉取最新，更新 spec 与版本(git tag)"><i class="ti ti-refresh" style="vertical-align:-2px"></i> 同步</span>`:''}
+          <span class="row-action" data-act="link" data-id="${esc(p.id)}" title="生成提交链接"><i class="ti ti-link" style="vertical-align:-2px"></i> 链接</span>
+          <span class="row-action" data-act="edit" data-id="${esc(p.id)}" title="编辑产品"><i class="ti ti-edit" style="vertical-align:-2px"></i> 编辑</span>
+          <span class="row-action danger" data-act="del" data-id="${esc(p.id)}" title="删除产品"><i class="ti ti-trash" style="vertical-align:-2px"></i> 删除</span>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+  // 三源合成：静态列已渲染，异步拉 /api/project-git（提交 + 最后同步）+ /api/versions（版本数）
+  PROJECTS.filter(p=>p.gitUrl||(p.subsystems&&p.subsystems.length)||p.repoPath).forEach(p=>{ loadGitInfo(p); loadVerBadge(p); });
+}
+
+// "e4c812a｜2026-07-03 10:22:01 +0800｜标题" → 高亮短 hash · 到分钟日期 · 标题
+function fmtHead(h){
+  if(!h)return '<span class="cdate">—</span>';
+  const parts=String(h).split('｜'), hash=parts[0]||'', date=fmtTime(parts[1]||''), sub=parts.slice(2).join('｜')||'';
+  return `<span class="chash">${esc(hash)}</span>  <span class="cdate">${esc(date)}</span>  <span class="csub">${esc(sub)}</span>`;
+}
+function applyGitInfo(id,r){
+  const hc=document.querySelector(`.commit-cell[data-head="${CSS.escape(id)}"]`);
+  const subs=((r&&r.subs)||[]).filter(s=>s&&s.head);
+  if(hc){
+    if(subs.length){
+      const rows=subs.map(s=>(subs.length>1&&s.name?`<span class="cname">${esc(s.name)}：</span>`:'')+fmtHead(s.head));
+      hc.innerHTML = rows.length<=1 ? rows[0]
+        : rows[0]+`<div class="commit-more" hidden>${rows.slice(1).join('<br>')}</div><span class="commit-toggle" role="button" tabindex="0" data-n="${rows.length-1}">展开其余 ${rows.length-1} 条 ▾</span>`;
+    }
+    else{ hc.innerHTML='<span class="none">未读到提交</span>'; }
+  }
+  const st=document.querySelector(`.synctime[data-sync="${CSS.escape(id)}"]`);
+  if(st){ if(r&&r.syncedAt){ st.style.display=''; st.innerHTML='<i class="ti ti-clock" style="vertical-align:-1px"></i> 最后同步 '+esc(fmtTime(r.syncedAt)); } else { st.style.display='none'; } }
+}
+async function loadGitInfo(p){
+  try{ applyGitInfo(p.id, await (await fetch('/api/project-git?project='+encodeURIComponent(p.id))).json()); }
+  catch(e){ applyGitInfo(p.id,{subs:[]}); }
+}
+async function loadVerBadge(p){
+  const el=()=>document.querySelector(`.vchip[data-ver="${CSS.escape(p.id)}"]`);
+  try{
+    const r=await (await fetch('/api/versions?project='+encodeURIComponent(p.id))).json();
+    const vs=r.versions||[]; const e=el(); if(!e)return;
+    if(vs.length){ e.className='vchip ok'; e.title='版本：'+vs.join('、'); e.innerHTML='<i class="ti ti-tag"></i> '+vs.length+' 个版本'; }
+    else{ e.className='vchip warn'; e.title='子系统仓下未读到 git tag（打了 tag 才有版本）'; e.innerHTML='<i class="ti ti-alert-triangle"></i> 未读到版本'; }
+  }catch(e){ const x=el(); if(x){ x.className='vchip warn'; x.innerHTML='<i class="ti ti-alert-triangle"></i> 读取失败'; } }
+}
+
+/* ===================== 表格事件委托 ===================== */
+$('#listBody').addEventListener('click',e=>{
+  const tg=e.target.closest('.commit-toggle');
+  if(tg){ const more=tg.parentElement.querySelector('.commit-more'); if(more){ if(more.hasAttribute('hidden')){ more.removeAttribute('hidden'); tg.textContent='收起 ▴'; } else { more.setAttribute('hidden',''); tg.textContent='展开其余 '+tg.dataset.n+' 条 ▾'; } } return; }
+  const a=e.target.closest('[data-act]'); if(!a)return;
+  const id=a.dataset.id, act=a.dataset.act;
+  if(act==='sync') syncRepo(id);
+  else if(act==='link') openLink(id);
+  else if(act==='edit') startEdit(id);
+  else if(act==='del') askDelete(id);
+});
+
+async function syncRepo(id){
+  const btn=document.querySelector(`[data-act="sync"][data-id="${CSS.escape(id)}"]`); const old=btn?btn.innerHTML:'';
+  if(btn){ btn.innerHTML='<i class="ti ti-loader-2"></i> 同步中…'; btn.style.pointerEvents='none'; btn.style.opacity='.6'; }
+  try{
+    const r=await (await fetch('/api/git-refresh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({project:id})})).json();
+    if(!r.ok){ toast(r.error||'同步失败','error'); return; }
+    toast('已同步到最新'+(r.syncedAt?'（'+fmtTime(r.syncedAt)+'）':''),'success');
+    const el=document.querySelector(`.vchip[data-ver="${CSS.escape(id)}"]`), vs=r.versions||[];
+    if(el){ if(vs.length){ el.className='vchip ok'; el.title='版本：'+vs.join('、'); el.innerHTML='<i class="ti ti-tag"></i> '+vs.length+' 个版本'; } else { el.className='vchip warn'; el.title='仓下暂无 git tag（打了 tag 才有版本）'; el.innerHTML='<i class="ti ti-alert-triangle"></i> 未读到版本'; } }
+    applyGitInfo(id,{syncedAt:r.syncedAt,subs:r.repos});
+  }catch(e){ toast('同步失败：'+e.message,'error'); }
+  finally{ if(btn){ btn.innerHTML=old; btn.style.pointerEvents=''; btn.style.opacity=''; } }
+}
+async function syncAll(){
+  const targets=PROJECTS.filter(p=>p.gitUrl||(p.subsystems&&p.subsystems.length)||p.repoPath);
+  if(!targets.length){ toast('暂无可同步的产品','warning'); return; }
+  const btn=$('#syncAllBtn'); btn.disabled=true; const old=btn.innerHTML; btn.innerHTML='<i class="ti ti-loader-2"></i> 同步中…';
+  toast('正在同步全部产品代码…','info');
+  let okN=0, failN=0;
+  for(const p of targets){
+    try{ const r=await (await fetch('/api/git-refresh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({project:p.id})})).json();
+      if(r.ok){ okN++; applyGitInfo(p.id,{syncedAt:r.syncedAt,subs:r.repos}); loadVerBadge(p); } else failN++;
+    }catch(e){ failN++; }
+  }
+  btn.disabled=false; btn.innerHTML=old;
+  toast(failN?`全部同步完成：成功 ${okN}，失败 ${failN}`:'全部产品同步完成',failN?'warning':'success');
+}
+$('#syncAllBtn').addEventListener('click',syncAll);
+
+/* ===================== 抽屉：新增 / 编辑 ===================== */
+function clearErr(){ ['id','name'].forEach(w=>{ $('#'+w+'Err').classList.add('hidden'); $('#f'+w.charAt(0).toUpperCase()+w.slice(1)).classList.remove('invalid'); }); }
+function setErr(which,msg){ const box=$('#'+which+'Err'); box.textContent=msg; box.classList.remove('hidden'); $('#f'+which.charAt(0).toUpperCase()+which.slice(1)).classList.add('invalid'); }
+
+function renderSubsPreview(subs){
+  const box=$('#subsPreview'), list=$('#subsList'), lbl=$('#subsCntLbl');
+  if(!subs){ box.classList.add('hidden'); list.innerHTML=''; lbl.textContent=''; return; }
+  box.classList.remove('hidden');
+  lbl.textContent='（'+subs.length+'）';
+  if(!subs.length){ list.innerHTML='<div class="subempty">该地址下未发现子系统仓</div>'; return; }
+  list.innerHTML=subs.map(s=>{
+    const key=(s&&s.key)||'', name=(s&&s.name)||key||'', desc=(s&&s.desc)||'';
+    return `<div class="subitem"><span class="sk" title="${esc(key)}">${esc(key||'—')}</span><span class="sd">·</span><span class="sn" title="${esc(name)}">${esc(name)}</span>${desc?`<span class="sdesc" title="${esc(desc)}">${esc(desc)}</span>`:''}</div>`;
+  }).join('');
+}
+
+function openAdd(){
+  editingId=null; inspected=null;
+  $('#fGit').value=''; $('#fId').value=''; $('#fName').value='';
+  $('#fId').disabled=false; $('#idHelp').style.display='';
+  $('#idCount').textContent='0/40'; $('#nameCount').textContent='0/40';
+  renderSubsPreview(null); clearErr();
+  $('#edTitle').textContent='新增产品'; $('#saveBtn').querySelector('span').textContent='新增';
+  openDrawer('editDrawer'); $('#fGit').focus();
+}
+$('#addBtn').addEventListener('click',openAdd);
+
+function startEdit(id){
+  const p=PROJECTS.find(x=>x.id===id); if(!p)return;
+  editingId=id; inspected=null;
+  $('#fGit').value=p.gitUrl||'';
+  $('#fId').value=p.id; $('#fId').disabled=true; $('#idHelp').style.display='none';
+  $('#fName').value=p.name||'';
+  $('#idCount').textContent=(p.id||'').length+'/40'; $('#nameCount').textContent=(p.name||'').length+'/40';
+  if(p.subsystems&&p.subsystems.length){ inspected={gitUrl:p.gitUrl||'',subsystems:p.subsystems}; renderSubsPreview(p.subsystems); }
+  else renderSubsPreview(null);
+  clearErr();
+  $('#edTitle').textContent='编辑产品'; $('#saveBtn').querySelector('span').textContent='保存';
+  openDrawer('editDrawer'); $('#fName').focus();
+}
+
+$('#fId').addEventListener('input',()=>{ const v=$('#fId').value.toLowerCase(); if(v!==$('#fId').value)$('#fId').value=v; $('#idCount').textContent=v.length+'/40'; $('#idErr').classList.add('hidden'); $('#fId').classList.remove('invalid'); });
+$('#fName').addEventListener('input',()=>{ $('#nameCount').textContent=$('#fName').value.length+'/40'; $('#nameErr').classList.add('hidden'); $('#fName').classList.remove('invalid'); });
+// 手动改动 Git 地址（与已解析结果不一致）→ 作废旧解析结果、清空子系统预览
+$('#fGit').addEventListener('input',()=>{ if(inspected&&$('#fGit').value.trim()!==(inspected.gitUrl||'').trim()){ inspected=null; renderSubsPreview(null); } });
+
+/* 解析 Git 地址 → 自动填 id / 名称 / 子系统（含中文 desc） */
+async function inspect(){
+  const url=$('#fGit').value.trim();
+  if(!url){ toast('请先填写 Git 地址','warning'); $('#fGit').focus(); return; }
+  const btn=$('#inspectBtn'), lbl=btn.querySelector('span'), prev=lbl.textContent;
+  btn.disabled=true; lbl.textContent='解析中…';
+  try{
+    const r=await (await fetch('/api/git-inspect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})})).json();
+    if(!r.ok){
+      const msg=r.error||'解析失败';
+      if(/未配置 Git 集成/.test(msg)) toast('未配置 Git 集成，请先点右上「Git 集成」配置 host + token','warning');
+      else toast(msg,'error');
+      return;
+    }
+    if(r.id){ $('#fId').value=r.id; $('#idCount').textContent=r.id.length+'/40'; $('#idErr').classList.add('hidden'); $('#fId').classList.remove('invalid'); }
+    if(r.name){ $('#fName').value=r.name.slice(0,40); $('#nameCount').textContent=$('#fName').value.length+'/40'; $('#nameErr').classList.add('hidden'); $('#fName').classList.remove('invalid'); }
+    const subs=Array.isArray(r.subsystems)?r.subsystems:[];
+    inspected={ gitUrl:r.gitUrl||url, subsystems:subs };
+    if(r.gitUrl) $('#fGit').value=r.gitUrl;
+    renderSubsPreview(subs);
+    toast('解析成功，发现 '+subs.length+' 个子系统','success');
+  }catch(e){ toast('解析失败：'+e.message,'error'); }
+  finally{ btn.disabled=false; lbl.textContent=prev; }
+}
+$('#inspectBtn').addEventListener('click',inspect);
+$('#fGit').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); inspect(); } });
+
+async function save(){
+  clearErr();
+  const id=$('#fId').value.trim().toLowerCase(), name=$('#fName').value.trim();
+  let bad=false;
+  if(!id){ setErr('id','项目 id 必填'); bad=true; }
+  else if(!ID_RE.test(id)){ setErr('id','只能小写字母 / 数字 / 连字符，1~40 位，以字母或数字开头'); bad=true; }
+  if(!name){ setErr('name','项目名必填'); bad=true; }
+  else if(name.length>40){ setErr('name','项目名不超过 40 字'); bad=true; }
+  if(bad){ toast('请修正表单中的错误','error'); return; }
+  const body={ id, name, gitUrl:(inspected&&inspected.gitUrl)||$('#fGit').value.trim(), subsystems:(inspected&&inspected.subsystems)||[] };
+  const btn=$('#saveBtn'), lbl=btn.querySelector('span'), prevLbl=lbl.textContent;
+  btn.disabled=true; lbl.textContent='保存中…（克隆代码仓）';
+  try{
+    const r=await (await fetch('/api/project-save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(!r.ok){ toast(r.error||'保存失败','error'); if(r.error&&/id/.test(r.error))setErr('id',r.error); return; }
+    PROJECTS=r.projects||PROJECTS;
+    const wasEdit=!!editingId;
+    closeDrawer('editDrawer'); render();
+    if(r.warn) toast((wasEdit?'已保存：':'已新增：')+r.warn,'warning');
+    else toast(wasEdit?'已保存':'已新增','success');
+  }catch(e){ toast('保存失败：'+e.message,'error'); }
+  finally{ btn.disabled=false; lbl.textContent=prevLbl; }
+}
+$('#saveBtn').addEventListener('click',save);
+['fId','fName'].forEach(id=>$('#'+id).addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); save(); } }));
+
+/* ===================== 删除（危险二次确认，走共享 uiConfirm） ===================== */
+async function askDelete(id){
+  const p=PROJECTS.find(x=>x.id===id); if(!p)return;
+  const ok=await uiConfirm(
+    '将解除对产品「'+p.name+'」（'+p.id+'）的登记。删除的只是登记信息；该产品已归档的进件数据仍保留在盘上，不会被清除。',
+    { title:'解除产品登记？', okText:'确认解除', danger:true }
+  );
+  if(!ok)return;
+  try{
+    const r=await (await fetch('/api/project-delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})})).json();
+    if(!r.ok){ toast(r.error||'删除失败','error'); return; }
+    PROJECTS=r.projects||PROJECTS.filter(x=>x.id!==id);
+    if(editingId===id){ closeDrawer('editDrawer'); editingId=null; }
+    render();
+    const kept=r.keptData||0;
+    toast(kept>0?('已解除登记，'+kept+' 条进件数据仍保留在盘上'):'已解除登记（该产品暂无进件数据）','success');
+  }catch(e){ toast('删除失败：'+e.message,'error'); }
+}
+
+/* ===================== Git 集成配置弹窗 ===================== */
+async function openGitCfg(){
+  $('#gcBase').value=''; $('#gcToken').value=''; $('#gcState').textContent='';
+  openModal('gcModal','gcMask');
+  try{
+    const c=await (await fetch('/api/git-config')).json();
+    $('#gcBase').value=c.baseUrl||'';
+    $('#gcState').innerHTML=c.configured
+      ? '<i class="ti ti-circle-check text-success" style="vertical-align:-2px"></i> 已配置，当前 token：'+esc(c.tokenMask||'已配置')
+      : (c.tokenMask?('当前 token：'+esc(c.tokenMask)):'<i class="ti ti-alert-triangle text-warning" style="vertical-align:-2px"></i> 尚未配置');
+  }catch(e){ $('#gcState').textContent='读取配置失败：'+e.message; }
+  $('#gcBase').focus();
+}
+$('#gitCfgBtn').addEventListener('click',openGitCfg);
+$('#gcSave').addEventListener('click',async()=>{
+  const baseUrl=$('#gcBase').value.trim(), token=$('#gcToken').value.trim();
+  if(!baseUrl){ toast('请填写 GitLab host','warning'); $('#gcBase').focus(); return; }
+  const btn=$('#gcSave'); btn.disabled=true;
+  try{
+    const r=await (await fetch('/api/git-config-save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({baseUrl,token})})).json();
+    if(!r.ok){ toast(r.error||'保存失败','error'); return; }
+    toast('Git 集成已保存','success'); closeModal('gcModal','gcMask');
+  }catch(e){ toast('保存失败：'+e.message,'error'); }
+  finally{ btn.disabled=false; }
+});
+
+/* ===================== 生成提交链接弹窗 ===================== */
+function openLink(id){
+  const p=PROJECTS.find(x=>x.id===id); if(!p)return;
+  linkId=id;
+  $('#lProjName').textContent=p.name+'（'+p.id+'）';
+  $('#lSite').value=''; $('#lVer').value=''; $('#lType').value=''; $('#lDays').value='';
+  $('#lResult').classList.add('hidden'); $('#lUrl').value=''; $('#lDaysNote').textContent='';
+  openModal('lModal','lMask'); $('#lSite').focus();
+}
+$('#lGen').addEventListener('click',async()=>{
+  if(!linkId)return;
+  const body={ project:linkId, site:$('#lSite').value.trim(), ver:$('#lVer').value.trim(), type:$('#lType').value, days:$('#lDays').value.trim()?+$('#lDays').value:365 };
+  const btn=$('#lGen'); btn.disabled=true;
+  try{
+    const r=await (await fetch('/api/submit-link',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(!r.ok){ toast(r.error||'生成失败','error'); return; }
+    // FS-08：优先用后端返回的 field 域绝对地址 r.url（双域名下相对路径打不通）；未配 FIELD_ORIGIN 时 r.url 与相对等价 → 退回 location.origin + r.path（单域名现状）。
+    $('#lUrl').value=(r.url && /^https?:\/\//i.test(r.url)) ? r.url : (location.origin+r.path);
+    $('#lDaysNote').textContent='· 有效期 '+r.days+' 天';
+    $('#lResult').classList.remove('hidden');
+    $('#lUrl').focus(); $('#lUrl').select();
+    toast('已生成提交链接','success');
+  }catch(e){ toast('生成失败：'+e.message,'error'); }
+  finally{ btn.disabled=false; }
+});
+$('#lCopy').addEventListener('click',async()=>{
+  const url=$('#lUrl').value; if(!url)return;
+  try{ await navigator.clipboard.writeText(url); toast('链接已复制到剪贴板','success'); }
+  catch(e){ $('#lUrl').focus(); $('#lUrl').select(); toast('复制失败，请手动选中复制','warning'); }
+});
+
+/* ===================== 关闭事件（抽屉 / 弹窗 / Esc） ===================== */
+document.addEventListener('click',e=>{
+  const cd=e.target.closest('[data-close-drawer]'); if(cd){ closeDrawer(cd.getAttribute('data-close-drawer')); return; }
+  const cm=e.target.closest('[data-close-modal]'); if(cm){ const id=cm.getAttribute('data-close-modal'); closeModal(id,id==='gcModal'?'gcMask':'lMask'); return; }
+});
+$('#drawerMask').addEventListener('click',closeAllDrawers);
+$('#gcMask').addEventListener('click',()=>closeModal('gcModal','gcMask'));
+$('#lMask').addEventListener('click',()=>closeModal('lModal','lMask'));
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ closeAllDrawers(); closeModal('gcModal','gcMask'); closeModal('lModal','lMask'); } });
+
+/* ===================== 初始化 ===================== */
+async function loadProjects(){
+  try{ const r=await (await fetch('/api/projects')).json(); PROJECTS=r.projects||[]; }
+  catch(e){ PROJECTS=[]; toast('加载产品失败：'+e.message,'error'); }
+  render();
+}
+loadProjects();
+</script>
+</body>
+</html>

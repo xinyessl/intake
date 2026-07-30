@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>运营工作台 · 收件 intake</title>
+<link rel="stylesheet" href="/vendor/tabler/tabler-icons.min.css">
+<link rel="stylesheet" href="/assets/theme.css">
+<link rel="stylesheet" href="/assets/app.css">
+<script src="/assets/ui.js" defer></script>
+<script src="/assets/shell.js" defer></script>
+<style>
+  /* 工作台专属：只补原型两栏布局与占位态，主视觉全走 theme.css 组件类 */
+  .wb-cols{display:grid;grid-template-columns:1.6fr 1fr;gap:16px;margin-top:16px;align-items:start}
+  .wb-right{display:flex;flex-direction:column;gap:16px}
+  .wb-list-row{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--color-border)}
+  .wb-list-row:last-child{border-bottom:none}
+  .wb-list-row .wb-lr-main{min-width:0}
+  .wb-list-row .wb-lr-title{font-weight:500;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .wb-list-row .wb-lr-sub{font-size:12px;color:var(--color-text-tertiary);margin-top:2px}
+  .wb-ph{padding:22px 16px;text-align:center;color:var(--color-text-tertiary);font-size:12.5px;line-height:1.7}
+  .wb-ph .ti{font-size:24px;opacity:.55;display:block;margin-bottom:6px}
+  .wb-ph .nh{display:inline-block;margin-top:8px;font-size:11px;font-weight:600;color:var(--color-warning);background:var(--color-warning-light);border:1px solid var(--color-warning-border);border-radius:var(--radius-pill);padding:2px 9px}
+  .wb-proj-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--color-border);cursor:pointer}
+  .wb-proj-row:last-child{border-bottom:none}
+  .wb-proj-row:hover{background:var(--color-surface-alt)}
+  .wb-proj-row .pid{font-size:11px;font-weight:700;color:var(--color-primary);background:var(--color-primary-light);padding:1px 8px;border-radius:var(--radius);font-family:var(--font-num)}
+  .wb-proj-row .pn{font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .wb-proj-row .norepo{font-size:11px;color:var(--color-text-tertiary);border:1px dashed var(--color-border-strong);padding:0 6px;border-radius:var(--radius)}
+  .wb-proj-row .cnt{font-size:12px;color:var(--color-text-secondary);font-family:var(--font-num)}
+  .table-wrap.wb-tw{max-height:none;overflow:visible}
+  @media(max-width:1000px){.wb-cols{grid-template-columns:1fr}.grid-cols-5{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body data-shell="admin" data-nav="console" data-breadcrumb="概览 > 运营工作台">
+
+<!-- 统计卡（5 张 · lifecycle 视角；值来自 /api/overview 旧粗粒度 status 三桶，见 NEEDS-HUMAN） -->
+<div class="grid grid-cols-5 gap-16" id="statGrid"></div>
+
+  <div class="wb-cols">
+    <!-- 最近工单 -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><i class="ti ti-history"></i>最近工单</div>
+        <button class="btn btn-sm btn-ghost" onclick="location.href='/inbox.html'">查看全部<i class="ti ti-chevron-right"></i></button>
+      </div>
+      <div class="table-wrap wb-tw">
+        <table class="data-table">
+          <thead><tr><th>编号 / 类型</th><th>标题</th><th>现场</th><th>状态</th><th>更新时间</th></tr></thead>
+          <tbody id="recentBody"><tr><td colspan="5" class="wb-ph"><i class="ti ti-loader"></i>加载中…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 右侧栏 -->
+    <div class="wb-right">
+      <!-- 本周批次概览（占位：BP-01 批次表未建） -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><i class="ti ti-package"></i>本周批次</div>
+        </div>
+        <div class="card-body compact" id="batchList">
+          <div class="wb-ph">
+            <i class="ti ti-package-off"></i>
+            本周批次概览暂未开放
+            <div style="margin-top:4px">批次（BP-01）功能尚未建表，待发包/收集中批次口径待补</div>
+            <span class="nh">NEEDS-HUMAN · BP-01 批次表未建</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 产品概览（保留部署能力：各产品进件数下钻） -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><i class="ti ti-folders"></i>产品概览</div>
+          <button class="btn btn-sm btn-ghost" onclick="location.href='/projects.html'">管理<i class="ti ti-chevron-right"></i></button>
+        </div>
+        <div class="card-body compact" id="projList"><div class="wb-ph"><i class="ti ti-loader"></i>加载中…</div></div>
+      </div>
+
+      <!-- 模型可用状态 -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><i class="ti ti-cpu"></i>模型状态</div>
+          <button class="btn btn-sm btn-ghost" onclick="location.href='/model-config.html'">配置<i class="ti ti-chevron-right"></i></button>
+        </div>
+        <div class="card-body compact" id="modelStatus"><div class="wb-ph"><i class="ti ti-loader"></i>检测中…</div></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const $=s=>document.querySelector(s);
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+// 共享时间格式化：yyyy-MM-dd HH:mm，兼容 ISO / 时间戳 / 空格分隔串，空值 —（全局规范 §12）
+function fmtTime(v){ if(!v)return '—'; let d=(typeof v==='number')?new Date(v):new Date(String(v).replace(' ','T')); if(isNaN(d))return String(v); const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+
+// 类型徽标（真实端点 type：bug / requirement / consult）
+function typeTag(type){
+  const cls=type==='bug'?'tag-bug':(type==='consult'?'tag-consult':'tag-req');
+  const label=type==='bug'?'BUG':(type==='consult'?'咨询':'需求');
+  return `<span class="tag ${cls}">${label}</span>`;
+}
+// 状态徽标（真实旧粗粒度 status：待处理 / 沟通中 / 已处理）
+function statusTag(s){
+  const map={'待处理':'tag-warning','沟通中':'tag-primary','已处理':'tag-success','已归档':'tag-gray'};
+  return `<span class="tag ${map[s]||'tag-gray'} tag-dot">${esc(s||'—')}</span>`;
+}
+
+// ── 统计卡（5 张，lifecycle 视角） ──
+// 值来源约束：/api/overview 只给旧粗粒度 status 三桶（待处理/沟通中/已处理），无 lifecycle 细粒度、无批次、无月份口径。
+//   · 待评审 = totals.待处理（precise；分析中 也属待评审但落在沟通中桶，精确计数需扩 overview → NEEDS-HUMAN）
+//   · 进行中 = totals.沟通中（已落实·排期 / 开发中 / 已交付等在建 lifecycle 合并，三桶无法拆分 → 精确拆分需扩 overview）
+//   · 已处理 = totals.已处理（含 已交付/暂缓/驳回，TK-01 新态经 lifecycleToStatus 并入）
+//   · 本周待发包批次 = 占位（BP-01 批次表未建）→ NEEDS-HUMAN
+//   · 本月已交付 = 占位（需 lifecycle + 月份口径，现 overview 无 → 扩 overview）→ NEEDS-HUMAN
+// 点击下钻走 /inbox.html?pipe=<组>，inbox 端按 lifecycle 集合精确筛选（PIPE：待评审/已落实·排期/开发中/已交付/已关闭）。
+function renderStats(t){
+  t=t||{};
+  const cards=[
+    { label:'待评审',   value:t['待处理']??0, unit:'单', icon:'ti-clipboard-list', tone:'warning', foot:'待处理·需评审决策', link:'/inbox.html?pipe=待评审' },
+    { label:'进行中',   value:t['沟通中']??0, unit:'单', icon:'ti-code',           tone:'accent',  foot:'排期/开发/待交付', link:'/inbox.html?pipe=开发中' },
+    { label:'已处理',   value:t['已处理']??0, unit:'单', icon:'ti-circle-check',   tone:'success', foot:'含已交付/暂缓/驳回', link:'/inbox.html?pipe=已关闭' },
+    { label:'本周待发包批次', value:'0', unit:'批', icon:'ti-package',        tone:'warning', foot:'批次表未建', ph:'batch' },
+    { label:'本月已交付', value:'—', unit:'单', icon:'ti-truck-delivery', tone:'primary', foot:'需月份口径', ph:'month' },
+  ];
+  $('#statGrid').innerHTML=cards.map(s=>{
+    const clickable=!s.ph;
+    const onclick=clickable?`onclick="location.href='${s.link}'"`:'';
+    const foot=s.ph
+      ? `<div class="stat-card-foot" title="NEEDS-HUMAN"><i class="ti ti-alert-triangle" style="color:var(--color-warning)"></i>${s.foot} · 待补</div>`
+      : `<div class="stat-card-foot"><i class="ti ti-point-filled" style="font-size:12px"></i>${s.foot}</div>`;
+    return `<div class="stat-card ${clickable?'clickable':''}" ${onclick}>
+      <div class="stat-card-icon" style="background:var(--color-${s.tone}-light);color:var(--color-${s.tone})"><i class="ti ${s.icon}"></i></div>
+      <div class="stat-card-label">${s.label}</div>
+      <div class="stat-card-value ${s.tone}">${s.value}<span class="unit">${s.unit}</span></div>
+      ${foot}
+    </div>`;
+  }).join('');
+}
+
+// ── 最近工单表（recent：前 12，按 submittedAt 倒序，排除 consult） ──
+// 真实端点无 customer/updateTime：客户位用 site（现场）；更新时间用 submittedAt（overview.recent 只给 submittedAt）。
+function renderRecent(list){
+  const el=$('#recentBody');
+  if(!list||!list.length){ el.innerHTML='<tr><td colspan="5" class="wb-ph"><i class="ti ti-mailbox"></i>暂无进件，去<a class="text-primary" href="/submit.html">提交</a>一条试试</td></tr>'; return; }
+  el.innerHTML=list.map(i=>`
+    <tr class="clickable" onclick="location.href='/detail.html?project=${encodeURIComponent(i.project)}&id=${encodeURIComponent(i.id)}'">
+      <td><div class="cell-id">${esc(i.id)}</div><div style="margin-top:4px">${typeTag(i.type)}</div></td>
+      <td><div class="cell-strong" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(i.title)}</div><div class="cell-sub">${esc(i.projectName||i.project)}${i.version?' · '+esc(i.version):''}</div></td>
+      <td>${i.site?esc(i.site):'<span class="text-tertiary">—</span>'}</td>
+      <td>${statusTag(i.status)}</td>
+      <td class="cell-time">${fmtTime(i.submittedAt)}</td>
+    </tr>`).join('');
+}
+
+// ── 产品概览（保留部署能力） ──
+function renderProjects(list){
+  const el=$('#projList');
+  if(!list||!list.length){ el.innerHTML='<div class="wb-ph"><i class="ti ti-folder-off"></i>还没有产品，先去<a class="text-primary" href="/projects.html">产品管理</a>登记一个</div>'; return; }
+  el.innerHTML=list.map(p=>`<div class="wb-proj-row" onclick="location.href='/inbox.html?project=${encodeURIComponent(p.id)}'">
+    <span class="pid">${esc(p.id)}</span><span class="pn">${esc(p.name)}</span>${p.hasRepo?'':'<span class="norepo">未绑代码仓</span>'}<span class="cnt">${p.count} 条</span><i class="ti ti-chevron-right text-tertiary"></i>
+  </div>`).join('');
+}
+
+// ── 模型状态 ──
+function renderModel(m){
+  const el=$('#modelStatus');
+  if(m&&m.configured){
+    el.innerHTML=`<div class="wb-list-row" onclick="location.href='/model-config.html'" style="cursor:pointer">
+      <div class="wb-lr-main"><div class="wb-lr-title">${esc(m.model||m.provider||'默认模型')}</div><div class="wb-lr-sub">${esc(m.provider||'')}</div></div>
+      <span class="tag tag-success tag-dot">已配置</span></div>`;
+  } else {
+    el.innerHTML=`<div class="wb-list-row" onclick="location.href='/model-config.html'" style="cursor:pointer">
+      <div class="wb-lr-main"><div class="wb-lr-title">未配置模型 API</div><div class="wb-lr-sub">配置后 AI 才会自动沟通、给处理意见</div></div>
+      <span class="tag tag-warning tag-dot">未配置</span></div>`;
+  }
+}
+
+(async()=>{
+  try{
+    const r=await (await fetch('/api/overview')).json();
+    renderStats(r.totals||{}); renderRecent(r.recent||[]); renderProjects(r.projects||[]); renderModel(r.model);
+  }catch(e){
+    renderStats({});
+    $('#recentBody').innerHTML='<tr><td colspan="5" class="wb-ph"><i class="ti ti-plug-connected-x"></i>加载失败：'+esc(e.message)+'</td></tr>';
+    $('#projList').innerHTML=''; renderModel(null);
+  }
+})();
+</script>
+</body>
+</html>

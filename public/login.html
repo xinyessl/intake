@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>登录 · 收件 intake</title>
+<link rel="stylesheet" href="/vendor/tabler/tabler-icons.min.css">
+<link rel="stylesheet" href="/assets/app.css">
+<style>
+  body{min-height:100dvh;display:grid;place-items:center;padding:20px}
+  .login{width:100%;max-width:380px}
+  .brand{display:flex;align-items:center;gap:11px;justify-content:center;margin-bottom:22px}
+  .brand .logo{width:44px;height:44px;border-radius:12px;background:var(--pri-grad);color:#fff;display:grid;place-items:center;font-size:22px;box-shadow:0 6px 18px rgba(26,109,190,.32)}
+  .brand .nm{font-size:20px;font-weight:800;letter-spacing:.3px}.brand .nm span{color:var(--t3);font-weight:600}
+  .card{padding:28px 26px}
+  .card h1{margin:0 0 4px;font-size:18px;font-weight:700}
+  .card .sub{color:var(--sub);font-size:13px;margin:0 0 20px}
+  .field{margin-top:15px}
+  .field .ic-in{position:relative}.field .ic-in i{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--t3);font-size:17px}
+  .field .ic-in input{padding-left:38px}
+  .btn.pri{width:100%;margin-top:22px;padding:11px}
+  .foot{margin-top:16px;font-size:12px;color:var(--t3);text-align:center;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="login">
+  <div class="brand"><span class="logo"><i class="ti ti-clipboard-check"></i></span><span class="nm">收件 <span>intake</span></span></div>
+  <div class="card">
+    <h1>登录</h1>
+    <p class="sub">开发方 / 现场方账号登录后使用。</p>
+    <div class="field"><div class="label">用户名</div><div class="ic-in"><i class="ti ti-user"></i><input id="u" autocomplete="username" placeholder="用户名"></div></div>
+    <div class="field"><div class="label">密码</div><div class="ic-in"><i class="ti ti-lock"></i><input id="p" type="password" autocomplete="current-password" placeholder="密码"></div></div>
+    <button class="btn pri" id="go"><i class="ti ti-login"></i> 登录</button>
+    <div class="msg-box" id="msg"></div>
+    <div class="foot" id="foot"></div>
+  </div>
+</div>
+<script>
+const $=s=>document.querySelector(s);
+function show(ok,t){ const m=$('#msg'); m.className='msg-box '+(ok?'ok':'bad'); m.textContent=t; }
+async function login(){
+  const username=$('#u').value.trim(), password=$('#p').value;
+  if(!username||!password) return show(false,'请输入用户名和密码');
+  $('#go').disabled=true;
+  try{ const r=await (await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})})).json();
+    if(r.ok){ location.href=(r.me&&r.me.mustChange)?'/accounts.html?changepw=1':'/'; } else { show(false,r.error||'登录失败'); $('#go').disabled=false; }
+  }catch(e){ show(false,'登录失败：'+e.message); $('#go').disabled=false; }
+}
+$('#go').addEventListener('click',login);
+$('#p').addEventListener('keydown',e=>{ if(e.key==='Enter') login(); });
+$('#u').addEventListener('keydown',e=>{ if(e.key==='Enter') $('#p').focus(); });
+// 若还没启用认证（没建过账号），提示去创建首个管理员
+(async()=>{ try{ const r=await (await fetch('/api/me')).json();
+  if(r.me){ location.href='/'; return; }
+  if(r.defaultAdmin){ $('#foot').innerHTML='首次使用默认账号 · <b style="color:var(--pri)">admin</b> / <b style="color:var(--pri)">admin123</b>（登录后请立即修改密码）'; }
+  else if(!r.authEnabled){ $('#foot').innerHTML='还没有任何账号 · <a href="/accounts.html" style="color:var(--pri);font-weight:600">去创建第一个管理员</a>'; }
+}catch(e){} })();
+</script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+# steward 自动生成 / 运行态——不提交。docs/specs/* 是规约源头；docs/tasks.json(任务清单)团队共享，要入库。
+board.json
+board.md
+.state/
+.intake/
