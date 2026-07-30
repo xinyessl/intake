@@ -12,7 +12,11 @@
   /* 操作按钮浮到页头右上；筛选行 5 列（产品/子系统/类型/状态/现场）一排，不再单独占行 */
   .page-header-actions .seg-item{padding:6px 12px;font-size:12.5px}
   .filter-grid{grid-template-columns:repeat(5,1fr)}
-  .filter-row-extra .kw-field{grid-column:span 3}
+  /* 展开态第二行：版本(1)+提交日期(2)+关键词(2)=5。原来提交日期只占 1 格→日期范围两个 date 输入溢出、压到「关键词」label 上（样式乱），故加宽并让 input 可压缩 */
+  .filter-row-extra .filter-field:nth-child(2){grid-column:span 2}
+  .filter-row-extra .kw-field{grid-column:span 2}
+  .filter-row-extra .range-box{min-width:0;overflow:hidden}
+  .filter-row-extra .range-box input[type=date]{min-width:0;flex:1 1 0}
   .cell-strong .txt{display:inline-block;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
   .row-unread{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--color-primary);margin-right:6px;vertical-align:middle}
   .st-map{display:inline-flex;align-items:center;gap:5px}
