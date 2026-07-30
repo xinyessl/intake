@@ -135,7 +135,9 @@ const PRI_CLS={ '紧急':'pri-紧急','高':'pri-高','中':'pri-中','低':'pri
 const TRANS={ '待处理':['已回复','已立项','暂缓','已驳回'],'分析中':['已回复','已立项','暂缓','已驳回'],'已回复':['已重开'],'已立项':['开发中'],'开发中':['已出包'],'已出包':['待验证'],'待验证':['已重开'],'已重开':['开发中','分析中'],'已关闭':['已重开'],'暂缓':['分析中','已立项','已重开'],'已驳回':['已重开'] };
 const TLABEL={ '已回复':['回复现场','ti-message-2'],'已立项':['立项','ti-clipboard-check'],'开发中':['进入开发','ti-code'],'已出包':['标记出包','ti-package'],'待验证':['转待验证','ti-eye-check'],'已关闭':['关闭','ti-circle-check'],'已重开':['重开','ti-rotate'],'分析中':['转分析','ti-scan'],'暂缓':['暂缓','ti-player-pause'],'已驳回':['驳回','ti-ban'] };
 function lifeCls(lc){ if(lc==='待处理')return 'g'; if(lc==='已关闭')return 'ok'; if(lc==='已重开'||lc==='已驳回')return 'r'; if(lc==='待验证'||lc==='暂缓')return 'o'; return 'b'; }
-function nextStates(cur){ const arr=(TRANS[cur]||[]).filter(x=>x!=='分析中'); if(cur!=='已关闭') arr.push('已关闭'); return arr; }
+// 开发侧/交付流水线状态（开发中/已出包/待验证）由 steward 回写驱动，运营端不手动逐条流转——避免重复劳动 + 状态漂移。运营端流程终点=「已落实·排期(已立项)」，之后进度只读展示、并保留「关闭」。（见 CHG-TK-01-开发侧流转交给steward）
+const STEWARD_STATES = new Set(['开发中','已出包','待验证']);
+function nextStates(cur){ const arr=(TRANS[cur]||[]).filter(x=>x!=='分析中' && !STEWARD_STATES.has(x)); if(cur!=='已关闭') arr.push('已关闭'); return arr; }
 function fld(k, v){ const has = v!=null && String(v).trim()!==''; return `<div class="fld"><div class="k">${esc(k)}</div><div class="v${has?'':' empty'}">${has?esc(v):'—'}</div></div>`; }
 function renderEmpty(icon, title, desc){ document.getElementById('content').innerHTML=`<div class="card"><div class="empty-state"><div class="bigic"><i class="ti ti-${icon}"></i></div><h2>${esc(title)}</h2><p>${esc(desc)}</p><a href="/inbox.html"><i class="ti ti-arrow-left"></i> 返回收件箱</a></div></div>`; }
 
