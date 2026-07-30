@@ -93,6 +93,13 @@
     </div>
     <div class="form-group">
       <div class="flex items-center justify-between mb-8">
+        <label style="margin:0">关联产品 + 各自版本</label>
+        <button class="btn btn-sm" id="btnAddProd"><i class="ti ti-plus"></i>添加产品</button>
+      </div>
+      <div id="edProdRows"></div>
+    </div>
+    <div class="form-group">
+      <div class="flex items-center justify-between mb-8">
         <label style="margin:0">医院联系人 <span class="text-tertiary" style="font-weight:400;font-size:12px">可添加多个</span></label>
         <button class="btn btn-sm" id="btnAddContact" type="button"><i class="ti ti-plus"></i>添加联系人</button>
       </div>
@@ -100,19 +107,10 @@
     </div>
     <div class="grid grid-cols-2 gap-12">
       <div class="form-group"><label>设备码</label><input class="input" id="edDeviceCode" maxlength="120" placeholder="设备 / 授权码"></div>
-      <div class="form-group"><label>维保时间</label>
-        <div class="range-box"><i class="ti ti-calendar"></i><input type="date" id="edMaintainStart" style="min-width:0;flex:1"><span class="range-sep">~</span><input type="date" id="edMaintainEnd" style="min-width:0;flex:1"></div>
-      </div>
+      <div class="form-group"><label>维保到期</label><input type="date" class="input" id="edMaintainEnd"></div>
     </div>
     <div class="form-group"><label>服务器信息</label><textarea class="textarea" id="edServerInfo" maxlength="1000" placeholder="服务器 IP / 配置 / 部署位置等" style="min-height:60px"></textarea></div>
     <div class="form-group"><label>备注信息</label><textarea class="textarea" id="edRemark" maxlength="1000" placeholder="备注" style="min-height:60px"></textarea></div>
-    <div class="form-group">
-      <div class="flex items-center justify-between mb-8">
-        <label style="margin:0">关联产品 + 各自版本</label>
-        <button class="btn btn-sm" id="btnAddProd"><i class="ti ti-plus"></i>添加产品</button>
-      </div>
-      <div id="edProdRows"></div>
-    </div>
   </div>
   <div class="drawer-footer"><button class="btn" data-close-drawer="editDrawer">取消</button><button class="btn btn-primary" id="btnSave"><i class="ti ti-check"></i>保存</button></div>
 </div>
@@ -339,7 +337,6 @@ function openEdit(c){
   (cts||[]).forEach(ct=>addContactRow(ct&&ct.name,ct&&ct.phone));
   if(!$$('#edContactRows .contact-row').length) addContactRow('','');   // 至少留一行空的方便填
   $('#edDeviceCode').value = c ? (c.deviceCode||'') : '';
-  $('#edMaintainStart').value = c ? (c.maintainStart||'') : '';
   $('#edMaintainEnd').value = c ? (c.maintainEnd||'') : '';
   $('#edServerInfo').value = c ? (c.serverInfo||'') : '';
   $('#edRemark').value = c ? (c.remark||'') : '';
@@ -381,7 +378,7 @@ async function saveCustomer(){
     const payload={ id:editId||'', name, level:$('#edLevel').value, region:(CUSTOMERS.find(c=>c.id===editId)||{}).region||'', status:$('#edStatus').value,
       impl:{ name:$('#edImplName').value.trim(), phone:((CUSTOMERS.find(c=>c.id===editId)||{}).impl||{}).phone||'' }, products,
       contacts:collectContacts(),
-      deviceCode:$('#edDeviceCode').value.trim(), maintainStart:$('#edMaintainStart').value, maintainEnd:$('#edMaintainEnd').value,
+      deviceCode:$('#edDeviceCode').value.trim(), maintainEnd:$('#edMaintainEnd').value,
       serverInfo:$('#edServerInfo').value.trim(), remark:$('#edRemark').value.trim() };
     const r=await (await fetch('/api/customer-save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})).json();
     if(!r.ok){ toast(r.error||'保存失败','error'); return; }
