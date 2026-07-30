@@ -257,7 +257,7 @@ const TYPE_TAG={ bug:'tag-bug', requirement:'tag-req', consult:'tag-consult' };
 function typeBadge(t){ return `<span class="tag ${TYPE_TAG[t]||'tag-gray'}">${esc(TYPE_LABEL[t]||t||'—')}</span>`; }
 
 // lifecycle → 状态徽标类（theme.css tag-*）
-const LC_TAG={ '待处理':'tag-warning','分析中':'tag-warning','已回复':'tag-info','已立项':'tag-primary','开发中':'tag-accent','已出包':'tag-primary','待验证':'tag-warning','已关闭':'tag-success','已重开':'tag-danger','暂缓':'tag-gray','已驳回':'tag-danger' };
+const LC_TAG={ '待处理':'tag-warning','分析中':'tag-warning','已回复':'tag-accent','已答复':'tag-accent','已立项':'tag-blue','开发中':'tag-indigo','已出包':'tag-success','待验证':'tag-warning','已交付':'tag-success','已关闭':'tag-gray','已重开':'tag-danger','暂缓':'tag-gray','已驳回':'tag-danger' };
 function stTag(lc){ return `<span class="tag ${LC_TAG[lc]||'tag-gray'} tag-dot">${esc(lc||'—')}</span>`; }
 function priHtml(p){ const m={'紧急':'tag-danger','高':'tag-warning','中':'tag-primary','低':'tag-gray'}; if(!p)return '<span class="text-tertiary">—</span>'; return `<span class="tag ${m[p]||'tag-gray'}">${esc(p)}</span>`; }
 

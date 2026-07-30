@@ -46,10 +46,10 @@
   --color-info-light:     #EEF2F4;
 
   /* 业务专用色 —— 工单类型（一眼区分需求/BUG/咨询） */
-  --ticket-req:      #2F6FB5;   /* 需求 蓝（与 BUG 红/咨询 紫三色分明；近黑藏青太糊改亮蓝） */
-  --ticket-req-bg:   #D9E8F8;
+  --ticket-req:      #D9730D;   /* 需求 橙（与 BUG 红/咨询 紫三色分明；2026-07-30 用户要求由蓝改橙）*/
+  --ticket-req-bg:   #FBE6D0;
   --ticket-bug:      #C0392B;   /* BUG  红 */
-  --ticket-bug-bg:   #F6D5D0;
+  --ticket-bug-bg:   #F7D7D2;
   --ticket-consult:  #7A5BA6;   /* 咨询 紫 */
   --ticket-consult-bg:#E6D9F2;
 
@@ -312,10 +312,12 @@ button { font-family: inherit; }
 .tag-primary { background: var(--color-primary-light); color: var(--color-primary); border-color: var(--color-primary-border); }
 .tag-accent  { background: var(--color-accent-light);  color: var(--color-accent);  border-color: var(--color-accent-border); }
 .tag-gray    { background: #EEF1F5; color: var(--color-text-secondary); }
+.tag-blue    { background: #E1ECFA; color: #2563C9; border-color: #BBD3F2; }   /* 状态：已落实·排期（已立项）等——鲜明蓝，替代暗藏青 tag-primary 的发灰观感 */
+.tag-indigo  { background: #E9E7FB; color: #5A47D6; border-color: #C9C2F1; }   /* 状态：开发中——靛，与「已落实」蓝区分 */
 /* 业务标签：工单类型 —— 描边式「类别筹码」，与填充式「状态标签」分家，避免一片蓝 */
 .tag-req, .tag-bug, .tag-consult { border-width: 1px; font-weight: 600; }
 .tag-req::before, .tag-bug::before, .tag-consult::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
-.tag-req     { color: var(--ticket-req);     background: var(--ticket-req-bg);     border-color: var(--color-primary-border); }
+.tag-req     { color: var(--ticket-req);     background: var(--ticket-req-bg);     border-color: #F0C89A; }
 .tag-bug     { color: var(--ticket-bug);     background: var(--ticket-bug-bg);     border-color: var(--color-danger-border); }
 .tag-consult { color: var(--ticket-consult); background: var(--ticket-consult-bg); border-color: #D8C9EA; }
 
