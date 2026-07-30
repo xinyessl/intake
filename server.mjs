@@ -246,7 +246,11 @@ function normCustomer(b, existing) {   // 规范化：名称必填、products �
     const region = String((b && b.region) || '').trim().slice(0, 40);
     const status = CUST_STATUSES.includes(String((b && b.status) || '').trim()) ? String(b.status).trim() : '已开通';
     const impl = { name: String((b && b.impl && b.impl.name) || '').trim().slice(0, 20), phone: String((b && b.impl && b.impl.phone) || '').trim().slice(0, 20) };
-    return { id: (existing && existing.id) || custGenId(), name, level, region, impl, status, products, updatedAt: nowStamp() };
+    // 扩展字段（2026-07-30 用户需求：服务器信息/设备码/维保时间/医院联系人/备注）——用 `'x' in b` 判存在，偏更新（如实施人写穿）保留原值不清空。
+    const pick = (k, n) => String(((b && (k in b)) ? b[k] : (existing && existing[k])) || '').trim().slice(0, n);
+    const serverInfo = pick('serverInfo', 1000), deviceCode = pick('deviceCode', 120), maintainDate = pick('maintainDate', 60);
+    const contactName = pick('contactName', 20), contactPhone = pick('contactPhone', 20), remark = pick('remark', 1000);
+    return { id: (existing && existing.id) || custGenId(), name, level, region, impl, status, products, serverInfo, deviceCode, maintainDate, contactName, contactPhone, remark, updatedAt: nowStamp() };
 }
 // 工单数派生：按 site↔客户名 关联统计（真库 intakes 无 customerId 列，关联键 site↔name——重名会串号，NEEDS-HUMAN）。
 //   全项目扫一遍 listIntake（不含 consult），按 site 计数，供客户台账只读展示；不落文件、不改库。

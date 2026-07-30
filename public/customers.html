@@ -91,6 +91,16 @@
       <label>负责实施人 <span class="text-tertiary" style="font-weight:400;font-size:12px">手机号在账号管理维护</span></label>
       <select class="select" id="edImplName"><option value="">（未指定实施人）</option></select>
     </div>
+    <div class="grid grid-cols-2 gap-12">
+      <div class="form-group"><label>医院联系人</label><input class="input" id="edContactName" maxlength="20" placeholder="联系人姓名"></div>
+      <div class="form-group"><label>联系电话</label><input class="input" id="edContactPhone" maxlength="20" placeholder="联系电话"></div>
+    </div>
+    <div class="grid grid-cols-2 gap-12">
+      <div class="form-group"><label>设备码</label><input class="input" id="edDeviceCode" maxlength="120" placeholder="设备 / 授权码"></div>
+      <div class="form-group"><label>维保时间</label><input class="input" id="edMaintainDate" maxlength="60" placeholder="如 2026-12-31 或 2025-01~2026-12"></div>
+    </div>
+    <div class="form-group"><label>服务器信息</label><textarea class="textarea" id="edServerInfo" maxlength="1000" placeholder="服务器 IP / 配置 / 部署位置等" style="min-height:60px"></textarea></div>
+    <div class="form-group"><label>备注信息</label><textarea class="textarea" id="edRemark" maxlength="1000" placeholder="备注" style="min-height:60px"></textarea></div>
     <div class="form-group">
       <div class="flex items-center justify-between mb-8">
         <label style="margin:0">关联产品 + 各自版本</label>
@@ -304,6 +314,12 @@ function openEdit(c){
   $('#edLevel').value = c ? (c.level||'三甲') : '三甲';
   $('#edStatus').value = c ? (c.status||'已开通') : '已开通';
   fillImplSelect(c && c.impl ? (c.impl.name||'') : '');
+  $('#edContactName').value = c ? (c.contactName||'') : '';
+  $('#edContactPhone').value = c ? (c.contactPhone||'') : '';
+  $('#edDeviceCode').value = c ? (c.deviceCode||'') : '';
+  $('#edMaintainDate').value = c ? (c.maintainDate||'') : '';
+  $('#edServerInfo').value = c ? (c.serverInfo||'') : '';
+  $('#edRemark').value = c ? (c.remark||'') : '';
   countName();
   $('#edProdRows').innerHTML='';
   // 回填每个产品的子系统勾选 + 版本：
@@ -340,7 +356,10 @@ async function saveCustomer(){
       if(!ok) return;   // 取消 → 中止保存（finally 恢复按钮）
     }
     const payload={ id:editId||'', name, level:$('#edLevel').value, region:(CUSTOMERS.find(c=>c.id===editId)||{}).region||'', status:$('#edStatus').value,
-      impl:{ name:$('#edImplName').value.trim(), phone:((CUSTOMERS.find(c=>c.id===editId)||{}).impl||{}).phone||'' }, products };
+      impl:{ name:$('#edImplName').value.trim(), phone:((CUSTOMERS.find(c=>c.id===editId)||{}).impl||{}).phone||'' }, products,
+      contactName:$('#edContactName').value.trim(), contactPhone:$('#edContactPhone').value.trim(),
+      deviceCode:$('#edDeviceCode').value.trim(), maintainDate:$('#edMaintainDate').value.trim(),
+      serverInfo:$('#edServerInfo').value.trim(), remark:$('#edRemark').value.trim() };
     const r=await (await fetch('/api/customer-save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})).json();
     if(!r.ok){ toast(r.error||'保存失败','error'); return; }
     CUSTOMERS=r.customers||[]; initRegionOptions(); render();
