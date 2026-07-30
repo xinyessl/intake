@@ -208,6 +208,14 @@ function renderOps(e,lc){
     if(lc==='待验证') return `<div class="card ops-card"><div class="ops-hd"><i class="ti ti-eye-check" style="color:var(--pri)"></i><b>请验证处理结果</b><span class="lbl">开发已处理，麻烦确认是否解决</span></div><div class="ops-row"><button class="op-btn ok" onclick="doVerify(true)"><i class="ti ti-circle-check"></i> 验证通过（关闭）</button><button class="op-btn danger" onclick="doVerify(false)"><i class="ti ti-rotate"></i> 未通过（打回重开）</button></div></div>`;
     return '';
   }
+  // 运营已交接（已立项/开发中/已出包）→ 只读「交付进度」+「关闭」；开发/交付由批次·现场推进，不在此逐条操作（延续 2026-07-30 决策）。
+  const DELIVERY_STATES={'已立项':1,'开发中':1,'已出包':1};
+  if(DELIVERY_STATES[lc]){
+    const bt=e.batch?`<a href="/batches.html" title="到批次管理看进度">批次 ${esc(e.batch)}</a>`:'<span style="color:var(--t3)">未归批次</span>';
+    return `<div class="card ops-card"><div class="ops-hd"><i class="ti ti-truck-delivery" style="color:var(--pri)"></i><b>交付进度</b><span class="lbl">当前：${esc(lc)}</span></div>`
+      +`<div style="font-size:13px;color:var(--sub);line-height:1.9;padding:2px 0 6px"><div>归属批次：${bt}</div><div>开发 / 交付进度随<b>批次</b>推进（发包 → 现场验证 → 关闭），运营端无需在此逐条操作。</div></div>`
+      +`<div class="ops-row"><button class="op-btn ok" onclick="openTrans('已关闭')"><i class="ti ti-circle-check"></i> 关闭</button></div><div class="op-form" id="opFormHost" style="display:none"></div></div>`;
+  }
   const btns=nextStates(lc).map(to=>{const t=TLABEL[to]||[to,'ti-arrow-right'];const cls=to==='已关闭'?'ok':((to==='已重开'||to==='已驳回')?'danger':'');return `<button class="op-btn ${cls}" onclick="openTrans('${to}')"><i class="ti ${t[1]}"></i> ${t[0]}</button>`;}).join('');
   return `<div class="card ops-card"><div class="ops-hd"><i class="ti ti-adjustments" style="color:var(--pri)"></i><b>工单操作</b><span class="lbl">当前：${esc(lc)}</span></div><div class="ops-row"><button class="op-btn pri" onclick="doAnalyze(this)"><i class="ti ti-scan"></i> AI 分析初判</button>${btns}</div><div class="op-form" id="opFormHost" style="display:none"></div></div>`;
 }
