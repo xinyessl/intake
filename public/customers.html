@@ -41,9 +41,10 @@
 
 <div class="card">
   <div class="filter-bar" style="display:flex;align-items:center;gap:12px;padding:10px 14px">
-    <div class="filter-grid" style="flex:1">
+    <div class="filter-grid" style="flex:1;grid-template-columns:repeat(5,1fr)">
       <div class="filter-field"><label>负责实施</label><select class="select" id="fImpl"><option value="">全部实施</option></select></div>
       <div class="filter-field"><label>等级</label><select class="select" id="fLevel"><option value="">全部等级</option><option value="三甲">三甲</option><option value="三乙">三乙</option><option value="二甲">二甲</option><option value="医共体">医共体</option></select></div>
+      <div class="filter-field"><label>系统</label><select class="select" id="fProduct"><option value="">全部系统</option></select></div>
       <div class="filter-field"><label>状态</label><select class="select" id="fStatus"><option value="">全部状态</option><option value="已开通">已开通</option><option value="未开通">未开通</option></select></div>
       <div class="filter-field"><label>关键词</label><div class="input-with-icon"><i class="ti ti-search"></i><input class="input" id="fKw" placeholder="医院名，回车搜索"></div></div>
     </div>
@@ -127,11 +128,17 @@ function initRegionOptions(){
   const names=[...new Set([...IMPL_ACCOUNTS.map(a=>(a.name||a.username||'').trim()), ...CUSTOMERS.map(c=>((c.impl&&c.impl.name)||'').trim())].filter(Boolean))].sort();
   fi.innerHTML='<option value="">全部实施</option>'+names.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
   if(names.includes(cur)) fi.value=cur;
+  // 系统（产品）筛选：取各医院已上线产品去重（产品级，不到子系统）
+  const fp=$('#fProduct'); const curP=fp.value;
+  const pids=[...new Set(CUSTOMERS.flatMap(c=>(c.products||[]).map(p=>p.project)).filter(Boolean))];
+  const opts=pids.map(id=>({id,name:pname(id)})).sort((a,b)=>String(a.name).localeCompare(String(b.name),'zh'));
+  fp.innerHTML='<option value="">全部系统</option>'+opts.map(o=>`<option value="${esc(o.id)}">${esc(o.name)}</option>`).join('');
+  if(pids.includes(curP)) fp.value=curP;
 }
-function collectFilters(){ state.filters={ impl:$('#fImpl').value, level:$('#fLevel').value, status:$('#fStatus').value, kw:$('#fKw').value.trim() }; }
+function collectFilters(){ state.filters={ impl:$('#fImpl').value, level:$('#fLevel').value, status:$('#fStatus').value, product:$('#fProduct').value, kw:$('#fKw').value.trim() }; }
 function getFiltered(){
   const f=state.filters;
-  return CUSTOMERS.filter(c=> (!f.impl||((c.impl&&c.impl.name)||'')===f.impl) && (!f.level||(c.level||'')===f.level) && (!f.status||(c.status||'')===f.status) && (!f.kw||(c.name||'').includes(f.kw)) );
+  return CUSTOMERS.filter(c=> (!f.impl||((c.impl&&c.impl.name)||'')===f.impl) && (!f.level||(c.level||'')===f.level) && (!f.status||(c.status||'')===f.status) && (!f.product||(c.products||[]).some(p=>p.project===f.product)) && (!f.kw||(c.name||'').includes(f.kw)) );
 }
 
 /* ---------- 列表 ---------- */
@@ -364,7 +371,7 @@ $('#custBody').addEventListener('click',e=>{
   else if(a.dataset.act==='del') delCustomer(c);
 });
 /* 选择型即选即查 */
-['fImpl','fLevel','fStatus'].forEach(id=>$('#'+id).addEventListener('change',()=>{ collectFilters(); state.page=1; render(); }));
+['fImpl','fLevel','fStatus','fProduct'].forEach(id=>$('#'+id).addEventListener('change',()=>{ collectFilters(); state.page=1; render(); }));
 $('#fKw').addEventListener('keydown',e=>{ if(e.key==='Enter'){ collectFilters(); state.page=1; render(); } });
 $('#pageSize').addEventListener('change',()=>{ state.size=+$('#pageSize').value; state.page=1; render(); });
 $('#pager').addEventListener('click',e=>{ const b=e.target.closest('[data-go]'); if(!b||b.disabled)return; state.page=+b.dataset.go; render(); });
