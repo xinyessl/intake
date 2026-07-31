@@ -136,7 +136,7 @@ function render(){
       <td><span class="tag ${ROLE_TAG[rc]}">${roleLabel(a.role)}</span></td>
       <td class="hospcell">${hospCell(a.sites)}</td>
       <td><span class="tag ${on?'tag-success':'tag-gray'} tag-dot">${on?'启用':'停用'}</span></td>
-      <td class="cell-time">${fmtTime(a.createTime||a.created_at)}</td>
+      <td class="cell-time">${fmtTime(a.createdAt||a.createTime||a.created_at)}</td>
       <td><div class="row-actions">
         <span class="row-action" data-edit="${esc(a.username)}">编辑</span><span class="divider"></span>
         <span class="row-action" data-pw="${esc(a.id)}">改密</span><span class="divider"></span>

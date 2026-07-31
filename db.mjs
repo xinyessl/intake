@@ -67,7 +67,7 @@ export async function loadAll() {
   const [pr] = await q(`SELECT * FROM projects ORDER BY created_at`);
   out.projects = pr.map(r => { const o = { id: r.id, name: r.name }; if (r.repo_path) o.repoPath = r.repo_path; if (r.specs_path) o.specsPath = r.specs_path; const subs = P(r.subsystems); if (subs && subs.length) o.subsystems = subs; return o; });
   const [ac] = await q(`SELECT * FROM accounts`);
-  out.accounts = ac.map(r => ({ id: r.id, username: r.username, role: r.role, name: r.name || '', phone: r.phone || '', salt: r.salt || '', hash: r.hash || '', mustChange: !!r.must_change, projects: P(r.projects) || [], sites: P(r.sites) || [], enabled: r.enabled == null ? 1 : (r.enabled ? 1 : 0) }));
+  out.accounts = ac.map(r => ({ id: r.id, username: r.username, role: r.role, name: r.name || '', phone: r.phone || '', salt: r.salt || '', hash: r.hash || '', mustChange: !!r.must_change, projects: P(r.projects) || [], sites: P(r.sites) || [], enabled: r.enabled == null ? 1 : (r.enabled ? 1 : 0), createdAt: r.created_at || '' }));
   const [se] = await q(`SELECT * FROM sessions`);
   for (const r of se) out.sessions[r.token] = { userId: r.user_id, exp: Number(r.exp) };
   const [ins] = await q(`SELECT project_id, data FROM intakes`);

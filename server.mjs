@@ -785,7 +785,7 @@ function verifyPw(pw, salt, hash) { try { const h = crypto.scryptSync(String(pw)
 function parseCookies(req) { const out = {}; (req.headers.cookie || '').split(';').forEach(p => { const i = p.indexOf('='); if (i > 0) out[p.slice(0, i).trim()] = decodeURIComponent(p.slice(i + 1).trim()); }); return out; }
 function authEnabled() { return loadAccounts().length > 0; }   // 未建任何账号 = 认证未启用（全开，供首次建管理员）
 function currentUser(req) { const t = parseCookies(req).intake_sess; if (!t) return null; const s = loadSessions()[t]; if (!s || (s.exp && s.exp < Date.now())) return null; return loadAccounts().find(a => a.id === s.userId) || null; }
-function pubUser(u) { return u ? { id: u.id, username: u.username, role: u.role, name: u.name || u.username, phone: u.phone || '', projects: u.projects || [], sites: u.sites || [], mustChange: !!u.mustChange, enabled: (u.enabled == null ? 1 : (u.enabled ? 1 : 0)) } : null; }
+function pubUser(u) { return u ? { id: u.id, username: u.username, role: u.role, name: u.name || u.username, phone: u.phone || '', projects: u.projects || [], sites: u.sites || [], mustChange: !!u.mustChange, enabled: (u.enabled == null ? 1 : (u.enabled ? 1 : 0)), createdAt: u.createdAt || '' } : null; }
 // enabled 归一：接受布尔/0-1/中文「启用/停用」/字符串，最终落 1(启用) 或 0(停用)。默认（未提供）返回 def。
 function normEnabled(v, def) { if (v == null) return def; if (v === 0 || v === false || v === '0' || v === '停用' || v === 'disabled' || v === 'off') return 0; if (v === 1 || v === true || v === '1' || v === '启用' || v === 'enabled' || v === 'on') return 1; return v ? 1 : 0; }
 // 停用保护：把某启用管理员改停用（或删除）前，确保系统仍留至少一个「启用的」管理员，否则拦截。account-delete / account-save 共用，避免两套漂移逻辑。
