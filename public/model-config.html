@@ -13,7 +13,12 @@
 
 <div class="alert alert-warning mb-16"><i class="ti ti-shield-lock"></i><div><b>安全说明：</b>API Key 仅存储于服务本机 <code class="mono">data/model-api.json</code>、<b>不入库</b>，页面仅回显掩码。切换主备、测试连通均在服务端完成。</div></div>
 
-  <div class="card">
+  <div class="seg-group mb-16" id="mcTabs" style="display:inline-flex">
+    <div class="seg-item active" data-tab="chat"><i class="ti ti-cpu" style="vertical-align:-2px"></i> 对话模型</div>
+    <div class="seg-item" data-tab="embed"><i class="ti ti-vector-triangle" style="vertical-align:-2px"></i> Embedding 模型</div>
+  </div>
+
+  <div class="card" id="panelChat">
     <div class="card-header">
       <div class="card-title"><i class="ti ti-cpu"></i>模型列表<span class="text-12 text-tertiary" id="recCount" style="margin-left:4px;font-weight:400"></span></div>
       <div style="display:flex;align-items:center;gap:16px">
@@ -40,7 +45,7 @@
   </div>
 
   <!-- ============ Embedding 模型（语义检索）============ -->
-  <div class="card mt-16">
+  <div class="card" id="panelEmbed" style="display:none">
     <div class="card-header">
       <div class="card-title"><i class="ti ti-vector-triangle"></i>Embedding 模型（语义检索）<span class="text-12 text-tertiary" id="embedStateTag" style="margin-left:6px;font-weight:400"></span></div>
     </div>
@@ -325,6 +330,8 @@ $('#emSaveBtn').addEventListener('click',async()=>{
 });
 
 async function load(){ try{ const c=await (await fetch('/api/model-config')).json(); MODELS=(c.models||[]).map(m=>({...m})); render(); if(c.embed){ EMBED={...c.embed, _newKey:''}; } fillEmbed(); }catch(e){ toast('读取配置失败：'+e.message,'error'); } }
+// tab 切换：对话模型 / Embedding 模型（点哪个显哪张卡）
+$('#mcTabs').addEventListener('click',e=>{ const t=e.target.closest('.seg-item'); if(!t) return; document.querySelectorAll('#mcTabs .seg-item').forEach(x=>x.classList.toggle('active',x===t)); const tab=t.getAttribute('data-tab'); $('#panelChat').style.display=(tab==='chat')?'':'none'; $('#panelEmbed').style.display=(tab==='embed')?'':'none'; });
 load();
 </script>
 </body>
