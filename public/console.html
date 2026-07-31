@@ -13,6 +13,8 @@
   /* 工作台专属：只补原型两栏布局与占位态，主视觉全走 theme.css 组件类 */
   .wb-cols{display:grid;grid-template-columns:1.6fr 1fr;gap:16px;margin-top:16px;align-items:start}
   .wb-right{display:flex;flex-direction:column;gap:16px}
+  /* 「最近工单」卡撑到与右栏等高，内部表格自身滚动，消除左下网格空档留白 */
+  .wb-recent{align-self:stretch;display:flex;flex-direction:column;min-height:0}
   .wb-list-row{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--color-border)}
   .wb-list-row:last-child{border-bottom:none}
   .wb-list-row .wb-lr-main{min-width:0}
@@ -28,7 +30,7 @@
   .wb-proj-row .pn{font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .wb-proj-row .norepo{font-size:11px;color:var(--color-text-tertiary);border:1px dashed var(--color-border-strong);padding:0 6px;border-radius:var(--radius)}
   .wb-proj-row .cnt{font-size:12px;color:var(--color-text-secondary);font-family:var(--font-num)}
-  .table-wrap.wb-tw{max-height:none;overflow:visible}
+  .table-wrap.wb-tw{min-height:0;overflow:auto}
   @media(max-width:1000px){.wb-cols{grid-template-columns:1fr}.grid-cols-5{grid-template-columns:repeat(2,1fr)}}
 </style>
 </head>
@@ -39,7 +41,7 @@
 
   <div class="wb-cols">
     <!-- 最近工单 -->
-    <div class="card">
+    <div class="card wb-recent">
       <div class="card-header">
         <div class="card-title"><i class="ti ti-history"></i>最近工单</div>
         <button class="btn btn-sm btn-ghost" onclick="location.href='/inbox.html'">查看全部<i class="ti ti-chevron-right"></i></button>
