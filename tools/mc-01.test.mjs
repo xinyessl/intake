@@ -323,3 +323,111 @@ test('AC-1/E2E model-config.html 落原型：整宽 data-table + thead 7 列 + �
   assert.doesNotMatch(html, /id="records"/, '不再有老两栏 #records 记录列表');
   assert.doesNotMatch(html, /class="reclist"/, '不再有老 reclist 卡片列表');
 });
+
+/* ============ EMBED · Embedding 模型（语义检索）配置：GET 视图 / save 持久化不覆盖 models / no-clobber / model-test kind=embed 错误分支 ============ */
+test('EMBED-1 GET /api/model-config 返回 embed 视图（provider/model/baseUrl/keyMask/configured），未配时 configured=false 无明文', async () => {
+  await api('/api/model-config-save', { method: 'POST', body: { models: [] } });   // 清空到已知态（无 embed）
+  const r = await api('/api/model-config');
+  assert.equal(r.status, 200);
+  assert.ok(r.json.embed && typeof r.json.embed === 'object', 'GET 应含 embed 视图对象');
+  assert.equal(r.json.embed.configured, false, '未配 embed → configured=false');
+  assert.ok('keyMask' in r.json.embed && 'baseUrl' in r.json.embed && 'model' in r.json.embed, 'embed 视图含 keyMask/baseUrl/model');
+  assert.equal(r.text.includes('"apiKey"'), false, 'embed 视图不回 apiKey 明文字段');
+});
+
+test('EMBED-2 save 带 embed 对象 → 落 model-api.json 的 embed 字段（三要素齐全），响应掩码、真实 Key 只在文件', async () => {
+  const EKEY = 'sk-embed-real-abcd1234wxyz9f2a';
+  const r = await api('/api/model-config-save', { method: 'POST', body: {
+    models: [{ provider: 'anthropic', model: 'chat-m', baseUrl: 'https://api.anthropic.com', apiKey: 'sk-ant-chat-0000111122223333', primary: true }],
+    embed: { provider: 'openai', model: 'qwen3.7-text-embedding', baseUrl: 'https://llm.example.com/compatible-mode/v1', apiKey: EKEY, mask: '' },
+  } });
+  assert.equal(r.json.ok, true);
+  assert.ok(r.json.embed && r.json.embed.configured === true, 'save 回 embed.configured=true');
+  assert.equal(r.json.embed.keyMask, maskKey(EKEY), 'embed keyMask 掩码');
+  assert.equal(r.text.includes(EKEY), false, '响应不含 embed Key 明文');
+  const disk = readCfgFile();
+  assert.equal(disk.embed.apiKey, EKEY, '真实 embed Key 只落文件');
+  assert.equal(disk.embed.model, 'qwen3.7-text-embedding');
+  assert.equal(disk.embed.baseUrl, 'https://llm.example.com/compatible-mode/v1');
+  assert.equal(disk.embed.provider, 'openai');
+  assert.equal(disk.model, 'chat-m', '同一保存里 models 主模型照常持久化（embed 未挤掉 models）');
+});
+
+test('EMBED-3 no-clobber：save 仅带 models（无 embed 字段）→ 已存 embed 不被覆盖', async () => {
+  // 承 EMBED-2：此时文件已有 embed。仅改 models、不带 embed。
+  const r = await api('/api/model-config-save', { method: 'POST', body: {
+    models: [{ provider: 'anthropic', model: 'chat-renamed', baseUrl: 'https://api.anthropic.com', apiKey: '', mask: maskKey('sk-ant-chat-0000111122223333'), primary: true }],
+  } });
+  assert.equal(r.json.ok, true);
+  const disk = readCfgFile();
+  assert.ok(disk.embed && disk.embed.model === 'qwen3.7-text-embedding', 'embed 未被 models-only 保存清掉（no-clobber）');
+  assert.equal(disk.model, 'chat-renamed', 'models 已更新');
+});
+
+test('EMBED-4 embed key 留空 + 正确 mask → 保留旧 embed Key（不丢）；models:[] 也不清 embed', async () => {
+  const disk0 = readCfgFile();
+  const mask = maskKey(disk0.embed.apiKey);
+  const r = await api('/api/model-config-save', { method: 'POST', body: {
+    models: [],   // 清空 models，但 embed 应保留
+    embed: { provider: 'openai', model: 'qwen3.7-text-embedding', baseUrl: 'https://llm.example.com/compatible-mode/v1', apiKey: '', mask },
+  } });
+  assert.equal(r.json.ok, true);
+  assert.deepEqual(r.json.models, [], 'models 已清空');
+  const disk = readCfgFile();
+  assert.equal(disk.embed.apiKey, 'sk-embed-real-abcd1234wxyz9f2a', '留空 + mask → 旧 embed Key 保留');
+  assert.equal(disk.provider, 'anthropic', 'models 清空仍写 provider:anthropic 顶层');
+});
+
+test('EMBED-5 model-test kind:embed 缺字段 → {ok:false,未配置}（不发请求、不烧 Key）', async () => {
+  const r = await api('/api/model-test', { method: 'POST', body: { kind: 'embed', model: '', baseUrl: '', apiKey: '' } });
+  assert.equal(r.status, 200);
+  assert.equal(r.json.ok, false);
+  assert.match(String(r.json.error || ''), /未配置 embedding/, '缺字段应报未配置 embedding');
+});
+
+test('EMBED-6 model-test kind:embed 不可达 baseUrl（假 Key）→ {ok:false,error}（走错误分支，不连真实 embedding 商）', async () => {
+  const r = await api('/api/model-test', { method: 'POST', body: { kind: 'embed', provider: 'openai', model: 'emb', baseUrl: 'http://127.0.0.1:1', apiKey: 'sk-fake-embed-error-branch' } });
+  assert.equal(r.status, 200);
+  assert.equal(r.json.ok, false, '不可达端点 → ok:false');
+  assert.ok(typeof r.json.error === 'string' && r.json.error.length > 0, '带 error 文案');
+  assert.equal(r.json.dim, undefined, '失败不返回维度');
+});
+
+test('EMBED-7 清干净 embed：save embed 空字段 → 文件不再含 embed（回到未配态）', async () => {
+  const r = await api('/api/model-config-save', { method: 'POST', body: { models: [], embed: { model: '', baseUrl: '', apiKey: '' } } });
+  assert.equal(r.json.ok, true);
+  const disk = readCfgFile();
+  assert.equal(disk.embed, undefined, '空 embed 三要素 → 清掉 embed 字段（after 再还原真实备份）');
+});
+
+/* ============ 前端 embedding 卡片 + 内联 JS new Function 解析 ============ */
+test('EMBED-E2E model-config.html：含「Embedding 模型（语义检索）」卡片 + 字段/按钮 + kind:embed 测试 + buildPayload 带 embed；内联 JS new Function 解析通过；不自写 page-content', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'public', 'model-config.html'), 'utf8');
+  // 卡片与字段
+  assert.match(html, /Embedding 模型（语义检索）/, '含 Embedding 卡片标题');
+  assert.match(html, /id="emProvider"/, '服务商下拉 #emProvider');
+  assert.match(html, /id="emModel"/, '模型输入 #emModel');
+  assert.match(html, /id="emEndpoint"/, '接口地址输入 #emEndpoint');
+  assert.match(html, /id="emKey"/, 'API Key 输入 #emKey');
+  assert.match(html, /id="emTestBtn"/, '测试连通按钮 #emTestBtn');
+  assert.match(html, /id="emSaveBtn"/, '保存按钮 #emSaveBtn');
+  assert.match(html, /type="password"[^>]*id="emKey"|id="emKey"[^>]*type="password"/, 'Key 输入为 password');
+  // 复用 theme.css 组件（.card/.input/.btn/toast）
+  assert.match(html, /class="card mt-16"/, 'embedding 卡片用 .card（模型列表卡下方）');
+  // 测试走 kind:'embed'
+  assert.match(html, /kind:\s*['"]embed['"]/, '测试请求带 kind:embed');
+  assert.match(html, /\/api\/model-test/, '测试复用 /api/model-test');
+  // 保存携 embed（同一端点、带 models 不清空）
+  assert.match(html, /embed:\s*embedPayload\(\)/, '保存 payload 带 embed:embedPayload()');
+  assert.match(html, /buildPayload\(\s*\{\s*embed:/, 'buildPayload 携 embed（同带 MODELS，不清模型）');
+  // 加载回填 embed
+  assert.match(html, /if\(c\.embed\)/, 'load 回填 c.embed');
+  // 不自写 page-content（shell.js 自建）
+  const pc = (html.match(/class="page-content/g) || []).length;
+  assert.equal(pc, 0, '页面不得自写 .page-content（含 list-layout 变体）');
+  // 内联 JS 用 new Function 解析必须过
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
+  const js = scripts[scripts.length - 1];
+  assert.ok(js && js.length > 100, '存在内联脚本块');
+  assert.doesNotThrow(() => { new Function(js); }, 'model-config.html 内联 JS 应能被 new Function 解析（无语法错）');
+});

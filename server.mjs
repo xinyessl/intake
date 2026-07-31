@@ -629,6 +629,78 @@ function kbSearch(projId, query, n = 5, minScore = 1) {   // 零依赖关键词�
   return entries.map(e => { const toks = kbTokenize([e.q, e.a, e.subsystem, e.module, (e.tags || []).join(' ')].join(' ')); let sc = 0; const seen = new Set(); for (const t of toks) if (q.has(t) && !seen.has(t)) { sc++; seen.add(t); } return { e, sc }; })
     .filter(x => x.sc >= lo).sort((a, b) => b.sc - a.sc).slice(0, n).map(x => x.e);
 }
+
+/* ===== 经验库语义检索（embedding · OpenAI 兼容 {baseUrl}/embeddings） =====
+   embedding 配置存 data/model-api.json 的 `embed` 字段 {provider,model,baseUrl,apiKey}（与 models 并存、互不覆盖）。
+   核心 kbRetrieve = 关键词 + 语义混合召回：语义可用时 sim>=SEM_GATE || lex>=minScore 入选（rank=sim+微量 lex 加权）；
+   语义不可用（未配置/调用/embed 任一步失败）时**完全退回旧关键词行为**（kbSearch 同口径）。绝不报错、绝不空结果——见 §安全兜底。 */
+const SEM_GATE = 0.42;                                               // 语义相关门槛（余弦 · 不相关文本实测约 0.23）
+function loadEmbedCfg() { const e = (readModelCfg() || {}).embed; return (e && e.apiKey && e.baseUrl && e.model) ? e : null; }   // 三要素齐全才算配置好，否则 null（=语义不可用，退回关键词）
+async function embedTexts(texts) {                                   // 批量取向量：POST {baseUrl}/embeddings，返回 [[...],[...]] 与 input 顺序对齐
+  const cfg = loadEmbedCfg(); if (!cfg) throw new Error('未配置 embedding 模型');
+  const base = String(cfg.baseUrl).replace(/\/$/, '') + '/embeddings';
+  const r = await fetch(base, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + cfg.apiKey }, body: JSON.stringify({ model: cfg.model, input: texts }), signal: AbortSignal.timeout(30000) });
+  const j = await r.json().catch(() => null);
+  if (!r.ok) throw new Error((j && j.error && j.error.message) || ('HTTP ' + r.status));
+  const data = (j && j.data) || []; return data.map(d => d.embedding);
+}
+function cosine(a, b) {                                              // 标准余弦；长度不等或空 → 0
+  if (!Array.isArray(a) || !Array.isArray(b) || !a.length || a.length !== b.length) return 0;
+  let dot = 0, na = 0, nb = 0; for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+  return (na && nb) ? dot / (Math.sqrt(na) * Math.sqrt(nb)) : 0;
+}
+// KB 向量缓存 data/kb-embed.json = {[entryId]:{h:内容hash,v:向量}}；内存 + 文件双缓存。
+const KB_EMBED_FILE = path.join(DATA_DIR, 'kb-embed.json');
+let _kbEmbedCache = null;
+function loadKbEmbed() { if (_kbEmbedCache) return _kbEmbedCache; try { _kbEmbedCache = JSON.parse(fs.readFileSync(KB_EMBED_FILE, 'utf8')) || {}; } catch { _kbEmbedCache = {}; } return _kbEmbedCache; }
+function saveKbEmbed(m) { _kbEmbedCache = m; try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(KB_EMBED_FILE, JSON.stringify(m)); } catch {} }
+function kbEntryText(e) { return [e.q, e.a, e.subsystem, e.module, (e.tags || []).join(' ')].filter(Boolean).join('\n'); }
+function _kbHash(s) { return crypto.createHash('sha1').update(String(s)).digest('hex').slice(0, 16); }
+// 补算该产品所有 KB 条目缺失/过期的向量并写缓存；try/catch 失败静默（不阻断检索、退回关键词）。
+async function ensureKbEmbed(projId) {
+  try {
+    if (!loadEmbedCfg()) return;
+    const entries = loadKB(projId); if (!entries.length) return;
+    const cache = loadKbEmbed(); const need = [];
+    for (const e of entries) { const h = _kbHash(kbEntryText(e)); const c = cache[e.id]; if (!c || c.h !== h) need.push({ id: e.id, h, t: kbEntryText(e) }); }
+    if (!need.length) return;
+    const vs = await embedTexts(need.map(x => x.t));                 // 批量补算
+    if (vs.length === need.length) { need.forEach((x, i) => { cache[x.id] = { h: x.h, v: vs[i] }; }); saveKbEmbed(cache); }
+  } catch { /* 静默：embedding 失败不影响关键词检索 */ }
+}
+// 给定 query（qtok 关键词集合 + 可选预算 qv 语义向量）对某产品 KB 打混合分，返回 [{e,rank}]。
+//   qv 传入=复用外部 embed 一次（跨产品聚合用）；qv 为 null 且已配 embed 但想内部 embed 由调用方先备。
+//   语义可用（qv 有值 + 有缓存向量）：入选 sim>=SEM_GATE || lex>=minScore，rank=sim+(lex>=minScore?0.001*lex:0)；
+//   语义不可用：入选 lex>=minScore，rank=lex（完全退回旧 kbSearch 行为）。
+function _kbScored(projId, query, qtok, qv, minScore = 1) {
+  const entries = loadKB(projId); if (!entries.length) return [];
+  const lo = Math.max(1, minScore | 0);
+  const cache = (qv && qv.length) ? loadKbEmbed() : null;
+  const semUsable = !!(qv && qv.length);
+  const out = [];
+  for (const e of entries) {
+    const toks = kbTokenize([e.q, e.a, e.subsystem, e.module, (e.tags || []).join(' ')].join(' '));
+    let lex = 0; const seen = new Set(); for (const t of toks) if (qtok.has(t) && !seen.has(t)) { lex++; seen.add(t); }
+    if (semUsable) {
+      const c = cache && cache[e.id]; const sim = (c && c.v) ? cosine(qv, c.v) : 0;
+      if (sim >= SEM_GATE || lex >= lo) out.push({ e, rank: sim + (lex >= lo ? 0.001 * lex : 0) });
+    } else {
+      if (lex >= lo) out.push({ e, rank: lex });                      // 退回旧行为
+    }
+  }
+  return out;
+}
+// 单产品混合召回：内部 embed 一次 query（若已配 embed），失败自动退回关键词。返回条目数组（Top-N）。
+async function kbRetrieve(projId, query, n = 5, minScore = 1) {
+  const qtok = new Set(kbTokenize(query)); if (!qtok.size) return [];
+  let qv = null;
+  if (loadEmbedCfg()) {
+    try { await ensureKbEmbed(projId); const vs = await embedTexts([query]); qv = (vs && vs[0]) || null; }
+    catch { qv = null; }                                             // 任一步失败 → 语义不可用，退回关键词
+  }
+  return _kbScored(projId, query, qtok, qv, minScore).sort((a, b) => b.rank - a.rank).slice(0, n).map(x => x.e);
+}
+
 function intakeSolution(e) {   // 从已解决工单里抽"解法"用于沉淀：根因/处理说明 + 修复版本一起带（别只留版本号，2026-07-30 用户反馈）
   const res = e.resolution || {};
   const devs = (e.chat || []).filter(m => m.role === 'dev');
@@ -1515,9 +1587,11 @@ const server = http.createServer((req, res) => {
   // 统一模型列表：第一个(primary=true)是主，其余按序备用。maskKey 掩码用于"留空保留旧 key"（跨全部旧模型匹配，主/备互换也不丢 key）
   const toModelView = (x, primary) => ({ provider: x.provider || 'anthropic', model: x.model || '', baseUrl: x.baseUrl || '', keyMask: maskKey(x.apiKey), configured: !!x.apiKey, primary });
   const modelsOf = c => (c.apiKey || (Array.isArray(c.backups) && c.backups.length)) ? [toModelView(c, true), ...((Array.isArray(c.backups) ? c.backups : []).map(b => toModelView(b, false)))] : [];
+  // embedding 配置视图（掩码，不回明文）：存 model-api.json 的 embed 字段 {provider,model,baseUrl,apiKey}
+  const embedView = c => { const e = (c && c.embed) || {}; return { provider: e.provider || 'openai', model: e.model || '', baseUrl: e.baseUrl || '', keyMask: maskKey(e.apiKey), configured: !!(e.apiKey && e.baseUrl && e.model) }; };
   if (url.pathname === '/api/model-config') {
     const c = readModelCfg();
-    return send(res, 200, JSON.stringify({ models: modelsOf(c), provider: c.provider || 'anthropic', model: c.model || '', baseUrl: c.baseUrl || '', keyMask: maskKey(c.apiKey), configured: !!c.apiKey }));
+    return send(res, 200, JSON.stringify({ models: modelsOf(c), provider: c.provider || 'anthropic', model: c.model || '', baseUrl: c.baseUrl || '', keyMask: maskKey(c.apiKey), configured: !!c.apiKey, embed: embedView(c) }));
   }
   if (url.pathname === '/api/model-config-save' && req.method === 'POST') {
     return readBody(req, async (b, err) => {
@@ -1525,19 +1599,45 @@ const server = http.createServer((req, res) => {
       const cur = readModelCfg();
       const oldModels = [{ provider: cur.provider, model: cur.model, baseUrl: cur.baseUrl, apiKey: cur.apiKey }, ...((Array.isArray(cur.backups) ? cur.backups : []))];
       const resolveKey = m => { let k = (m.apiKey && String(m.apiKey).trim()) ? String(m.apiKey).trim() : ''; if (!k && m.mask) { const o = oldModels.find(x => maskKey(x.apiKey) === m.mask); if (o) k = o.apiKey; } return k; };
+      // embed：body 带 embed 对象则据它写 cfg.embed（key 留空+掩码=保留旧 key，同 models 的 resolveKey 口径）；不带则原样保留旧 embed（别覆盖没）。
+      const oldEmbed = (cur && cur.embed) || null;
+      const resolveEmbedKey = e => { let k = (e.apiKey && String(e.apiKey).trim()) ? String(e.apiKey).trim() : ''; if (!k && e.mask && oldEmbed && maskKey(oldEmbed.apiKey) === e.mask) k = oldEmbed.apiKey; return k; };
+      let embedCfg = oldEmbed;   // 缺省保留旧 embed
+      if (b.embed && typeof b.embed === 'object') {
+        const eb = b.embed, key = resolveEmbedKey(eb), model = (eb.model || '').trim(), baseUrl = (eb.baseUrl || '').trim();
+        embedCfg = (key && model && baseUrl) ? { provider: eb.provider || 'openai', model, baseUrl, apiKey: key } : null;   // 三要素齐全才存；否则视为清空 embed
+      }
       const models = (Array.isArray(b.models) ? b.models : []).map(m => ({ provider: m.provider || 'anthropic', model: (m.model || '').trim(), baseUrl: (m.baseUrl || '').trim(), apiKey: resolveKey(m), primary: !!m.primary })).filter(m => m.apiKey);
-      if (!models.length) { writeModelCfg({ provider: 'anthropic' }); return send(res, 200, JSON.stringify({ ok: true, models: [] })); }
+      if (!models.length) { const c0 = { provider: 'anthropic' }; if (embedCfg) c0.embed = embedCfg; writeModelCfg(c0); return send(res, 200, JSON.stringify({ ok: true, models: [], embed: embedView(c0) })); }
       const primary = models.find(m => m.primary) || models[0], backups = models.filter(m => m !== primary);
       const c = { provider: primary.provider, model: primary.model, baseUrl: primary.baseUrl, apiKey: primary.apiKey };
       if (backups.length) c.backups = backups.map(m => ({ provider: m.provider, model: m.model, baseUrl: m.baseUrl, apiKey: m.apiKey }));
+      if (embedCfg) c.embed = embedCfg;   // 与 models 一起持久化，别把 embed 覆盖没
       writeModelCfg(c);
-      send(res, 200, JSON.stringify({ ok: true, models: modelsOf(c) }));
+      send(res, 200, JSON.stringify({ ok: true, models: modelsOf(c), embed: embedView(c) }));
     });
   }
   if (url.pathname === '/api/model-test' && req.method === 'POST') {
     return readBody(req, async (b, err) => {
       if (!b) return send(res, 400, JSON.stringify({ ok: false, error: err }));
       const cur = readModelCfg();
+      // kind:'embed'（或带 embed 字段）→ 测 embedding 连通：POST {baseUrl}/embeddings，成功返回维度；否则维持原聊天模型测试。
+      if (b.kind === 'embed' || (b.embed && typeof b.embed === 'object')) {
+        const src = (b.embed && typeof b.embed === 'object') ? b.embed : b;   // 兼容 {kind:'embed', baseUrl,model,apiKey,mask} 或 {embed:{...}}
+        const oldEmbed = (cur && cur.embed) || null;
+        let ekey = (src.apiKey && String(src.apiKey).trim()) ? String(src.apiKey).trim() : '';
+        if (!ekey && src.mask && oldEmbed && maskKey(oldEmbed.apiKey) === src.mask) ekey = oldEmbed.apiKey;   // 留空+掩码 → 保留旧 key
+        const model = (src.model || '').trim(), baseUrl = (src.baseUrl || '').trim();
+        if (!ekey || !model || !baseUrl) return send(res, 200, JSON.stringify({ ok: false, error: '未配置 embedding（接口地址 / 模型 / API Key 需齐全）' }));
+        try {
+          const r = await fetch(baseUrl.replace(/\/$/, '') + '/embeddings', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + ekey }, body: JSON.stringify({ model, input: ['测试'] }), signal: AbortSignal.timeout(30000) });
+          const j = await r.json().catch(() => null);
+          if (!r.ok) throw new Error((j && j.error && j.error.message) || ('HTTP ' + r.status));
+          const vec = (((j && j.data) || [])[0] || {}).embedding || [];
+          if (!Array.isArray(vec) || !vec.length) throw new Error('响应无 embedding 向量');
+          return send(res, 200, JSON.stringify({ ok: true, dim: vec.length, model }));
+        } catch (e) { return send(res, 200, JSON.stringify({ ok: false, error: String((e && e.message) || e) })); }
+      }
       const oldModels = [{ provider: cur.provider, model: cur.model, baseUrl: cur.baseUrl, apiKey: cur.apiKey }, ...((Array.isArray(cur.backups) ? cur.backups : []))];
       let apiKey = (b.apiKey && String(b.apiKey).trim()) ? String(b.apiKey).trim() : '';
       if (!apiKey && b.mask) { const o = oldModels.find(x => maskKey(x.apiKey) === b.mask); if (o) apiKey = o.apiKey; }
@@ -1625,7 +1725,7 @@ const server = http.createServer((req, res) => {
       const lastUser = [...msgs].reverse().find(m => m.role === 'user'); const qtext = lastUser ? lastUser.content : '';
       const sub = String(b.subsystem || '').trim();   // 用户指定的子系统（空=全部）
       const imgs = (Array.isArray(b.images) ? b.images : []).slice(0, 6);   // 本轮附的截图（data URL，≤6）→ 多模态并进末条 user，让 AI 结合图答疑；落库见下方 convId 已知处
-      const hits = kbSearch(proj.id, qtext, 5, 2); const specHits = specSearch(proj, String(b.version || '').trim(), qtext, 5, sub);   // consult 相关度门槛 minScore=2：弱匹配（只命中 1 个常见 token）既不注入 consultSystem 也不发 kb 事件（不展示），避免引用与提问无关的经验库
+      const hits = await kbRetrieve(proj.id, qtext, 5, 2); const specHits = specSearch(proj, String(b.version || '').trim(), qtext, 5, sub);   // consult：语义混合召回（配了 embedding 时 sim>=SEM_GATE||lex>=2 入选；未配/失败自动退回关键词 minScore=2）。弱匹配（只命中 1 个常见 token 且语义不相关）既不注入 consultSystem 也不发 kb 事件
 
       const codeHits = b.deep ? codeSearch(proj, String(b.version || '').trim(), qtext, specHits, 4, sub) : null;   // 「深入思考」：搜源码
       // FS-06 引用可见：命中经验库时先发一个 kb 事件（流式答复之前），前端据此渲染「📚 参考经验库(N)」，让答复所引「历史经验库」有据可查、不再断层。
@@ -1681,20 +1781,28 @@ const server = http.createServer((req, res) => {
       return send(res, 200, JSON.stringify({ entries: out }));                                   // 全库为空 → 空数组（前端据此显「经验库暂无内容」）
     }
     if (!qtext) return send(res, 200, JSON.stringify({ entries: [] }));                          // 空关键词（无 all）→ 空数组（对齐现有端点温和风格，保 L-记录空态契约）
-    let n = parseInt(url.searchParams.get('n') || '5', 10); if (!Number.isFinite(n) || n < 1) n = 5; if (n > 20) n = 20;   // 默认 5、封顶 20
-    const pids = only ? (projById(only) ? [only] : []) : loadProjects().map(p => p.id);          // 全库=遍历已登记产品；未知过滤 id → 空
-    const qtok = new Set(kbTokenize(qtext));
-    const scored = [];
-    for (const pid of pids) {
-      const name = (projById(pid) || {}).name || '';
-      for (const e of kbSearch(pid, qtext, n)) {                                                 // 复用 kbSearch 单产品打分（逻辑不改）；每产品取至多 n 条
-        const toks = kbTokenize([e.q, e.a, e.subsystem, e.module, (e.tags || []).join(' ')].join(' '));   // 同 kbSearch 口径重算分，供全局排序
-        let sc = 0; const seen = new Set(); for (const t of toks) if (qtok.has(t) && !seen.has(t)) { sc++; seen.add(t); }
-        scored.push({ sc, e: { ...e, project: pid, productName: name, subsystemLabel: kbSubLabel(pid, e.subsystem) } });   // 追加 project(产品 id)+productName(产品名)+subsystemLabel(子系统中文 desc，展示用) 以区分产品
+    // GET 端点在同步 createServer 回调里 → 语义召回要 await，用 async IIFE 包裹；embed 失败/未配全退回关键词，绝不报错、绝不空结果。
+    (async () => {
+      let n = parseInt(url.searchParams.get('n') || '5', 10); if (!Number.isFinite(n) || n < 1) n = 5; if (n > 20) n = 20;   // 默认 5、封顶 20
+      const pids = only ? (projById(only) ? [only] : []) : loadProjects().map(p => p.id);          // 全库=遍历已登记产品；未知过滤 id → 空
+      const qtok = new Set(kbTokenize(qtext));
+      // 语义混合：跨产品只 embed 一次 query（qv），各产品补算缓存后调 _kbScored 复用；失败/未配 → qv=null 完全退回关键词。
+      let qv = null;
+      if (loadEmbedCfg()) {
+        try { for (const pid of pids) await ensureKbEmbed(pid); const vs = await embedTexts([qtext]); qv = (vs && vs[0]) || null; }
+        catch { qv = null; }
       }
-    }
-    scored.sort((a, b) => b.sc - a.sc);                                                          // 全局按分降序
-    return send(res, 200, JSON.stringify({ entries: scored.slice(0, n).map(x => x.e) }));        // 取全局 Top-N
+      const scored = [];
+      for (const pid of pids) {
+        const name = (projById(pid) || {}).name || '';
+        for (const { e, rank } of _kbScored(pid, qtext, qtok, qv, 1)) {                            // 单产品混合打分（语义可用则含 sim，否则纯关键词）；每产品全量参与全局排序
+          scored.push({ rank, e: { ...e, project: pid, productName: name, subsystemLabel: kbSubLabel(pid, e.subsystem) } });   // 追加 project(产品 id)+productName(产品名)+subsystemLabel(子系统中文 desc，展示用) 以区分产品
+        }
+      }
+      scored.sort((a, b) => b.rank - a.rank);                                                      // 全局按 rank 降序（语义 sim 或关键词分）
+      send(res, 200, JSON.stringify({ entries: scored.slice(0, n).map(x => x.e) }));               // 取全局 Top-N
+    })().catch(() => { try { send(res, 200, JSON.stringify({ entries: [] })); } catch {} });       // 兜底：意外错误也不 500（温和空态）
+    return;
   }
   if (url.pathname === '/api/kb-list') { const proj = projById(url.searchParams.get('project')); return send(res, 200, JSON.stringify({ entries: proj ? loadKB(proj.id) : [] })); }
   if (url.pathname === '/api/kb-save' && req.method === 'POST') {   // 人工新增/编辑经验条目

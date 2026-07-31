@@ -459,16 +459,18 @@ test('B-KB-REL3 逻辑层：kbSearch(minScore=2) 过滤 sc=1、minScore=1（draw
   assert.ok(String(strict[0].q).includes(REL_TOK), '保留的是强相关那条');
 });
 
-test('B-KB-REL4 server.mjs：只 consult 显式收紧 minScore=2，drawer /api/kb-search 与其它调用方默认不变', () => {
-  // consult 那处 kbSearch 传 minScore=2
-  assert.match(SRC, /const hits = kbSearch\(proj\.id, qtext, 5, 2\)/, '★ consult 调用传 minScore=2（收紧弱匹配）');
-  // kbSearch 签名带 minScore 默认 1
-  assert.match(SRC, /function kbSearch\(projId, query, n = 5, minScore = 1\)/, '★ kbSearch 默认 minScore=1（历史行为）');
-  assert.match(SRC, /\.filter\(x => x\.sc >= lo\)/, 'kbSearch 用 minScore（lo）作过滤门槛');
-  // drawer /api/kb-search 与 intake-chat 等其它调用点不传 minScore（默认 1，不受影响）
-  const otherCalls = [...SRC.matchAll(/kbSearch\(([^)]*)\)/g)].map(m => m[0]).filter(s => !s.includes('function kbSearch'));
-  const withMin2 = otherCalls.filter(s => /,\s*2\s*\)/.test(s));
-  assert.equal(withMin2.length, 1, '★ 全仓仅一处 kbSearch 传 minScore=2（即 consult），其它调用方默认 1 不受影响');
+test('B-KB-REL4 server.mjs：consult 走 kbRetrieve 语义混合召回并显式收紧 minScore=2（未配 embedding 时退回关键词 minScore=2，等价旧 kbSearch 门槛）', () => {
+  // consult 那处改为 kbRetrieve（语义混合召回），仍传 minScore=2（收紧关键词弱匹配门槛）
+  assert.match(SRC, /const hits = await kbRetrieve\(proj\.id, qtext, 5, 2\)/, '★ consult 调用 kbRetrieve 传 minScore=2（语义混合 + 关键词门槛收紧）');
+  // kbRetrieve/_kbScored 签名带 minScore（关键词门槛沿用），默认 1
+  assert.match(SRC, /async function kbRetrieve\(projId, query, n = 5, minScore = 1\)/, '★ kbRetrieve 默认 minScore=1（历史行为）');
+  assert.match(SRC, /function _kbScored\(projId, query, qtok, qv, minScore = 1\)/, '_kbScored 带 minScore 作关键词门槛');
+  // kbSearch 签名仍带 minScore 默认 1（保留、未删）
+  assert.match(SRC, /function kbSearch\(projId, query, n = 5, minScore = 1\)/, 'kbSearch 默认 minScore=1（保留兼容）');
+  // 仅 consult 那一处 kbRetrieve 传 minScore=2；kb-search 跨产品用 _kbScored(...,1) 默认门槛不受影响
+  const retrCalls = [...SRC.matchAll(/kbRetrieve\(([^)]*)\)/g)].map(m => m[0]).filter(s => !s.includes('function kbRetrieve'));
+  const withMin2 = retrCalls.filter(s => /,\s*2\s*\)/.test(s));
+  assert.equal(withMin2.length, 1, '★ 全仓仅一处 kbRetrieve 传 minScore=2（即 consult），其它检索默认门槛不受影响');
 });
 
 /* ---- KB-02 · 前端「正在思考中…」等待期动效（field.html）：AI 气泡在首个 token 前显动效，首个 o.v 到达即清 ---- */

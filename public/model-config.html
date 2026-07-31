@@ -39,6 +39,44 @@
     </div>
   </div>
 
+  <!-- ============ Embedding 模型（语义检索）============ -->
+  <div class="card mt-16">
+    <div class="card-header">
+      <div class="card-title"><i class="ti ti-vector-triangle"></i>Embedding 模型（语义检索）<span class="text-12 text-tertiary" id="embedStateTag" style="margin-left:6px;font-weight:400"></span></div>
+    </div>
+    <div style="padding:16px 4px 4px">
+      <div class="form-hint" style="margin:0 0 14px">用于经验库语义检索（RAG）。<b>未配置或调用失败时，答疑 / 经验库检索自动退回关键词检索，不影响使用。</b>接口为 OpenAI 兼容 <code class="mono">{接口地址}/embeddings</code>。</div>
+      <div class="grid" style="display:grid;grid-template-columns:1fr 1fr;gap:14px 20px;max-width:860px">
+        <div class="form-group">
+          <label>服务商</label>
+          <select class="input" id="emProvider">
+            <option value="openai">OpenAI 兼容</option>
+          </select>
+          <div class="form-hint">通义千问 / OpenAI 等 OpenAI 协议 embeddings 端点。</div>
+        </div>
+        <div class="form-group">
+          <label>模型 <span class="req">*</span></label>
+          <input class="input mono" id="emModel" placeholder="qwen3.7-text-embedding">
+          <div class="form-hint">embedding 模型名。</div>
+        </div>
+        <div class="form-group">
+          <label>接口地址 Base URL <span class="req">*</span></label>
+          <div class="input-with-icon"><i class="ti ti-link"></i><input class="input mono" id="emEndpoint" placeholder="https://.../compatible-mode/v1"></div>
+          <div class="form-hint">将拼接 <code class="mono">/embeddings</code> 调用（末尾斜杠自动处理）。</div>
+        </div>
+        <div class="form-group">
+          <label>API Key <span class="req" id="emKeyReq">*</span></label>
+          <div class="input-with-icon"><i class="ti ti-key"></i><input class="input mono" id="emKey" placeholder="sk-..." type="password" autocomplete="off"></div>
+          <div class="form-hint" id="emKeyHint">留空保留原 Key；重填则更换。仅存本机、不入库、页面仅回显掩码。</div>
+        </div>
+      </div>
+      <div class="flex gap-16" style="margin-top:8px">
+        <button class="btn" id="emTestBtn"><i class="ti ti-plug-connected"></i>测试连通</button>
+        <button class="btn btn-primary" id="emSaveBtn"><i class="ti ti-check"></i>保存</button>
+      </div>
+    </div>
+  </div>
+
 <!-- ============ 新增 / 编辑抽屉 ============ -->
 <div class="drawer-mask" id="drawerMask"></div>
 <div class="drawer" id="editDrawer">
@@ -142,7 +180,11 @@ function render(){
   }).join('');
 }
 
-function buildPayload(){ return { models: MODELS.map(m=>({ provider:m.provider, model:m.model||'', baseUrl:m.baseUrl||'', primary:!!m.primary, apiKey:m._newKey||'', mask:m.keyMask||'' })) }; }
+/* EMBED：embedding 模型配置（语义检索）。{provider,model,baseUrl,keyMask,configured,_newKey?} */
+let EMBED={ provider:'openai', model:'', baseUrl:'', keyMask:'', configured:false, _newKey:'' };
+function embedPayload(){ return { provider:EMBED.provider||'openai', model:($('#emModel').value||'').trim(), baseUrl:($('#emEndpoint').value||'').trim(), apiKey:($('#emKey').value||'').trim(), mask:EMBED.keyMask||'' }; }
+// 保存 embed 时也携当前 MODELS（同一端点），避免只传 embed 把模型清空。
+function buildPayload(extra){ const p={ models: MODELS.map(m=>({ provider:m.provider, model:m.model||'', baseUrl:m.baseUrl||'', primary:!!m.primary, apiKey:m._newKey||'', mask:m.keyMask||'' })) }; if(extra&&extra.embed) p.embed=extra.embed; return p; }
 async function persist(){
   try{ const r=await (await fetch('/api/model-config-save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(buildPayload())})).json();
     if(!r.ok){ toast('保存失败：'+(r.error||''),'error'); return false; }
@@ -243,7 +285,46 @@ $('#modelBody').addEventListener('click',async e=>{
   }
 });
 
-async function load(){ try{ const c=await (await fetch('/api/model-config')).json(); MODELS=(c.models||[]).map(m=>({...m})); render(); }catch(e){ toast('读取配置失败：'+e.message,'error'); } }
+/* —— Embedding 模型：回填 / 渲染态 / 测试 / 保存 —— */
+function renderEmbed(){
+  const tag=$('#embedStateTag'); if(tag) tag.innerHTML=EMBED.configured?'<span class="tag tag-success tag-dot">已配置</span>':'<span class="tag tag-gray tag-dot">未配置</span>';
+  const req=$('#emKeyReq'), hint=$('#emKeyHint');
+  if(EMBED.configured){ $('#emKey').placeholder='留空 = 保留已配置的 Key（'+esc(EMBED.keyMask)+'）'; if(req)req.style.display='none'; if(hint)hint.innerHTML='已配置 <b style="color:var(--color-success)">'+esc(EMBED.keyMask)+'</b>，留空保留；重填则更换。仅存本机、不入库。'; }
+  else{ $('#emKey').placeholder='sk-...'; if(req)req.style.display=''; if(hint)hint.textContent='留空保留原 Key；重填则更换。仅存本机、不入库、页面仅回显掩码。'; }
+}
+function fillEmbed(){ const p=$('#emProvider'); if(p)p.value=EMBED.provider||'openai'; $('#emModel').value=EMBED.model||''; $('#emEndpoint').value=EMBED.baseUrl||''; $('#emKey').value=''; renderEmbed(); }
+
+$('#emTestBtn').addEventListener('click',async()=>{
+  const model=($('#emModel').value||'').trim(), base=($('#emEndpoint').value||'').trim(), key=($('#emKey').value||'').trim(), mask=EMBED.keyMask||'';
+  if(!model){ $('#emModel').classList.add('invalid'); return toast('请填 embedding 模型名','warning'); }
+  if(!base){ $('#emEndpoint').classList.add('invalid'); return toast('请填接口地址','warning'); }
+  if(!key && !mask){ $('#emKey').classList.add('invalid'); return toast('请先填 API Key 再测试','warning'); }
+  $$('#emModel,#emEndpoint,#emKey').forEach(el=>el&&el.classList.remove('invalid'));
+  $('#emTestBtn').disabled=true; toast('正在测试 embedding 连通…','info');
+  try{ const r=await (await fetch('/api/model-test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ kind:'embed', provider:EMBED.provider||'openai', model, baseUrl:base, apiKey:key, mask })})).json();
+    if(r.ok) toast('连通正常（'+(r.model||model)+'，向量维度 '+(r.dim||'?')+'）','success');
+    else toast('连不通：'+String(r.error||'').slice(0,80),'error');
+  }catch(e){ toast('测试失败：'+e.message,'error'); }
+  $('#emTestBtn').disabled=false;
+});
+
+$('#emSaveBtn').addEventListener('click',async()=>{
+  const model=($('#emModel').value||'').trim(), base=($('#emEndpoint').value||'').trim(), key=($('#emKey').value||'').trim();
+  $$('#emModel,#emEndpoint,#emKey').forEach(el=>el&&el.classList.remove('invalid'));
+  if(!model){ $('#emModel').classList.add('invalid'); return toast('请填 embedding 模型名','warning'); }
+  if(!base){ $('#emEndpoint').classList.add('invalid'); return toast('请填接口地址','warning'); }
+  if(!EMBED.configured && !key){ $('#emKey').classList.add('invalid'); return toast('请填 API Key','warning'); }
+  $('#emSaveBtn').disabled=true;
+  try{ const r=await (await fetch('/api/model-config-save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(buildPayload({ embed: embedPayload() }))})).json();
+    if(!r.ok){ toast('保存失败：'+(r.error||''),'error'); }
+    else{ if(r.models){ const prevStatus={}; MODELS.forEach(m=>{ if(m._status) prevStatus[(m.provider||'')+'|'+(m.model||'')]=m._status; }); MODELS=(r.models||[]).map(m=>{ const s=prevStatus[(m.provider||'')+'|'+(m.model||'')]; return s?{...m,_status:s}:{...m}; }); render(); }
+      if(r.embed){ EMBED={...r.embed, _newKey:''}; fillEmbed(); }
+      toast('Embedding 配置已保存','success'); }
+  }catch(e){ toast('保存失败：'+e.message,'error'); }
+  $('#emSaveBtn').disabled=false;
+});
+
+async function load(){ try{ const c=await (await fetch('/api/model-config')).json(); MODELS=(c.models||[]).map(m=>({...m})); render(); if(c.embed){ EMBED={...c.embed, _newKey:''}; } fillEmbed(); }catch(e){ toast('读取配置失败：'+e.message,'error'); } }
 load();
 </script>
 </body>
