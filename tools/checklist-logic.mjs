@@ -28,18 +28,70 @@ export function normTemplateTasks(tasks, genId) {
   return out;
 }
 
-// 部署进度：以「模板项（live）」为分母，customer.deployTasks 里 done:true 的项为分子。
-//   模板项增删即时对所有医院生效（分母变），deployTasks 里指向已删模板项的完成态不计入分子（overlay 语义）。
-export function deployProgress(templateTasks, deployTasks) {
+// 部署进度（**单产品作用域**）：以「模板项（live）」为分母，某产品完成态子对象 `{taskId:{done,by,at}}` 里 done:true 的项为分子。
+//   模板项增删即时对所有医院生效（分母变），指向已删模板项的完成态不计入分子（overlay 语义）。
+//   ⚠️ 2026-08-03 起 customer.deployTasks 改为**按产品嵌套** `{[productId]:{[taskId]:{...}}}`——本函数只吃**某一个产品**的子对象（调用方传 `deployTasks[productId]`）。
+export function deployProgress(productDeployTasks, _ignore) {
+  const tpl = Array.isArray(productDeployTasks) ? productDeployTasks : (Array.isArray(_ignore) ? _ignore : null);
+  // 兼容旧调用签名 deployProgress(templateTasks, deployTasks)：若第一参是数组即模板、第二参是完成态。
+  if (Array.isArray(productDeployTasks)) {
+    const t = productDeployTasks;
+    const dt = _ignore && typeof _ignore === 'object' ? _ignore : {};
+    let done = 0;
+    for (const x of t) { const st = dt[x && x.id]; if (st && st.done) done++; }
+    return { done, total: t.length };
+  }
+  return { done: 0, total: 0 };
+}
+
+// 部署进度（**单产品作用域**·清爽签名）：模板项 tpl（live）为分母，某产品完成态 pdt 里 done:true & 指向现存模板项 为分子。
+export function deployProgressForProduct(templateTasks, productDeployTasks) {
   const tpl = Array.isArray(templateTasks) ? templateTasks : [];
-  const dt = deployTasks && typeof deployTasks === 'object' ? deployTasks : {};
-  const total = tpl.length;
+  const dt = productDeployTasks && typeof productDeployTasks === 'object' ? productDeployTasks : {};
   let done = 0;
   for (const t of tpl) { const st = dt[t && t.id]; if (st && st.done) done++; }
+  return { done, total: tpl.length };
+}
+
+// 判断 deployTasks 是否「嵌套形状」（顶层键的值本身是 {taskId:{done,...}} 的对象；旧 flat 形状顶层键值是 {done,by,at}）。
+//   旧 flat 判据：某顶层值含 `done`/`by`/`at` 这种叶子字段 → 判 flat。空对象 → 视作嵌套（安全）。
+export function isNestedDeployTasks(deployTasks) {
+  const d = deployTasks && typeof deployTasks === 'object' ? deployTasks : {};
+  for (const k of Object.keys(d)) {
+    const v = d[k];
+    if (!v || typeof v !== 'object') return false;                     // 顶层值非对象 → 非嵌套（异常/旧）
+    if ('done' in v || 'by' in v || 'at' in v) return false;           // 叶子（含 done/by/at）→ 旧 flat 形状
+  }
+  return true;
+}
+
+// 取某产品的完成态子对象（嵌套形状下 = deployTasks[productId]；旧 flat / 缺失 → {}，安全不崩、不臆造把旧 flat 塞给某产品）。
+export function productDeployTasksOf(deployTasks, productId) {
+  const d = deployTasks && typeof deployTasks === 'object' ? deployTasks : {};
+  if (!isNestedDeployTasks(d)) return {};                              // 旧 flat 形状 → 丢弃（迁移：几乎无历史完成数据）
+  const sub = d[productId];
+  return (sub && typeof sub === 'object') ? sub : {};
+}
+
+// 跨产品聚合部署进度（供运营端列表 N/M）：
+//   分母 = live 模板项数 M × 该院产品数 P；分子 = 各产品各自 done:true & 指向现存模板项 的总和。
+//   productIds = 该院 products[].project 去重列表。旧 flat deployTasks → 分子按 0 计（安全丢弃）。空模板或无产品 → total=0。
+export function deployAggProgress(templateTasks, deployTasks, productIds) {
+  const tpl = Array.isArray(templateTasks) ? templateTasks : [];
+  const pids = Array.isArray(productIds) ? [...new Set(productIds.filter(Boolean))] : [];
+  const total = tpl.length * pids.length;
+  if (!total) return { done: 0, total: 0 };
+  const nested = isNestedDeployTasks(deployTasks) ? (deployTasks || {}) : {};
+  let done = 0;
+  for (const pid of pids) {
+    const pdt = (nested[pid] && typeof nested[pid] === 'object') ? nested[pid] : {};
+    for (const t of tpl) { const st = pdt[t && t.id]; if (st && st.done) done++; }
+  }
   return { done, total };
 }
 
-// 模板项 + 某院完成态 → 渲染行（left join：模板为主，overlay 完成态）。空模板 → []。
+// 模板项 + 某院【某产品】完成态子对象 → 渲染行（left join：模板为主，overlay 完成态）。空模板 → []。
+//   deployTasks 入参 = 单产品的完成态 `{taskId:{done,by,at}}`（嵌套形状下 = customer.deployTasks[productId]）。
 export function deployRows(templateTasks, deployTasks) {
   const dt = deployTasks && typeof deployTasks === 'object' ? deployTasks : {};
   return (Array.isArray(templateTasks) ? templateTasks : []).map(t => {
@@ -51,7 +103,8 @@ export function deployRows(templateTasks, deployTasks) {
   });
 }
 
-// 应用一次部署清单勾选/取消（幂等）：done 真 → 写完成态；done 假 → 删该键。
+// 应用一次部署清单勾选/取消（幂等·**单产品作用域**）：done 真 → 写完成态；done 假 → 删该键。
+//   deployTasks 入参 = 单产品的完成态 `{taskId:{done,by,at}}`（嵌套形状下 = customer.deployTasks[productId]）。
 //   返回 { deployTasks, changed }（deployTasks 为新对象，不改入参）。taskId 须 ∈ 模板（由调用方先校验）。
 export function applyDeployToggle(deployTasks, taskId, done, by, at) {
   const src = deployTasks && typeof deployTasks === 'object' ? deployTasks : {};

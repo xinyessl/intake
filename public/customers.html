@@ -156,7 +156,8 @@ function maintainCell(me){
   return `<span class="mono text-secondary">${esc(me)}</span>`;
 }
 
-// 部署进度单元格：后端派生 deployDone/deployTotal（模板项数为分母，该院已完成为分子）；模板为空显「—」；满进度绿、有进度中性
+// 部署进度单元格：后端派生 deployDone/deployTotal（2026-08-03 起**聚合进度**：分母=模板项数M×该院产品数P，分子=各产品各自已完成之和）；
+//   模板为空或无产品 → total=0 显「—」；满进度绿、有进度中性
 function deployCell(c){
   const total=+(c&&c.deployTotal)||0, done=+(c&&c.deployDone)||0;
   if(!total) return '<span class="text-tertiary">—</span>';

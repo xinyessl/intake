@@ -26,7 +26,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import * as db from './db.mjs';
 // 现场实施代办清单纯逻辑（部署清单模板/进度/合并/勾选/越权判断，可独立单测：tools/fs-06-checklist.logic.test.mjs）
-import { normTemplateTasks, deployProgress, deployRows, applyDeployToggle, mergeImplTasks, applyBatchTaskToggle, implProgress } from './tools/checklist-logic.mjs';
+import { normTemplateTasks, deployProgress, deployProgressForProduct, deployAggProgress, isNestedDeployTasks, productDeployTasksOf, deployRows, applyDeployToggle, mergeImplTasks, applyBatchTaskToggle, implProgress } from './tools/checklist-logic.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));           // 收件项目根目录
 const PORT = process.env.PORT || 5180;
@@ -265,7 +265,8 @@ function normCustomer(b, existing) {   // 规范化：名称必填、products �
     let ctIn = (b && Array.isArray(b.contacts)) ? b.contacts : ((existing && Array.isArray(existing.contacts)) ? existing.contacts : null);
     if (!ctIn) { const on = pick('contactName', 20), op = pick('contactPhone', 20); ctIn = (on || op) ? [{ name: on, phone: op }] : []; }
     const contacts = ctIn.map(x => ({ name: String((x && x.name) || '').trim().slice(0, 20), phone: String((x && x.phone) || '').trim().slice(0, 20) })).filter(x => x.name || x.phone).slice(0, 20);
-    // 部署清单每院完成态（overlay，只存已完成项 {taskId:{done,by,at}}）——偏更新（如实施端勾选、customer-save）保留原值不清空，用 `'deployTasks' in b` 判存在。
+    // 部署清单每院完成态（overlay，2026-08-03 起**按产品嵌套** {[productId]:{[taskId]:{done,by,at}}}，只存已完成项）——
+    //   偏更新（如实施端勾选、customer-save）保留原值不清空，用 `'deployTasks' in b` 判存在。旧 flat 形状读进来也不崩（消费方按嵌套解析、flat 安全丢弃）。
     const deployTasks = (b && ('deployTasks' in b)) ? (b.deployTasks && typeof b.deployTasks === 'object' ? b.deployTasks : {}) : ((existing && existing.deployTasks && typeof existing.deployTasks === 'object') ? existing.deployTasks : {});
     return { id: (existing && existing.id) || custGenId(), name, level, region, impl, status, products, serverInfo, deviceCode, maintainEnd, contacts, remark, deployTasks, updatedAt: nowStamp() };
 }
@@ -327,7 +328,9 @@ function custWithTicketCount(list) {   // 给每条客户挂读时派生的 tick
     const accs = loadAccounts();
     const tpl = loadDeployTemplate();   // 部署清单模板（live）作分母，每院 deployTasks 完成态作分子，读时派生进度（不落文件）
     return list.map(c => {
-        const dp = deployProgress(tpl, c.deployTasks);
+        // 2026-08-03：部署完成度按 (医院,产品) 分记 → 运营列表显**跨该院所有产品**的聚合进度：M × P 为分母。
+        const pids = (Array.isArray(c.products) ? c.products : []).map(p => p && p.project).filter(Boolean);
+        const dp = deployAggProgress(tpl, c.deployTasks, pids);
         return { ...c, impl: deriveImpl(accs, c.name), ticketCount: cnt[(c.name || '').trim()] || 0, deployDone: dp.done, deployTotal: dp.total };
     });
 }
@@ -1527,16 +1530,20 @@ const server = http.createServer((req, res) => {
       return send(res, 200, JSON.stringify({ ok: true, tasks }));
     });
   }
-  // ---------- POST /api/customer-deploy-task：某院勾选/取消一条部署清单项（管理员 + field·按 user.sites 越权收敛，同 customer-maintain）----------
-  //   {site, taskId, done} → 校验 site∈user.sites（越权 403）+ taskId∈模板（否则 400）；
-  //     done 真 → c.deployTasks[taskId]={done:true,by:username,at}；done 假 → 删该键；幂等（同态不重复写）；saveCustomers；返回更新后 customer + 进度。
+  // ---------- POST /api/customer-deploy-task：某院【某产品】勾选/取消一条部署清单项（管理员 + field·按 user.sites 越权收敛，同 customer-maintain）----------
+  //   {site, product, taskId, done}（2026-08-03：completion 按 (医院,产品) 分记）→
+  //     校验 site∈user.sites（越权 403）+ product∈该院 products[].project（不属 400）+ taskId∈模板（否则 400）；
+  //     done 真 → c.deployTasks[product][taskId]={done:true,by:username,at}；done 假 → 删该键；幂等（同态不重复写）；saveCustomers；
+  //     返回更新后 customer + 该产品进度 deployDone/deployTotal（单产品分母=模板项数）。
   if (url.pathname === '/api/customer-deploy-task' && req.method === 'POST') {
     return readBody(req, async (b, err) => {
       if (!b) return send(res, 400, JSON.stringify({ ok: false, error: err }));
       const site = String((b && (b.site || b.customerName)) || '').trim();
+      const product = String((b && b.product) || '').trim();
       const taskId = String((b && b.taskId) || '').trim();
       const done = !!(b && b.done);
       if (!site) return send(res, 400, JSON.stringify({ ok: false, error: '缺少医院' }));
+      if (!product) return send(res, 400, JSON.stringify({ ok: false, error: '缺少产品' }));
       if (!taskId) return send(res, 400, JSON.stringify({ ok: false, error: '缺少任务项' }));
       // 越权：site 不在当前账号 sites（管理员不限）——与 customer-maintain/customer-version 完全一致
       if (user && !isAdmin(user) && (!Array.isArray(user.sites) || !user.sites.map(String).includes(site))) return send(res, 403, JSON.stringify({ ok: false, error: '无权操作该医院部署清单' }));
@@ -1545,12 +1552,21 @@ const server = http.createServer((req, res) => {
       const list = loadCustomers();
       const c = list.find(x => (x.name || '').trim() === site.trim());
       if (!c) return send(res, 400, JSON.stringify({ ok: false, error: '客户不存在' }));
+      const pids = (Array.isArray(c.products) ? c.products : []).map(p => p && p.project).filter(Boolean);
+      if (!pids.includes(product)) return send(res, 400, JSON.stringify({ ok: false, error: '该医院未上线此产品' }));   // product 须 ∈ 该院产品
       const at = nowStamp(); const by = (user && user.username) || '';
-      const r = applyDeployToggle(c.deployTasks, taskId, done, by, at);
-      if (r.changed) { c.deployTasks = r.deployTasks; c.updatedAt = at; saveCustomers(list); }
-      const dp = deployProgress(tpl, c.deployTasks);
+      // 嵌套形状：取（或初始化）该产品的完成态子对象；旧 flat 形状会被 productDeployTasksOf 安全丢弃返 {}。
+      const nested = isNestedDeployTasks(c.deployTasks) ? (c.deployTasks && typeof c.deployTasks === 'object' ? c.deployTasks : {}) : {};
+      const prevSub = productDeployTasksOf(c.deployTasks, product);
+      const r = applyDeployToggle(prevSub, taskId, done, by, at);
+      if (r.changed) {
+        const next = Object.assign({}, nested);   // 不改入参：拷贝顶层
+        next[product] = r.deployTasks;             // 写回该产品子对象
+        c.deployTasks = next; c.updatedAt = at; saveCustomers(list);
+      }
+      const dp = deployProgressForProduct(tpl, productDeployTasksOf(c.deployTasks, product));   // 该产品进度（单产品分母=模板项数）
       const withCnt = custWithTicketCount(list);
-      return send(res, 200, JSON.stringify({ ok: true, changed: r.changed, customer: withCnt.find(x => x.id === c.id) || c, deployDone: dp.done, deployTotal: dp.total }));
+      return send(res, 200, JSON.stringify({ ok: true, changed: r.changed, product, customer: withCnt.find(x => x.id === c.id) || c, deployDone: dp.done, deployTotal: dp.total }));
     });
   }
   // ---------- POST /api/batch-task：勾选/取消一条批次实施任务清单项（管理员 + field；全局完成态，谁勾了算完成）----------

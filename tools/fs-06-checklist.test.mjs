@@ -2,7 +2,9 @@
 //   ⚠️ 本测试 spawn 真实 server.mjs，需要 MySQL 在跑（登录/账号读真库）。本地 MySQL 当前不可用（ECONNREFUSED 3306）→ 未能本地运行，
 //      留待有库环境 / 线上冒烟执行（编排器部署后连线上真库跑）。纯文件存逻辑已由 tools/fs-06-checklist.logic.test.mjs 本地覆盖（11/11 绿）。
 //   覆盖：
-//     场景1 部署清单：deploy-template-save/get（仅管理员存·title 空 400·截断）→ 每院 customer-deploy-task 勾选/取消（越权 403·幂等·留痕 by/at·taskId 不存在 400）→ /api/customers 派生 deployDone/deployTotal。
+//     场景1 部署清单（2026-08-03：完成度按 (医院,产品) 分记）：deploy-template-save/get（仅管理员存·title 空 400·截断）
+//        → 每院每产品 customer-deploy-task {site,product,taskId,done} 勾选/取消（越权 403·product 不属/缺失 400·幂等·留痕 by/at·嵌套落态·taskId 不存在 400）
+//        → 产品A勾不影响产品B → /api/customers 派生聚合 deployDone/deployTotal（M×P）→ 模板删项分母随之变。
 //     场景2 更新包清单：batch-update 定义 implTasks（按 id 合并保留完成态）→ batch-task 全局勾选（幂等·doneBy/doneAt 留痕·不存在项 400）→ batchOut/field 批次视图带 implTasks。
 //   护栏：customers.json/batches.json 测前备份、测后还原；账号带 TAG、after 精确删 + DB 兜底；deploy-template.json 测前备份还原。
 //   用法：node --test --test-concurrency=1 tools/fs-06-checklist.test.mjs
@@ -19,6 +21,7 @@ const PORT = 5800 + Math.floor(Math.random() * 90);
 const BASE = `http://127.0.0.1:${PORT}`;
 const TAG = Date.now().toString(36);
 const PID = 'fs06ck-' + TAG;
+const PID2 = 'fs06ck2-' + TAG;      // 第二产品（验部署完成度按 (医院,产品) 分记：勾产品A不影响产品B + 聚合进度 M×P）
 const S_A = 'CK甲院-' + TAG;         // impl 负责
 const S_B = 'CK乙院-' + TAG;         // impl 负责（第二院，验各院进度独立）
 const S_OTHER = 'CK越权院-' + TAG;   // impl 不负责（测越权 403）
@@ -67,9 +70,11 @@ before(async () => {
 
   const ps = await api('/api/project-save', { method: 'POST', body: { id: PID, name: 'FS-06 清单冒烟', subsystems: [{ key: 'kwsb', name: 'kwsb', desc: '库房' }] }, jar: admin });
   assert.equal(ps.json?.ok, true, '前置：造隔离产品应成功');
+  const ps2 = await api('/api/project-save', { method: 'POST', body: { id: PID2, name: 'FS-06 清单冒烟B', subsystems: [{ key: 'kwsb', name: 'kwsb', desc: '库房' }] }, jar: admin });
+  assert.equal(ps2.json?.ok, true, '前置：造第二隔离产品应成功');
 
   // impl 绑甲/乙院；other 绑越权院
-  const acc = await api('/api/account-save', { method: 'POST', body: { username: U_IMPL, role: 'impl', name: '清单实施', password: PW, sites: [S_A, S_B], projects: [PID] }, jar: admin });
+  const acc = await api('/api/account-save', { method: 'POST', body: { username: U_IMPL, role: 'impl', name: '清单实施', password: PW, sites: [S_A, S_B], projects: [PID, PID2] }, jar: admin });
   assert.equal(acc.json?.ok, true, '前置：造 impl 账号应成功');
   created.accountIds.push((acc.json.accounts || []).find(x => x.username === U_IMPL).id);
   const acc2 = await api('/api/account-save', { method: 'POST', body: { username: U_OTHER, role: 'impl', name: '越权实施', password: PW, sites: [S_OTHER], projects: [PID] }, jar: admin });
@@ -77,8 +82,13 @@ before(async () => {
   created.accountIds.push((acc2.json.accounts || []).find(x => x.username === U_OTHER).id);
 
   // 造 3 家客户（impl.name 与账号 name 一致，避免 customer-save 写穿把 site 移走）
-  for (const [name, implName] of [[S_A, '清单实施'], [S_B, '清单实施'], [S_OTHER, '越权实施']]) {
-    const r = await api('/api/customer-save', { method: 'POST', body: { name, impl: { name: implName }, products: [{ project: PID, subsystems: [{ name: 'kwsb', version: 'v1' }] }] }, jar: admin });
+  //   S_A 上两个产品（PID+PID2，验部署完成度按产品分记 + 聚合 M×P）；S_B/S_OTHER 单产品 PID。
+  for (const [name, implName, prods] of [
+    [S_A, '清单实施', [{ project: PID, subsystems: [{ name: 'kwsb', version: 'v1' }] }, { project: PID2, subsystems: [{ name: 'kwsb', version: 'v1' }] }]],
+    [S_B, '清单实施', [{ project: PID, subsystems: [{ name: 'kwsb', version: 'v1' }] }]],
+    [S_OTHER, '越权实施', [{ project: PID, subsystems: [{ name: 'kwsb', version: 'v1' }] }]],
+  ]) {
+    const r = await api('/api/customer-save', { method: 'POST', body: { name, impl: { name: implName }, products: prods }, jar: admin });
     assert.equal(r.json?.ok, true, '前置：造 ' + name + ' 台账应成功：' + JSON.stringify(r.json));
   }
   await api('/api/login', { method: 'POST', body: { username: U_IMPL, password: PW }, jar: impl });
@@ -87,8 +97,10 @@ before(async () => {
 
 after(async () => {
   try { await api('/api/project-delete', { method: 'POST', body: { id: PID }, jar: admin }); } catch {}
+  try { await api('/api/project-delete', { method: 'POST', body: { id: PID2 }, jar: admin }); } catch {}
   for (const id of created.accountIds) { try { await api('/api/account-delete', { method: 'POST', body: { id }, jar: admin }); } catch {} }
-  try { if (pool) await pool.query('DELETE FROM projects WHERE id=?', [PID]); } catch {}
+  try { if (pool) await pool.query('DELETE FROM projects WHERE id IN (?,?)', [PID, PID2]); } catch {}
+  try { if (pool) await pool.query('DELETE FROM intakes WHERE project_id IN (?,?)', [PID, PID2]); } catch {}
   try { if (pool && created.accountIds.length) await pool.query(`DELETE FROM accounts WHERE id IN (${created.accountIds.map(() => '?').join(',')})`, created.accountIds); } catch {}
   try { if (custExisted && custBackup != null) fs.writeFileSync(CUSTOMERS_FILE, custBackup); else if (fs.existsSync(CUSTOMERS_FILE)) fs.unlinkSync(CUSTOMERS_FILE); } catch {}
   try { if (batchExisted && batchBackup != null) fs.writeFileSync(BATCHES_FILE, batchBackup); else if (fs.existsSync(BATCHES_FILE)) fs.unlinkSync(BATCHES_FILE); } catch {}
@@ -115,49 +127,80 @@ test('S1-2 非管理员不能存模板（403），但可读模板', async () => 
   assert.equal(get.json?.ok, true, 'field 应可读模板');
   assert.equal(get.json.tasks.length, 2);
 });
-test('S1-3 impl 勾选自己负责医院部署清单项 → 留痕 by/at + 幂等 + 进度', async () => {
-  const r = await api('/api/customer-deploy-task', { method: 'POST', body: { site: S_A, taskId: TID1, done: true }, jar: impl });
+test('S1-3 impl 勾选自己负责医院【某产品】部署清单项 → 嵌套落态 + 留痕 by/at + 幂等 + 该产品进度', async () => {
+  const r = await api('/api/customer-deploy-task', { method: 'POST', body: { site: S_A, product: PID, taskId: TID1, done: true }, jar: impl });
   assert.equal(r.json?.ok, true, '勾选应 ok：' + JSON.stringify(r.json));
   assert.equal(r.json.changed, true);
-  assert.deepEqual([r.json.deployDone, r.json.deployTotal], [1, 2], '甲院进度 1/2');
+  assert.equal(r.json.product, PID, '回传所勾产品');
+  assert.deepEqual([r.json.deployDone, r.json.deployTotal], [1, 2], '甲院 PID 产品进度 1/2（单产品分母=模板项数）');
   const c = readCustomer(S_A);
-  assert.equal(c.deployTasks[TID1].done, true, 'deployTasks 落完成态');
-  assert.equal(c.deployTasks[TID1].by, U_IMPL, '留痕 by=username');
-  assert.ok(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(c.deployTasks[TID1].at || ''), '留痕 at=nowStamp');
+  // 嵌套形状：deployTasks[PID][TID1]
+  assert.equal(c.deployTasks[PID][TID1].done, true, 'deployTasks 按产品嵌套落完成态');
+  assert.equal(c.deployTasks[PID][TID1].by, U_IMPL, '留痕 by=username');
+  assert.ok(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(c.deployTasks[PID][TID1].at || ''), '留痕 at=nowStamp');
   // 幂等：重复勾同项不再改
-  const r2 = await api('/api/customer-deploy-task', { method: 'POST', body: { site: S_A, taskId: TID1, done: true }, jar: impl });
+  const r2 = await api('/api/customer-deploy-task', { method: 'POST', body: { site: S_A, product: PID, taskId: TID1, done: true }, jar: impl });
   assert.equal(r2.json.changed, false, '同态幂等不 changed');
 });
-test('S1-4 取消勾选 → 删完成态；taskId 不存在 → 400', async () => {
-  const r = await api('/api/customer-deploy-task', { method: 'POST', body: { site: S_A, taskId: TID1, done: false }, jar: impl });
+test('S1-3b 按产品各自记进度：产品A勾不影响产品B（同一标准模板，每系统各自完成态）', async () => {
+  // S_A 的 PID 已勾 TID1（S1-3）；此刻勾 PID2 的 TID2 → PID2 进度 1/2，PID 仍 1/2、互不影响
+  const r = await api('/api/customer-deploy-task', { method: 'POST', body: { site: S_A, product: PID2, taskId: TID2, done: true }, jar: impl });
+  assert.equal(r.json?.ok, true, 'PID2 勾选应 ok：' + JSON.stringify(r.json));
+  assert.deepEqual([r.json.deployDone, r.json.deployTotal], [1, 2], 'PID2 产品进度 1/2');
+  const c = readCustomer(S_A);
+  assert.equal(c.deployTasks[PID][TID1].done, true, 'PID 完成态不受 PID2 勾选影响');
+  assert.ok(!c.deployTasks[PID][TID2], 'PID 下未勾 TID2');
+  assert.equal(c.deployTasks[PID2][TID2].done, true, 'PID2 完成态独立落 TID2');
+  assert.ok(!c.deployTasks[PID2][TID1], 'PID2 下未勾 TID1（不受 PID 影响）');
+  // 复原 PID2（后续 S1-6 聚合按已知态断言）
+  await api('/api/customer-deploy-task', { method: 'POST', body: { site: S_A, product: PID2, taskId: TID2, done: false }, jar: impl });
+});
+test('S1-3c product 不属该院 → 400', async () => {
+  // S_B 只上了 PID（没上 PID2）→ 对 PID2 勾选应 400
+  const bad = await api('/api/customer-deploy-task', { method: 'POST', body: { site: S_B, product: PID2, taskId: TID1, done: true }, jar: impl });
+  assert.equal(bad.status, 400, 'product 不在该院 products → 400');
+  // 缺 product → 400
+  const noProd = await api('/api/customer-deploy-task', { method: 'POST', body: { site: S_A, taskId: TID1, done: true }, jar: impl });
+  assert.equal(noProd.status, 400, '缺 product → 400');
+});
+test('S1-4 取消勾选 → 删该产品下该键；taskId 不存在 → 400', async () => {
+  const r = await api('/api/customer-deploy-task', { method: 'POST', body: { site: S_A, product: PID, taskId: TID1, done: false }, jar: impl });
   assert.equal(r.json.changed, true);
-  assert.deepEqual([r.json.deployDone, r.json.deployTotal], [0, 2], '取消后 0/2');
-  assert.ok(!readCustomer(S_A).deployTasks[TID1], '取消后删键');
-  const bad = await api('/api/customer-deploy-task', { method: 'POST', body: { site: S_A, taskId: 'tNOPE', done: true }, jar: impl });
+  assert.deepEqual([r.json.deployDone, r.json.deployTotal], [0, 2], '取消后 PID 产品 0/2');
+  const c = readCustomer(S_A);
+  assert.ok(!(c.deployTasks[PID] && c.deployTasks[PID][TID1]), '取消后删该产品下该键');
+  const bad = await api('/api/customer-deploy-task', { method: 'POST', body: { site: S_A, product: PID, taskId: 'tNOPE', done: true }, jar: impl });
   assert.equal(bad.status, 400, 'taskId 不在模板应 400');
 });
 test('S1-5 越权：impl 勾不属自己 sites 的医院 → 403', async () => {
-  const r = await api('/api/customer-deploy-task', { method: 'POST', body: { site: S_OTHER, taskId: TID1, done: true }, jar: impl });
+  const r = await api('/api/customer-deploy-task', { method: 'POST', body: { site: S_OTHER, product: PID, taskId: TID1, done: true }, jar: impl });
   assert.equal(r.status, 403, '越权应 403');
 });
-test('S1-6 各院进度独立 + /api/customers 派生 deployDone/deployTotal', async () => {
-  // 甲院勾 TID1、TID2（全完成）；乙院只勾 TID1
-  await api('/api/customer-deploy-task', { method: 'POST', body: { site: S_A, taskId: TID1, done: true }, jar: impl });
-  await api('/api/customer-deploy-task', { method: 'POST', body: { site: S_A, taskId: TID2, done: true }, jar: impl });
-  await api('/api/customer-deploy-task', { method: 'POST', body: { site: S_B, taskId: TID1, done: true }, jar: impl });
+test('S1-6 各院/各产品进度独立 + /api/customers 派生聚合 deployDone/deployTotal（M×P）', async () => {
+  // 甲院 PID 勾 TID1、TID2（该产品全完成 2/2）+ PID2 勾 TID1（1/2）；乙院 PID 只勾 TID1（1/2）
+  await api('/api/customer-deploy-task', { method: 'POST', body: { site: S_A, product: PID, taskId: TID1, done: true }, jar: impl });
+  await api('/api/customer-deploy-task', { method: 'POST', body: { site: S_A, product: PID, taskId: TID2, done: true }, jar: impl });
+  await api('/api/customer-deploy-task', { method: 'POST', body: { site: S_A, product: PID2, taskId: TID1, done: true }, jar: impl });
+  await api('/api/customer-deploy-task', { method: 'POST', body: { site: S_B, product: PID, taskId: TID1, done: true }, jar: impl });
   const r = await api('/api/customers', { method: 'GET', jar: admin });
   const byName = Object.fromEntries((r.json.customers || []).map(c => [c.name, c]));
-  assert.deepEqual([byName[S_A].deployDone, byName[S_A].deployTotal], [2, 2], '甲院 2/2');
-  assert.deepEqual([byName[S_B].deployDone, byName[S_B].deployTotal], [1, 2], '乙院 1/2（各院独立）');
+  // 甲院：M=2，P=2 → 分母 4；分子 = PID(2) + PID2(1) = 3
+  assert.deepEqual([byName[S_A].deployDone, byName[S_A].deployTotal], [3, 4], '甲院聚合 3/4（M2×P2=4，PID 2 + PID2 1）');
+  // 乙院：M=2，P=1 → 分母 2；分子 = PID(1)
+  assert.deepEqual([byName[S_B].deployDone, byName[S_B].deployTotal], [1, 2], '乙院聚合 1/2（M2×P1）');
+  // 越权院：未勾任何项 → 0/2
   assert.deepEqual([byName[S_OTHER].deployDone, byName[S_OTHER].deployTotal], [0, 2], '越权院 0/2');
 });
-test('S1-7 模板删项 → 各院分母即时变小，已删项完成态不计入分子', async () => {
-  // 删掉 TID2（模板只剩 TID1）；甲院原本勾了 TID1+TID2
+test('S1-7 模板删项 → 各院分母随之变（M×P），已删项完成态不计入分子', async () => {
+  // 删掉 TID2（模板只剩 TID1，M=1）；甲院 PID 原本勾了 TID1+TID2、PID2 勾了 TID1
   const r = await api('/api/deploy-template-save', { method: 'POST', body: { tasks: [{ id: TID1, title: '部署数据库', desc: '执行建库脚本' }] }, jar: admin });
   assert.equal(r.json?.ok, true);
   const c = await api('/api/customers', { method: 'GET', jar: admin });
   const a = (c.json.customers || []).find(x => x.name === S_A);
-  assert.deepEqual([a.deployDone, a.deployTotal], [1, 1], '删 TID2 后甲院 1/1（TID2 完成态不计入分母也不计分子）');
+  // 甲院：M=1，P=2 → 分母 2；分子 = PID(TID1 仍在→1) + PID2(TID1→1) = 2；TID2 已删不计
+  assert.deepEqual([a.deployDone, a.deployTotal], [2, 2], '删 TID2 后甲院聚合 2/2（M1×P2；各产品 TID1 计入，TID2 不计）');
+  const b = (c.json.customers || []).find(x => x.name === S_B);
+  assert.deepEqual([b.deployDone, b.deployTotal], [1, 1], '删 TID2 后乙院 1/1（M1×P1）');
 });
 
 // ================= 场景2：更新包实施任务清单 + 全局勾选 =================

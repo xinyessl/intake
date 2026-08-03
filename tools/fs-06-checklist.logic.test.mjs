@@ -4,7 +4,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  clip, normTemplateTasks, deployProgress, deployRows, applyDeployToggle,
+  clip, normTemplateTasks, deployProgress, deployProgressForProduct, deployAggProgress,
+  isNestedDeployTasks, productDeployTasksOf, deployRows, applyDeployToggle,
   mergeImplTasks, applyBatchTaskToggle, implProgress, siteAllowed
 } from './checklist-logic.mjs';
 
@@ -37,35 +38,85 @@ test('normTemplateTasks：title 非空校验（空项丢弃）+ 截断 title≤1
   assert.equal(new Set(ids).size, ids.length);          // 全唯一
 });
 
-test('deployProgress：以 live 模板为分母，deployTasks done:true 为分子；overlay 语义（指向已删项的完成态不计入）', () => {
+test('deployProgressForProduct（单产品作用域）：live 模板为分母，某产品完成态 done:true 为分子；overlay 语义（指向已删项不计）', () => {
   const tpl = [{ id: 't1' }, { id: 't2' }, { id: 't3' }];
-  // 某院完成了 t1、t3，另外还残留一条指向已删模板项 tOld 的完成态
-  const dt = { t1: { done: true }, t3: { done: true }, tOld: { done: true } };
-  const p = deployProgress(tpl, dt);
-  assert.deepEqual(p, { done: 2, total: 3 });           // tOld 不在模板 → 不计入分子；分母=模板项数
+  // 某产品完成了 t1、t3，另外还残留一条指向已删模板项 tOld 的完成态
+  const pdt = { t1: { done: true }, t3: { done: true }, tOld: { done: true } };
+  assert.deepEqual(deployProgressForProduct(tpl, pdt), { done: 2, total: 3 });   // tOld 不在模板 → 不计入分子
 
-  // 模板新增一项 t4（分母变 4），该院进度自动变 2/4（未联动改院完成态）
-  const p2 = deployProgress([...tpl, { id: 't4' }], dt);
-  assert.deepEqual(p2, { done: 2, total: 4 });
-
-  // 模板删除 t3（分母变 2），该院分子随之只剩 t1（t3 完成态指向已删项不计）
-  const p3 = deployProgress([{ id: 't1' }, { id: 't2' }], dt);
-  assert.deepEqual(p3, { done: 1, total: 2 });
-
+  // 模板新增一项 t4（分母变 4），该产品进度自动变 2/4
+  assert.deepEqual(deployProgressForProduct([...tpl, { id: 't4' }], pdt), { done: 2, total: 4 });
+  // 模板删除 t3（分母变 2），分子随之只剩 t1（t3 完成态指向已删项不计）
+  assert.deepEqual(deployProgressForProduct([{ id: 't1' }, { id: 't2' }], pdt), { done: 1, total: 2 });
   // 空模板 → 0/0
+  assert.deepEqual(deployProgressForProduct([], pdt), { done: 0, total: 0 });
+  // 无完成态（新产品）→ 0/total
+  assert.deepEqual(deployProgressForProduct(tpl, undefined), { done: 0, total: 3 });
+});
+
+test('deployProgress 旧签名兼容 deployProgress(templateTasks, deployTasks) 仍工作（单产品口径）', () => {
+  const tpl = [{ id: 't1' }, { id: 't2' }, { id: 't3' }];
+  const dt = { t1: { done: true }, t3: { done: true } };
+  assert.deepEqual(deployProgress(tpl, dt), { done: 2, total: 3 });
   assert.deepEqual(deployProgress([], dt), { done: 0, total: 0 });
 });
 
-test('模板增删项后不同医院各自进度独立正确', () => {
+test('isNestedDeployTasks：区分嵌套 {pid:{taskId:{...}}} 与旧 flat {taskId:{done,...}}；空对象视作嵌套', () => {
+  assert.equal(isNestedDeployTasks({}), true);                                          // 空 → 嵌套（安全）
+  assert.equal(isNestedDeployTasks(undefined), true);
+  assert.equal(isNestedDeployTasks({ pms: { t1: { done: true } } }), true);            // 嵌套形状
+  assert.equal(isNestedDeployTasks({ t1: { done: true, by: 'x', at: 'y' } }), false);  // 旧 flat（叶子含 done/by/at）
+  assert.equal(isNestedDeployTasks({ t1: { done: true } }), false);                    // 旧 flat（叶子含 done）
+});
+
+test('productDeployTasksOf：嵌套取 dt[pid]；旧 flat / 缺失 → {}（安全丢弃，不臆造塞旧数据给某产品）', () => {
+  const nested = { pms: { t1: { done: true } }, audit: { t2: { done: true } } };
+  assert.deepEqual(productDeployTasksOf(nested, 'pms'), { t1: { done: true } });
+  assert.deepEqual(productDeployTasksOf(nested, 'audit'), { t2: { done: true } });
+  assert.deepEqual(productDeployTasksOf(nested, 'unknown'), {});                        // 该产品无完成态 → {}
+  // 旧 flat 形状 → 一律 {}（迁移安全，几乎无历史完成数据）
+  assert.deepEqual(productDeployTasksOf({ t1: { done: true, by: 'x', at: 'y' } }, 'pms'), {});
+});
+
+test('按产品各自记进度：产品A勾不影响产品B（同一标准模板，每系统各自完成态）', () => {
   const tpl = [{ id: 't1' }, { id: 't2' }, { id: 't3' }];
-  const hospA = { t1: { done: true, by: 'implA', at: '2026-08-03 10:00' } };  // A 完成 1 项
-  const hospB = { t1: { done: true }, t2: { done: true }, t3: { done: true } }; // B 全完成
-  const hospC = {};                                                            // C 未开始
-  assert.deepEqual(deployProgress(tpl, hospA), { done: 1, total: 3 });
-  assert.deepEqual(deployProgress(tpl, hospB), { done: 3, total: 3 });
-  assert.deepEqual(deployProgress(tpl, hospC), { done: 0, total: 3 });
-  // 新建医院（无 deployTasks 键）也应 0/total
-  assert.deepEqual(deployProgress(tpl, undefined), { done: 0, total: 3 });
+  const dt = { pms: { t1: { done: true }, t2: { done: true } }, audit: { t3: { done: true } } };
+  // 产品 pms 完成 2/3；产品 audit 完成 1/3——互不影响
+  assert.deepEqual(deployProgressForProduct(tpl, productDeployTasksOf(dt, 'pms')), { done: 2, total: 3 });
+  assert.deepEqual(deployProgressForProduct(tpl, productDeployTasksOf(dt, 'audit')), { done: 1, total: 3 });
+});
+
+test('deployAggProgress（跨产品聚合·运营列表 N/M）：分母=M×P、分子=各产品之和；模板增删/无产品/旧 flat 边界', () => {
+  const tpl = [{ id: 't1' }, { id: 't2' }, { id: 't3' }];   // M=3
+  const dt = { pms: { t1: { done: true }, t2: { done: true } }, audit: { t3: { done: true } } };
+  // P=2 → 分母 6；分子 = pms(2) + audit(1) = 3
+  assert.deepEqual(deployAggProgress(tpl, dt, ['pms', 'audit']), { done: 3, total: 6 });
+  // 只算某一个产品（P=1）→ 分母 3、分子 2
+  assert.deepEqual(deployAggProgress(tpl, dt, ['pms']), { done: 2, total: 3 });
+  // 无产品 → 0/0
+  assert.deepEqual(deployAggProgress(tpl, dt, []), { done: 0, total: 0 });
+  // 空模板 → 0/0（无论几个产品）
+  assert.deepEqual(deployAggProgress([], dt, ['pms', 'audit']), { done: 0, total: 0 });
+  // 模板增一项 t4（M=4）→ 分母 8、分子仍 3（未联动改完成态）
+  assert.deepEqual(deployAggProgress([...tpl, { id: 't4' }], dt, ['pms', 'audit']), { done: 3, total: 8 });
+  // productIds 去重：重复 'pms' 只算一次
+  assert.deepEqual(deployAggProgress(tpl, dt, ['pms', 'pms']), { done: 2, total: 3 });
+  // 该院上了产品但没勾任何项 → 分子 0、分母仍 M×P
+  assert.deepEqual(deployAggProgress(tpl, {}, ['pms', 'audit']), { done: 0, total: 6 });
+  // 旧 flat deployTasks → 分子按 0 计（安全丢弃）、分母仍 M×P
+  assert.deepEqual(deployAggProgress(tpl, { t1: { done: true, by: 'x', at: 'y' } }, ['pms']), { done: 0, total: 3 });
+});
+
+test('模板增删项后不同产品各自进度独立正确（每系统各自记进度）', () => {
+  const tpl = [{ id: 't1' }, { id: 't2' }, { id: 't3' }];
+  const dt = {
+    pms: { t1: { done: true, by: 'implA', at: '2026-08-03 10:00' } },      // pms 完成 1 项
+    audit: { t1: { done: true }, t2: { done: true }, t3: { done: true } }, // audit 全完成
+    report: {}                                                             // report 未开始
+  };
+  assert.deepEqual(deployProgressForProduct(tpl, productDeployTasksOf(dt, 'pms')), { done: 1, total: 3 });
+  assert.deepEqual(deployProgressForProduct(tpl, productDeployTasksOf(dt, 'audit')), { done: 3, total: 3 });
+  assert.deepEqual(deployProgressForProduct(tpl, productDeployTasksOf(dt, 'report')), { done: 0, total: 3 });
 });
 
 test('deployRows：模板 left join 完成态（带完成人/时间）；空模板 → []', () => {
