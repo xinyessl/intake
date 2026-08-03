@@ -814,12 +814,12 @@ function authGate(pathname, user, link) {
   if (!user) return 'login';
   if (isAdmin(user)) return 'allow';                                    // 管理员：全放行
   // 现场侧（产品经理 / 实施工程师）：只允许 提交面 + 工单查看 + 验证
-  const FIELD_OK = new Set(['/', '/submit.html', '/detail.html', '/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/consult', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-transition', '/api/field/submissions', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/intake-verify']);   // FS-05：现场端 4 新端点（按批次视图/下载/改版本/逐单验证），均端点内按 user.sites 二次收敛
+  const FIELD_OK = new Set(['/', '/submit.html', '/detail.html', '/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/consult', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-transition', '/api/field/submissions', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify']);   // FS-05：现场端新端点（按批次视图/下载/改版本/维保回写/逐单验证），均端点内按 user.sites 二次收敛
   return FIELD_OK.has(pathname) ? 'allow' : 'forbidden';
 }
 // FS-08 §4①：field 域接口允许集 = LINK_OK ∪ FIELD_OK（供访客链接 + 现场账号），与 authGate 内 FIELD_OK 同源，避免漂移。
 //   注意：这里是 authGate 里那份 FIELD_OK 的镜像常量——两者若改一处务必同步（authGate 用于登录态白名单，本集用于 field 域名层外层闸）。
-const FS08_FIELD_API = new Set(['/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/consult', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-transition', '/api/field/submissions', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/intake-verify', '/api/model-config']);   // FS-05 4 端点（field/batches·batch-download·customer-version·intake-verify）须与 FIELD_OK 同步，否则实施域(field)整个批次流被 originGate deny→forbidden（实测坑，见 fs-08 防漂移断言）
+const FS08_FIELD_API = new Set(['/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/consult', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-transition', '/api/field/submissions', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/model-config']);   // FS-05 端点（field/batches·batch-download·customer-version·customer-maintain·intake-verify）须与 FIELD_OK 同步，否则实施域(field)整个批次流被 originGate deny→forbidden（实测坑，见 fs-08 防漂移断言）
 // field 域可加载的静态页（现场提交面 + 实施端外壳 + 现场可看的详情 + 登录页）。console/inbox/customers/kb/model-config/accounts/projects 等后台页不在其中 → 越域拒。
 const FS08_FIELD_PAGES = new Set(['/', '/field.html', '/submit.html', '/detail.html', '/login.html']);
 // 鉴权/健康端点：两域都放（field 域现场登录/查身份/登出/健康探测需要）。
@@ -1445,6 +1445,34 @@ const server = http.createServer((req, res) => {
     });
   }
 
+  // ---------- POST /api/customer-maintain：实施端回写维保到期（镜像 customer-version）----------
+  //   {site, maintainEnd} → maintainEnd 须 yyyy-MM-dd（本期不支持清空）；校验 site ∈ user.sites（管理员不限，越权 403）
+  //     → 回写 data/customers.json c.maintainEnd（≤20）；幂等（新值===旧值 不写不留痕）；留痕 c.maintainLog[]（谁/何时/哪院/from→to）。
+  if (url.pathname === '/api/customer-maintain' && req.method === 'POST') {
+    return readBody(req, async (b, err) => {
+      if (!b) return send(res, 400, JSON.stringify({ ok: false, error: err }));
+      const site = String((b && (b.site || b.customerName)) || '').trim();
+      const maintainEnd = String((b && b.maintainEnd) || '').trim();
+      if (!site) return send(res, 400, JSON.stringify({ ok: false, error: '缺少医院' }));
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(maintainEnd)) return send(res, 400, JSON.stringify({ ok: false, error: '维保到期日期格式须为 yyyy-MM-dd' }));
+      // 越权：site 不在当前账号 sites（管理员不限）——与 customer-version 完全一致
+      if (user && !isAdmin(user) && (!Array.isArray(user.sites) || !user.sites.map(String).includes(site))) return send(res, 403, JSON.stringify({ ok: false, error: '无权改该医院维保到期' }));
+      const list = loadCustomers();
+      const c = list.find(x => (x.name || '').trim() === site.trim());
+      if (!c) return send(res, 400, JSON.stringify({ ok: false, error: '客户不存在' }));
+      const from = String(c.maintainEnd || '').trim();
+      if (from === maintainEnd) return send(res, 200, JSON.stringify({ ok: true }));   // 幂等：值没变不写不留痕
+      c.maintainEnd = maintainEnd.slice(0, 20);
+      c.maintainLog = Array.isArray(c.maintainLog) ? c.maintainLog : [];
+      c.maintainLog.push({ by: (user && user.username) || '', at: nowStamp(), site, from, to: maintainEnd });
+      if (c.maintainLog.length > 200) c.maintainLog = c.maintainLog.slice(-200);
+      c.updatedAt = nowStamp();
+      saveCustomers(list);
+      const withCnt = custWithTicketCount(list);
+      return send(res, 200, JSON.stringify({ ok: true, customer: withCnt.find(x => x.id === c.id) || c, customers: withCnt }));
+    });
+  }
+
   // ---------- POST /api/intake-verify：逐单现场验证（AC-15~20/AC-22/23）----------
   //   {project, id, result:'pass'|'fail', note?} → 校验 site ∈ user.sites + lifecycle=待验证（非待验证态拒）
   //     pass：待验证→已关闭 + 现场验证留痕；fail：待验证→已重开 + note 反馈进 history。
@@ -1991,18 +2019,38 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="intake-${proj.id}.csv"` });
     return res.end('﻿' + rows.join('\r\n'));
   }
-  if (url.pathname === '/api/notifications') {   // 站内待办提醒（按角色）
+  if (url.pathname === '/api/notifications') {   // 站内待办提醒（按角色）：工单待办 + 维保到期提醒
     if (!user) return send(res, 200, JSON.stringify({ count: 0, items: [] }));
     const items = [];
     for (const p of loadProjects()) {
       let list = scopedForField(user, listIntake(p));   // FS-01 AC-20：待办同样按 me.sites 隔离（复用统一过滤，避免漂移）
       for (const it of list) {
         const need = isAdmin(user) ? (it.lifecycle === '待处理' || it.lifecycle === '已重开') : (it.lifecycle === '已回复' || it.lifecycle === '待验证');
-        if (need) items.push({ project: p.id, id: it.id, title: it.title, lifecycle: it.lifecycle, type: it.type });
+        if (need) items.push({ kind: 'ticket', project: p.id, id: it.id, title: it.title, lifecycle: it.lifecycle, type: it.type });   // kind:'ticket' 供前端区分（维保项 kind:'maintain'）
       }
     }
     items.sort((a, b) => (a.lifecycle || '').localeCompare(b.lifecycle || ''));
-    return send(res, 200, JSON.stringify({ count: items.length, items: items.slice(0, 30), role: isAdmin(user) ? 'dev' : 'field' }));
+    // 维保到期提醒：可见范围 = 管理员全部 / 实施(field) 仅 user.sites；剩余 ≤15 天（含已过期负数）即提醒。
+    //   daysLeft = 到期日 − 今天，用 date-only UTC 归一避免时区 off-by-one（今天取本地年月日再喂 Date.UTC）。
+    const maintainItems = [];
+    const _now = new Date();
+    const todayUTC = Date.UTC(_now.getFullYear(), _now.getMonth(), _now.getDate());
+    const admin = isAdmin(user);
+    const siteSet = new Set(Array.isArray(user.sites) ? user.sites.map(String) : []);
+    for (const c of loadCustomers()) {
+      const nm = (c.name || '').trim();
+      if (!admin && !siteSet.has(nm)) continue;   // field 仅负责的院
+      const me = String(c.maintainEnd || '').trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(me)) continue;   // 无/非法日期跳过
+      const [y, mo, d] = me.split('-').map(Number);
+      const endUTC = Date.UTC(y, mo - 1, d);
+      const daysLeft = Math.round((endUTC - todayUTC) / 86400000);
+      if (daysLeft <= 15) maintainItems.push({ kind: 'maintain', site: nm, maintainEnd: me, daysLeft });   // 含已过期（负数）
+    }
+    maintainItems.sort((a, b) => a.daysLeft - b.daysLeft);   // 越紧急（已过期→负数最小）越靠前
+    const all = maintainItems.concat(items);   // 维保项排在工单前更醒目
+    // count=全部（实施端待办铃铛用，含维保）；ticketCount=仅工单（后台「工单管理」导航角标用，避免维保虚增工单数）。
+    return send(res, 200, JSON.stringify({ count: all.length, ticketCount: items.length, maintainCount: maintainItems.length, items: all.slice(0, 50), role: admin ? 'dev' : 'field' }));
   }
   if (url.pathname === '/api/intake-media') {   // 供详情页取截图（media 落在 intake-store，不在 public/，单开只读端点 + 防穿越）
     const proj = projById(url.searchParams.get('project')); if (!proj) return send(res, 404, 'no project', 'text/plain');

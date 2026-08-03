@@ -399,6 +399,10 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
 .f-ctx { position: relative; display: inline-flex; align-items: center; flex-wrap: wrap; gap: 5px; font-size: 12.5px; color: var(--color-text); line-height: 1.5; }
 .f-ctx .ti { font-size: 15px; color: var(--color-primary); }
 .f-ctx b { font-weight: 700; }
+/* 维保到期常驻 chip（FS-05）：分隔符 + 到期显示 + 编辑铅笔 */
+.f-ctx .f-ctx-sep { color: var(--color-border); margin: 0 1px; }
+.f-ctx .f-maintain { display: inline-flex; align-items: center; gap: 3px; }
+.f-ctx .f-maintain .f-maintain-edit:hover { opacity: .7; }
 /* 系统视图：运营 tag 版本下拉触发器 + 弹菜单 */
 .f-ctx .f-ver { cursor: pointer; display: inline-flex; align-items: center; gap: 3px; background: var(--color-surface); border: 1px solid var(--color-primary-border); border-radius: 6px; padding: 1px 7px; margin-left: 1px; font-family: var(--font-num), monospace; }
 .f-ctx .f-ver:hover { background: var(--color-primary-light); }
@@ -1061,9 +1065,22 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     if (!items.length) { body.className = 'f-todo-empty'; body.innerHTML = '<i class="ti ti-circle-check" style="font-size:26px;opacity:.4;display:block;margin-bottom:6px"></i>暂无待办'; return; }
     body.className = 'f-todo-list';
     body.innerHTML = items.map(function (it) {
+      // 维保到期项（kind:'maintain'）：标题「XX医院 · 维保到期 yyyy-MM-dd · 剩 N 天 / 已过期 M 天」；已过期红、临期黄
+      if (it.kind === 'maintain') {
+        var dl = (typeof it.daysLeft === 'number') ? it.daysLeft : null;
+        var over = dl != null && dl < 0;
+        var mt = over ? '#B4232A' : '#8A6100', mb = over ? '#FBECEC' : '#FCF3E2';
+        var when = over ? ('已过期' + (-dl) + '天') : ('剩 ' + (dl == null ? '?' : dl) + ' 天');
+        return '<div class="f-todo-item" data-kind="maintain" data-site="' + escapeHtml(it.site || '') + '">' +
+          '<span class="ti-ic" style="background:' + mb + ';color:' + mt + '"><i class="ti ti-shield-check"></i></span>' +
+          '<span class="tt"><span class="t1"><span class="lctag" style="color:' + mt + ';background:' + mb + '">维保到期</span></span>' +
+          '<span class="ttl">' + escapeHtml(it.site || '') + ' · 维保到期 ' + escapeHtml(it.maintainEnd || '') + '</span>' +
+          '<span class="t2" style="color:' + mt + '">' + escapeHtml(when) + '，点击可编辑维保到期</span></span>' +
+          '</div>';
+      }
       var m = TODO_LC[it.lifecycle] || { hint: it.lifecycle || '', tone: '#5A6573', bg: '#EEF1F5', ic: 'ti-bell', tag: it.lifecycle || '待办' };
       var tp = it.type === 'bug' ? 'BUG' : (it.type === 'requirement' ? '需求' : (it.type === 'consult' ? '咨询' : ''));
-      return '<div class="f-todo-item" data-lc="' + escapeHtml(it.lifecycle || '') + '">' +
+      return '<div class="f-todo-item" data-kind="ticket" data-lc="' + escapeHtml(it.lifecycle || '') + '">' +
         '<span class="ti-ic" style="background:' + m.bg + ';color:' + m.tone + '"><i class="ti ' + m.ic + '"></i></span>' +
         '<span class="tt"><span class="t1"><span class="lctag" style="color:' + m.tone + ';background:' + m.bg + '">' + escapeHtml(m.tag) + '</span>' + (tp ? '<span style="font-size:11.5px;color:#5A6573">[' + escapeHtml(tp) + ']</span>' : '') + '</span>' +
         '<span class="ttl">' + escapeHtml(it.title || '（无标题）') + '</span>' +
@@ -1074,8 +1091,10 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     for (var i = 0; i < rows.length; i++) rows[i].addEventListener('click', function () { onTodoClick(this); });
   }
   function onTodoClick(row) {
-    var lc = row.getAttribute('data-lc');
     var pop = $('fTodoPop'); if (pop) pop.classList.remove('open');
+    // 维保项：点进去打开同一个维保编辑（改该院维保）
+    if (row.getAttribute('data-kind') === 'maintain') { openMaintainEdit(row.getAttribute('data-site')); return; }
+    var lc = row.getAttribute('data-lc');
     if (lc === '待验证') { setGroupBy('batch'); showToast('已切到「按批次」，可在对应批次逐单验证', 'info'); }
     else { setGroupBy('type'); showToast('已回到清单，点对应记录可查看 / 续聊', 'info'); }
   }
@@ -1819,6 +1838,71 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     });
   }
 
+  // ========== 维保到期（FS-05 新增：实施端可编辑回写） ==========
+  //   两处入口：① 医院视图归档条常驻显示「维保到期」并可点编辑；② 待办提醒里的维保项点进去也能改。
+  function custBySite(site) {
+    var nm = String(site || '').trim();
+    for (var i = 0; i < state.customers.length; i++) {
+      if ((state.customers[i].name || '').trim() === nm) return state.customers[i];
+    }
+    return null;
+  }
+  // date-only 剩余天数（避免时区 off-by-one：两边归一到本地 00:00 再算）；非法日期 → null
+  function maintainDaysLeft(me) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(me || ''))) return null;
+    var p = me.split('-');
+    var end = Date.UTC(+p[0], +p[1] - 1, +p[2]);
+    var n = new Date();
+    var today = Date.UTC(n.getFullYear(), n.getMonth(), n.getDate());
+    return Math.round((end - today) / 86400000);
+  }
+  // 维保到期常驻 chip（含颜色态 + 编辑入口）：空显「未设置」；≤15 天标黄、已过期标红
+  function maintainChipHtml(site) {
+    var cust = custBySite(site);
+    var me = cust ? String(cust.maintainEnd || '').trim() : '';
+    var dl = maintainDaysLeft(me);
+    var tone = '', bg = '', extra = '';
+    if (me && dl != null) {
+      if (dl < 0) { tone = '#B4232A'; bg = '#FBECEC'; extra = ' · 已过期' + (-dl) + '天'; }
+      else if (dl <= 15) { tone = '#8A6100'; bg = '#FCF3E2'; extra = ' · 剩' + dl + '天'; }
+    }
+    var valHtml = me
+      ? '<b style="' + (tone ? 'color:' + tone : '') + '">' + escapeHtml(me) + '</b>' + (extra ? '<span style="font-size:11.5px;' + (tone ? 'color:' + tone : 'color:#5A6573') + '">' + escapeHtml(extra) + '</span>' : '')
+      : '<b style="color:#5A6573">未设置</b>';
+    return '<span class="f-maintain" id="fMaintainChip"' + (bg ? ' style="background:' + bg + ';border-radius:6px;padding:1px 7px"' : '') + '>' +
+      '<i class="ti ti-shield-check" style="font-size:14px;color:' + (tone || 'var(--color-primary)') + '"></i> 维保到期：' + valHtml +
+      ' <button type="button" class="f-maintain-edit" id="fMaintainEdit" title="编辑维保到期" aria-label="编辑维保到期" style="border:none;background:none;cursor:pointer;color:var(--color-primary);padding:0 2px;font-size:12.5px"><i class="ti ti-pencil"></i></button></span>';
+  }
+  // 绑定 chip 里的编辑按钮（renderHospChip 每次重渲后调）
+  function bindMaintainEdit(site) {
+    var btn = $('fMaintainEdit');
+    if (btn) btn.addEventListener('click', function (e) { e.stopPropagation(); openMaintainEdit(site); });
+  }
+  // 弹编辑（field.html 无 ui.js prompt，沿用轻量 window.prompt；前端校验 yyyy-MM-dd）→ POST /api/customer-maintain
+  function openMaintainEdit(site) {
+    var nm = String(site || '').trim();
+    if (!nm) { showToast('请先选择医院', 'error'); return; }
+    var cust = custBySite(nm);
+    var cur = cust ? String(cust.maintainEnd || '').trim() : '';
+    var val = window.prompt('设置「' + nm + '」维保到期日期（格式 yyyy-MM-dd，如 2027-03-31）：', cur);
+    if (val == null) return;                 // 取消
+    val = String(val).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(val)) { showToast('日期格式须为 yyyy-MM-dd', 'error'); return; }
+    doMaintainSave(nm, val);
+  }
+  function doMaintainSave(site, val) {
+    api('/api/customer-maintain', { method: 'POST', body: JSON.stringify({ site: site, maintainEnd: val }) }).then(function (r) {
+      var b = r.body || {};
+      if (!b.ok) { showToast(b.error || '保存失败', 'error'); return; }
+      // 成功后刷新 state.customers（整表返回）+ 重新拉待办 + 重渲当前归档条
+      if (b.customers && Array.isArray(b.customers)) state.customers = b.customers;
+      else { var c = custBySite(site); if (c) c.maintainEnd = val; }
+      showToast('已更新维保到期 ' + val, 'success');
+      try { updateCtx(); } catch (e) {}     // 重渲医院视图归档条（维保 chip 随之更新颜色态）
+      try { loadTodo(); } catch (e) {}       // 重新拉待办（维保提醒随新到期日变化）
+    }).catch(function () { showToast('保存失败，请重试', 'error'); });
+  }
+
   // 医院视图归档 chip（现场版本，只读 · AC-18/19/20）
   //   ⚠️ 2026-07-24 问题②：归档条不再显示医院名（顶栏已有医院选择器，重复占位），也去前导医院图标 → 各分支直接起头。
   //   两分支（2026-07-24 问题②/③）：
@@ -1831,11 +1915,13 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     // 2026-07-24 问题②：归档条不再重复显示医院名（顶栏已有医院选择器），也去前导医院图标 → 各分支直接从「现场版本：」/「系统：」起头。
     //   site 仍用于数据取值（下方 customers 匹配、currentArchive.out.site、&subsystem 过滤一律不动），只是归档条不显示它。
     if (!site) { ctx.innerHTML = '现场版本：未上线产品'; return; }
-    // 分支①：选中具体子系统 → 只显该子系统 + 其版本，去掉产品级现场版本列
+    // 分支①：选中具体子系统 → 只显该子系统 + 其版本，去掉产品级现场版本列（+ 常驻维保到期）
     if (state.curSub) {
       var sv = subVersion(state.curSub);
       ctx.innerHTML = '系统：' + escapeHtml(subLabel(state.curSub)) +
-        ' · 版本：<b>' + escapeHtml(sv || '—') + '</b>';
+        ' · 版本：<b>' + escapeHtml(sv || '—') + '</b>' +
+        ' <span class="f-ctx-sep">·</span> ' + maintainChipHtml(site);
+      bindMaintainEdit(site);
       return;
     }
     // 分支②：未选子系统（全部子项目）→ 紧凑产品名摘要 + 版本明细 icon（不再平铺所有子系统版本）
@@ -1845,8 +1931,10 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     }
     var hasProd = cust && Array.isArray(cust.products) && cust.products.length;
     if (!hasProd) {
-      // AC-20：无 products → 「未上线产品」占位，不显 icon（问题②：去医院名，直接从「现场版本：」起头）
-      ctx.innerHTML = '现场版本：未上线产品';
+      // AC-20：无 products → 「未上线产品」占位，不显 icon（问题②：去医院名，直接从「现场版本：」起头）+ 常驻维保到期
+      ctx.innerHTML = '现场版本：未上线产品' +
+        ' <span class="f-ctx-sep">·</span> ' + maintainChipHtml(site);
+      bindMaintainEdit(site);
       return;
     }
     // 产品名摘要（多产品用『、』连接；仅产品名，不平铺子系统/版本）
@@ -1854,11 +1942,13 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       var proj = state.projMap[pr.project];
       return escapeHtml((proj && proj.name) || pr.project || '');
     }).filter(Boolean).join('、');
-    // 紧凑摘要 + icon 按钮（title=查看各子系统版本）；点开由 buildVerDetailPanel 逻辑接管（问题②：去医院名，直接从「现场版本：」起头）
+    // 紧凑摘要 + icon 按钮（title=查看各子系统版本）；点开由 buildVerDetailPanel 逻辑接管（问题②：去医院名，直接从「现场版本：」起头）+ 常驻维保到期
     ctx.innerHTML = '现场版本：' + (prodNames || '—') +
       ' <button type="button" class="f-verdd-btn" id="fVerDetailBtn" title="查看各子系统版本" aria-label="查看各子系统版本">' +
       '<i class="ti ti-list-details"></i></button>' +
-      '<div class="f-verdd-panel f-sysdd-panel" id="fVerDetail"></div>';
+      '<div class="f-verdd-panel f-sysdd-panel" id="fVerDetail"></div>' +
+      ' <span class="f-ctx-sep">·</span> ' + maintainChipHtml(site);
+    bindMaintainEdit(site);
     // 绑定 icon 触发器：点开/收起版本明细面板（position:fixed 逃 .f-rtool overflow 裁剪）
     var vbtn = $('fVerDetailBtn'), vpanel = $('fVerDetail');
     if (vbtn && vpanel) {
@@ -2886,7 +2976,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   })();
 
   // 暴露给测试/调试（不含敏感数据）
-  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, newConversation: newConversation, sendChat: sendChat, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast };
+  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, newConversation: newConversation, sendChat: sendChat, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast, openMaintainEdit: openMaintainEdit, doMaintainSave: doMaintainSave, maintainChipHtml: maintainChipHtml, maintainDaysLeft: maintainDaysLeft, renderTodoBody: renderTodoBody };
 })();
 </script>
 </body>

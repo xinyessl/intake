@@ -61,6 +61,7 @@
             <th style="width:200px">负责实施</th>
             <th>上线产品 · 版本</th>
             <th style="width:92px">状态</th>
+            <th style="width:120px">维保到期</th>
             <th style="width:74px">工单数</th>
             <th style="width:160px">操作</th>
           </tr>
@@ -121,6 +122,19 @@
 const $=s=>document.querySelector(s);
 const $$=s=>Array.prototype.slice.call(document.querySelectorAll(s));
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+// 维保到期单元格：date-only 剩余天数（避免时区 off-by-one）；≤15天临期黄、已过期红，其余常态；空显「—」
+function maintainCell(me){
+  me=String(me||'').trim();
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(me)) return '<span class="text-tertiary">—</span>';
+  const p=me.split('-'), end=Date.UTC(+p[0],+p[1]-1,+p[2]);
+  const n=new Date(), today=Date.UTC(n.getFullYear(),n.getMonth(),n.getDate());
+  const dl=Math.round((end-today)/86400000);
+  let cls='text-secondary', extra='';
+  if(dl<0){ cls='tag-danger'; extra=' · 已过期'+(-dl)+'天'; }
+  else if(dl<=15){ cls='tag-warning'; extra=' · 剩'+dl+'天'; }
+  if(dl<0||dl<=15) return `<span class="tag ${cls} tag-dot mono">${esc(me)}${extra}</span>`;
+  return `<span class="mono text-secondary">${esc(me)}</span>`;
+}
 
 /* —— toast（部署 shell.js 无 toast，自实现；用 theme.css .toast-container/.toast.show） —— */
 function toast(msg,type){ const host=$('#toastHost'); if(!host)return; const el=document.createElement('div'); el.className='toast '+(type||''); const ic=type==='success'?'ti-circle-check':type==='error'?'ti-alert-circle':type==='warning'?'ti-alert-triangle':'ti-info-circle'; el.innerHTML=`<i class="ti ${ic}"></i><span>${esc(msg)}</span>`; host.appendChild(el); requestAnimationFrame(()=>el.classList.add('show')); setTimeout(()=>{ el.classList.remove('show'); setTimeout(()=>el.remove(),300); },2400); }
@@ -188,6 +202,7 @@ function render(){
       <td>${implCell}</td>
       <td>${prodCell}</td>
       <td><span class="tag ${on?'tag-success':'tag-gray'} tag-dot">${esc(c.status||'—')}</span></td>
+      <td>${maintainCell(c.maintainEnd)}</td>
       <td><span class="mono ${tc?'text-link':'text-tertiary'}" data-tickets="${esc(c.name)}">${tc}</span></td>
       <td>
         <div class="row-actions">
@@ -197,7 +212,7 @@ function render(){
         </div>
       </td>
     </tr>`;
-  }).join('') : `<tr><td colspan="7"><div class="empty"><div class="empty-illu"><i class="ti ti-building-hospital"></i></div><div class="empty-title">${CUSTOMERS.length?'没有匹配的医院':'还没有医院，点右上角「新增医院」'}</div></div></td></tr>`;
+  }).join('') : `<tr><td colspan="8"><div class="empty"><div class="empty-illu"><i class="ti ti-building-hospital"></i></div><div class="empty-title">${CUSTOMERS.length?'没有匹配的医院':'还没有医院，点右上角「新增医院」'}</div></div></td></tr>`;
   $('#totalCount').textContent=total;
   renderPager(pages);
 }

@@ -291,7 +291,7 @@
       if (me && me.link) { location.href = "/submit.html"; return; }   // token 链接访客不进后台外壳，重定向提交页
       if (me) patchUser(me);
       if (me && !isAdmin) filterNavForField();
-      if (me) fetch("/api/notifications").then(function (r) { return r.json(); }).then(function (n) { if (n && n.count > 0) patchBadge(n.count); }).catch(function () {});
+      if (me) fetch("/api/notifications").then(function (r) { return r.json(); }).then(function (n) { var c = (n && typeof n.ticketCount === "number") ? n.ticketCount : (n && n.count) || 0; if (c > 0) patchBadge(c); }).catch(function () {});   // 工单管理角标只计工单，维保提醒走 customers.html 维保列 + 实施端待办
     }).catch(function () {});
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();

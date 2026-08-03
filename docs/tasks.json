@@ -79,6 +79,44 @@
           "note": "NH-1 已裁决并并入 spec；实现前 AM-01 仍 draft，待 draft→ready 或经确认后 /build。真库冒烟注意：既有 accounts 表需 ALTER 补列，CREATE TABLE IF NOT EXISTS 不会加列。"
         }
       ]
+    },
+    {
+      "id": "B-20260731-维保提醒",
+      "source": "CLI窗口·用户口述",
+      "importedAt": "2026-07-31",
+      "ref": "系统维保时间需提醒实施；实施在intake更新维保时间后同步回运营后台",
+      "tasks": [
+        {
+          "id": "MT-1",
+          "title": "实施端 /api/customer-maintain 回写维保到期（by user.sites 越权收敛·幂等·留痕 maintainLog）",
+          "status": "done",
+          "specRef": "FS-05"
+        },
+        {
+          "id": "MT-2",
+          "title": "/api/notifications 增加维保到期提醒（≤15天/过期，实施+运营管理员）",
+          "status": "done",
+          "specRef": "FS-05"
+        },
+        {
+          "id": "MT-3",
+          "title": "field.html 医院视图常驻维保到期可编辑 + 待办维保项点进去可改",
+          "status": "done",
+          "specRef": "FS-05"
+        },
+        {
+          "id": "MT-4",
+          "title": "运营端铃铛/后台待办渲染维保提醒",
+          "status": "done",
+          "specRef": "FS-05"
+        },
+        {
+          "id": "MT-5",
+          "title": "spec diff：FS-05 + CU-01 补维保回写与提醒 AC（待评审）",
+          "status": "done",
+          "specRef": "CU-01"
+        }
+      ]
     }
   ]
 }
