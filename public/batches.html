@@ -266,7 +266,6 @@ async function openDetail(id){
       </div>
     </div>
     ${relHtml}
-    ${implTasksHtml(b)}
     <div class="dsec"><div class="dlab">覆盖医院（${hosps.length}）</div><div class="hospchips">${hospHtml}</div></div>
     <div class="dsec"><div class="dlab">覆盖工单（按子系统分组）</div></div>
     ${groupHtml}
@@ -284,68 +283,9 @@ async function openDetail(id){
   const pkgCancel=$('#btnPkgCancel');
   if(pkgCancel) pkgCancel.addEventListener('click',()=>{ $('#pkgEdit').style.display='none'; $('#pkgView').style.display='block'; if(pkgEditBtn) pkgEditBtn.style.display='inline-flex'; });
   const pkgSave=$('#btnPkgSave'); if(pkgSave) pkgSave.addEventListener('click',()=>savePkgInfo(b.id));
-  bindImplTasks(b);
 }
-
-/* ---------- 实施任务清单（更新包清单 · batch-update 定义模板，实施端全局勾选） ---------- */
-// 视图态：逐项展示完成态（勾/未勾 + 标题 + 说明 + 完成人/时间）+「编辑清单」；编辑态：多行增删（标题+说明），保存→batch-update {implTasks}。
-function implTasksHtml(b){
-  const tasks=Array.isArray(b.implTasks)?b.implTasks:[];
-  const done=+(b.implDone)||tasks.filter(t=>t&&t.done).length, total=+(b.implTotal)||tasks.length;
-  const progress = total ? `<span class="tag ${done>=total?'tag-success':'tag-gray'} tag-dot mono" style="margin-left:8px">${done}/${total}</span>` : '';
-  const viewRows = tasks.length ? tasks.map(t=>{
-    const d=!!(t&&t.done);
-    const meta = d ? `<div class="it-meta"><i class="ti ti-user"></i> ${esc(t.doneBy||'—')} · ${esc(fmtTime(t.doneAt))}</div>` : '';
-    return `<div class="it-item">
-      <i class="ti ${d?'ti-circle-check-filled':'ti-circle'} it-chk${d?'':' off'}"></i>
-      <div class="it-main"><div class="it-title${d?' done':''}">${esc(t.title||'（无标题）')}</div>${t.desc?`<div class="it-desc">${esc(t.desc)}</div>`:''}${meta}</div>
-    </div>`;
-  }).join('') : '<div class="it-empty">还没有实施任务清单。点「编辑清单」为该更新包定义现场实施要做的事，实施端逐条勾选完成。</div>';
-  const editRows = tasks.map(t=>implEditRow(t.id,t.title,t.desc)).join('');
-  return `<div class="itbox">
-    <div class="rlhd"><i class="ti ti-list-check"></i>实施任务清单${progress}<button class="btn btn-sm" id="btnImplEdit" style="margin-left:auto"><i class="ti ti-edit"></i>编辑清单</button></div>
-    <div id="implView">${viewRows}</div>
-    <div id="implEdit" style="display:none">
-      <div id="implEditRows">${editRows}</div>
-      <button class="btn btn-sm" id="btnImplAdd" type="button" style="margin:4px 0 10px"><i class="ti ti-plus"></i>添加任务</button>
-      <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-sm" id="btnImplCancel">取消</button><button class="btn btn-sm btn-primary" id="btnImplSave"><i class="ti ti-check"></i>保存清单</button></div>
-    </div>
-  </div>`;
-}
-function implEditRow(taskId,title,desc){
-  // data-id 保留原项 id → 保存时带回，后端按 id 合并保留完成态（doneBy/doneAt）；新增行 id 为空，后端补新 id、done=false
-  return `<div class="it-edit-row" data-id="${esc(taskId||'')}">
-    <input class="itTitle" maxlength="120" placeholder="任务标题（必填）" value="${esc(title||'')}" style="flex:0 0 34%;min-width:0">
-    <input class="itDesc" maxlength="1000" placeholder="说明（选填）" value="${esc(desc||'')}" style="flex:1;min-width:0">
-    <button class="btn btn-sm itDel" type="button" title="删除" style="flex:0 0 auto"><i class="ti ti-trash" style="color:var(--color-danger)"></i></button>
-  </div>`;
-}
-function bindImplTasks(b){
-  const editBtn=$('#btnImplEdit');
-  if(editBtn) editBtn.addEventListener('click',()=>{ $('#implView').style.display='none'; $('#implEdit').style.display='block'; editBtn.style.display='none'; });
-  const cancel=$('#btnImplCancel');
-  if(cancel) cancel.addEventListener('click',()=>{ $('#implEdit').style.display='none'; $('#implView').style.display='block'; if(editBtn) editBtn.style.display='inline-flex'; });
-  const add=$('#btnImplAdd');
-  if(add) add.addEventListener('click',()=>{ const box=$('#implEditRows'); box.insertAdjacentHTML('beforeend',implEditRow('','','')); });
-  // 删除按钮事件委托（动态行 → 委托挂容器，重渲后仍生效）
-  const rowsBox=$('#implEditRows');
-  if(rowsBox) rowsBox.addEventListener('click',e=>{ const del=e.target.closest('.itDel'); if(del){ const row=del.closest('.it-edit-row'); if(row) row.remove(); } });
-  const save=$('#btnImplSave'); if(save) save.addEventListener('click',()=>saveImplTasks(b.id));
-}
-async function saveImplTasks(id){
-  const rows=$$('#implEditRows .it-edit-row');
-  const implTasks=rows.map(r=>({ id:(r.getAttribute('data-id')||'').trim(), title:(r.querySelector('.itTitle').value||'').trim(), desc:(r.querySelector('.itDesc').value||'').trim() })).filter(t=>t.title);
-  if(rows.length && !implTasks.length){ toast('请至少填写一条任务标题','warning'); return; }
-  const btn=$('#btnImplSave'); if(btn) btn.disabled=true;
-  try{
-    const r=await (await fetch('/api/batch-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,implTasks})})).json();
-    if(!r.ok){ toast(r.error||'保存清单失败','warning'); return; }
-    toast('实施任务清单已保存（'+implTasks.length+' 项）','success');
-    await loadBatches();
-    await openDetail(id);   // 刷新详情显示新清单
-  }catch(e){ toast('保存清单失败：'+e.message,'error'); }
-  finally{ if(btn) btn.disabled=false; }
-}
+// 注：更新包「实施任务清单 + SQL 脚本」已从批次内改为「版本发版登记」页按版本独立维护（跨版本累积到现场），
+//     批次详情不再内嵌 implTasks 编辑区。实施端按 (现场版本, 目标版本] 自动累积展示，见 releases.html / field.html。
 
 /* ---------- 改排期（batch-update，即点即存 + toast + 刷新） ---------- */
 async function saveSchedule(id){

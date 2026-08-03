@@ -274,6 +274,30 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
 .f-impl-item.done .f-impl-title { text-decoration: line-through; color: var(--color-text-tertiary); }
 .f-impl-desc { font-size: 12px; color: var(--color-text-secondary); margin-top: 2px; white-space: pre-wrap; word-break: break-word; }
 .f-impl-meta { font-size: 11.5px; color: var(--color-text-tertiary); margin-top: 3px; display: flex; align-items: center; gap: 4px; }
+/* 累积更新计划（按版本独立维护 + 跨版本累积）：批次卡内 */
+.f-plan-block { border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface); padding: 10px 13px; margin-bottom: 12px; }
+.f-plan-loading, .f-plan-empty { font-size: 12.5px; color: var(--color-text-tertiary); padding: 8px 2px; }
+.f-plan-hd { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--color-text-secondary); margin-bottom: 6px; flex-wrap: wrap; }
+.f-plan-hd b { color: var(--color-text, #1B2733); font-family: var(--font-num, monospace); }
+.f-plan-hd .f-plan-vcount { margin-left: auto; font-size: 11.5px; color: var(--color-text-tertiary); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-pill); padding: 1px 8px; }
+.f-plan-sec { margin-top: 8px; }
+.f-plan-sec-hd { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; color: var(--color-text, #1B2733); margin-bottom: 6px; border-top: 1px solid var(--color-border); padding-top: 8px; }
+.f-plan-sec:first-child .f-plan-sec-hd { border-top: none; padding-top: 0; }
+.f-plan-sec-hd .f-plan-prog { margin-left: 6px; font-size: 12px; font-weight: 600; color: var(--color-primary, #2F6FB5); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-pill); padding: 1px 8px; font-family: var(--font-num, monospace); }
+.f-plan-dl { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--color-btn, #2F6FB5); background: var(--color-surface); border: 1px solid var(--color-btn, #2F6FB5); border-radius: var(--radius); padding: 3px 10px; cursor: pointer; }
+.f-plan-dl:hover { background: var(--color-primary-light, #EEF4FB); }
+.f-plan-item { display: flex; gap: 9px; align-items: flex-start; padding: 7px 0; border-top: 1px solid var(--color-border); }
+.f-plan-item:first-of-type { border-top: none; }
+.f-plan-cb { flex: 0 0 auto; margin-top: 2px; width: 16px; height: 16px; cursor: pointer; }
+.f-plan-cb[disabled] { cursor: wait; opacity: .6; }
+.f-plan-main { flex: 1; min-width: 0; }
+.f-plan-title { font-size: 13px; font-weight: 600; color: var(--color-text); word-break: break-word; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.f-plan-item.done .f-plan-title { text-decoration: line-through; color: var(--color-text-tertiary); }
+.f-plan-vtag { flex: 0 0 auto; font-size: 11px; font-weight: 700; color: var(--color-primary, #2F6FB5); background: var(--color-primary-light, #EEF4FB); border: 1px solid var(--color-primary-border, #C7D6E8); border-radius: var(--radius-pill); padding: 0 7px; font-family: var(--font-num, monospace); }
+.f-plan-exec-hint { font-size: 11px; font-weight: 400; color: var(--color-text-tertiary); }
+.f-plan-desc { font-size: 12px; color: var(--color-text-secondary); margin-top: 2px; white-space: pre-wrap; word-break: break-word; }
+.f-plan-sql { font-size: 11.5px; color: var(--color-text-secondary); margin-top: 4px; background: var(--color-bg-subtle, #f5f7fa); border: 1px solid var(--color-border); border-radius: 6px; padding: 6px 8px; max-height: 160px; overflow: auto; white-space: pre-wrap; word-break: break-word; font-family: var(--font-num, monospace); }
+.f-plan-meta { font-size: 11.5px; color: var(--color-text-tertiary); margin-top: 3px; display: flex; align-items: center; gap: 4px; }
 /* FS-06 部署清单（左侧医院视图 · 可折叠区块 · 按产品/系统分区） */
 .f-deploy-block { border: 1px solid var(--color-primary-border, #C7D6E8); border-radius: var(--radius); background: var(--color-primary-light, #EEF4FB); margin-bottom: 12px; overflow: hidden; }
 .f-deploy-tophd { display: flex; align-items: center; gap: 6px; padding: 9px 12px; cursor: pointer; user-select: none; font-size: 13px; font-weight: 700; color: var(--color-text, #1B2733); }
@@ -1401,8 +1425,8 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     body.className = 'f-batch-body';
     // 更新包卡（可下载/已交付态且有包版本）
     if ((g.status === '可下载' || g.status === '已交付') && g.pkgVersion) body.appendChild(mkPkgCard(g));
-    // 实施任务清单（更新包清单 · 全局完成态，谁勾了算完成）：有清单项才渲染
-    if (Array.isArray(g.implTasks) && g.implTasks.length) body.appendChild(mkImplChecklist(g));
+    // 累积更新计划（按版本独立维护 + 跨版本累积）：有目标版本(pkgVersion)才异步拉取渲染
+    if (g.pkgVersion) body.appendChild(mkUpdatePlanBlock(g));
     // 逐子系统分组 + 逐单
     (g.subGroups || []).forEach(function (sg) {
       var gh = document.createElement('div');
@@ -1440,43 +1464,108 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     return card;
   }
 
-  // 实施任务清单卡（更新包清单 · 全局完成态）：逐项 checkbox（勾/取消 → POST /api/batch-task，全局完成）+ 标题/说明/完成人/时间 + 进度。
-  function mkImplChecklist(g) {
+  // ===== 累积更新计划（按版本独立维护 + 跨版本累积）=====
+  //   每个有目标版本(pkgVersion)的批次卡下，按当前医院该产品「现场版本 X → 目标版本 Y」调 /api/field/update-plan
+  //   拉取 (X,Y] 区间已登记版本的累积「实施任务 + SQL 脚本」+ 完成态。逐条勾选 → /api/field/update-toggle；SQL 支持合并下载。
+  //   容器先占位，异步填充（避免阻塞卡渲染）。
+  function mkUpdatePlanBlock(g) {
     var box = document.createElement('div');
-    box.className = 'f-impl-list';
-    var tasks = Array.isArray(g.implTasks) ? g.implTasks : [];
-    var done = (g.implDone != null) ? g.implDone : tasks.filter(function (t) { return t && t.done; }).length;
-    var total = (g.implTotal != null) ? g.implTotal : tasks.length;
-    var hd = document.createElement('div');
-    hd.className = 'f-impl-hd';
-    hd.innerHTML = '<i class="ti ti-list-check"></i> 实施任务清单 <span class="f-impl-prog">' + done + '/' + total + '</span>';
-    box.appendChild(hd);
-    tasks.forEach(function (t) { box.appendChild(mkImplItem(t, g)); });
+    box.className = 'f-plan-block';
+    box.setAttribute('data-batch', g.batchId);
+    box.innerHTML = '<div class="f-plan-loading"><i class="ti ti-loader"></i> 加载更新计划…</div>';
+    loadUpdatePlan(g, box);
     return box;
   }
-  // 单条实施任务项：checkbox + 标题 + 说明 + （已完成）完成人/时间
-  function mkImplItem(t, g) {
+  function loadUpdatePlan(g, box) {
+    var site = state.curSite || '';
+    if (!site) { box.innerHTML = ''; return; }
+    var qs = '?site=' + encodeURIComponent(site) + '&product=' + encodeURIComponent(g.product) + '&target=' + encodeURIComponent(g.pkgVersion || '');
+    api('/api/field/update-plan' + qs, { method: 'GET' }).then(function (r) {
+      var b = r.body || {};
+      if (!b.ok) { box.innerHTML = ''; return; }   // 产品不存在等 → 静默不显（不打断卡）
+      renderUpdatePlan(g, box, b);
+    }).catch(function () { box.innerHTML = ''; });
+  }
+  function renderUpdatePlan(g, box, plan) {
+    box.innerHTML = '';
+    var tasks = Array.isArray(plan.tasks) ? plan.tasks : [];
+    var sqls = Array.isArray(plan.sqls) ? plan.sqls : [];
+    var vers = Array.isArray(plan.versionsInRange) ? plan.versionsInRange : [];
+    // 头：现场 X → 目标 Y + 覆盖版本数
+    var hd = document.createElement('div');
+    hd.className = 'f-plan-hd';
+    var fromV = plan.fromVersion ? escapeHtml(plan.fromVersion) : '（未记录/最早）';
+    hd.innerHTML = '<i class="ti ti-arrow-guide"></i> 更新计划 · 现场 <b>' + fromV + '</b> → 目标 <b>' + escapeHtml(plan.toVersion || '') + '</b>' +
+      '<span class="f-plan-vcount">覆盖 ' + vers.length + ' 个版本</span>';
+    box.appendChild(hd);
+    if (!tasks.length && !sqls.length) {
+      var em = document.createElement('div');
+      em.className = 'f-plan-empty';
+      em.textContent = '该版本区间暂无登记的更新任务 / SQL（运营端在「版本发版」登记后会出现在这里）';
+      box.appendChild(em);
+      return;
+    }
+    // 累积实施任务（带版本标签，逐条 checkbox）
+    if (tasks.length) {
+      var tsec = document.createElement('div'); tsec.className = 'f-plan-sec';
+      tsec.appendChild(planSecHd('ti-list-check', '累积实施任务', plan.taskDone, plan.taskTotal));
+      tasks.forEach(function (t) { tsec.appendChild(mkPlanItem(g, 'task', t)); });
+      box.appendChild(tsec);
+    }
+    // 累积 SQL 脚本（逐条勾「已执行」 + 合并下载按钮）
+    if (sqls.length) {
+      var ssec = document.createElement('div'); ssec.className = 'f-plan-sec';
+      var sh = planSecHd('ti-database', '累积 SQL 脚本', plan.sqlDone, plan.sqlTotal);
+      var dlBtn = document.createElement('button');
+      dlBtn.type = 'button'; dlBtn.className = 'f-plan-dl';
+      dlBtn.innerHTML = '<i class="ti ti-download"></i> 合并下载 SQL';
+      dlBtn.addEventListener('click', function () {
+        var site = state.curSite || '';
+        var u = '/api/field/update-sql-merged?site=' + encodeURIComponent(site) + '&product=' + encodeURIComponent(g.product) + '&target=' + encodeURIComponent(g.pkgVersion || '');
+        window.open(u, '_blank');
+      });
+      sh.appendChild(dlBtn);
+      ssec.appendChild(sh);
+      sqls.forEach(function (s) { ssec.appendChild(mkPlanItem(g, 'sql', s)); });
+      box.appendChild(ssec);
+    }
+  }
+  function planSecHd(icon, label, done, total) {
+    var hd = document.createElement('div');
+    hd.className = 'f-plan-sec-hd';
+    hd.innerHTML = '<i class="ti ' + icon + '"></i> ' + escapeHtml(label) + ' <span class="f-plan-prog">' + (done || 0) + '/' + (total || 0) + '</span>';
+    return hd;
+  }
+  // 单条计划项（task/sql 通用）：checkbox + 版本标签 + 标题(name) + 说明(SQL 正文预览) + （已完成）完成人/时间
+  function mkPlanItem(g, kind, it) {
     var row = document.createElement('div');
-    row.className = 'f-impl-item' + (t.done ? ' done' : '');
+    row.className = 'f-plan-item' + (it.done ? ' done' : '');
     var cb = document.createElement('input');
-    cb.type = 'checkbox'; cb.className = 'f-impl-cb'; cb.checked = !!t.done;
-    cb.addEventListener('change', function () { doImplToggle(g, t, cb.checked, cb); });
+    cb.type = 'checkbox'; cb.className = 'f-plan-cb'; cb.checked = !!it.done;
+    cb.addEventListener('change', function () { doPlanToggle(g, kind, it, cb.checked, cb); });
     var main = document.createElement('div');
-    main.className = 'f-impl-main';
-    var metaHtml = t.done ? ('<div class="f-impl-meta"><i class="ti ti-user"></i> ' + escapeHtml(t.doneBy || '—') + ' · ' + escapeHtml(fmtTime(t.doneAt)) + '</div>') : '';
-    main.innerHTML = '<div class="f-impl-title">' + escapeHtml(t.title || '（无标题）') + '</div>' +
-      (t.desc ? '<div class="f-impl-desc">' + escapeHtml(t.desc) + '</div>' : '') + metaHtml;
+    main.className = 'f-plan-main';
+    var title = kind === 'sql' ? (it.name || '（未命名脚本）') : (it.title || '（无标题）');
+    var descHtml = '';
+    if (kind === 'sql' && it.content) descHtml = '<pre class="f-plan-sql">' + escapeHtml(it.content) + '</pre>';
+    else if (kind === 'task' && it.desc) descHtml = '<div class="f-plan-desc">' + escapeHtml(it.desc) + '</div>';
+    var metaHtml = it.done ? ('<div class="f-plan-meta"><i class="ti ti-user"></i> ' + escapeHtml(it.by || '—') + ' · ' + escapeHtml(fmtTime(it.at)) + '</div>') : '';
+    main.innerHTML = '<div class="f-plan-title"><span class="f-plan-vtag">' + escapeHtml(it.version || '') + '</span>' + escapeHtml(title) +
+      (kind === 'sql' ? '<span class="f-plan-exec-hint">（在库手动执行后勾选）</span>' : '') + '</div>' + descHtml + metaHtml;
     row.appendChild(cb); row.appendChild(main);
     return row;
   }
-  // 勾选/取消一条批次清单项（全局完成态）：调 batch-task → 成功刷新批次视图（进度/完成人随之更新）。
-  function doImplToggle(g, t, done, cb) {
+  // 勾选/取消一条累积计划项 → /api/field/update-toggle；成功后刷新该批 plan（进度随完成态更新）。
+  function doPlanToggle(g, kind, it, done, cb) {
     cb.disabled = true;
-    api('/api/batch-task', { method: 'POST', body: JSON.stringify({ batchId: g.batchId, taskId: t.id, done: done }) }).then(function (r) {
+    var site = state.curSite || '';
+    api('/api/field/update-toggle', { method: 'POST', body: JSON.stringify({ site: site, product: g.product, version: it.version, kind: kind, itemId: it.id, done: done }) }).then(function (r) {
       var b = r.body || {};
-      if (!b.ok) { cb.disabled = false; cb.checked = !done; showToast(b.error || '操作失败', 'error'); return; }   // 失败还原勾选态
+      if (!b.ok) { cb.disabled = false; cb.checked = !done; showToast(b.error || '操作失败', 'error'); return; }
       showToast(done ? '已标记完成' : '已取消完成', 'success');
-      loadBatchView();   // 刷新：进度 + 完成人/时间随全局态更新
+      // 刷新该批更新计划块（进度 + 完成人/时间）
+      var box = document.querySelector('.f-plan-block[data-batch="' + (g.batchId || '') + '"]');
+      if (box) loadUpdatePlan(g, box); else loadBatchView();
     }).catch(function () { cb.disabled = false; cb.checked = !done; showToast('操作失败，请重试', 'error'); });
   }
 
@@ -1777,7 +1866,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     var time = fmtTime(it.updatedAt || it.submittedAt);
     // 归批工单带批次排期 → 顶行加醒目 chip「计划交付 <date>」（纯 yyyy-MM-dd）；无排期不显。放在类型/状态标签之后。
     var sched = (it.batchSchedule || '').trim();
-    // 已发包（已出包/待验证）且归批 → 引导「去下载更新包」：切到「按批次」视图并定位该批次的更新包卡
+    // 已出包（已出包/待验证）且归批 → 引导「去下载更新包」：切到「按批次」视图并定位该批次的更新包卡
     var canDl = !!it.batchId && (it.lifecycle === '已出包' || it.lifecycle === '待验证');
     el.innerHTML =
       '<div class="f-item-top">' +
@@ -3178,7 +3267,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   })();
 
   // 暴露给测试/调试（不含敏感数据）
-  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, newConversation: newConversation, sendChat: sendChat, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast, openMaintainEdit: openMaintainEdit, doMaintainSave: doMaintainSave, maintainChipHtml: maintainChipHtml, maintainDaysLeft: maintainDaysLeft, renderTodoBody: renderTodoBody, mkImplChecklist: mkImplChecklist, mkImplItem: mkImplItem, doImplToggle: doImplToggle, mkDeployChecklist: mkDeployChecklist, toggleDeployCollapse: toggleDeployCollapse, deployProductsOf: deployProductsOf, deployProdTasks: deployProdTasks, deployIsNested: deployIsNested, deployAggProgress: deployAggProgress, mkDeployItem: mkDeployItem, doDeployToggle: doDeployToggle };
+  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, newConversation: newConversation, sendChat: sendChat, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast, openMaintainEdit: openMaintainEdit, doMaintainSave: doMaintainSave, maintainChipHtml: maintainChipHtml, maintainDaysLeft: maintainDaysLeft, renderTodoBody: renderTodoBody, mkUpdatePlanBlock: mkUpdatePlanBlock, loadUpdatePlan: loadUpdatePlan, renderUpdatePlan: renderUpdatePlan, mkPlanItem: mkPlanItem, doPlanToggle: doPlanToggle, mkDeployChecklist: mkDeployChecklist, toggleDeployCollapse: toggleDeployCollapse, deployProductsOf: deployProductsOf, deployProdTasks: deployProdTasks, deployIsNested: deployIsNested, deployAggProgress: deployAggProgress, mkDeployItem: mkDeployItem, doDeployToggle: doDeployToggle };
 })();
 </script>
 </body>

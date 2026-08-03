@@ -167,6 +167,44 @@
           "specRef": "FS-05"
         }
       ]
+    },
+    {
+      "id": "B-20260803-版本累积更新清单",
+      "source": "CLI窗口·用户口述",
+      "importedAt": "2026-08-03",
+      "ref": "更新包清单/SQL 改为按版本独立维护+跨版本累积：运营按产品·按git-tag版本登记 delta(任务+SQL)；实施更新时按(现场版本,目标版本]累积展示，逐条勾；SQL 到现场合并成一个文件下载",
+      "tasks": [
+        {
+          "id": "VR-1",
+          "title": "server：版本发版登记存储 data/version-releases.json {product:{version:{tasks,sqls}}} + GET /api/version-releases + POST /api/version-release-save(管理员)",
+          "status": "done",
+          "specRef": "BP-01"
+        },
+        {
+          "id": "VR-2",
+          "title": "server：累积计算(现场版本→目标版本，git tag 排序算区间) + /api/field/update-plan + /api/field/update-toggle(按院回写completion) + /api/field/update-sql-merged(合并SQL下载) + 白名单双Set + normCustomer updateProgress",
+          "status": "done",
+          "specRef": "BP-01"
+        },
+        {
+          "id": "VR-3",
+          "title": "运营端 releases.html 版本发版登记页(按产品选版本→登记delta任务+SQL) + 导航入口",
+          "status": "done",
+          "specRef": "BP-01"
+        },
+        {
+          "id": "VR-4",
+          "title": "field.html 批次视图改累积更新计划(任务+SQL逐条勾+合并SQL下载)；移除旧 ad-hoc implTasks",
+          "status": "done",
+          "specRef": "FS-05"
+        },
+        {
+          "id": "VR-5",
+          "title": "spec：BP-01/FS-05 + 版本发版登记 AC(草稿待评审)",
+          "status": "done",
+          "specRef": "BP-01"
+        }
+      ]
     }
   ]
 }

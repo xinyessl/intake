@@ -27,7 +27,8 @@
       { id: "inbox",  label: "工单管理", icon: "ti-inbox", href: "/inbox.html" }
     ]},
     { section: "交付", items: [
-      { id: "batches", label: "批次管理", icon: "ti-package", href: "/batches.html" }
+      { id: "batches",  label: "批次管理", icon: "ti-package",     href: "/batches.html" },
+      { id: "releases", label: "版本发版", icon: "ti-git-branch",  href: "/releases.html" }
     ]},
     { section: "主体管理", items: [
       { id: "projects",  label: "产品管理", icon: "ti-box",               href: "/projects.html" },
