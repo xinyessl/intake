@@ -25,6 +25,8 @@ import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import * as db from './db.mjs';
+// 现场实施代办清单纯逻辑（部署清单模板/进度/合并/勾选/越权判断，可独立单测：tools/fs-06-checklist.logic.test.mjs）
+import { normTemplateTasks, deployProgress, deployRows, applyDeployToggle, mergeImplTasks, applyBatchTaskToggle, implProgress } from './tools/checklist-logic.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));           // 收件项目根目录
 const PORT = process.env.PORT || 5180;
@@ -217,6 +219,15 @@ function batchGenId(list) {
 }
 // 排期时间（计划交付日期）规范化：只认纯日期 yyyy-MM-dd，非法/空 → ''（允许后补，不报错）。
 function normScheduleDate(v) { const s = String(v || '').trim(); return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : ''; }
+
+// ===== 现场实施代办清单 · 场景1：标准部署清单模板（文件存 data/deploy-template.json，与 customers/batches 同范式） =====
+//   v1 单一全局模板（不分产品，per-product 留 future）：{ tasks:[{ id, title, desc }] }。新建/已有医院都自动套用。
+//   每院完成态 overlay 存 customer.deployTasks（见 normCustomer），模板增删项对所有医院即时生效（读时 left join）。
+const DEPLOY_TPL_FILE = path.join(DATA_DIR, 'deploy-template.json');
+function loadDeployTemplate() { try { const t = JSON.parse(fs.readFileSync(DEPLOY_TPL_FILE, 'utf8')).tasks; return Array.isArray(t) ? t : []; } catch { return []; } }
+function saveDeployTemplate(tasks) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(DEPLOY_TPL_FILE, JSON.stringify({ tasks }, null, 2)); } catch {} }
+// 清单项 id 生成器（'t' + 4字节 hex，喂给纯逻辑模块保证真随机·测试里可注入确定性）。
+function deployTaskGenId() { return 't' + crypto.randomBytes(4).toString('hex'); }
 // 单个产品规范化（新形状「按子系统 + 各自版本」 + 向后兼容旧形状「产品级 version」）：
 //   · 新形状：p.subsystems=[{name,version}]（name 须命中该产品 projById(project).subsystems[].name，不命中丢弃防臆造；version ≤30 字符串；按 name 去重）
 //     → 产出 { project, subsystems:[{name,version}] }（勾选的子系统；无勾选=空数组仍保留产品，实施端兜底显全部，避免误删）。
@@ -254,7 +265,9 @@ function normCustomer(b, existing) {   // 规范化：名称必填、products �
     let ctIn = (b && Array.isArray(b.contacts)) ? b.contacts : ((existing && Array.isArray(existing.contacts)) ? existing.contacts : null);
     if (!ctIn) { const on = pick('contactName', 20), op = pick('contactPhone', 20); ctIn = (on || op) ? [{ name: on, phone: op }] : []; }
     const contacts = ctIn.map(x => ({ name: String((x && x.name) || '').trim().slice(0, 20), phone: String((x && x.phone) || '').trim().slice(0, 20) })).filter(x => x.name || x.phone).slice(0, 20);
-    return { id: (existing && existing.id) || custGenId(), name, level, region, impl, status, products, serverInfo, deviceCode, maintainEnd, contacts, remark, updatedAt: nowStamp() };
+    // 部署清单每院完成态（overlay，只存已完成项 {taskId:{done,by,at}}）——偏更新（如实施端勾选、customer-save）保留原值不清空，用 `'deployTasks' in b` 判存在。
+    const deployTasks = (b && ('deployTasks' in b)) ? (b.deployTasks && typeof b.deployTasks === 'object' ? b.deployTasks : {}) : ((existing && existing.deployTasks && typeof existing.deployTasks === 'object') ? existing.deployTasks : {});
+    return { id: (existing && existing.id) || custGenId(), name, level, region, impl, status, products, serverInfo, deviceCode, maintainEnd, contacts, remark, deployTasks, updatedAt: nowStamp() };
 }
 // 工单数派生：按 site↔客户名 关联统计（真库 intakes 无 customerId 列，关联键 site↔name——重名会串号，NEEDS-HUMAN）。
 //   全项目扫一遍 listIntake（不含 consult），按 site 计数，供客户台账只读展示；不落文件、不改库。
@@ -309,10 +322,14 @@ function reconcileSiteToImpl(accs, siteName, targetImplName) {
     }
     return changed;
 }
-function custWithTicketCount(list) {   // 给每条客户挂读时派生的 ticketCount + impl（均不写文件）
+function custWithTicketCount(list) {   // 给每条客户挂读时派生的 ticketCount + impl + 部署清单进度（均不写文件）
     const cnt = custTicketCountBySite();
     const accs = loadAccounts();
-    return list.map(c => ({ ...c, impl: deriveImpl(accs, c.name), ticketCount: cnt[(c.name || '').trim()] || 0 }));
+    const tpl = loadDeployTemplate();   // 部署清单模板（live）作分母，每院 deployTasks 完成态作分子，读时派生进度（不落文件）
+    return list.map(c => {
+        const dp = deployProgress(tpl, c.deployTasks);
+        return { ...c, impl: deriveImpl(accs, c.name), ticketCount: cnt[(c.name || '').trim()] || 0, deployDone: dp.done, deployTotal: dp.total };
+    });
 }
 // git 引用安全校验：只允许 tag/branch/sha 常见字符，挡掉选项注入（如 --upload-pack）。空=不安全/未提供。
 function safeRef(v) { v = String(v || '').trim(); return (/^[A-Za-z0-9._\-\/]+$/.test(v) && !v.startsWith('-')) ? v : ''; }
@@ -814,12 +831,12 @@ function authGate(pathname, user, link) {
   if (!user) return 'login';
   if (isAdmin(user)) return 'allow';                                    // 管理员：全放行
   // 现场侧（产品经理 / 实施工程师）：只允许 提交面 + 工单查看 + 验证
-  const FIELD_OK = new Set(['/', '/submit.html', '/detail.html', '/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/consult', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-transition', '/api/field/submissions', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify']);   // FS-05：现场端新端点（按批次视图/下载/改版本/维保回写/逐单验证），均端点内按 user.sites 二次收敛
+  const FIELD_OK = new Set(['/', '/submit.html', '/detail.html', '/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/consult', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-transition', '/api/field/submissions', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/deploy-template', '/api/customer-deploy-task', '/api/batch-task']);   // FS-05：现场端新端点（按批次视图/下载/改版本/维保回写/逐单验证）+ FS-06 代办清单（读部署模板/勾部署清单/勾批次清单），均端点内按 user.sites 二次收敛
   return FIELD_OK.has(pathname) ? 'allow' : 'forbidden';
 }
 // FS-08 §4①：field 域接口允许集 = LINK_OK ∪ FIELD_OK（供访客链接 + 现场账号），与 authGate 内 FIELD_OK 同源，避免漂移。
 //   注意：这里是 authGate 里那份 FIELD_OK 的镜像常量——两者若改一处务必同步（authGate 用于登录态白名单，本集用于 field 域名层外层闸）。
-const FS08_FIELD_API = new Set(['/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/consult', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-transition', '/api/field/submissions', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/model-config']);   // FS-05 端点（field/batches·batch-download·customer-version·customer-maintain·intake-verify）须与 FIELD_OK 同步，否则实施域(field)整个批次流被 originGate deny→forbidden（实测坑，见 fs-08 防漂移断言）
+const FS08_FIELD_API = new Set(['/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/consult', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-transition', '/api/field/submissions', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/deploy-template', '/api/customer-deploy-task', '/api/batch-task', '/api/model-config']);   // FS-05/FS-06 端点须与 FIELD_OK 同步，否则实施域(field)整个流被 originGate deny→forbidden（实测坑，见 fs-08 防漂移断言）；deploy-template/customer-deploy-task/batch-task 为代办清单三端点
 // field 域可加载的静态页（现场提交面 + 实施端外壳 + 现场可看的详情 + 登录页）。console/inbox/customers/kb/model-config/accounts/projects 等后台页不在其中 → 越域拒。
 const FS08_FIELD_PAGES = new Set(['/', '/field.html', '/submit.html', '/detail.html', '/login.html']);
 // 鉴权/健康端点：两域都放（field 域现场登录/查身份/登出/健康探测需要）。
@@ -1055,7 +1072,7 @@ const server = http.createServer((req, res) => {
 
   // ---------- 批次管理（BP-01 第 1 期 · 均 admin：未进 FIELD_OK/LINK_OK 白名单 → authGate 已对非 admin 返 403/401，无需页内再判）----------
   // 派生：给批次挂 ticketCount + 冗余 productName（读时派生，不落存），倒序按 createdAt。
-  function batchOut(bt) { return { ...bt, scheduleDate: String(bt.scheduleDate || ''), ticketCount: Array.isArray(bt.ticketIds) ? bt.ticketIds.length : 0, productName: (projById(bt.product) || {}).name || bt.product }; }
+  function batchOut(bt) { const implTasks = Array.isArray(bt.implTasks) ? bt.implTasks : []; const ip = implProgress(implTasks); return { ...bt, scheduleDate: String(bt.scheduleDate || ''), ticketCount: Array.isArray(bt.ticketIds) ? bt.ticketIds.length : 0, productName: (projById(bt.product) || {}).name || bt.product, implTasks, implDone: ip.done, implTotal: ip.total }; }
   if (url.pathname === '/api/batch-arrange' && req.method === 'POST') {   // 定档建批：归入该产品全部「已立项且未归批」工单（跨院合并），初始态「开发中」
     return readBody(req, async (b, err) => {
       if (!b) return send(res, 400, JSON.stringify({ ok: false, error: err }));
@@ -1140,6 +1157,19 @@ const server = http.createServer((req, res) => {
         if (chg.length) {
           const at = nowStamp(); const by = user ? (user.name || user.username) : 'admin';
           bt.history = bt.history || []; bt.history.push({ action: 'update', by, at, note: '改包信息（' + chg.join('/') + '）' });
+          changed = true;
+        }
+      }
+      // 实施任务清单（FS-06 场景2）：运营上传包时/详情里定义一份 implTasks（[{id?,title,desc}]）。
+      //   按 id 合并到现有 implTasks——保留各项已存在的 done/doneBy/doneAt，新项 done=false；title 空丢弃、截断（title≤120/desc≤1000）。不传则不动。
+      if ('implTasks' in b) {
+        const before = JSON.stringify((bt.implTasks || []).map(t => ({ id: t.id, title: t.title, desc: t.desc })));
+        const merged = mergeImplTasks(bt.implTasks, b.implTasks, deployTaskGenId);
+        const after = JSON.stringify(merged.map(t => ({ id: t.id, title: t.title, desc: t.desc })));
+        if (before !== after) {                       // 清单结构（增删改项）有变才落更（完成态由 batch-task 单独维护，不在此覆盖）
+          bt.implTasks = merged;
+          const at = nowStamp(); const by = user ? (user.name || user.username) : 'admin';
+          bt.history = bt.history || []; bt.history.push({ action: 'update', by, at, note: '编辑实施任务清单（' + merged.length + ' 项）' });
           changed = true;
         }
       }
@@ -1325,11 +1355,15 @@ const server = http.createServer((req, res) => {
         bySub.get(sub).push({ project: bt.product, id: e.id, type: e.type, title: e.title || '', site: e.site || '', version: e.version || '', subsystem: sub, lifecycle: lc, statusLabel: sl.label, statusTag: sl.tag, canVerify: lc === '待验证', verified: lc === '已关闭' });
       }
       const subGroups = [...bySub.entries()].map(([sub, tickets]) => ({ subsystem: sub, subsystemLabel: sub ? kbSubLabel(bt.product, sub) : '（未指定子系统）', tickets }));
+      // 实施任务清单（FS-06 场景2）：全局完成态（谁勾了算完成），透传到批次视图（此手拼 group 是 batchOut 之外的另一出口，须一并带 implTasks + 进度，否则实施端看不到清单——见经验库「多输出端点后加字段逐个透传」）。
+      const implTasks = Array.isArray(bt.implTasks) ? bt.implTasks : [];
+      const ip = implProgress(implTasks);
       groups.push({
         batchId: bt.id, product: bt.product, productName: (proj || {}).name || bt.product, status: bt.status || '开发中',
         pkgVersion: bt.pkgVersion || '', releaseNote: bt.releaseNote || '', releaseTime: bt.releaseTime || '', artifactUrl: bt.artifactUrl || '',
         scheduleDate: bt.scheduleDate || '',   // 计划交付日期（yyyy-MM-dd，可空）：实施端按批次视图批次头展示排期
         downloads: bt.downloads || 0, downloadedByMe: Array.isArray(bt.downloadedBy) && bt.downloadedBy.includes(user.username || ''),
+        implTasks, implDone: ip.done, implTotal: ip.total,
         hospitals: [...hospSet], subGroups
       });
     }
@@ -1470,6 +1504,75 @@ const server = http.createServer((req, res) => {
       saveCustomers(list);
       const withCnt = custWithTicketCount(list);
       return send(res, 200, JSON.stringify({ ok: true, customer: withCnt.find(x => x.id === c.id) || c, customers: withCnt }));
+    });
+  }
+
+  // ========== 现场实施代办清单（FS-06 两场景）==========
+  // ---------- GET /api/deploy-template：读标准部署清单模板（管理员 + field 都可读）----------
+  //   → { ok:true, tasks:[{id,title,desc}] }。纯同步读文件（GET 在同步回调里，不用 await）。
+  if (url.pathname === '/api/deploy-template' && req.method === 'GET') {
+    return send(res, 200, JSON.stringify({ ok: true, tasks: loadDeployTemplate() }));
+  }
+  // ---------- POST /api/deploy-template-save：保存标准部署清单模板（仅管理员：未进 FIELD_OK/LINK_OK → authGate 已挡非管理员）----------
+  //   {tasks:[{id?,title,desc}]} → 规范化（title 非空、title≤120/desc≤1000、缺 id 补 't'+hex、id 去重）→ 写 data/deploy-template.json。
+  //   模板增删项对所有医院即时生效（进度读时按 live 模板派生；deployTasks 里指向已删项的完成态不计入）。
+  if (url.pathname === '/api/deploy-template-save' && req.method === 'POST') {
+    return readBody(req, async (b, err) => {
+      if (!b) return send(res, 400, JSON.stringify({ ok: false, error: err }));
+      if (!Array.isArray(b.tasks)) return send(res, 400, JSON.stringify({ ok: false, error: 'tasks 须为数组' }));
+      const bad = b.tasks.find(t => !String((t && t.title) || '').trim());
+      if (bad) return send(res, 400, JSON.stringify({ ok: false, error: '每项任务标题不能为空' }));
+      const tasks = normTemplateTasks(b.tasks, deployTaskGenId);
+      saveDeployTemplate(tasks);
+      return send(res, 200, JSON.stringify({ ok: true, tasks }));
+    });
+  }
+  // ---------- POST /api/customer-deploy-task：某院勾选/取消一条部署清单项（管理员 + field·按 user.sites 越权收敛，同 customer-maintain）----------
+  //   {site, taskId, done} → 校验 site∈user.sites（越权 403）+ taskId∈模板（否则 400）；
+  //     done 真 → c.deployTasks[taskId]={done:true,by:username,at}；done 假 → 删该键；幂等（同态不重复写）；saveCustomers；返回更新后 customer + 进度。
+  if (url.pathname === '/api/customer-deploy-task' && req.method === 'POST') {
+    return readBody(req, async (b, err) => {
+      if (!b) return send(res, 400, JSON.stringify({ ok: false, error: err }));
+      const site = String((b && (b.site || b.customerName)) || '').trim();
+      const taskId = String((b && b.taskId) || '').trim();
+      const done = !!(b && b.done);
+      if (!site) return send(res, 400, JSON.stringify({ ok: false, error: '缺少医院' }));
+      if (!taskId) return send(res, 400, JSON.stringify({ ok: false, error: '缺少任务项' }));
+      // 越权：site 不在当前账号 sites（管理员不限）——与 customer-maintain/customer-version 完全一致
+      if (user && !isAdmin(user) && (!Array.isArray(user.sites) || !user.sites.map(String).includes(site))) return send(res, 403, JSON.stringify({ ok: false, error: '无权操作该医院部署清单' }));
+      const tpl = loadDeployTemplate();
+      if (!tpl.some(t => t && t.id === taskId)) return send(res, 400, JSON.stringify({ ok: false, error: '任务项不存在（可能已被删除）' }));   // taskId 须 ∈ 模板
+      const list = loadCustomers();
+      const c = list.find(x => (x.name || '').trim() === site.trim());
+      if (!c) return send(res, 400, JSON.stringify({ ok: false, error: '客户不存在' }));
+      const at = nowStamp(); const by = (user && user.username) || '';
+      const r = applyDeployToggle(c.deployTasks, taskId, done, by, at);
+      if (r.changed) { c.deployTasks = r.deployTasks; c.updatedAt = at; saveCustomers(list); }
+      const dp = deployProgress(tpl, c.deployTasks);
+      const withCnt = custWithTicketCount(list);
+      return send(res, 200, JSON.stringify({ ok: true, changed: r.changed, customer: withCnt.find(x => x.id === c.id) || c, deployDone: dp.done, deployTotal: dp.total }));
+    });
+  }
+  // ---------- POST /api/batch-task：勾选/取消一条批次实施任务清单项（管理员 + field；全局完成态，谁勾了算完成）----------
+  //   {batchId, taskId, done} → 找 batch.implTasks[taskId]，全局置 done + doneBy:username + doneAt（done 假则清 doneBy/doneAt）；幂等；写 batches.json；返回更新后 batch。
+  //   独立进度，不联动工单/批次状态机（纯进度追踪）。field 可调（清单是发给现场做的），无 sites 收敛（清单全局，非按院）——产品范围可读该批则可勾。
+  if (url.pathname === '/api/batch-task' && req.method === 'POST') {
+    return readBody(req, async (b, err) => {
+      if (!b) return send(res, 400, JSON.stringify({ ok: false, error: err }));
+      const batchId = String((b && b.batchId) || '').trim();
+      const taskId = String((b && b.taskId) || '').trim();
+      const done = !!(b && b.done);
+      if (!batchId) return send(res, 400, JSON.stringify({ ok: false, error: '缺少批次' }));
+      if (!taskId) return send(res, 400, JSON.stringify({ ok: false, error: '缺少任务项' }));
+      const list = loadBatches();
+      const bt = list.find(x => x.id === batchId); if (!bt) return send(res, 404, JSON.stringify({ ok: false, error: '批次不存在' }));
+      // 产品范围收敛（非管理员 field：仅当该账号 projects 可读此批产品才允许，忽略越权批次；管理员不限）
+      if (user && !isAdmin(user) && Array.isArray(user.projects) && user.projects.length && !user.projects.includes(bt.product)) return send(res, 403, JSON.stringify({ ok: false, error: '无权操作该批次清单' }));
+      const at = nowStamp(); const by = (user && (user.name || user.username)) || 'admin';
+      const r = applyBatchTaskToggle(bt.implTasks, taskId, done, by, at);
+      if (!r.item) return send(res, 400, JSON.stringify({ ok: false, error: '任务项不存在（可能已被删除）' }));
+      if (r.changed) { bt.updatedAt = at; saveBatches(list); }
+      return send(res, 200, JSON.stringify({ ok: true, changed: r.changed, item: batchOut(bt) }));
     });
   }
 

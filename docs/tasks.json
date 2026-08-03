@@ -117,6 +117,50 @@
           "specRef": "CU-01"
         }
       ]
+    },
+    {
+      "id": "B-20260803-实施代办清单",
+      "source": "CLI窗口·用户口述",
+      "importedAt": "2026-08-03",
+      "ref": "现场实施代办：①初始化部署任务清单(标准模板自动套用·每院各自完成) ②更新包代办(运营上传包时定义·每包一份全局完成)；项含标题+说明+勾选；独立进度不联动",
+      "tasks": [
+        {
+          "id": "CL-1",
+          "title": "server：部署清单标准模板存储(deploy-template.json) + GET/save 端点 + 客户部署任务勾选回写(customer-deploy-task, by user.sites)",
+          "status": "done",
+          "specRef": "CU-01"
+        },
+        {
+          "id": "CL-2",
+          "title": "server：批次 implTasks(batch-update 扩展定义 + batch-task 全局勾选端点) + 白名单 FIELD_OK/FS08 同步",
+          "status": "done",
+          "specRef": "BP-01"
+        },
+        {
+          "id": "CL-3",
+          "title": "customers.html：部署清单模板编辑器(drawer) + 每院部署进度 N/M",
+          "status": "done",
+          "specRef": "CU-01"
+        },
+        {
+          "id": "CL-4",
+          "title": "batches.html：上传包表单(pkg-edit)加实施任务清单编辑器",
+          "status": "done",
+          "specRef": "BP-01"
+        },
+        {
+          "id": "CL-5",
+          "title": "field.html：医院视图部署清单逐条勾选 + 批次视图更新包清单逐条勾选(回写留痕)",
+          "status": "done",
+          "specRef": "FS-05"
+        },
+        {
+          "id": "CL-6",
+          "title": "spec：BP-01(更新包清单)+CU-01/FS-05(部署清单)补 AC（草稿待评审）",
+          "status": "done",
+          "specRef": "BP-01"
+        }
+      ]
     }
   ]
 }

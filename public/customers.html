@@ -48,6 +48,7 @@
       <div class="filter-field"><label>状态</label><select class="select" id="fStatus"><option value="">全部状态</option><option value="已开通">已开通</option><option value="未开通">未开通</option></select></div>
       <div class="filter-field"><label>关键词</label><div class="input-with-icon"><i class="ti ti-search"></i><input class="input" id="fKw" placeholder="医院名，回车搜索"></div></div>
     </div>
+    <button class="btn" id="btnDeployTpl"><i class="ti ti-list-check"></i>部署清单模板</button>
     <button class="btn btn-primary" id="btnAdd"><i class="ti ti-plus"></i>新增医院</button>
   </div>
 </div>
@@ -62,6 +63,7 @@
             <th>上线产品 · 版本</th>
             <th style="width:92px">状态</th>
             <th style="width:120px">维保到期</th>
+            <th style="width:96px">部署进度</th>
             <th style="width:74px">工单数</th>
             <th style="width:160px">操作</th>
           </tr>
@@ -116,6 +118,24 @@
   <div class="drawer-footer"><button class="btn" data-close-drawer="editDrawer">取消</button><button class="btn btn-primary" id="btnSave"><i class="ti ti-check"></i>保存</button></div>
 </div>
 
+<!-- 部署清单模板编辑抽屉（标准模板 · 全局单份，新建/已有医院自动套用；每院各自逐条勾选完成） -->
+<div class="drawer wide" id="tplDrawer">
+  <div class="drawer-header">
+    <div><div class="drawer-title">标准部署清单模板</div><div class="drawer-subtitle">全局单份 · 新建/已有医院自动套用；每家医院各自逐条勾选完成</div></div>
+    <span class="modal-close" data-close-drawer="tplDrawer"><i class="ti ti-x"></i></span>
+  </div>
+  <div class="drawer-body">
+    <div class="form-group">
+      <div class="flex items-center justify-between mb-8">
+        <label style="margin:0">任务项 <span class="text-tertiary" style="font-weight:400;font-size:12px">标题必填；增删项对所有医院即时生效</span></label>
+        <button class="btn btn-sm" id="btnAddTplTask" type="button"><i class="ti ti-plus"></i>添加任务</button>
+      </div>
+      <div id="tplTaskRows"></div>
+    </div>
+  </div>
+  <div class="drawer-footer"><button class="btn" data-close-drawer="tplDrawer">取消</button><button class="btn btn-primary" id="btnTplSave"><i class="ti ti-check"></i>保存模板</button></div>
+</div>
+
 <div class="toast-container" id="toastHost"></div>
 
 <script>
@@ -134,6 +154,14 @@ function maintainCell(me){
   else if(dl<=15){ cls='tag-warning'; extra=' · 剩'+dl+'天'; }
   if(dl<0||dl<=15) return `<span class="tag ${cls} tag-dot mono">${esc(me)}${extra}</span>`;
   return `<span class="mono text-secondary">${esc(me)}</span>`;
+}
+
+// 部署进度单元格：后端派生 deployDone/deployTotal（模板项数为分母，该院已完成为分子）；模板为空显「—」；满进度绿、有进度中性
+function deployCell(c){
+  const total=+(c&&c.deployTotal)||0, done=+(c&&c.deployDone)||0;
+  if(!total) return '<span class="text-tertiary">—</span>';
+  const full=done>=total;
+  return `<span class="tag ${full?'tag-success':'tag-gray'} tag-dot mono">${done}/${total}</span>`;
 }
 
 /* —— toast（部署 shell.js 无 toast，自实现；用 theme.css .toast-container/.toast.show） —— */
@@ -203,6 +231,7 @@ function render(){
       <td>${prodCell}</td>
       <td><span class="tag ${on?'tag-success':'tag-gray'} tag-dot">${esc(c.status||'—')}</span></td>
       <td>${maintainCell(c.maintainEnd)}</td>
+      <td>${deployCell(c)}</td>
       <td><span class="mono ${tc?'text-link':'text-tertiary'}" data-tickets="${esc(c.name)}">${tc}</span></td>
       <td>
         <div class="row-actions">
@@ -212,7 +241,7 @@ function render(){
         </div>
       </td>
     </tr>`;
-  }).join('') : `<tr><td colspan="8"><div class="empty"><div class="empty-illu"><i class="ti ti-building-hospital"></i></div><div class="empty-title">${CUSTOMERS.length?'没有匹配的医院':'还没有医院，点右上角「新增医院」'}</div></div></td></tr>`;
+  }).join('') : `<tr><td colspan="9"><div class="empty"><div class="empty-illu"><i class="ti ti-building-hospital"></i></div><div class="empty-title">${CUSTOMERS.length?'没有匹配的医院':'还没有医院，点右上角「新增医院」'}</div></div></td></tr>`;
   $('#totalCount').textContent=total;
   renderPager(pages);
 }
@@ -413,7 +442,57 @@ async function delCustomer(c){
   }catch(e){ toast('删除失败：'+e.message,'error'); }
 }
 
+/* ---------- 部署清单模板（标准模板 · 全局单份） ---------- */
+let DEPLOY_TPL=[];
+function addTplTaskRow(title,desc){
+  const box=$('#tplTaskRows');
+  const empty=box.querySelector('.tplempty'); if(empty) empty.remove();
+  const row=document.createElement('div'); row.className='tpl-task-row';
+  row.style.cssText='display:flex;gap:8px;align-items:flex-start;margin-bottom:8px';
+  row.innerHTML='<input class="input tplTitle" maxlength="120" placeholder="任务标题（必填），如「部署数据库」" value="'+esc(title||'')+'" style="flex:0 0 34%;min-width:0">'+
+    '<input class="input tplDesc" maxlength="1000" placeholder="说明（选填）" value="'+esc(desc||'')+'" style="flex:1;min-width:0">'+
+    '<button class="btn btn-sm tplDel" type="button" title="删除" style="flex:0 0 auto"><i class="ti ti-trash" style="color:var(--color-danger)"></i></button>';
+  box.appendChild(row);
+  row.querySelector('.tplDel').addEventListener('click',()=>{ row.remove(); syncTplEmpty(); });
+}
+function syncTplEmpty(){ const box=$('#tplTaskRows'); if(!box.querySelector('.tpl-task-row') && !box.querySelector('.tplempty')){ const e=document.createElement('div'); e.className='tplempty text-tertiary'; e.style.cssText='padding:14px 0;font-size:13px'; e.textContent='还没有任务项，点「添加任务」新增一条。'; box.appendChild(e);} }
+function openDeployTpl(){
+  fetch('/api/deploy-template').then(r=>r.json()).then(r=>{
+    DEPLOY_TPL=(r&&Array.isArray(r.tasks))?r.tasks:[];
+    $('#tplTaskRows').innerHTML='';
+    DEPLOY_TPL.forEach(t=>addTplTaskRow(t&&t.title,t&&t.desc));
+    syncTplEmpty();
+    openDrawer('tplDrawer');
+  }).catch(()=>{ toast('加载模板失败','error'); });
+}
+function collectTplTasks(){
+  return $$('#tplTaskRows .tpl-task-row').map(row=>({
+    title:(row.querySelector('.tplTitle').value||'').trim(),
+    desc:(row.querySelector('.tplDesc').value||'').trim()
+  })).filter(t=>t.title);   // 空标题项前端先过滤（后端也校验）
+}
+async function saveDeployTpl(){
+  const tasks=collectTplTasks();
+  // 有行但标题全空 → 提示（避免误存空模板）
+  const rows=$$('#tplTaskRows .tpl-task-row');
+  if(rows.length && !tasks.length){ toast('请至少填写一条任务标题','warning'); return; }
+  const btn=$('#btnTplSave'); btn.disabled=true;
+  try{
+    const r=await (await fetch('/api/deploy-template-save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tasks})})).json();
+    if(!r.ok){ toast(r.error||'保存失败','error'); return; }
+    DEPLOY_TPL=r.tasks||[];
+    toast('部署清单模板已保存（'+DEPLOY_TPL.length+' 项）','success');
+    closeDrawer('tplDrawer');
+    // 模板项数变了 → 各院分母变，重新拉客户刷新进度列
+    try{ CUSTOMERS=(await (await fetch('/api/customers')).json()).customers||[]; render(); }catch(e){}
+  }catch(e){ toast('保存失败：'+e.message,'error'); }
+  finally{ btn.disabled=false; }
+}
+
 /* ---------- 事件绑定 ---------- */
+$('#btnDeployTpl').addEventListener('click',openDeployTpl);
+$('#btnAddTplTask').addEventListener('click',()=>addTplTaskRow('',''));
+$('#btnTplSave').addEventListener('click',saveDeployTpl);
 $('#btnAdd').addEventListener('click',()=>openEdit(null));
 $('#btnAddProd').addEventListener('click',()=>addProdRow('',null));
 $('#btnAddContact').addEventListener('click',()=>addContactRow('',''));

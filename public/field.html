@@ -260,6 +260,20 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
 .f-dl-btn:hover { filter: brightness(1.06); }
 .f-dl-btn.done, .f-bump-btn.done { color: var(--color-success, #2E9E5B); background: var(--color-success-light, #E7F6EE); border-color: var(--color-success-border, #B7E3C9); cursor: default; }
 .f-dl-btn[disabled], .f-bump-btn[disabled], .f-verify-btn[disabled], .f-reject-btn[disabled] { opacity: .55; cursor: not-allowed; }
+/* FS-06 实施/部署清单（勾选式代办） */
+.f-impl-list { border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface); padding: 10px 13px; margin-bottom: 12px; }
+.f-deploy-list { background: var(--color-primary-light, #EEF4FB); border-color: var(--color-primary-border, #C7D6E8); }
+.f-impl-hd { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; color: var(--color-text, #1B2733); margin-bottom: 8px; }
+.f-impl-hd .f-impl-prog { margin-left: 6px; font-size: 12px; font-weight: 600; color: var(--color-primary, #2F6FB5); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-pill); padding: 1px 8px; font-family: var(--font-num, monospace); }
+.f-impl-item { display: flex; gap: 9px; align-items: flex-start; padding: 7px 0; border-top: 1px solid var(--color-border); }
+.f-impl-item:first-of-type { border-top: none; }
+.f-impl-cb { flex: 0 0 auto; margin-top: 2px; width: 16px; height: 16px; cursor: pointer; }
+.f-impl-cb[disabled] { cursor: wait; opacity: .6; }
+.f-impl-main { flex: 1; min-width: 0; }
+.f-impl-title { font-size: 13px; font-weight: 600; color: var(--color-text); word-break: break-word; }
+.f-impl-item.done .f-impl-title { text-decoration: line-through; color: var(--color-text-tertiary); }
+.f-impl-desc { font-size: 12px; color: var(--color-text-secondary); margin-top: 2px; white-space: pre-wrap; word-break: break-word; }
+.f-impl-meta { font-size: 11.5px; color: var(--color-text-tertiary); margin-top: 3px; display: flex; align-items: center; gap: 4px; }
 /* 改版本条 */
 .f-bump-row { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; padding: 8px 10px; border: 1px dashed var(--color-border); border-radius: var(--radius); margin-bottom: 7px; font-size: 12px; }
 .f-bump-row .bp-site { font-weight: 600; color: var(--color-text); }
@@ -634,7 +648,8 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     verMap: {},             // 产品 id → 运营 tag 版本数组（/api/versions?project= 结果缓存，最新在前）
     ctxVer: null,           // 系统视图归档 chip 当前所选 tag 版本（未手动选=默认 versions[0]）
     verOpen: false,         // tag 版本下拉展开态
-    verDetailOpen: false    // 医院视图「全部子项目」态·版本明细面板展开态（2026-07-24 问题③：icon 弹各子系统版本，替代平铺）
+    verDetailOpen: false,   // 医院视图「全部子项目」态·版本明细面板展开态（2026-07-24 问题③：icon 弹各子系统版本，替代平铺）
+    deployTpl: []           // 标准部署清单模板（/api/deploy-template）：[{id,title,desc}]，医院视图部署清单区块用（模板项 + 该院完成态 left join）
   };
 
   // ---------- 登录门 ----------
@@ -664,7 +679,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   function doLogout() {
     api('/api/logout', { method: 'GET' }).catch(function () {}).then(function () {
       // AC-8 清空工作空间状态并重新显示登录门
-      state = { me: null, mode: 'hosp', sites: [], curSite: null, subsystems: [], projects: [], customers: [], projMap: {}, groupBy: 'type', curSub: '', subOptions: [], systems: [], curSys: null, sysOpen: false, sysQuery: '', hospOpen: false, hospQuery: '', verMap: {}, ctxVer: null, verOpen: false, verDetailOpen: false };
+      state = { me: null, mode: 'hosp', sites: [], curSite: null, subsystems: [], projects: [], customers: [], projMap: {}, groupBy: 'type', curSub: '', subOptions: [], systems: [], curSys: null, sysOpen: false, sysQuery: '', hospOpen: false, hospQuery: '', verMap: {}, ctxVer: null, verOpen: false, verDetailOpen: false, deployTpl: [] };
       var lt = $('fListType'), lb = $('fListBatch'), ls = $('fListSystem'); if (lt) lt.innerHTML = ''; if (lb) lb.innerHTML = ''; if (ls) ls.innerHTML = '';
       $('loginUser').value = ''; $('loginPwd').value = ''; setLoginErr('');
       $('fHtabs').innerHTML = ''; setTodoCount(0); closeAllMenus();
@@ -722,7 +737,11 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     var pSys = api('/api/field/systems', { method: 'GET' }).then(function (r) {
       state.systems = (r.body && Array.isArray(r.body.systems)) ? r.body.systems : [];   // [{key,name,project,productName}]，稳定排序
     }).catch(function () { state.systems = []; });
-    return Promise.all([pCust, pProj, pSys]);
+    // FS-06 场景1：标准部署清单模板（全局单份）——医院视图部署清单区块用（模板 + 该院完成态 left join）
+    var pTpl = api('/api/deploy-template', { method: 'GET' }).then(function (r) {
+      state.deployTpl = (r.body && Array.isArray(r.body.tasks)) ? r.body.tasks : [];
+    }).catch(function () { state.deployTpl = []; });
+    return Promise.all([pCust, pProj, pSys, pTpl]);
   }
 
   // ---------- 用户区 ----------
@@ -1367,6 +1386,8 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     body.className = 'f-batch-body';
     // 更新包卡（可下载/已交付态且有包版本）
     if ((g.status === '可下载' || g.status === '已交付') && g.pkgVersion) body.appendChild(mkPkgCard(g));
+    // 实施任务清单（更新包清单 · 全局完成态，谁勾了算完成）：有清单项才渲染
+    if (Array.isArray(g.implTasks) && g.implTasks.length) body.appendChild(mkImplChecklist(g));
     // 逐子系统分组 + 逐单
     (g.subGroups || []).forEach(function (sg) {
       var gh = document.createElement('div');
@@ -1402,6 +1423,95 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       renderBumpRows(card, g, null);   // 重进/刷新后仍显改版本条
     }
     return card;
+  }
+
+  // 实施任务清单卡（更新包清单 · 全局完成态）：逐项 checkbox（勾/取消 → POST /api/batch-task，全局完成）+ 标题/说明/完成人/时间 + 进度。
+  function mkImplChecklist(g) {
+    var box = document.createElement('div');
+    box.className = 'f-impl-list';
+    var tasks = Array.isArray(g.implTasks) ? g.implTasks : [];
+    var done = (g.implDone != null) ? g.implDone : tasks.filter(function (t) { return t && t.done; }).length;
+    var total = (g.implTotal != null) ? g.implTotal : tasks.length;
+    var hd = document.createElement('div');
+    hd.className = 'f-impl-hd';
+    hd.innerHTML = '<i class="ti ti-list-check"></i> 实施任务清单 <span class="f-impl-prog">' + done + '/' + total + '</span>';
+    box.appendChild(hd);
+    tasks.forEach(function (t) { box.appendChild(mkImplItem(t, g)); });
+    return box;
+  }
+  // 单条实施任务项：checkbox + 标题 + 说明 + （已完成）完成人/时间
+  function mkImplItem(t, g) {
+    var row = document.createElement('div');
+    row.className = 'f-impl-item' + (t.done ? ' done' : '');
+    var cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.className = 'f-impl-cb'; cb.checked = !!t.done;
+    cb.addEventListener('change', function () { doImplToggle(g, t, cb.checked, cb); });
+    var main = document.createElement('div');
+    main.className = 'f-impl-main';
+    var metaHtml = t.done ? ('<div class="f-impl-meta"><i class="ti ti-user"></i> ' + escapeHtml(t.doneBy || '—') + ' · ' + escapeHtml(fmtTime(t.doneAt)) + '</div>') : '';
+    main.innerHTML = '<div class="f-impl-title">' + escapeHtml(t.title || '（无标题）') + '</div>' +
+      (t.desc ? '<div class="f-impl-desc">' + escapeHtml(t.desc) + '</div>' : '') + metaHtml;
+    row.appendChild(cb); row.appendChild(main);
+    return row;
+  }
+  // 勾选/取消一条批次清单项（全局完成态）：调 batch-task → 成功刷新批次视图（进度/完成人随之更新）。
+  function doImplToggle(g, t, done, cb) {
+    cb.disabled = true;
+    api('/api/batch-task', { method: 'POST', body: JSON.stringify({ batchId: g.batchId, taskId: t.id, done: done }) }).then(function (r) {
+      var b = r.body || {};
+      if (!b.ok) { cb.disabled = false; cb.checked = !done; showToast(b.error || '操作失败', 'error'); return; }   // 失败还原勾选态
+      showToast(done ? '已标记完成' : '已取消完成', 'success');
+      loadBatchView();   // 刷新：进度 + 完成人/时间随全局态更新
+    }).catch(function () { cb.disabled = false; cb.checked = !done; showToast('操作失败，请重试', 'error'); });
+  }
+
+  // ========== FS-06 场景1 · 部署清单（当前医院 · 每院各自逐条勾选完成） ==========
+  // 模板项（state.deployTpl，live）+ 该院完成态（custBySite(site).deployTasks）left join；模板为空 → 不渲染。
+  function mkDeployChecklist(site) {
+    var tpl = Array.isArray(state.deployTpl) ? state.deployTpl : [];
+    if (!tpl.length || !site) return null;                          // 无模板 / 无当前医院 → 不显示
+    var cust = custBySite(site);
+    var dt = (cust && cust.deployTasks && typeof cust.deployTasks === 'object') ? cust.deployTasks : {};
+    var done = 0;
+    tpl.forEach(function (t) { var st = dt[t && t.id]; if (st && st.done) done++; });
+    var box = document.createElement('div');
+    box.className = 'f-impl-list f-deploy-list';
+    var hd = document.createElement('div');
+    hd.className = 'f-impl-hd';
+    hd.innerHTML = '<i class="ti ti-clipboard-check"></i> 部署清单 <span class="f-impl-prog">' + done + '/' + tpl.length + '</span>';
+    box.appendChild(hd);
+    tpl.forEach(function (t) {
+      var st = dt[t.id] || {};
+      box.appendChild(mkDeployItem(t, !!st.done, st.by || '', st.at || '', site));
+    });
+    return box;
+  }
+  // 单条部署清单项：checkbox（勾/取消 → POST /api/customer-deploy-task {site,taskId,done}）+ 标题/说明 +（已完成）完成人/时间
+  function mkDeployItem(t, isDone, by, at, site) {
+    var row = document.createElement('div');
+    row.className = 'f-impl-item' + (isDone ? ' done' : '');
+    var cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.className = 'f-impl-cb'; cb.checked = isDone;
+    cb.addEventListener('change', function () { doDeployToggle(site, t, cb.checked, cb); });
+    var main = document.createElement('div');
+    main.className = 'f-impl-main';
+    var metaHtml = isDone ? ('<div class="f-impl-meta"><i class="ti ti-user"></i> ' + escapeHtml(by || '—') + ' · ' + escapeHtml(fmtTime(at)) + '</div>') : '';
+    main.innerHTML = '<div class="f-impl-title">' + escapeHtml(t.title || '（无标题）') + '</div>' +
+      (t.desc ? '<div class="f-impl-desc">' + escapeHtml(t.desc) + '</div>' : '') + metaHtml;
+    row.appendChild(cb); row.appendChild(main);
+    return row;
+  }
+  // 勾选/取消一条部署清单项（该院完成态）：调 customer-deploy-task → 成功更新 state.customers 该院 deployTasks + 重渲医院视图。
+  function doDeployToggle(site, t, done, cb) {
+    cb.disabled = true;
+    api('/api/customer-deploy-task', { method: 'POST', body: JSON.stringify({ site: site, taskId: t.id, done: done }) }).then(function (r) {
+      var b = r.body || {};
+      if (!b.ok) { cb.disabled = false; cb.checked = !done; showToast(b.error || '操作失败', 'error'); return; }   // 失败还原勾选态
+      // 回写 state.customers 该院 deployTasks（服务端回传更新后 customer）
+      if (b.customer) { for (var i = 0; i < state.customers.length; i++) { if ((state.customers[i].name || '').trim() === String(site).trim()) { state.customers[i] = b.customer; break; } } }
+      showToast(done ? '已标记完成' : '已取消完成', 'success');
+      loadSubmissions();   // 重渲医院视图（部署清单进度 + 完成人/时间随之更新）
+    }).catch(function () { cb.disabled = false; cb.checked = !done; showToast('操作失败，请重试', 'error'); });
   }
 
   // 下载更新包：调 batch-download → downloads+1（幂等）+ 覆盖单转待验证 + 返回 bumps → 渲染改版本条 + 刷新列表状态
@@ -1529,6 +1639,9 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     var listBatch = $('fListBatch');
     listBatch.style.display = 'none'; box.style.display = 'block';
     box.innerHTML = '';
+    // FS-06 场景1：当前医院部署清单区块（模板 + 该院完成态）——独立于提交记录，模板非空时总显示在最上
+    var deployCard = mkDeployChecklist(state.curSite);
+    if (deployCard) box.appendChild(deployCard);
     // 空态（该医院无记录 / 筛选后为空）
     var total = 0;
     groups.forEach(function (g) { total += (g.items || []).length; });
@@ -2976,7 +3089,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   })();
 
   // 暴露给测试/调试（不含敏感数据）
-  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, newConversation: newConversation, sendChat: sendChat, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast, openMaintainEdit: openMaintainEdit, doMaintainSave: doMaintainSave, maintainChipHtml: maintainChipHtml, maintainDaysLeft: maintainDaysLeft, renderTodoBody: renderTodoBody };
+  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, newConversation: newConversation, sendChat: sendChat, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast, openMaintainEdit: openMaintainEdit, doMaintainSave: doMaintainSave, maintainChipHtml: maintainChipHtml, maintainDaysLeft: maintainDaysLeft, renderTodoBody: renderTodoBody, mkImplChecklist: mkImplChecklist, mkImplItem: mkImplItem, doImplToggle: doImplToggle, mkDeployChecklist: mkDeployChecklist, mkDeployItem: mkDeployItem, doDeployToggle: doDeployToggle };
 })();
 </script>
 </body>
