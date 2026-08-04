@@ -275,7 +275,16 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
 .f-impl-desc { font-size: 12px; color: var(--color-text-secondary); margin-top: 2px; white-space: pre-wrap; word-break: break-word; }
 .f-impl-meta { font-size: 11.5px; color: var(--color-text-tertiary); margin-top: 3px; display: flex; align-items: center; gap: 4px; }
 /* 累积更新计划（按版本独立维护 + 跨版本累积）：批次卡内 */
-.f-plan-block { border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface); padding: 10px 13px; margin-bottom: 12px; }
+.f-plan-block { border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface); margin-bottom: 12px; overflow: hidden; }
+.f-plan-tophd { display: flex; align-items: center; gap: 6px; padding: 9px 12px; cursor: pointer; user-select: none; font-size: 12.5px; color: var(--color-text-secondary); flex-wrap: wrap; }
+.f-plan-tophd:hover { background: rgba(47,111,181,.05); }
+.f-plan-tophd b { color: var(--color-text, #1B2733); font-family: var(--font-num, monospace); }
+.f-plan-tophd .ttl { flex: 1 1 auto; min-width: 0; }
+.f-plan-tophd .f-plan-prog { flex: 0 0 auto; font-size: 12px; font-weight: 600; color: var(--color-primary, #2F6FB5); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-pill); padding: 1px 8px; font-family: var(--font-num, monospace); }
+.f-plan-tophd .chev { flex: 0 0 auto; font-size: 16px; opacity: .6; transition: transform .15s; }
+.f-plan-block.open .f-plan-tophd .chev { transform: rotate(180deg); }
+.f-plan-body { display: none; padding: 2px 12px 12px; }
+.f-plan-block.open .f-plan-body { display: block; }
 .f-plan-loading, .f-plan-empty { font-size: 12.5px; color: var(--color-text-tertiary); padding: 8px 2px; }
 .f-plan-hd { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--color-text-secondary); margin-bottom: 6px; flex-wrap: wrap; }
 .f-plan-hd b { color: var(--color-text, #1B2733); font-family: var(--font-num, monospace); }
@@ -688,7 +697,8 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     verOpen: false,         // tag 版本下拉展开态
     verDetailOpen: false,   // 医院视图「全部子项目」态·版本明细面板展开态（2026-07-24 问题③：icon 弹各子系统版本，替代平铺）
     deployTpl: [],          // 标准部署清单模板（/api/deploy-template）：[{id,title,desc}]，医院视图部署清单区块用（模板项 + 该院完成态 left join）
-    deployCollapsed: true    // FS-06：医院视图部署清单可折叠区块折叠态（内存·默认 true=收起；点标题行切换，见 toggleDeployCollapse）
+    deployCollapsed: true,   // FS-06：医院视图部署清单可折叠区块折叠态（内存·默认 true=收起；点标题行切换，见 toggleDeployCollapse）
+    planExpanded: {}         // FS-05：批次「更新计划」可折叠展开态（内存·按 batchId·默认收起；见 renderUpdatePlan）
   };
 
   // ---------- 登录门 ----------
@@ -718,7 +728,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   function doLogout() {
     api('/api/logout', { method: 'GET' }).catch(function () {}).then(function () {
       // AC-8 清空工作空间状态并重新显示登录门
-      state = { me: null, mode: 'hosp', sites: [], curSite: null, subsystems: [], projects: [], customers: [], projMap: {}, groupBy: 'type', curSub: '', subOptions: [], systems: [], curSys: null, sysOpen: false, sysQuery: '', hospOpen: false, hospQuery: '', verMap: {}, ctxVer: null, verOpen: false, verDetailOpen: false, deployTpl: [], deployCollapsed: true };
+      state = { me: null, mode: 'hosp', sites: [], curSite: null, subsystems: [], projects: [], customers: [], projMap: {}, groupBy: 'type', curSub: '', subOptions: [], systems: [], curSys: null, sysOpen: false, sysQuery: '', hospOpen: false, hospQuery: '', verMap: {}, ctxVer: null, verOpen: false, verDetailOpen: false, deployTpl: [], deployCollapsed: true, planExpanded: {} };
       var lt = $('fListType'), lb = $('fListBatch'), ls = $('fListSystem'); if (lt) lt.innerHTML = ''; if (lb) lb.innerHTML = ''; if (ls) ls.innerHTML = '';
       $('loginUser').value = ''; $('loginPwd').value = ''; setLoginErr('');
       $('fHtabs').innerHTML = ''; setTodoCount(0); closeAllMenus();
@@ -1492,28 +1502,37 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     var tasks = Array.isArray(plan.tasks) ? plan.tasks : [];
     var sql = plan.sql || { hasSql: false };
     var vers = Array.isArray(plan.versionsInRange) ? plan.versionsInRange : [];
-    // 头：现场 X → 目标 Y + 覆盖版本数
-    var hd = document.createElement('div');
-    hd.className = 'f-plan-hd';
     var fromV = plan.fromVersion ? escapeHtml(plan.fromVersion) : '（未记录/最早）';
-    hd.innerHTML = '<i class="ti ti-arrow-guide"></i> 更新计划 · 现场 <b>' + fromV + '</b> → 目标 <b>' + escapeHtml(plan.toVersion || '') + '</b>' +
-      '<span class="f-plan-vcount">覆盖 ' + vers.length + ' 个版本</span>';
-    box.appendChild(hd);
+    var totalItems = (plan.taskTotal || 0) + (sql.hasSql ? 1 : 0);
+    var doneItems = (plan.taskDone || 0) + (sql.hasSql && sql.done ? 1 : 0);
+    // 可折叠区块：默认收起（内存态 state.planExpanded[batchId]），收起态标题行也显进度
+    var expanded = state.planExpanded[g.batchId] === true;
+    var block = document.createElement('div');
+    block.className = 'f-plan-block' + (expanded ? ' open' : '');
+    var top = document.createElement('div');
+    top.className = 'f-plan-tophd';
+    top.innerHTML = '<i class="ti ti-chevron-down chev"></i>' +
+      '<span class="ttl"><i class="ti ti-arrow-guide"></i> 更新计划 · 现场 <b>' + fromV + '</b> → 目标 <b>' + escapeHtml(plan.toVersion || '') + '</b> · 覆盖 ' + vers.length + ' 个版本</span>' +
+      '<span class="f-plan-prog">' + doneItems + '/' + totalItems + '</span>';
+    top.addEventListener('click', function () { state.planExpanded[g.batchId] = !(state.planExpanded[g.batchId] === true); block.classList.toggle('open'); });
+    block.appendChild(top);
+    var body = document.createElement('div');
+    body.className = 'f-plan-body';
     if (!tasks.length && !sql.hasSql) {
       var em = document.createElement('div');
       em.className = 'f-plan-empty';
       em.textContent = '该版本区间暂无登记的更新任务（运营端在「版本发版」登记后会出现在这里）';
-      box.appendChild(em);
-      return;
+      body.appendChild(em);
+    } else {
+      // 一份统一实施任务清单（累积任务逐条 + 末尾 SQL 执行条目）——总进度 = 任务完成 + SQL 单点（若有）
+      var sec = document.createElement('div'); sec.className = 'f-plan-sec';
+      sec.appendChild(planSecHd('ti-list-check', '实施任务清单', doneItems, totalItems));
+      tasks.forEach(function (t) { sec.appendChild(mkPlanTaskItem(g, t)); });
+      if (sql.hasSql) sec.appendChild(mkSqlBundleItem(g, plan, sql));   // SQL 执行 = 一个条目，放清单末尾
+      body.appendChild(sec);
     }
-    // 一份统一实施任务清单（累积任务逐条 + 末尾 SQL 执行条目）——总进度 = 任务完成 + SQL 单点（若有）
-    var totalItems = (plan.taskTotal || 0) + (sql.hasSql ? 1 : 0);
-    var doneItems = (plan.taskDone || 0) + (sql.hasSql && sql.done ? 1 : 0);
-    var sec = document.createElement('div'); sec.className = 'f-plan-sec';
-    sec.appendChild(planSecHd('ti-list-check', '实施任务清单', doneItems, totalItems));
-    tasks.forEach(function (t) { sec.appendChild(mkPlanTaskItem(g, t)); });
-    if (sql.hasSql) sec.appendChild(mkSqlBundleItem(g, plan, sql));   // SQL 执行 = 一个条目，放清单末尾
-    box.appendChild(sec);
+    block.appendChild(body);
+    box.appendChild(block);
   }
   function planSecHd(icon, label, done, total) {
     var hd = document.createElement('div');
