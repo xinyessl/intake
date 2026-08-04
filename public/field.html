@@ -243,13 +243,19 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
 
 /* ---------- FS-05 · 实施端按批次视图（批次分组 + 更新包卡 + 改版本条 + 逐单验证）---------- */
 .f-batch-grp { border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface); margin-bottom: 14px; overflow: hidden; }
-.f-batch-hd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 11px 13px; background: var(--color-surface-alt); border-bottom: 1px solid var(--color-border); }
+.f-batch-hd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 11px 13px; background: var(--color-surface-alt); border-bottom: 1px solid var(--color-border); cursor: pointer; user-select: none; }
+.f-batch-hd:hover { background: rgba(47,111,181,.05); }
+.f-batch-hd .f-batch-chev { flex: 0 0 auto; font-size: 16px; opacity: .55; transition: transform .15s; margin-right: -2px; }
+.f-batch-grp.open .f-batch-hd .f-batch-chev { transform: rotate(180deg); }
+.f-batch-grp:not(.open) .f-batch-hd { border-bottom: none; }
+.f-batch-hd .bcount { margin-left: auto; font-size: 11.5px; color: var(--color-text-secondary); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-pill); padding: 1px 8px; }
 .f-batch-hd .bname { font-size: 13.5px; font-weight: 700; color: var(--color-text); }
 .f-batch-hd .bid { font-size: 11.5px; color: var(--color-text-tertiary); font-family: var(--font-num, monospace); }
 .f-batch-hd .bpkg { font-size: 11.5px; color: var(--color-text-secondary); }
 .f-batch-hd .bsched { font-size: 11.5px; color: var(--color-text-secondary); }
 .f-batch-hd .bsched.none { color: var(--color-text-tertiary); }
-.f-batch-body { padding: 11px 13px; }
+.f-batch-body { padding: 11px 13px; display: none; }
+.f-batch-grp.open .f-batch-body { display: block; }
 /* 更新包卡（可下载态） */
 .f-pkg-card { border: 1px solid var(--color-primary-border, #C7D6E8); border-radius: var(--radius); background: var(--color-primary-light, #EEF4FB); padding: 11px 13px; margin-bottom: 12px; }
 .f-pkg-card .pk-t { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 700; color: var(--color-primary, #0F2744); margin-bottom: 4px; }
@@ -698,7 +704,8 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     verDetailOpen: false,   // 医院视图「全部子项目」态·版本明细面板展开态（2026-07-24 问题③：icon 弹各子系统版本，替代平铺）
     deployTpl: [],          // 标准部署清单模板（/api/deploy-template）：[{id,title,desc}]，医院视图部署清单区块用（模板项 + 该院完成态 left join）
     deployCollapsed: true,   // FS-06：医院视图部署清单可折叠区块折叠态（内存·默认 true=收起；点标题行切换，见 toggleDeployCollapse）
-    planExpanded: {}         // FS-05：批次「更新计划」可折叠展开态（内存·按 batchId·默认收起；见 renderUpdatePlan）
+    planExpanded: {},        // FS-05：批次「更新计划」可折叠展开态（内存·按 batchId·默认收起；见 renderUpdatePlan）
+    batchExpanded: {}        // FS-05：按批次视图·整个批次卡可折叠展开态（内存·按 batchId·默认收起；见 mkBatchGroup）
   };
 
   // ---------- 登录门 ----------
@@ -728,7 +735,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   function doLogout() {
     api('/api/logout', { method: 'GET' }).catch(function () {}).then(function () {
       // AC-8 清空工作空间状态并重新显示登录门
-      state = { me: null, mode: 'hosp', sites: [], curSite: null, subsystems: [], projects: [], customers: [], projMap: {}, groupBy: 'type', curSub: '', subOptions: [], systems: [], curSys: null, sysOpen: false, sysQuery: '', hospOpen: false, hospQuery: '', verMap: {}, ctxVer: null, verOpen: false, verDetailOpen: false, deployTpl: [], deployCollapsed: true, planExpanded: {} };
+      state = { me: null, mode: 'hosp', sites: [], curSite: null, subsystems: [], projects: [], customers: [], projMap: {}, groupBy: 'type', curSub: '', subOptions: [], systems: [], curSys: null, sysOpen: false, sysQuery: '', hospOpen: false, hospQuery: '', verMap: {}, ctxVer: null, verOpen: false, verDetailOpen: false, deployTpl: [], deployCollapsed: true, planExpanded: {}, batchExpanded: {} };
       var lt = $('fListType'), lb = $('fListBatch'), ls = $('fListSystem'); if (lt) lt.innerHTML = ''; if (lb) lb.innerHTML = ''; if (ls) ls.innerHTML = '';
       $('loginUser').value = ''; $('loginPwd').value = ''; setLoginErr('');
       $('fHtabs').innerHTML = ''; setTodoCount(0); closeAllMenus();
@@ -1420,16 +1427,21 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   var BATCH_TAG = { '开发中': 'tag-primary', '可下载': 'tag-info', '已交付': 'tag-success' };
   function mkBatchGroup(g) {
     var wrap = document.createElement('div');
-    wrap.className = 'f-batch-grp';
+    var expanded = state.batchExpanded[g.batchId] === true;   // 整个批次可折叠·默认收起（内存态·按 batchId）
+    wrap.className = 'f-batch-grp' + (expanded ? ' open' : '');
     wrap.setAttribute('data-batch', g.batchId);
     var tag = BATCH_TAG[g.status] || 'tag-gray';
+    var ticketCount = (g.subGroups || []).reduce(function (n, sg) { return n + ((sg.tickets || []).length); }, 0);
     var hd = document.createElement('div');
     hd.className = 'f-batch-hd';
-    hd.innerHTML = '<span class="bname">' + escapeHtml(g.productName || g.product || '') + '</span>' +
+    hd.innerHTML = '<i class="ti ti-chevron-down f-batch-chev"></i>' +
+      '<span class="bname">' + escapeHtml(g.productName || g.product || '') + '</span>' +
       '<span class="bid">' + escapeHtml(g.batchId || '') + '</span>' +
       '<span class="tag ' + tag + '">' + escapeHtml(g.status || '') + '</span>' +
       (g.pkgVersion ? '<span class="bpkg">包版本 ' + escapeHtml(g.pkgVersion) + '</span>' : '') +
-      (g.scheduleDate ? '<span class="bsched">计划交付 ' + escapeHtml(g.scheduleDate) + '</span>' : '<span class="bsched none">未排期</span>');
+      (g.scheduleDate ? '<span class="bsched">计划交付 ' + escapeHtml(g.scheduleDate) + '</span>' : '<span class="bsched none">未排期</span>') +
+      (ticketCount ? '<span class="bcount">' + ticketCount + ' 单</span>' : '');
+    hd.addEventListener('click', function () { state.batchExpanded[g.batchId] = !(state.batchExpanded[g.batchId] === true); wrap.classList.toggle('open'); });
     wrap.appendChild(hd);
     var body = document.createElement('div');
     body.className = 'f-batch-body';
@@ -1855,9 +1867,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     var listBatch = $('fListBatch');
     listBatch.style.display = 'none'; box.style.display = 'block';
     box.innerHTML = '';
-    // FS-06 场景1（2026-08-03 修订）：部署清单放回医院视图左侧、提交清单上方，做成默认收起的可折叠区块（模板空/无产品→不渲染）。
-    var deployBlock = mkDeployChecklist(state.curSite);
-    if (deployBlock) box.appendChild(deployBlock);
+    // FS-06 场景1（2026-08-04）：按用户反馈，医院视图（按类型）不再显示部署清单块（运营端模板与数据保留，仅去掉此处展示）。
     // 空态（该医院无记录 / 筛选后为空）
     var total = 0;
     groups.forEach(function (g) { total += (g.items || []).length; });
