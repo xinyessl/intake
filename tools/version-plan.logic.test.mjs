@@ -5,7 +5,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   clip, genId, normVersionTasks, normVersionSqls,
-  rangeVersions, accumulate, joinProgress, applyToggle, mergeSql, siteAllowed
+  rangeVersions, accumulate, joinProgress, applyToggle, mergeSql, siteAllowed,
+  sqlBundleSummary, applySqlBundleToggle
 } from './version-plan-logic.mjs';
 
 function seqGen(prefix) { let n = 0; return () => prefix + String(++n).padStart(4, '0'); }
@@ -117,11 +118,50 @@ test('joinProgress：按 (version,id) 左连 done/by/at + 汇总 done/total', ()
   assert.equal(j.rows[1].by, '');
 });
 
-test('joinProgress：sqls 分桶独立于 tasks（同 id 不串）', () => {
-  const sqls = [{ version: '1.0', id: 'vs1', name: 'S' }];
-  const progress = { '1.0': { tasks: { vs1: { done: true } }, sqls: {} } };  // tasks 桶有 vs1 但 sqls 桶没有
-  const j = joinProgress(sqls, progress, 'sqls');
-  assert.equal(j.done, 0);   // 不误取 tasks 桶
+// ---------- 合并 SQL 单点汇总 + 单点完成态（2026-08-04 re-target：SQL = 一个点，非逐脚本）----------
+test('sqlBundleSummary：汇总脚本数/版本数（去重升序）+ 无完成态时 done=false', () => {
+  const accSqls = [
+    { version: '1.0', id: 'vs1', name: '加列', content: 'A;' },
+    { version: '1.0', id: 'vs2', name: '初值', content: 'B;' },
+    { version: '1.1', id: 'vs3', name: '建表', content: 'C;' },
+  ];
+  const s = sqlBundleSummary(accSqls, {}, '1.1');
+  assert.equal(s.hasSql, true);
+  assert.equal(s.scriptCount, 3);
+  assert.deepEqual(s.versions, ['1.0', '1.1']);   // 版本去重
+  assert.equal(s.done, false);
+  // 空 SQL → hasSql false
+  const empty = sqlBundleSummary([], {}, '1.1');
+  assert.equal(empty.hasSql, false);
+  assert.equal(empty.scriptCount, 0);
+});
+test('sqlBundleSummary：完成态挂 progress[targetVersion].sqlBundle（一个点，读得到 by/at）', () => {
+  const accSqls = [{ version: '1.0', id: 'vs1', name: 'S', content: 'A;' }];
+  const progress = { '1.1': { sqlBundle: { done: true, by: '实施甲', at: '2026-08-04 09:00' } } };
+  const s = sqlBundleSummary(accSqls, progress, '1.1');
+  assert.equal(s.done, true);
+  assert.equal(s.by, '实施甲');
+  assert.equal(s.at, '2026-08-04 09:00');
+  // 目标版本不同 → 读不到（完成态按目标版本挂）
+  assert.equal(sqlBundleSummary(accSqls, progress, '1.0').done, false);
+});
+test('applySqlBundleToggle：单点写/删 + 幂等 + 不改入参 + 与 tasks 桶隔离', () => {
+  const p0 = { '1.1': { tasks: { vt1: { done: true } } } };   // 已有 tasks 桶
+  const r1 = applySqlBundleToggle(p0, '1.1', true, '李四', '2026-08-04 10:00');
+  assert.equal(r1.changed, true);
+  assert.equal(r1.progress['1.1'].sqlBundle.done, true);
+  assert.equal(r1.progress['1.1'].sqlBundle.by, '李四');
+  assert.equal(r1.progress['1.1'].tasks.vt1.done, true, 'tasks 桶不受影响');
+  assert.equal('sqlBundle' in p0['1.1'], false, '入参未变');
+  // 幂等：再勾 changed=false，by 不被覆盖
+  const r2 = applySqlBundleToggle(r1.progress, '1.1', true, '王五', 'x');
+  assert.equal(r2.changed, false);
+  assert.equal(r2.progress['1.1'].sqlBundle.by, '李四');
+  // 取消 → 删 sqlBundle 键；再取消幂等
+  const r3 = applySqlBundleToggle(r1.progress, '1.1', false, '', '');
+  assert.equal(r3.changed, true);
+  assert.equal('sqlBundle' in r3.progress['1.1'], false);
+  assert.equal(applySqlBundleToggle(r3.progress, '1.1', false, '', '').changed, false);
 });
 
 // ---------- 勾选幂等 ----------
@@ -209,12 +249,15 @@ test('端到端：现场 0.9 升 1.1，取 1.0+1.1 累积，左连完成态，�
   const acc = accumulate(range, releases);
   assert.equal(acc.tasks.length, 2);
   assert.equal(acc.sqls.length, 2);
-  const progress = { '1.0': { sqls: { vs1: { done: true, by: '实施', at: '2026-08-03 09:00' } } } };
+  // tasks 逐条完成态；SQL = 一个点（挂目标版本 1.1 的 sqlBundle）
+  const progress = { '1.1': { sqlBundle: { done: true, by: '实施', at: '2026-08-04 09:00' } } };
   const jt = joinProgress(acc.tasks, progress, 'tasks');
-  const js = joinProgress(acc.sqls, progress, 'sqls');
+  const sqlSum = sqlBundleSummary(acc.sqls, progress, '1.1');
   assert.equal(jt.done, 0);
-  assert.equal(js.done, 1);                                   // vs1 已执行
-  assert.equal(js.total, 2);
+  assert.equal(sqlSum.hasSql, true);
+  assert.equal(sqlSum.scriptCount, 2);          // 累积 2 个脚本
+  assert.deepEqual(sqlSum.versions, ['1.0', '1.1']);
+  assert.equal(sqlSum.done, true);              // SQL 单点已执行
   const merged = mergeSql(acc.sqls, { productName: '合理用药系统', from: '0.9', to: '1.1', site: 'X院' });
   assert.ok(merged.indexOf('ALTER TABLE a ADD c INT;') < merged.indexOf('CREATE INDEX i ON a(c);'));
 });

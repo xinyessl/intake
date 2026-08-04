@@ -28,7 +28,7 @@ import * as db from './db.mjs';
 // 现场实施代办清单纯逻辑（部署清单模板/进度/合并/勾选/越权判断，可独立单测：tools/fs-06-checklist.logic.test.mjs）
 import { normTemplateTasks, deployProgress, deployProgressForProduct, deployAggProgress, isNestedDeployTasks, productDeployTasksOf, deployRows, applyDeployToggle, mergeImplTasks, applyBatchTaskToggle, implProgress } from './tools/checklist-logic.mjs';
 // 更新包「按版本独立维护 + 跨版本累积」纯逻辑（区间/累积/左连/勾选/合并SQL，可独立单测：tools/version-plan.logic.test.mjs）
-import { normVersionTasks, normVersionSqls, rangeVersions, accumulate, joinProgress as vpJoinProgress, applyToggle as vpApplyToggle, mergeSql as vpMergeSql } from './tools/version-plan-logic.mjs';
+import { normVersionTasks, normVersionSqls, rangeVersions, accumulate, joinProgress as vpJoinProgress, applyToggle as vpApplyToggle, applySqlBundleToggle as vpApplySqlBundleToggle, sqlBundleSummary as vpSqlBundleSummary, mergeSql as vpMergeSql } from './tools/version-plan-logic.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));           // 收件项目根目录
 const PORT = process.env.PORT || 5180;
@@ -1639,11 +1639,13 @@ const server = http.createServer((req, res) => {
     const acc = accumulate(range, releases);
     const progressForProduct = (cust && cust.updateProgress && typeof cust.updateProgress === 'object' && cust.updateProgress[productId]) || {};
     const jt = vpJoinProgress(acc.tasks, progressForProduct, 'tasks');
-    const js = vpJoinProgress(acc.sqls, progressForProduct, 'sqls');
+    // 2026-08-04 re-target：SQL 不再逐脚本给前端/逐个完成态——整个区间合并成「一个点」（一个完成态 + 一个合并下载）。
+    //   sql 汇总 = {hasSql,scriptCount,versions,done,by,at}；完成态挂 updateProgress[product][toVersion].sqlBundle。
+    const sql = vpSqlBundleSummary(acc.sqls, progressForProduct, toVersion);
     return {
       proj, cust, fromVersion, toVersion, gitTags: tags, versionsInRange: acc.versionsInRange,
-      tasks: jt.rows, sqls: js.rows, accSqls: acc.sqls,
-      taskDone: jt.done, taskTotal: jt.total, sqlDone: js.done, sqlTotal: js.total
+      tasks: jt.rows, sql, accSqls: acc.sqls,
+      taskDone: jt.done, taskTotal: jt.total
     };
   }
 
@@ -1709,26 +1711,31 @@ const server = http.createServer((req, res) => {
     return send(res, 200, JSON.stringify({
       ok: true, site, product: productId, productName: plan.proj.name || productId,
       fromVersion: plan.fromVersion, toVersion: plan.toVersion, versionsInRange: plan.versionsInRange,
-      tasks: plan.tasks, sqls: plan.sqls,
-      taskDone: plan.taskDone, taskTotal: plan.taskTotal, sqlDone: plan.sqlDone, sqlTotal: plan.sqlTotal
+      tasks: plan.tasks,          // 累积实施任务（逐条，仍逐条完成态）
+      sql: plan.sql,              // 2026-08-04：SQL 汇总为「一个点」{hasSql,scriptCount,versions,done,by,at}（明细只在合并下载里）
+      taskDone: plan.taskDone, taskTotal: plan.taskTotal
     }));
   }
 
-  // ---------- POST /api/field/update-toggle：勾选/取消一条累积任务或 SQL（管理员 + field·按 sites 收敛）----------
-  //   {site, product, version, kind:'task'|'sql', itemId, done} → 写 customer.updateProgress[product][version][kind+'s'][itemId]；幂等；返回该 plan 最新进度。
+  // ---------- POST /api/field/update-toggle：勾选/取消一条累积「任务」或「合并 SQL 单点」（管理员 + field·按 sites 收敛）----------
+  //   两种 kind（2026-08-04 re-target）：
+  //     · kind:'task' → 逐条任务完成态：{site,product,version,itemId,done} → 写 updateProgress[product][version].tasks[itemId]（version=该任务所属登记版本）。
+  //     · kind:'sql'  → **合并 SQL 单点**完成态：{site,product,target(或version),done} → 写 updateProgress[product][targetVersion].sqlBundle（一个点，非逐脚本，itemId 忽略）。
+  //   幂等；返回 changed。前端刷 update-plan 拿全量进度。
   if (url.pathname === '/api/field/update-toggle' && req.method === 'POST') {
     return readBody(req, async (b, err) => {
       if (!b) return send(res, 400, JSON.stringify({ ok: false, error: err }));
       const site = String((b && (b.site || b.customerName)) || '').trim();
       const productId = String((b && b.product) || '').trim();
-      const version = String((b && b.version) || '').trim();
-      const kind = (b && b.kind === 'sql') ? 'sqls' : 'tasks';   // 归一到 version-plan-logic 的桶名
+      const isSql = (b && b.kind === 'sql');
+      // task：version = 该任务所属登记版本；sql：目标版本（优先 target，兼容 version）——合并点挂在目标版本下。
+      const version = String((b && (isSql ? (b.target || b.version) : b.version)) || '').trim();
       const itemId = String((b && b.itemId) || '').trim();
       const done = !!(b && b.done);
       if (!site) return send(res, 400, JSON.stringify({ ok: false, error: '缺少医院' }));
       if (!productId) return send(res, 400, JSON.stringify({ ok: false, error: '缺少产品' }));
-      if (!version) return send(res, 400, JSON.stringify({ ok: false, error: '缺少版本' }));
-      if (!itemId) return send(res, 400, JSON.stringify({ ok: false, error: '缺少条目' }));
+      if (!version) return send(res, 400, JSON.stringify({ ok: false, error: isSql ? '缺少目标版本' : '缺少版本' }));
+      if (!isSql && !itemId) return send(res, 400, JSON.stringify({ ok: false, error: '缺少条目' }));   // task 必须带 itemId；sql 单点不需要
       if (!projById(productId)) return send(res, 400, JSON.stringify({ ok: false, error: '产品不存在' }));
       // 越权：site 不在当前账号 sites（管理员不限）
       if (user && !isAdmin(user) && (!Array.isArray(user.sites) || !user.sites.map(String).includes(site))) return send(res, 403, JSON.stringify({ ok: false, error: '无权操作该医院更新计划' }));
@@ -1736,17 +1743,17 @@ const server = http.createServer((req, res) => {
       const c = list.find(x => (x.name || '').trim() === site.trim());
       if (!c) return send(res, 400, JSON.stringify({ ok: false, error: '客户不存在' }));
       const at = nowStamp(); const by = (user && user.username) || '';
-      // updateProgress 顶层 {[productId]:{[version]:{tasks:{},sqls:{}}}}——只改该 product 分支，其余不动。
+      // updateProgress 顶层 {[productId]:{[version]:{tasks:{},sqlBundle:{}}}}——只改该 product 分支，其余不动。
       const up = (c.updateProgress && typeof c.updateProgress === 'object') ? c.updateProgress : {};
       const prevProd = (up[productId] && typeof up[productId] === 'object') ? up[productId] : {};
-      const r = vpApplyToggle(prevProd, version, kind, itemId, done, by, at);
+      const r = isSql
+        ? vpApplySqlBundleToggle(prevProd, version, done, by, at)   // 合并 SQL 单点（挂目标版本 sqlBundle）
+        : vpApplyToggle(prevProd, version, 'tasks', itemId, done, by, at);   // 逐条任务
       if (r.changed) {
         const nextUp = Object.assign({}, up); nextUp[productId] = r.progress;
         c.updateProgress = nextUp; c.updatedAt = at; saveCustomers(list);
       }
-      // 回传最新 plan 进度（target = 该 version 所属批次目标版本无从此端点得知，用 version 本身兜底求进度不合适——
-      //   进度按整个 (from,target] 计，此处不重算 plan，只回 changed + 该条状态，前端刷 update-plan 拿全量进度）。
-      return send(res, 200, JSON.stringify({ ok: true, changed: r.changed, site, product: productId, version, kind: kind === 'sqls' ? 'sql' : 'task', itemId, done }));
+      return send(res, 200, JSON.stringify({ ok: true, changed: r.changed, site, product: productId, version, kind: isSql ? 'sql' : 'task', itemId: isSql ? '' : itemId, done }));
     });
   }
 

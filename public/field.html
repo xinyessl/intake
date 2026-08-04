@@ -296,7 +296,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
 .f-plan-vtag { flex: 0 0 auto; font-size: 11px; font-weight: 700; color: var(--color-primary, #2F6FB5); background: var(--color-primary-light, #EEF4FB); border: 1px solid var(--color-primary-border, #C7D6E8); border-radius: var(--radius-pill); padding: 0 7px; font-family: var(--font-num, monospace); }
 .f-plan-exec-hint { font-size: 11px; font-weight: 400; color: var(--color-text-tertiary); }
 .f-plan-desc { font-size: 12px; color: var(--color-text-secondary); margin-top: 2px; white-space: pre-wrap; word-break: break-word; }
-.f-plan-sql { font-size: 11.5px; color: var(--color-text-secondary); margin-top: 4px; background: var(--color-bg-subtle, #f5f7fa); border: 1px solid var(--color-border); border-radius: 6px; padding: 6px 8px; max-height: 160px; overflow: auto; white-space: pre-wrap; word-break: break-word; font-family: var(--font-num, monospace); }
+.f-plan-sqlitem .f-plan-dl { margin-top: 6px; }
 .f-plan-meta { font-size: 11.5px; color: var(--color-text-tertiary); margin-top: 3px; display: flex; align-items: center; gap: 4px; }
 /* FS-06 部署清单（左侧医院视图 · 可折叠区块 · 按产品/系统分区） */
 .f-deploy-block { border: 1px solid var(--color-primary-border, #C7D6E8); border-radius: var(--radius); background: var(--color-primary-light, #EEF4FB); margin-bottom: 12px; overflow: hidden; }
@@ -1486,10 +1486,11 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       renderUpdatePlan(g, box, b);
     }).catch(function () { box.innerHTML = ''; });
   }
+  // 2026-08-04 re-target：一份统一「实施任务清单」为主体；SQL 执行 = 清单末尾**一个条目**（一个完成态 + 合并下载，不逐脚本）。
   function renderUpdatePlan(g, box, plan) {
     box.innerHTML = '';
     var tasks = Array.isArray(plan.tasks) ? plan.tasks : [];
-    var sqls = Array.isArray(plan.sqls) ? plan.sqls : [];
+    var sql = plan.sql || { hasSql: false };
     var vers = Array.isArray(plan.versionsInRange) ? plan.versionsInRange : [];
     // 头：现场 X → 目标 Y + 覆盖版本数
     var hd = document.createElement('div');
@@ -1498,37 +1499,21 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     hd.innerHTML = '<i class="ti ti-arrow-guide"></i> 更新计划 · 现场 <b>' + fromV + '</b> → 目标 <b>' + escapeHtml(plan.toVersion || '') + '</b>' +
       '<span class="f-plan-vcount">覆盖 ' + vers.length + ' 个版本</span>';
     box.appendChild(hd);
-    if (!tasks.length && !sqls.length) {
+    if (!tasks.length && !sql.hasSql) {
       var em = document.createElement('div');
       em.className = 'f-plan-empty';
-      em.textContent = '该版本区间暂无登记的更新任务 / SQL（运营端在「版本发版」登记后会出现在这里）';
+      em.textContent = '该版本区间暂无登记的更新任务（运营端在「版本发版」登记后会出现在这里）';
       box.appendChild(em);
       return;
     }
-    // 累积实施任务（带版本标签，逐条 checkbox）
-    if (tasks.length) {
-      var tsec = document.createElement('div'); tsec.className = 'f-plan-sec';
-      tsec.appendChild(planSecHd('ti-list-check', '累积实施任务', plan.taskDone, plan.taskTotal));
-      tasks.forEach(function (t) { tsec.appendChild(mkPlanItem(g, 'task', t)); });
-      box.appendChild(tsec);
-    }
-    // 累积 SQL 脚本（逐条勾「已执行」 + 合并下载按钮）
-    if (sqls.length) {
-      var ssec = document.createElement('div'); ssec.className = 'f-plan-sec';
-      var sh = planSecHd('ti-database', '累积 SQL 脚本', plan.sqlDone, plan.sqlTotal);
-      var dlBtn = document.createElement('button');
-      dlBtn.type = 'button'; dlBtn.className = 'f-plan-dl';
-      dlBtn.innerHTML = '<i class="ti ti-download"></i> 合并下载 SQL';
-      dlBtn.addEventListener('click', function () {
-        var site = state.curSite || '';
-        var u = '/api/field/update-sql-merged?site=' + encodeURIComponent(site) + '&product=' + encodeURIComponent(g.product) + '&target=' + encodeURIComponent(g.pkgVersion || '');
-        window.open(u, '_blank');
-      });
-      sh.appendChild(dlBtn);
-      ssec.appendChild(sh);
-      sqls.forEach(function (s) { ssec.appendChild(mkPlanItem(g, 'sql', s)); });
-      box.appendChild(ssec);
-    }
+    // 一份统一实施任务清单（累积任务逐条 + 末尾 SQL 执行条目）——总进度 = 任务完成 + SQL 单点（若有）
+    var totalItems = (plan.taskTotal || 0) + (sql.hasSql ? 1 : 0);
+    var doneItems = (plan.taskDone || 0) + (sql.hasSql && sql.done ? 1 : 0);
+    var sec = document.createElement('div'); sec.className = 'f-plan-sec';
+    sec.appendChild(planSecHd('ti-list-check', '实施任务清单', doneItems, totalItems));
+    tasks.forEach(function (t) { sec.appendChild(mkPlanTaskItem(g, t)); });
+    if (sql.hasSql) sec.appendChild(mkSqlBundleItem(g, plan, sql));   // SQL 执行 = 一个条目，放清单末尾
+    box.appendChild(sec);
   }
   function planSecHd(icon, label, done, total) {
     var hd = document.createElement('div');
@@ -1536,36 +1521,71 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     hd.innerHTML = '<i class="ti ' + icon + '"></i> ' + escapeHtml(label) + ' <span class="f-plan-prog">' + (done || 0) + '/' + (total || 0) + '</span>';
     return hd;
   }
-  // 单条计划项（task/sql 通用）：checkbox + 版本标签 + 标题(name) + 说明(SQL 正文预览) + （已完成）完成人/时间
-  function mkPlanItem(g, kind, it) {
+  // 单条累积任务：checkbox + 版本标签 + 标题 + 说明 + （已完成）完成人/时间
+  function mkPlanTaskItem(g, it) {
     var row = document.createElement('div');
     row.className = 'f-plan-item' + (it.done ? ' done' : '');
     var cb = document.createElement('input');
     cb.type = 'checkbox'; cb.className = 'f-plan-cb'; cb.checked = !!it.done;
-    cb.addEventListener('change', function () { doPlanToggle(g, kind, it, cb.checked, cb); });
+    cb.addEventListener('change', function () { doTaskToggle(g, it, cb.checked, cb); });
     var main = document.createElement('div');
     main.className = 'f-plan-main';
-    var title = kind === 'sql' ? (it.name || '（未命名脚本）') : (it.title || '（无标题）');
-    var descHtml = '';
-    if (kind === 'sql' && it.content) descHtml = '<pre class="f-plan-sql">' + escapeHtml(it.content) + '</pre>';
-    else if (kind === 'task' && it.desc) descHtml = '<div class="f-plan-desc">' + escapeHtml(it.desc) + '</div>';
+    var descHtml = it.desc ? ('<div class="f-plan-desc">' + escapeHtml(it.desc) + '</div>') : '';
     var metaHtml = it.done ? ('<div class="f-plan-meta"><i class="ti ti-user"></i> ' + escapeHtml(it.by || '—') + ' · ' + escapeHtml(fmtTime(it.at)) + '</div>') : '';
-    main.innerHTML = '<div class="f-plan-title"><span class="f-plan-vtag">' + escapeHtml(it.version || '') + '</span>' + escapeHtml(title) +
-      (kind === 'sql' ? '<span class="f-plan-exec-hint">（在库手动执行后勾选）</span>' : '') + '</div>' + descHtml + metaHtml;
+    main.innerHTML = '<div class="f-plan-title"><span class="f-plan-vtag">' + escapeHtml(it.version || '') + '</span>' + escapeHtml(it.title || '（无标题）') + '</div>' + descHtml + metaHtml;
     row.appendChild(cb); row.appendChild(main);
     return row;
   }
-  // 勾选/取消一条累积计划项 → /api/field/update-toggle；成功后刷新该批 plan（进度随完成态更新）。
-  function doPlanToggle(g, kind, it, done, cb) {
+  // SQL 执行条目（清单里的一个点）：一个「已执行」checkbox + 「下载合并 SQL」按钮，不展开正文。
+  function mkSqlBundleItem(g, plan, sql) {
+    var row = document.createElement('div');
+    row.className = 'f-plan-item f-plan-sqlitem' + (sql.done ? ' done' : '');
+    var cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.className = 'f-plan-cb'; cb.checked = !!sql.done;
+    cb.addEventListener('change', function () { doSqlBundleToggle(g, plan, cb.checked, cb); });
+    var main = document.createElement('div');
+    main.className = 'f-plan-main';
+    var verCount = Array.isArray(sql.versions) ? sql.versions.length : 0;
+    var titleLine = '<div class="f-plan-title"><i class="ti ti-database"></i> 执行数据库升级 SQL' +
+      '<span class="f-plan-exec-hint">（本次合并 ' + (sql.scriptCount || 0) + ' 个脚本 · ' + verCount + ' 个版本 · 在库手动执行后勾选）</span></div>';
+    var metaHtml = sql.done ? ('<div class="f-plan-meta"><i class="ti ti-user"></i> ' + escapeHtml(sql.by || '—') + ' · ' + escapeHtml(fmtTime(sql.at)) + '</div>') : '';
+    var dl = document.createElement('button');
+    dl.type = 'button'; dl.className = 'f-plan-dl';
+    dl.innerHTML = '<i class="ti ti-download"></i> 下载合并 SQL';
+    dl.addEventListener('click', function () {
+      var site = state.curSite || '';
+      var u = '/api/field/update-sql-merged?site=' + encodeURIComponent(site) + '&product=' + encodeURIComponent(g.product) + '&target=' + encodeURIComponent(g.pkgVersion || '');
+      window.open(u, '_blank');
+    });
+    main.innerHTML = titleLine + metaHtml;
+    main.appendChild(dl);
+    row.appendChild(cb); row.appendChild(main);
+    return row;
+  }
+  function refreshPlanBlock(g) {
+    var box = document.querySelector('.f-plan-block[data-batch="' + (g.batchId || '') + '"]');
+    if (box) loadUpdatePlan(g, box); else loadBatchView();
+  }
+  // 勾选/取消一条累积任务 → /api/field/update-toggle {kind:'task'}；成功后刷新该批 plan。
+  function doTaskToggle(g, it, done, cb) {
     cb.disabled = true;
     var site = state.curSite || '';
-    api('/api/field/update-toggle', { method: 'POST', body: JSON.stringify({ site: site, product: g.product, version: it.version, kind: kind, itemId: it.id, done: done }) }).then(function (r) {
+    api('/api/field/update-toggle', { method: 'POST', body: JSON.stringify({ site: site, product: g.product, version: it.version, kind: 'task', itemId: it.id, done: done }) }).then(function (r) {
       var b = r.body || {};
       if (!b.ok) { cb.disabled = false; cb.checked = !done; showToast(b.error || '操作失败', 'error'); return; }
       showToast(done ? '已标记完成' : '已取消完成', 'success');
-      // 刷新该批更新计划块（进度 + 完成人/时间）
-      var box = document.querySelector('.f-plan-block[data-batch="' + (g.batchId || '') + '"]');
-      if (box) loadUpdatePlan(g, box); else loadBatchView();
+      refreshPlanBlock(g);
+    }).catch(function () { cb.disabled = false; cb.checked = !done; showToast('操作失败，请重试', 'error'); });
+  }
+  // 勾选/取消「合并 SQL 单点」→ /api/field/update-toggle {kind:'sql', target:目标版本}；一个完成态（非逐脚本）。
+  function doSqlBundleToggle(g, plan, done, cb) {
+    cb.disabled = true;
+    var site = state.curSite || '';
+    api('/api/field/update-toggle', { method: 'POST', body: JSON.stringify({ site: site, product: g.product, kind: 'sql', target: (plan.toVersion || g.pkgVersion || ''), done: done }) }).then(function (r) {
+      var b = r.body || {};
+      if (!b.ok) { cb.disabled = false; cb.checked = !done; showToast(b.error || '操作失败', 'error'); return; }
+      showToast(done ? '已标记 SQL 执行完成' : '已取消 SQL 执行标记', 'success');
+      refreshPlanBlock(g);
     }).catch(function () { cb.disabled = false; cb.checked = !done; showToast('操作失败，请重试', 'error'); });
   }
 
@@ -3267,7 +3287,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   })();
 
   // 暴露给测试/调试（不含敏感数据）
-  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, newConversation: newConversation, sendChat: sendChat, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast, openMaintainEdit: openMaintainEdit, doMaintainSave: doMaintainSave, maintainChipHtml: maintainChipHtml, maintainDaysLeft: maintainDaysLeft, renderTodoBody: renderTodoBody, mkUpdatePlanBlock: mkUpdatePlanBlock, loadUpdatePlan: loadUpdatePlan, renderUpdatePlan: renderUpdatePlan, mkPlanItem: mkPlanItem, doPlanToggle: doPlanToggle, mkDeployChecklist: mkDeployChecklist, toggleDeployCollapse: toggleDeployCollapse, deployProductsOf: deployProductsOf, deployProdTasks: deployProdTasks, deployIsNested: deployIsNested, deployAggProgress: deployAggProgress, mkDeployItem: mkDeployItem, doDeployToggle: doDeployToggle };
+  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, newConversation: newConversation, sendChat: sendChat, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast, openMaintainEdit: openMaintainEdit, doMaintainSave: doMaintainSave, maintainChipHtml: maintainChipHtml, maintainDaysLeft: maintainDaysLeft, renderTodoBody: renderTodoBody, mkUpdatePlanBlock: mkUpdatePlanBlock, loadUpdatePlan: loadUpdatePlan, renderUpdatePlan: renderUpdatePlan, mkPlanTaskItem: mkPlanTaskItem, mkSqlBundleItem: mkSqlBundleItem, doTaskToggle: doTaskToggle, doSqlBundleToggle: doSqlBundleToggle, mkDeployChecklist: mkDeployChecklist, toggleDeployCollapse: toggleDeployCollapse, deployProductsOf: deployProductsOf, deployProdTasks: deployProdTasks, deployIsNested: deployIsNested, deployAggProgress: deployAggProgress, mkDeployItem: mkDeployItem, doDeployToggle: doDeployToggle };
 })();
 </script>
 </body>

@@ -123,6 +123,52 @@ export function joinProgress(items, progress, kind) {
   return { rows, done, total: list.length };
 }
 
+// ---------- 合并 SQL「单点完成态」（一份合并文件 = 一个完成标记，非逐脚本）----------
+// 2026-08-04 用户反馈 re-target：整个版本区间的 SQL 合并成一个文件，在任务清单里体现为**一个条目**、**一个完成态**。
+//   存储：customer.updateProgress[productId][targetVersion].sqlBundle = { done, by, at }（targetVersion = 本次更新目标版本）。
+//   —— 与逐条 tasks/sqls 桶并存不冲突（sqlBundle 是 version 对象下的独立键，非 tasks/sqls 桶）。
+//
+// 汇总合并 SQL 为「一个点」：给 accumulate 出来的 sqls（升序·带 version），产出前端展示所需摘要（不含明细正文）。
+//   progress = customer.updateProgress[productId]；targetVersion = 本次目标版本（完成态挂它下）。
+//   返回 { hasSql, scriptCount, versions:[去重升序], done, by, at }。
+export function sqlBundleSummary(accSqls, progress, targetVersion) {
+  const list = Array.isArray(accSqls) ? accSqls : [];
+  const scriptCount = list.length;
+  const versions = [];
+  for (const s of list) { if (s && s.version && versions.indexOf(s.version) < 0) versions.push(s.version); }
+  const prog = progress && typeof progress === 'object' ? progress : {};
+  const v = String(targetVersion || '');
+  const vp = prog[v] && typeof prog[v] === 'object' ? prog[v] : {};
+  const st = vp.sqlBundle && typeof vp.sqlBundle === 'object' ? vp.sqlBundle : null;
+  return {
+    hasSql: scriptCount > 0,
+    scriptCount,
+    versions,
+    done: !!(st && st.done),
+    by: (st && st.by) || '',
+    at: (st && st.at) || ''
+  };
+}
+
+// 应用一次「合并 SQL 单点」勾选/取消（幂等）：写 progress[targetVersion].sqlBundle = {done,by,at}（假删）。
+//   与 applyToggle 同风格逐层浅拷贝、不改入参。kind 由调用方判定（这是 SQL 单点专用，非逐脚本）。
+export function applySqlBundleToggle(progress, targetVersion, done, by, at) {
+  const src = progress && typeof progress === 'object' ? progress : {};
+  const v = String(targetVersion || '');
+  const next = Object.assign({}, src);
+  const curV = (next[v] && typeof next[v] === 'object') ? next[v] : {};
+  const nextV = Object.assign({}, curV);
+  if (done) {
+    if (nextV.sqlBundle && nextV.sqlBundle.done) return { progress: next, changed: false };   // 幂等：已完成
+    nextV.sqlBundle = { done: true, by: clip(by, 40), at: clip(at, 40) };
+  } else {
+    if (!('sqlBundle' in nextV)) return { progress: next, changed: false };                    // 幂等：本就未完成
+    delete nextV.sqlBundle;
+  }
+  next[v] = nextV;
+  return { progress: next, changed: true };
+}
+
 // ---------- 应用一次勾选/取消（幂等·(医院×产品×版本×条目) 作用域）----------
 // progress：customer.updateProgress[productId]（可空）；version/kind('tasks'|'sqls')/itemId/done/by/at。
 // done 真 → 写 progress[version][kind][itemId]={done,by,at}；done 假 → 删该键（假删）。

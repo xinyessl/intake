@@ -137,13 +137,16 @@ test('R-3 非管理员不能登记（403），但可读版本登记', async () =
 });
 
 // ============ 累积更新计划（field/update-plan）============
-test('P-1 impl 拉自己院更新计划：结构完整（from/to/versionsInRange/tasks/sqls/进度）', async () => {
+test('P-1 impl 拉自己院更新计划：结构完整（from/to/versionsInRange/tasks/sql 汇总/任务进度）', async () => {
   const r = await api('/api/field/update-plan?site=' + encodeURIComponent(S_A) + '&product=' + PID + '&target=1.1', { method: 'GET', jar: impl });
   assert.equal(r.json?.ok, true, '拉计划应 ok：' + JSON.stringify(r.json));
   assert.equal(r.json.fromVersion, '1.0', 'fromVersion = 该院该产品现场版本');
   assert.equal(r.json.toVersion, '1.1');
-  assert.ok('versionsInRange' in r.json && 'tasks' in r.json && 'sqls' in r.json, '带 versionsInRange/tasks/sqls');
-  assert.ok('taskDone' in r.json && 'taskTotal' in r.json && 'sqlDone' in r.json && 'sqlTotal' in r.json, '带四个进度计数');
+  assert.ok('versionsInRange' in r.json && 'tasks' in r.json, '带 versionsInRange/tasks');
+  assert.ok('taskDone' in r.json && 'taskTotal' in r.json, '带任务进度计数');
+  // 2026-08-04：SQL 汇总为一个点 sql:{hasSql,scriptCount,versions,done,by,at}（不再逐脚本 sqls[]）
+  assert.ok(r.json.sql && typeof r.json.sql === 'object' && 'hasSql' in r.json.sql && 'scriptCount' in r.json.sql, '带 sql 汇总对象（单点）');
+  assert.equal('sqls' in r.json, false, '不再返回逐脚本 sqls[] 明细');
   // 无 git tag 时 listVersions=[] → range=[] → 累积为空（区间以 git tag 为准；本用例验结构 + 空区间兜底不崩）。
 });
 test('P-2 越权院 → 403', async () => {
@@ -163,16 +166,23 @@ test('T-1 impl 勾选一条任务 → updateProgress 嵌套落态 + by/at 留痕
   const r2 = await api('/api/field/update-toggle', { method: 'POST', body: { site: S_A, product: PID, version: '1.1', kind: 'task', itemId: VT1, done: true }, jar: impl });
   assert.equal(r2.json.changed, false, '重复勾选幂等 changed=false');
 });
-test('T-2 kind sql 独立分桶（同版本 task/sql 不串）+ 取消假删', async () => {
-  const r = await api('/api/field/update-toggle', { method: 'POST', body: { site: S_A, product: PID, version: '1.1', kind: 'sql', itemId: VS1, done: true }, jar: impl });
+test('T-2 kind sql = 合并 SQL 单点（挂目标版本 sqlBundle，非逐脚本）+ 幂等 + 取消假删 + 与 tasks 隔离', async () => {
+  // 单点：kind:'sql' + target=目标版本，无需 itemId
+  const r = await api('/api/field/update-toggle', { method: 'POST', body: { site: S_A, product: PID, kind: 'sql', target: '1.1', done: true }, jar: impl });
+  assert.equal(r.json?.ok, true, 'SQL 单点勾选应 ok：' + JSON.stringify(r.json));
   assert.equal(r.json.changed, true);
+  assert.equal(r.json.kind, 'sql');
   const c = readCustomer(S_A);
-  assert.equal(c.updateProgress[PID]['1.1'].sqls[VS1].done, true, 'sql 桶独立落态');
+  assert.equal(c.updateProgress[PID]['1.1'].sqlBundle.done, true, '合并 SQL 单点落 updateProgress[product][target].sqlBundle');
+  assert.ok(c.updateProgress[PID]['1.1'].sqlBundle.by && c.updateProgress[PID]['1.1'].sqlBundle.at, 'sqlBundle by/at 留痕');
   assert.equal(c.updateProgress[PID]['1.1'].tasks[VT1].done, true, 'task 桶不受影响');
-  // 取消 → 假删该键
-  const un = await api('/api/field/update-toggle', { method: 'POST', body: { site: S_A, product: PID, version: '1.1', kind: 'sql', itemId: VS1, done: false }, jar: impl });
+  // 幂等
+  const r2 = await api('/api/field/update-toggle', { method: 'POST', body: { site: S_A, product: PID, kind: 'sql', target: '1.1', done: true }, jar: impl });
+  assert.equal(r2.json.changed, false, 'SQL 单点重复勾选幂等');
+  // 取消 → 假删 sqlBundle
+  const un = await api('/api/field/update-toggle', { method: 'POST', body: { site: S_A, product: PID, kind: 'sql', target: '1.1', done: false }, jar: impl });
   assert.equal(un.json.changed, true);
-  assert.equal(VS1 in (readCustomer(S_A).updateProgress[PID]['1.1'].sqls || {}), false, '取消 → 假删 sql 键');
+  assert.equal('sqlBundle' in (readCustomer(S_A).updateProgress[PID]['1.1'] || {}), false, '取消 → 假删 sqlBundle 键');
 });
 test('T-3 越权院勾选 → 403', async () => {
   const r = await api('/api/field/update-toggle', { method: 'POST', body: { site: S_A, product: PID, version: '1.1', kind: 'task', itemId: VT1, done: true }, jar: other });
