@@ -691,7 +691,7 @@ async function saveIntake(proj, e) {   // 缓存 + MySQL(为准) + 导出 .md/.j
   try { const dir = intakeDir(proj); fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, e.id + '.json'), JSON.stringify(e, null, 2)); fs.writeFileSync(path.join(dir, e.id + '.md'), renderIntakeMd(e)); } catch {}
 }
 function loadIntake(proj, id) { const e = CACHE.intakes[proj.id] && CACHE.intakes[proj.id][id]; return e ? ensureLifecycle(structuredClone(e)) : null; }
-function listIntake(proj, opts = {}) { const m = CACHE.intakes[proj.id] || {}; let arr = Object.values(m); if (!opts.withConsult) arr = arr.filter(e => e.type !== 'consult'); const out = arr.map(e => ({ id: e.id, type: e.type, title: e.title, subsystem: e.subsystem || '', module: e.module, version: e.version || '', site: e.site || '', priority: e.priority, reporter: e.reporter, status: e.status, lifecycle: deriveLifecycle(e), assignee: e.assignee || '', batch: e.batch || '', submittedAt: e.submittedAt, updatedAt: e.updatedAt || e.submittedAt, unread: !!e.needReply })); return out.sort((a, b) => (b.updatedAt || b.submittedAt || '').localeCompare(a.updatedAt || a.submittedAt || '')); }
+function listIntake(proj, opts = {}) { const m = CACHE.intakes[proj.id] || {}; let arr = Object.values(m).filter(e => !e.deleted); if (!opts.withConsult) arr = arr.filter(e => e.type !== 'consult'); const out = arr.map(e => ({ id: e.id, type: e.type, title: e.title, subsystem: e.subsystem || '', module: e.module, version: e.version || '', site: e.site || '', priority: e.priority, reporter: e.reporter, status: e.status, lifecycle: deriveLifecycle(e), assignee: e.assignee || '', batch: e.batch || '', convertedTo: e.convertedTo || '', submittedAt: e.submittedAt, updatedAt: e.updatedAt || e.submittedAt, unread: !!e.needReply })); return out.sort((a, b) => (b.updatedAt || b.submittedAt || '').localeCompare(a.updatedAt || a.submittedAt || '')); }
 // 多现场归并：按 标题(归一化)+模块 聚合，展开 现场/版本/条数，看"通病 vs 某版本回归"
 function aggregateIntake(proj) {
   const norm = t => String(t || '').toLowerCase().replace(/\s+/g, '').replace(/[，,。.、!！?？:：]/g, '');
@@ -971,12 +971,12 @@ function authGate(pathname, user, link) {
   if (!user) return 'login';
   if (isAdmin(user)) return 'allow';                                    // 管理员：全放行
   // 现场侧（产品经理 / 实施工程师）：只允许 提交面 + 工单查看 + 验证
-  const FIELD_OK = new Set(['/', '/submit.html', '/detail.html', '/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/consult', '/api/consult-to-intake', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-transition', '/api/field/submissions', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/field/update-plan', '/api/field/update-toggle', '/api/field/update-sql-merged']);   // FS-05：现场端新端点（按批次视图/下载/改版本/维保回写/逐单验证）+ 累积更新计划（读代码 docs/deploy.json/累积计划/勾选/合并SQL），均端点内按 user.sites 二次收敛。2026-08-05 架构重构删 deploy-template/customer-deploy-task/batch-task/version-releases（跟随产品代码，废弃手工登记与部署模板）
+  const FIELD_OK = new Set(['/', '/submit.html', '/detail.html', '/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/consult', '/api/consult-to-intake', '/api/intake-delete', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-transition', '/api/field/submissions', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/field/update-plan', '/api/field/update-toggle', '/api/field/update-sql-merged']);   // FS-05：现场端新端点（按批次视图/下载/改版本/维保回写/逐单验证）+ 累积更新计划（读代码 docs/deploy.json/累积计划/勾选/合并SQL），均端点内按 user.sites 二次收敛。2026-08-05 架构重构删 deploy-template/customer-deploy-task/batch-task/version-releases（跟随产品代码，废弃手工登记与部署模板）
   return FIELD_OK.has(pathname) ? 'allow' : 'forbidden';
 }
 // FS-08 §4①：field 域接口允许集 = LINK_OK ∪ FIELD_OK（供访客链接 + 现场账号），与 authGate 内 FIELD_OK 同源，避免漂移。
 //   注意：这里是 authGate 里那份 FIELD_OK 的镜像常量——两者若改一处务必同步（authGate 用于登录态白名单，本集用于 field 域名层外层闸）。
-const FS08_FIELD_API = new Set(['/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/consult', '/api/consult-to-intake', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-transition', '/api/field/submissions', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/field/update-plan', '/api/field/update-toggle', '/api/field/update-sql-merged', '/api/model-config']);   // FS-05 端点须与 FIELD_OK 同步，否则实施域(field)整个流被 originGate deny→forbidden（实测坑，见 fs-08 防漂移断言）；update-plan/update-toggle/update-sql-merged 为累积更新计划现场端。2026-08-05 架构重构删 deploy-template/customer-deploy-task/batch-task/version-releases（跟随产品代码）
+const FS08_FIELD_API = new Set(['/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/consult', '/api/consult-to-intake', '/api/intake-delete', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-transition', '/api/field/submissions', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/field/update-plan', '/api/field/update-toggle', '/api/field/update-sql-merged', '/api/model-config']);   // FS-05 端点须与 FIELD_OK 同步，否则实施域(field)整个流被 originGate deny→forbidden（实测坑，见 fs-08 防漂移断言）；update-plan/update-toggle/update-sql-merged 为累积更新计划现场端。2026-08-05 架构重构删 deploy-template/customer-deploy-task/batch-task/version-releases（跟随产品代码）
 // field 域可加载的静态页（现场提交面 + 实施端外壳 + 现场可看的详情 + 登录页）。console/inbox/customers/kb/model-config/accounts/projects 等后台页不在其中 → 越域拒。
 const FS08_FIELD_PAGES = new Set(['/', '/field.html', '/submit.html', '/detail.html', '/login.html']);
 // 鉴权/健康端点：两域都放（field 域现场登录/查身份/登出/健康探测需要）。
@@ -1021,6 +1021,22 @@ function convergeSite(user, wanted) {
   if (!ss.length) return '';                            // 未分配医院 → 不落任何 site（避免越权落库）
   if (w && ss.includes(w)) return w;                    // 传的是合法医院 → 采信
   return ss[0];                                         // 越权/空 → 收敛到当前账号首家合法医院
+}
+
+// 现场提交记录「软删除」守卫（FS-02 删除）：返回 {ok} 或 {ok:false,error}。纯函数（无 I/O），供 /api/intake-delete + 逻辑测试共用。
+//   e   = 目标记录（已从缓存 loadIntake 出来的副本，含 convertedTo/batch/site/deleted）
+//   user= 当前登录用户（isAdmin 放行；现场账号按 user.sites 收敛）
+// 守卫顺序：不存在 → not_found；已删 → 幂等(gone)；已转工单/已归批 → 禁删；越权 site → 无权。
+function intakeDeleteGuard(e, user) {
+  if (!e) return { ok: false, code: 'not_found', error: '记录不存在' };
+  if (e.deleted) return { ok: false, code: 'gone', error: '记录已删除' };                        // 幂等：已删再删，前端可当成功从清单移除
+  if (String(e.convertedTo || '').trim()) return { ok: false, code: 'converted', error: '已转工单的咨询不可删除' };
+  if (String(e.batch || '').trim()) return { ok: false, code: 'batched', error: '已归批的需求/BUG 不可删除' };
+  if (user && !isAdmin(user)) {                                                                  // 现场账号：只能删自己 sites 内记录（管理员不限）
+    const ss = Array.isArray(user.sites) ? user.sites.map(String) : [];
+    if (!ss.includes(String(e.site || ''))) return { ok: false, code: 'forbidden', error: '无权删除该记录' };
+  }
+  return { ok: true };
 }
 
 // FS-02 §6.2：真实 lifecycle（中文）→ 现场 UI 状态标签 + theme.css tag 类。未命中键 → 灰底兜底（不静默报错）。
@@ -1232,6 +1248,7 @@ const server = http.createServer((req, res) => {
       const ticketIds = [];
       for (const e of Object.values(store)) {
         if (!e || e.type === 'consult') continue;                       // consult 不进批次
+        if (e.deleted) continue;                                        // 软删记录不归批（即便还挂着已立项态）
         if (deriveLifecycle(e) !== '已立项') continue;                   // 仅已落实
         if (String(e.batch || '').trim()) continue;                      // 已归批不重复归入
         ticketIds.push(e.id);
@@ -2085,7 +2102,7 @@ const server = http.createServer((req, res) => {
       let convId = String(b.convId || '').trim();
       if (reply) try {
         const store = CACHE.intakes[proj.id] || {};
-        const prev = convId && store[convId] && store[convId].type === 'consult' ? store[convId] : null;
+        const prev = convId && store[convId] && store[convId].type === 'consult' && !store[convId].deleted ? store[convId] : null;   // 软删 consult 不复活续聊 → 起新会话
         if (!prev) convId = intakeGenId(proj, 'consult');
         // 咨询存图（镜像 intake-chat/submit）：≤6 张 data URL 落 intake-store/<proj>/media/<convId>/img-N.png，记 e.media（detail.html 已按 e.media 展示、对 consult 同样生效）。
         //   续聊同 convId：从已有 media 数量起序号累加（不覆盖前几轮截图），累计封顶 6 张；base 目录用 convId（此处 id===convId）。
@@ -2113,7 +2130,7 @@ const server = http.createServer((req, res) => {
       const proj = projById(link ? link.project : b.project); if (!proj) return send(res, 400, JSON.stringify({ ok: false, error: '请选择项目' }));
       const convId = String(b.convId || '').trim(); if (!convId) return send(res, 400, JSON.stringify({ ok: false, error: '缺少咨询会话 id' }));
       const src = CACHE.intakes[proj.id] && CACHE.intakes[proj.id][convId];
-      if (!src || src.type !== 'consult') return send(res, 400, JSON.stringify({ ok: false, error: '咨询记录不存在' }));   // 只允许对真实 consult 记录转单
+      if (!src || src.type !== 'consult' || src.deleted) return send(res, 400, JSON.stringify({ ok: false, error: '咨询记录不存在' }));   // 只允许对真实（未删）consult 记录转单
       const type = b.type === 'bug' ? 'bug' : 'requirement';                                   // 白名单：仅 bug/requirement，其余归为需求
       const version = String(src.version || '').trim();
       if (type === 'bug' && !version) return send(res, 400, JSON.stringify({ ok: false, error: '报BUG 需产品版本' }));   // BUG 必须有版本（沿用 intake-submit 规则）
@@ -2145,6 +2162,27 @@ const server = http.createServer((req, res) => {
       // 给咨询记录标 convertedTo=id（留痕 + 前端显「已转工单」防重复）
       try { const cur = CACHE.intakes[proj.id][convId]; if (cur && !cur.convertedTo) { cur.convertedTo = id; cur.updatedAt = nowStamp(); await saveIntake(proj, cur); } } catch {}
       send(res, 200, JSON.stringify({ ok: true, id }));
+    });
+  }
+  if (url.pathname === '/api/intake-delete' && req.method === 'POST') {   // FS-02 删除：现场提交记录软删（隐藏标记，不真删库/磁盘，media/history 全保留）。现场+管理员可调（已进 FIELD_OK/FS08_FIELD_API）。
+    return readBody(req, async (b, err) => {
+      if (!b) return send(res, 400, JSON.stringify({ ok: false, error: err }));
+      const proj = projById(link ? link.project : b.project); if (!proj) return send(res, 400, JSON.stringify({ ok: false, error: '请选择项目' }));
+      const id = String((b && b.id) || '').trim(); if (!id) return send(res, 400, JSON.stringify({ ok: false, error: '缺少记录 id' }));
+      const e = loadIntake(proj, id);
+      const g = intakeDeleteGuard(e, user);   // 守卫：不存在/已删/已转工单/已归批/越权（真值以此端点为准，不信前端 deletable）
+      if (!g.ok) {
+        if (g.code === 'gone') return send(res, 200, JSON.stringify({ ok: true, alreadyDeleted: true }));   // 幂等：已删当成功（前端从清单移除即可）
+        const st = g.code === 'not_found' ? 404 : (g.code === 'forbidden' ? 403 : 400);
+        return send(res, st, JSON.stringify({ ok: false, error: g.error }));
+      }
+      const at = nowStamp(); const by = user ? (user.name || user.username) : (link ? link.name : '现场'); const byRole = user ? user.role : 'field';
+      e.deleted = true; e.deletedAt = at; e.deletedBy = by;                                       // 软删标记随 data JSON 落库（不加库列，同 e.batch/media 范式）
+      if (!Array.isArray(e.history)) e.history = [];
+      e.history.push({ from: e.status || e.lifecycle || '', to: '已删除', by, byRole, at, note: '删除' });   // 留痕：谁/何时/删除
+      e.updatedAt = at;
+      await saveIntake(proj, e);                                                                  // 缓存+MySQL(data JSON)+导出 .md/.json 一并更新
+      return send(res, 200, JSON.stringify({ ok: true }));
     });
   }
   if (url.pathname === '/api/kb-search') {   // FS-07：现场只读检索经验库（全库跨产品聚合，方案 A）。已加入 FIELD_OK（现场可调）。
@@ -2330,7 +2368,8 @@ const server = http.createServer((req, res) => {
     const schedByBatch = new Map();
     for (const bt of loadBatches()) schedByBatch.set(String(bt.id || ''), String(bt.scheduleDate || ''));
     // 条目 → 现场清单条目（§6.2 状态标签映射）。挂 batch/batchSchedule：按类型卡显「计划交付 <date>」（该工单归批则取批次排期，无则空）。
-    const mapItem = (it) => { const lc = it.lifecycle || '待处理'; const sl = fieldStatusLabel(lc); const bid = String(it.batch || '').trim(); return { id: it.id, project: it.project, type: it.type, title: it.title || '', subsystem: it.subsystem || '', site: it.site || '', version: it.version || '', module: it.module || '', reporter: it.reporter || '', lifecycle: lc, statusLabel: sl.label, statusTag: sl.tag, batchId: bid, batchSchedule: bid ? (schedByBatch.get(bid) || '') : '', submittedAt: it.submittedAt || '', updatedAt: it.updatedAt || it.submittedAt || '' }; };
+    // 可删标记（前端显隐删除入口用）：已转工单（convertedTo）或已归批（batch）→ 不可删（禁破坏在办流程）；守卫真值以 /api/intake-delete 端点为准，deletable 只供 UI。
+    const mapItem = (it) => { const lc = it.lifecycle || '待处理'; const sl = fieldStatusLabel(lc); const bid = String(it.batch || '').trim(); const conv = String(it.convertedTo || '').trim(); return { id: it.id, project: it.project, type: it.type, title: it.title || '', subsystem: it.subsystem || '', site: it.site || '', version: it.version || '', module: it.module || '', reporter: it.reporter || '', lifecycle: lc, statusLabel: sl.label, statusTag: sl.tag, batchId: bid, batchSchedule: bid ? (schedByBatch.get(bid) || '') : '', convertedTo: conv, deletable: !conv && !bid, submittedAt: it.submittedAt || '', updatedAt: it.updatedAt || it.submittedAt || '' }; };
     if (dimension === 'sys') {
       // ===== FS-03 系统视图：跨全部负责医院聚合、按子系统分组（忽略医院维度；边界仍是 me.sites） =====
       const only = (system && system !== '全部系统') ? system : '';   // 选某系统 → 只该子系统；空/全部系统 → 各系统分组
@@ -2360,6 +2399,7 @@ const server = http.createServer((req, res) => {
   }
   if (url.pathname === '/api/intake-detail') {
     const proj = projById(url.searchParams.get('project')); const e = proj ? loadIntake(proj, url.searchParams.get('id')) : null;
+    if (e && e.deleted) return send(res, 404, JSON.stringify({ item: null, error: '记录已删除' }));   // 软删记录详情不可读、不可 reopen
     if (e && user && !isAdmin(user) && (((user.projects || []).length && !user.projects.includes(proj.id)) || ((user.sites || []).length && !user.sites.includes(e.site || '')))) return send(res, 403, JSON.stringify({ item: null, error: '无权查看该工单' }));
     return send(res, 200, JSON.stringify({ item: e }));
   }

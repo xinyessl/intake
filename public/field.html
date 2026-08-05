@@ -198,6 +198,12 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
 .f-item.clickable:hover { border-color: var(--ticket-consult, #7A5BA6); box-shadow: 0 1px 6px rgba(122, 91, 166, .12); }
 /* Bug B：左侧记录选中态（当前打开续聊的那条）—— 左边框高亮 + 浅底，与 app 风格一致 */
 .f-item.active { border-color: var(--color-primary, #1A6DBE); border-left-width: 3px; background: var(--color-primary-bg, #F4F9FE); box-shadow: 0 1px 8px rgba(26, 109, 190, .14); }
+/* 记录卡右上角删除入口（仅可删记录挂出，FS-02 删除） */
+.f-item-hasdel { position: relative; }
+.f-item-hasdel .f-item-top { padding-right: 24px; }        /* 给右上角删除按钮腾位，避免遮住状态标签 */
+.f-item-del { position: absolute; top: 7px; right: 7px; width: 22px; height: 22px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--color-text-tertiary); cursor: pointer; font-size: 14px; line-height: 1; transition: background .12s, color .12s, border-color .12s; }
+.f-item-del:hover { background: var(--color-danger-light, #FDECEC); color: var(--color-danger, #D14343); border-color: var(--color-danger-border, #F0C0C0); }
+.f-item-del .ti { font-size: 14px; }
 .f-item-top { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-bottom: 5px; }
 .f-item-title { font-size: 13.5px; font-weight: 600; color: var(--color-text); line-height: 1.45; margin-bottom: 5px; }
 .f-item-ctx { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 11.5px; color: var(--color-text-tertiary); }
@@ -1842,6 +1848,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       '</div>' +
       (canDl ? '<div style="margin-top:8px"><a class="f-godl" role="button" style="display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:600;color:#1A6DBE;cursor:pointer;padding:4px 10px;border:1px solid #C7DCF1;border-radius:8px;background:#F4F9FE"><i class="ti ti-package-import"></i> 去下载更新包</a></div>' : '');
     bindReopen(el, it);
+    bindDelete(el, it);   // 删除入口（仅 it.deletable：非已转工单、非已归批），点击 stopPropagation 不触发 reopen
     if (canDl) { var gd = el.querySelector('.f-godl'); if (gd) gd.addEventListener('click', function (e) { e.stopPropagation(); goToBatchDownload(it.batchId); }); }
     return el;
   }
@@ -2025,6 +2032,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
         '<span>' + escapeHtml(time) + '</span>' +
       '</div>';
     bindReopen(el, it);
+    bindDelete(el, it);   // 系统视图同款删除入口（镜像 mkItem，两处共用 bindDelete 避免漏系统视图，见 lessons L-026）
     return el;
   }
 
@@ -2172,6 +2180,63 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       mask.onclick = function (e) { if (e.target === mask) done(null); };
       document.addEventListener('keydown', onKey);
     });
+  }
+
+  // app 风格「是/否」确认框（复用共享遮罩 #fModalMask，清空 #fmBody 不放输入框；别调 fPrompt——那必带输入框）。resolve(true=确定 / false=取消)。
+  //   直接操作 #fmOk/#fmCancel/#fmBody（同 openConsultToIntake 多字段弹窗范式，见 lessons L-025），cleanup 里清 handler，别与 fPrompt 争。
+  function fConfirm(opts) {
+    opts = opts || {};
+    return new Promise(function (resolve) {
+      var mask = $('fModalMask');
+      if (!mask) { resolve(window.confirm(opts.message || opts.title || '确认？')); return; }
+      $('fmTitle').textContent = opts.title || '确认';
+      $('fmMsg').textContent = opts.message || '';
+      $('fmBody').innerHTML = '';                                  // 确认框无输入项
+      var ok = $('fmOk'), cancel = $('fmCancel');
+      ok.textContent = opts.okText || '确定';
+      cancel.textContent = opts.cancelText || '取消';
+      if (opts.danger) ok.classList.add('btn-danger'); else ok.classList.remove('btn-danger');
+      mask.classList.add('open');
+      function cleanup() { mask.classList.remove('open'); ok.onclick = null; cancel.onclick = null; mask.onclick = null; document.removeEventListener('keydown', onKey); ok.classList.remove('btn-danger'); ok.textContent = '确定'; cancel.textContent = '取消'; }
+      function done(v) { cleanup(); resolve(v); }
+      function onKey(e) { if (e.key === 'Escape') done(false); else if (e.key === 'Enter') done(true); }
+      ok.onclick = function () { done(true); };
+      cancel.onclick = function () { done(false); };
+      mask.onclick = function (e) { if (e.target === mask) done(false); };
+      document.addEventListener('keydown', onKey);
+    });
+  }
+
+  // 删除一条提交记录（软删除）：弹 app 风格确认 → POST /api/intake-delete → 成功从 DOM 移除该卡（若正是右侧打开的会话则清空右侧）。
+  //   仅在 it.deletable 为真时才由 mkItem/mkSysItem 挂出入口；守卫真值以后端为准（后端再校验已转工单/已归批/越权）。
+  function doDeleteItem(it, cardEl) {
+    if (!it || !it.project || !it.id) return;
+    fConfirm({ title: '删除记录', message: '删除这条记录？删除后将从清单中移除。', okText: '删除', danger: true }).then(function (yes) {
+      if (!yes) return;
+      api('/api/intake-delete', { method: 'POST', body: JSON.stringify({ project: it.project, id: it.id }) }).then(function (r) {
+        var b = r.body || {};
+        if (!b.ok) { showToast(b.error || '删除失败', 'error'); return; }   // 展示后端禁删原因（如已转工单/已归批/无权）
+        showToast('已删除', 'success');
+        // 若被删的正是右侧当前打开的会话（consult 用 convId、intake 用 savedId），清空右侧对话区
+        if (chat.convId === it.id || chat.savedId === it.id) { try { newConversation(); } catch (e) {} }
+        // 从 DOM 移除该卡（两视图同款 .f-item）；随后刷新左侧列表保证分组条数/空组一致
+        if (cardEl && cardEl.parentNode) cardEl.parentNode.removeChild(cardEl);
+        try { refreshLeftList(); } catch (e) {}
+      }).catch(function () { showToast('删除失败，请重试', 'error'); });
+    });
+  }
+  // 给记录卡挂删除入口（仅 it.deletable 时）：右上角小 ✕ 按钮，点击 stopPropagation 不触发卡片 reopen。mkItem/mkSysItem 两处共用（避免漏系统视图，见 lessons L-026）。
+  function bindDelete(el, it) {
+    if (!it || !it.deletable) return;
+    el.classList.add('f-item-hasdel');
+    var btn = document.createElement('button');
+    btn.className = 'f-item-del';
+    btn.type = 'button';
+    btn.title = '删除这条记录';
+    btn.setAttribute('aria-label', '删除');
+    btn.innerHTML = '<i class="ti ti-trash"></i>';
+    btn.addEventListener('click', function (e) { e.stopPropagation(); e.preventDefault(); doDeleteItem(it, el); });
+    el.appendChild(btn);
   }
 
   // 维保到期编辑 → 样式化 date 弹窗（app 风格）→ POST /api/customer-maintain
@@ -3378,7 +3443,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   })();
 
   // 暴露给测试/调试（不含敏感数据）
-  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, newConversation: newConversation, sendChat: sendChat, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast, openMaintainEdit: openMaintainEdit, doMaintainSave: doMaintainSave, maintainChipHtml: maintainChipHtml, maintainDaysLeft: maintainDaysLeft, renderTodoBody: renderTodoBody, mkUpdatePlanBlock: mkUpdatePlanBlock, loadUpdatePlan: loadUpdatePlan, renderUpdatePlan: renderUpdatePlan, mkPlanTaskItem: mkPlanTaskItem, mkSqlBundleItem: mkSqlBundleItem, doTaskToggle: doTaskToggle, doSqlBundleToggle: doSqlBundleToggle, appendConsultToIntake: appendConsultToIntake, openConsultToIntake: openConsultToIntake, doConsultToIntake: doConsultToIntake, appendMediaBubble: appendMediaBubble, mediaUrls: mediaUrls, markLeftActive: markLeftActive, reapplyLeftActive: reapplyLeftActive, bindReopen: bindReopen };
+  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, newConversation: newConversation, sendChat: sendChat, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast, openMaintainEdit: openMaintainEdit, doMaintainSave: doMaintainSave, maintainChipHtml: maintainChipHtml, maintainDaysLeft: maintainDaysLeft, renderTodoBody: renderTodoBody, mkUpdatePlanBlock: mkUpdatePlanBlock, loadUpdatePlan: loadUpdatePlan, renderUpdatePlan: renderUpdatePlan, mkPlanTaskItem: mkPlanTaskItem, mkSqlBundleItem: mkSqlBundleItem, doTaskToggle: doTaskToggle, doSqlBundleToggle: doSqlBundleToggle, appendConsultToIntake: appendConsultToIntake, openConsultToIntake: openConsultToIntake, doConsultToIntake: doConsultToIntake, appendMediaBubble: appendMediaBubble, mediaUrls: mediaUrls, markLeftActive: markLeftActive, reapplyLeftActive: reapplyLeftActive, bindReopen: bindReopen, fConfirm: fConfirm, doDeleteItem: doDeleteItem, bindDelete: bindDelete };
 })();
 </script>
 </body>
