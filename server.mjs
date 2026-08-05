@@ -2058,7 +2058,9 @@ const server = http.createServer((req, res) => {
           if (add.length) { const mdir = path.join(intakeDir(proj), 'media', convId); fs.mkdirSync(mdir, { recursive: true }); add.forEach((du, i) => { const mm = /^data:image\/\w+;base64,(.+)$/.exec(du || ''); if (mm) { const n = prevMedia.length + i + 1; fs.writeFileSync(path.join(mdir, `img-${n}.png`), Buffer.from(mm[1], 'base64')); media.push(`media/${convId}/img-${n}.png`); } }); }
         } catch {}
         const reporter = user ? (user.name || user.username) : (link ? link.name : '现场');
-        const title = ((lastUser && lastUser.content) || (msgs[0] && msgs[0].content) || '系统咨询').replace(/\s+/g, ' ').trim().slice(0, 60);
+        // 标题取「第一句问话」（会话原始问题），续聊保留原标题 —— 避免被后续消息（如手打「转工单」）覆盖成无意义标题。
+        const firstUser = msgs.find(m => m.role === 'user');
+        const title = (prev && String(prev.title || '').trim()) ? prev.title : (((firstUser && firstUser.content) || (msgs[0] && msgs[0].content) || '系统咨询').replace(/\s+/g, ' ').trim().slice(0, 60));
         const chat = [...msgs.map(x => ({ role: x.role, text: x.content })), { role: 'assistant', text: reply, ts: Date.now() }];
         const rec = { id: convId, type: 'consult', project: proj.id, version: String(b.version || '').trim() || (link ? link.ver : ''), site: String(b.site || '').trim() || (link ? link.site : ''), subsystem: sub, module: '', title, priority: '', reporter, role: user ? user.role : 'field', contact: '', media, status: '沟通中', lifecycle: '已答复', assignee: '', analysis: null, resolution: {}, chat, submittedAt: (prev && prev.submittedAt) || nowStamp(), updatedAt: nowStamp() };
         await saveIntake(proj, rec);
