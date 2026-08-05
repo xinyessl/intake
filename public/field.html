@@ -3200,7 +3200,13 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     // 提交类型切换（提需求/报BUG ↔ 咨询答疑）
     var togBtns = $('fToggle').querySelectorAll('button');
     for (var tg = 0; tg < togBtns.length; tg++) {
-      togBtns[tg].addEventListener('click', function () { setSubmitKind(this.getAttribute('data-k')); });
+      togBtns[tg].addEventListener('click', function () {
+        var k = this.getAttribute('data-k');
+        if (k === chat.submitKind) return;                 // 点当前模式：不动
+        var hasConv = chat.messages && chat.messages.length;
+        setSubmitKind(k);
+        if (hasConv) newConversation();                    // 切到不同模式且已有对话 → 起新对话（咨询↔提单是不同上下文）
+      });
     }
     // 深入思考开关（仅咨询答疑显示；开→sendConsult 带 deep:true）
     var deepBtn = $('fDeep'); if (deepBtn) deepBtn.addEventListener('click', toggleDeep);
