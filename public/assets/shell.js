@@ -27,8 +27,8 @@
       { id: "inbox",  label: "工单管理", icon: "ti-inbox", href: "/inbox.html" }
     ]},
     { section: "交付", items: [
-      { id: "batches",  label: "批次管理", icon: "ti-package",     href: "/batches.html" },
-      { id: "releases", label: "版本发版", icon: "ti-git-branch",  href: "/releases.html" }
+      { id: "batches",  label: "批次管理", icon: "ti-package",     href: "/batches.html" }
+      /* 2026-08-05 架构重构：删「版本发版」入口——部署/更新清单改为跟随产品代码（各子系统仓 docs/deploy.json 按 tag 读），废弃手工登记页 releases.html */
     ]},
     { section: "主体管理", items: [
       { id: "projects",  label: "产品管理", icon: "ti-box",               href: "/projects.html" },

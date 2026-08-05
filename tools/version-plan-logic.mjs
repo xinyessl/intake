@@ -1,14 +1,15 @@
-// ===== 更新包「按版本独立维护 + 跨版本累积」· 纯逻辑（可独立测试，不依赖 MySQL / 不 spawn server / 不碰 git）=====
-// 供 server.mjs import 复用 + tools/version-plan.logic.test.mjs 单测。
+// ===== 更新包「跟随产品代码 · 按 tag 读 docs/deploy.json + 跨版本累积」· 纯逻辑（可独立测试，不依赖 MySQL / 不 spawn server / 不碰 git）=====
+// 供 server.mjs import 复用 + tools/version-plan-deploy.logic.test.mjs 单测。
 //
-// 模型（用户拍板，别改规则）：
-//   1) 运营按「产品 × 版本(git tag)」登记该版本的 delta 实施任务 + delta SQL 脚本（存 data/version-releases.json）。
-//   2) 实施在某院把某产品升到「目标版本 Y」→ 按该院该产品的现场版本 X → Y，取 (X, Y] 区间内所有【已登记】版本的
-//      任务 + SQL 累积并集，按版本升序展示。
-//   3) SQL 系统不碰库，只列出；实施手动跑、逐个勾「已执行」。
-//   4) SQL 到现场可合并成一个 .sql 文件下载（按版本序 + 分隔注释）。
+// 模型（2026-08-05 架构重构·用户拍板，别改规则）：
+//   1) 清单/SQL 是**产品代码的一部分**：每个子系统仓 `docs/deploy.json`（按 git tag 读，见 server.readDeployManifest）声明该版本 delta 实施任务 + SQL。
+//      **废弃** intake 内手工「版本发版登记」（version-releases.json）。
+//   2) 实施在某院把某产品升到「目标版本 Y」→ 按该院该产品的现场版本 X → Y，取 (X, Y] 区间内每个 tag 的清单
+//      （跨子系统聚合 + 跨版本累积并集），按版本升序展示。
+//   3) SQL 系统不碰库，只列出；实施手动跑、勾「已执行」（整区间合并为**一个点**）。
+//   4) SQL 到现场可合并成一个 .sql 文件下载（按版本序 + 分隔注释；file 引用由 server 读正文，content 内联兜底）。
 //   5) 版本号来源 = git tag（listVersions）。累积起点 = 现场版本。
-//   6) 完成度按 (医院 × 产品 × 版本 × 条目) 记（customer.updateProgress）。
+//   6) 完成度按 (医院 × 产品 × 版本 × 条目) 记（customer.updateProgress）。任务全局 id = `<子系统>:<原id>`，跨子系统不撞号。
 //
 // 版本序说明：listVersions(proj) 返回**倒序**（新→旧）。本模块所有入参 orderedTags 统一约定为
 //   「**升序**（旧→新）」——调用方（server.mjs）传入前先 reverse。区间/合并都按升序处理，展示天然旧→新。
@@ -19,40 +20,42 @@ export function clip(v, n) { return String(v == null ? '' : v).trim().slice(0, n
 // 生成 id：prefix + 4字节 hex（测试里可注入 gen 保证确定性）。
 export function genId(prefix, rand) { return String(prefix || 'v') + (rand ? rand() : Math.random().toString(16).slice(2, 10).padEnd(8, '0')); }
 
-// ---------- 版本发版登记规范化 ----------
-// 规范化一个版本的 delta 任务列表：title 必填（空丢弃），title≤120 / desc≤2000，缺 id 补 'vt'+，按 id 去重，上限 200。
-export function normVersionTasks(tasks, gen) {
-  const g = gen || (() => genId('vt'));
-  const seen = new Set();
-  const out = [];
-  for (const t of (Array.isArray(tasks) ? tasks : [])) {
+// ---------- 单个子系统 docs/deploy.json 规范化（server.readDeployManifest 里对每个子系统调用）----------
+// 入参：raw = JSON.parse(docs/deploy.json) 的结果（{tasks:[],sql:[]}）；subsystem = 子系统名（用于全局 id 前缀 + 来源标记）。
+// 输出：{ tasks:[{subsystem,id,gid,title,desc}], sql:[{subsystem,id,gid,file,desc,content}] }。
+//   · title/name(此处无 name，用 desc/file 标识) 约束：title 非空丢弃、title≤120/desc≤2000；sql desc≤200/content≤20000。
+//   · 缺 id → 补 'dt'/'ds' + hex；同一子系统内 id 去重。tasks/sql 各上限 200。
+//   · 全局 id gid = `<subsystem>:<id>`（跨子系统不撞号；子系统空则用 'default'）。
+export function normDeployManifest(raw, subsystem, gen) {
+  const sub = clip(subsystem, 60);
+  const gt = (gen && gen.task) || (() => genId('dt'));
+  const gs = (gen && gen.sql) || (() => genId('ds'));
+  const pfx = (sub || 'default') + ':';
+  const r = raw && typeof raw === 'object' ? raw : {};
+  const tasks = [];
+  const seenT = new Set();
+  for (const t of (Array.isArray(r.tasks) ? r.tasks : [])) {
     const title = clip(t && t.title, 120);
     if (!title) continue;
-    let id = clip(t && t.id, 40) || g();
-    if (seen.has(id)) id = g();
-    seen.add(id);
-    out.push({ id, title, desc: clip(t && t.desc, 2000) });
-    if (out.length >= 200) break;
+    let id = clip(t && t.id, 60) || gt();
+    if (seenT.has(id)) id = gt();
+    seenT.add(id);
+    tasks.push({ subsystem: sub, id, gid: pfx + id, title, desc: clip(t && t.desc, 2000) });
+    if (tasks.length >= 200) break;
   }
-  return out;
-}
-
-// 规范化一个版本的 delta SQL 列表：name 必填（空丢弃），name≤120 / content≤20000，缺 id 补 'vs'+，按 id 去重，上限 200。
-export function normVersionSqls(sqls, gen) {
-  const g = gen || (() => genId('vs'));
-  const seen = new Set();
-  const out = [];
-  for (const s of (Array.isArray(sqls) ? sqls : [])) {
-    const name = clip(s && s.name, 120);
-    if (!name) continue;
-    let id = clip(s && s.id, 40) || g();
-    if (seen.has(id)) id = g();
-    seen.add(id);
-    // SQL 正文只做长度截断 + 去掉首尾空白；不改内容语义（保留换行/缩进）。
-    out.push({ id, name, content: String(s && s.content != null ? s.content : '').slice(0, 20000) });
-    if (out.length >= 200) break;
+  const sql = [];
+  const seenS = new Set();
+  for (const s of (Array.isArray(r.sql) ? r.sql : [])) {
+    const file = clip(s && s.file, 300);
+    const content = String(s && s.content != null ? s.content : '').slice(0, 20000);
+    if (!file && !content) continue;                                   // 既无 file 又无 content → 无意义，丢弃
+    let id = clip(s && s.id, 60) || gs();
+    if (seenS.has(id)) id = gs();
+    seenS.add(id);
+    sql.push({ subsystem: sub, id, gid: pfx + id, file, desc: clip(s && s.desc, 200), content });
+    if (sql.length >= 200) break;
   }
-  return out;
+  return { tasks, sql };
 }
 
 // ---------- 区间计算 ：(from, to] ----------
@@ -82,26 +85,34 @@ export function rangeVersions(orderedTags, from, to) {
   return tags.slice(startIdx, toIdx + 1);       // (from, to] 升序
 }
 
-// ---------- 累积汇总（任务 + SQL）----------
-// versionsInRange：rangeVersions 结果（升序 tag）。releases：{[version]:{tasks:[],sqls:[]}}（该产品的登记）。
-// 只汇总**已登记**的版本（releases 里有该 version 且有 tasks/sqls）；未登记的 tag 跳过。
-// 返回 { versionsInRange（实际有登记的·升序）, tasks:[{version,id,title,desc}], sqls:[{version,id,name,content}] }。
-export function accumulate(versionsInRange, releases) {
-  const rel = releases && typeof releases === 'object' ? releases : {};
+// ---------- 累积汇总（跨版本 · 从代码读来的各版本 manifest）----------
+// versionsInRange：rangeVersions 结果（升序 tag）。manifestByVersion：{[version]:{tasks:[{gid,title,desc,subsystem}], sql:[{gid,file,desc,content,subsystem}]}}
+//   （每个 version 的 manifest 已是「该版本区间所有子系统聚合后」的规范化结果，见 server.readDeployManifest）。
+// 只汇总**有清单**的版本（该 version 有 tasks 或 sql）；无清单的 tag 跳过（不进 versionsInRange）。
+// 返回：
+//   versionsInRange：实际有清单的版本（升序）；
+//   tasks：[{version, id(=gid 全局唯一), title, desc, subsystem}]（逐条完成态用 (version,id)）；
+//   sqls： [{version, id(=gid), name(=file 或 desc·展示/合并用), file, content, subsystem}]（合并为一个点）。
+export function accumulateManifests(versionsInRange, manifestByVersion) {
+  const byV = manifestByVersion && typeof manifestByVersion === 'object' ? manifestByVersion : {};
   const tasks = [];
   const sqls = [];
-  const registered = [];
+  const withManifest = [];
   for (const v of (Array.isArray(versionsInRange) ? versionsInRange : [])) {
-    const r = rel[v];
-    if (!r || typeof r !== 'object') continue;
-    const vt = Array.isArray(r.tasks) ? r.tasks : [];
-    const vs = Array.isArray(r.sqls) ? r.sqls : [];
-    if (!vt.length && !vs.length) continue;              // 该版本无任何登记内容 → 跳过（不进 versionsInRange）
-    registered.push(v);
-    for (const t of vt) tasks.push({ version: v, id: t.id, title: t.title || '', desc: t.desc || '' });
-    for (const s of vs) sqls.push({ version: v, id: s.id, name: s.name || '', content: String(s.content == null ? '' : s.content) });
+    const m = byV[v];
+    if (!m || typeof m !== 'object') continue;
+    const vt = Array.isArray(m.tasks) ? m.tasks : [];
+    const vs = Array.isArray(m.sql) ? m.sql : [];
+    if (!vt.length && !vs.length) continue;              // 该版本无清单 → 跳过
+    withManifest.push(v);
+    for (const t of vt) tasks.push({ version: v, id: t.gid || t.id, title: t.title || '', desc: t.desc || '', subsystem: t.subsystem || '' });
+    for (const s of vs) {
+      const name = String((s.file || s.desc || s.id || '') || '');   // 展示名 = file（相对路径）优先，其次 desc
+      // repoPath 透传（若 manifest 项带了 · server 侧用于合并下载时 readSqlAtTag 定位文件正文；纯逻辑测试里可无）
+      sqls.push({ version: v, id: s.gid || s.id, name, file: s.file || '', desc: s.desc || '', content: String(s.content == null ? '' : s.content), subsystem: s.subsystem || '', repoPath: s.repoPath || '' });
+    }
   }
-  return { versionsInRange: registered, tasks, sqls };
+  return { versionsInRange: withManifest, tasks, sqls };
 }
 
 // ---------- 完成态左连 ----------
@@ -198,8 +209,9 @@ export function applyToggle(progress, version, kind, itemId, done, by, at) {
 }
 
 // ---------- 合并 SQL 为单文件 ----------
-// sqls：accumulate 产出（升序·各带 version/name/content）。meta：{productName, from, to, site}（文件头注释用）。
-// 按版本升序（sqls 已升序）拼成一个 .sql 文本：文件头注释 + 每段前分隔注释（产品·版本·脚本名）。
+// sqls：accumulateManifests 产出（升序·各带 version/name/file/content/subsystem；content 已由 server 用 git show 读入正文）。
+//   meta：{productName, from, to, site}（文件头注释用）。
+// 按版本升序（sqls 已升序）拼成一个 .sql 文本：文件头注释 + 每段前分隔注释 `-- ==== <产品> <版本> <子系统> <文件/脚本> ====`。
 // 无 SQL → 也回一个含说明注释的文本（别 500）。
 export function mergeSql(sqls, meta) {
   const m = meta && typeof meta === 'object' ? meta : {};
@@ -210,30 +222,27 @@ export function mergeSql(sqls, meta) {
   const list = Array.isArray(sqls) ? sqls : [];
   const lines = [];
   lines.push('-- =========================================================');
-  lines.push('-- 更新 SQL 合并脚本（按版本升序累积）');
+  lines.push('-- 更新 SQL 合并脚本（按版本升序累积 · 从产品代码 docs/deploy.json 读取）');
   lines.push('-- 产品：' + productName);
   lines.push('-- 医院：' + (site || '（未指定）'));
   lines.push('-- 版本区间：(' + (from || '最早') + ', ' + (to || '?') + ']');
   lines.push('-- 脚本段数：' + list.length);
-  lines.push('-- 说明：请按顺序在目标库手动执行；逐段执行后到系统勾选「已执行」。');
+  lines.push('-- 说明：请按顺序在目标库手动执行；执行完毕后到系统勾选「已执行」。');
   lines.push('-- =========================================================');
   lines.push('');
   if (!list.length) {
-    lines.push('-- （该版本区间暂无已登记的 SQL 脚本）');
+    lines.push('-- （该版本区间暂无 SQL 脚本；产品代码中未在 docs/deploy.json 声明本区间 SQL）');
     lines.push('');
     return lines.join('\n');
   }
-  let lastVer = null;
   for (const s of list) {
-    if (s.version !== lastVer) {
-      lines.push('');
-      lines.push('-- ================ ' + productName + ' ' + (s.version || '') + ' ================');
-      lastVer = s.version;
-    }
-    lines.push('-- 脚本：' + (s.name || '（未命名）') + '（版本 ' + (s.version || '') + '）');
+    const label = (s.file || s.name || '（未命名）');
+    lines.push('');
+    lines.push('-- ==== ' + productName + ' ' + (s.version || '') + ' ' + (s.subsystem || '（默认）') + ' ' + label + ' ====');
+    if (s.desc) lines.push('-- 说明：' + s.desc);
     const content = String(s.content == null ? '' : s.content).replace(/\s+$/, '');
-    lines.push(content);
-    // 段间保证以分号+换行收尾感（不强改用户 SQL，只补空行分隔）
+    lines.push(content || '-- （脚本正文为空或读取失败）');
+    // 段间补空行分隔（不强改用户 SQL）
     lines.push('');
   }
   return lines.join('\n');

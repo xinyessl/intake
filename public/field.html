@@ -702,8 +702,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     ctxVer: null,           // 系统视图归档 chip 当前所选 tag 版本（未手动选=默认 versions[0]）
     verOpen: false,         // tag 版本下拉展开态
     verDetailOpen: false,   // 医院视图「全部子项目」态·版本明细面板展开态（2026-07-24 问题③：icon 弹各子系统版本，替代平铺）
-    deployTpl: [],          // 标准部署清单模板（/api/deploy-template）：[{id,title,desc}]，医院视图部署清单区块用（模板项 + 该院完成态 left join）
-    deployCollapsed: true,   // FS-06：医院视图部署清单可折叠区块折叠态（内存·默认 true=收起；点标题行切换，见 toggleDeployCollapse）
+    // 2026-08-05 架构重构：删 deployTpl/deployCollapsed（标准部署清单模板已废，改跟随产品代码 update-plan）
     planExpanded: {},        // FS-05：批次「更新计划」可折叠展开态（内存·按 batchId·默认收起；见 renderUpdatePlan）
     batchExpanded: {}        // FS-05：按批次视图·整个批次卡可折叠展开态（内存·按 batchId·默认收起；见 mkBatchGroup）
   };
@@ -735,7 +734,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   function doLogout() {
     api('/api/logout', { method: 'GET' }).catch(function () {}).then(function () {
       // AC-8 清空工作空间状态并重新显示登录门
-      state = { me: null, mode: 'hosp', sites: [], curSite: null, subsystems: [], projects: [], customers: [], projMap: {}, groupBy: 'type', curSub: '', subOptions: [], systems: [], curSys: null, sysOpen: false, sysQuery: '', hospOpen: false, hospQuery: '', verMap: {}, ctxVer: null, verOpen: false, verDetailOpen: false, deployTpl: [], deployCollapsed: true, planExpanded: {}, batchExpanded: {} };
+      state = { me: null, mode: 'hosp', sites: [], curSite: null, subsystems: [], projects: [], customers: [], projMap: {}, groupBy: 'type', curSub: '', subOptions: [], systems: [], curSys: null, sysOpen: false, sysQuery: '', hospOpen: false, hospQuery: '', verMap: {}, ctxVer: null, verOpen: false, verDetailOpen: false, planExpanded: {}, batchExpanded: {} };
       var lt = $('fListType'), lb = $('fListBatch'), ls = $('fListSystem'); if (lt) lt.innerHTML = ''; if (lb) lb.innerHTML = ''; if (ls) ls.innerHTML = '';
       $('loginUser').value = ''; $('loginPwd').value = ''; setLoginErr('');
       $('fHtabs').innerHTML = ''; setTodoCount(0); closeAllMenus();
@@ -793,11 +792,8 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     var pSys = api('/api/field/systems', { method: 'GET' }).then(function (r) {
       state.systems = (r.body && Array.isArray(r.body.systems)) ? r.body.systems : [];   // [{key,name,project,productName}]，稳定排序
     }).catch(function () { state.systems = []; });
-    // FS-06 场景1：标准部署清单模板（全局单份）——医院视图部署清单区块用（模板 + 该院完成态 left join）
-    var pTpl = api('/api/deploy-template', { method: 'GET' }).then(function (r) {
-      state.deployTpl = (r.body && Array.isArray(r.body.tasks)) ? r.body.tasks : [];
-    }).catch(function () { state.deployTpl = []; });
-    return Promise.all([pCust, pProj, pSys, pTpl]);
+    // 2026-08-05 架构重构：删标准部署清单模板加载（/api/deploy-template 已废）——部署清单跟随产品代码（update-plan）。
+    return Promise.all([pCust, pProj, pSys]);
   }
 
   // ---------- 用户区 ----------
@@ -1254,7 +1250,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     buildSubOptions();                 // 按当前医院已上产品重建下拉
     setProdLabel('全部子项目');
     renderProdDD();
-    loadSubmissions();                 // FS-06：切医院会重渲医院视图（renderTypeView 内重建部署清单可折叠区块，随当前医院刷新）
+    loadSubmissions();                 // 切医院重渲医院视图（提交清单随当前医院刷新；部署清单已改跟随产品代码，不在此渲染）
     updateCtx();                       // AC-18：医院视图归档 chip 现场版本跟随所选医院刷新
     syncConversationToSystem();        // FS-04：切医院（curSite/curSub 变）→ 保存旧段 + 恢复该系统会话
   }
@@ -1620,127 +1616,10 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     }).catch(function () { cb.disabled = false; cb.checked = !done; showToast('操作失败，请重试', 'error'); });
   }
 
-  // ========== FS-06 场景1 · 部署清单（当前医院 · 医院视图左侧「可折叠区块」· 按产品/系统分区各记进度） ==========
-  // 2026-08-03：同一套标准模板，完成度按 (医院,产品) 分记 → customer.deployTasks 嵌套 {[productId]:{[taskId]:{done,by,at}}}。
-  //   放回医院视图左侧（提交清单上方），做成**默认收起**的可折叠区块：收起只显紧凑标题行 + 跨系统聚合进度 N/M；
-  //   展开后按当前医院已上的每个产品分区，各显该系统进度 + 标准清单 + 该产品完成态。折叠态存内存 state.deployCollapsed（默认 true=收起）。
-
-  // 判断嵌套形状（顶层值本身是 {taskId:{done,...}}；旧 flat 顶层值含 done/by/at）——与 checklist-logic.isNestedDeployTasks 一致。
-  function deployIsNested(dt) {
-    if (!dt || typeof dt !== 'object') return true;
-    for (var k in dt) { var v = dt[k]; if (!v || typeof v !== 'object') return false; if ('done' in v || 'by' in v || 'at' in v) return false; }
-    return true;
-  }
-  // 取某产品的完成态子对象（嵌套 → dt[productId]；旧 flat/缺失 → {}，安全不崩、不臆造塞旧数据给某产品）。
-  function deployProdTasks(dt, pid) {
-    if (!deployIsNested(dt)) return {};
-    var sub = dt && dt[pid];
-    return (sub && typeof sub === 'object') ? sub : {};
-  }
-  // 当前医院已上产品列表 [{project, name}]（name=中文产品名，走 projMap；无则回退 id），按 products 顺序去重。
-  function deployProductsOf(site) {
-    var cust = custBySite(site);
-    var out = [], seen = {};
-    if (!cust || !Array.isArray(cust.products)) return out;
-    cust.products.forEach(function (pr) {
-      var pid = pr && pr.project; if (!pid || seen[pid]) return; seen[pid] = 1;
-      var proj = state.projMap[pid];
-      out.push({ project: pid, name: (proj && proj.name) || pid });
-    });
-    return out;
-  }
-  // 跨产品聚合进度（收起态标题显示）：分母 = 模板项数 M × 该院产品数 P；分子 = 各产品各自 done 之和。与后端 deployAggProgress 同口径。
-  function deployAggProgress(site) {
-    var tpl = Array.isArray(state.deployTpl) ? state.deployTpl : [];
-    var prods = deployProductsOf(site);
-    var total = tpl.length * prods.length;
-    if (!total) return { done: 0, total: 0 };
-    var cust = custBySite(site);
-    var dt = (cust && cust.deployTasks && typeof cust.deployTasks === 'object') ? cust.deployTasks : {};
-    var done = 0;
-    prods.forEach(function (p) {
-      var sub = deployProdTasks(dt, p.project);
-      tpl.forEach(function (t) { var st = sub[t && t.id]; if (st && st.done) done++; });
-    });
-    return { done: done, total: total };
-  }
-
-  // 构建部署清单可折叠区块（医院视图左侧）：模板为空 / 无当前医院 / 该院无产品 → 返回 null（整块不渲染，别显空壳）。
-  //   默认收起（state.deployCollapsed !== false）；点标题行展开/收起；展开后按产品分区。
-  function mkDeployChecklist(site) {
-    var tpl = Array.isArray(state.deployTpl) ? state.deployTpl : [];
-    if (!tpl.length || !site) return null;                       // 模板空 / 无医院 → 不渲染
-    var prods = deployProductsOf(site);
-    if (!prods.length) return null;                              // 该医院无上线产品 → 不渲染（不显空壳）
-    var cust = custBySite(site);
-    var dt = (cust && cust.deployTasks && typeof cust.deployTasks === 'object') ? cust.deployTasks : {};
-    var agg = deployAggProgress(site);
-    var open = (state.deployCollapsed === false);               // 默认收起
-    var block = document.createElement('div');
-    block.className = 'f-deploy-block' + (open ? ' open' : '');
-    // 收起态紧凑标题行：📋 部署清单 · <聚合 N/M> + chevron；点击切换
-    var hd = document.createElement('div');
-    hd.className = 'f-deploy-tophd';
-    hd.innerHTML = '<i class="ti ti-clipboard-check"></i><span class="ttl">部署清单</span>' +
-      '<span class="f-impl-prog">' + agg.done + '/' + agg.total + '</span>' +
-      '<i class="ti ti-chevron-down chev"></i>';
-    hd.addEventListener('click', function () { toggleDeployCollapse(); });
-    block.appendChild(hd);
-    // 展开区：按产品分区
-    var body = document.createElement('div');
-    body.className = 'f-deploy-body';
-    prods.forEach(function (p) {
-      var sub = deployProdTasks(dt, p.project);
-      var done = 0;
-      tpl.forEach(function (t) { var st = sub[t && t.id]; if (st && st.done) done++; });
-      var sec = document.createElement('div');
-      sec.className = 'f-deploy-sec';
-      var shd = document.createElement('div');
-      shd.className = 'f-deploy-sechd';
-      shd.innerHTML = '<i class="ti ti-stack-2"></i><span class="nm">' + escapeHtml(p.name) + '</span>' +
-        '<span class="f-impl-prog">' + done + '/' + tpl.length + '</span>';
-      sec.appendChild(shd);
-      tpl.forEach(function (t) {
-        var st = sub[t.id] || {};
-        sec.appendChild(mkDeployItem(t, !!st.done, st.by || '', st.at || '', site, p.project));
-      });
-      body.appendChild(sec);
-    });
-    block.appendChild(body);
-    return block;
-  }
-  // 切换折叠态（内存，默认收起）+ 就地重渲医院视图（部署区块随之展开/收起）。
-  function toggleDeployCollapse() {
-    state.deployCollapsed = (state.deployCollapsed === false) ? true : false;
-    if (state.mode === 'hosp') loadSubmissions();   // 重渲医院视图（renderTypeView 会重建部署区块 + 提交清单）
-  }
-  // 单条部署清单项：checkbox（勾/取消 → POST /api/customer-deploy-task {site,product,taskId,done}）+ 标题/说明 +（已完成）完成人/时间
-  function mkDeployItem(t, isDone, by, at, site, product) {
-    var row = document.createElement('div');
-    row.className = 'f-impl-item' + (isDone ? ' done' : '');
-    var cb = document.createElement('input');
-    cb.type = 'checkbox'; cb.className = 'f-impl-cb'; cb.checked = isDone;
-    cb.addEventListener('change', function () { doDeployToggle(site, product, t, cb.checked, cb); });
-    var main = document.createElement('div');
-    main.className = 'f-impl-main';
-    var metaHtml = isDone ? ('<div class="f-impl-meta"><i class="ti ti-user"></i> ' + escapeHtml(by || '—') + ' · ' + escapeHtml(fmtTime(at)) + '</div>') : '';
-    main.innerHTML = '<div class="f-impl-title">' + escapeHtml(t.title || '（无标题）') + '</div>' +
-      (t.desc ? '<div class="f-impl-desc">' + escapeHtml(t.desc) + '</div>' : '') + metaHtml;
-    row.appendChild(cb); row.appendChild(main);
-    return row;
-  }
-  // 勾选/取消一条部署清单项（该院该产品完成态）：调 customer-deploy-task → 成功更新 state.customers 该院 + 重渲医院视图（部署区块进度 + 完成人/时间随之更新）。
-  function doDeployToggle(site, product, t, done, cb) {
-    cb.disabled = true;
-    api('/api/customer-deploy-task', { method: 'POST', body: JSON.stringify({ site: site, product: product, taskId: t.id, done: done }) }).then(function (r) {
-      var b = r.body || {};
-      if (!b.ok) { cb.disabled = false; cb.checked = !done; showToast(b.error || '操作失败', 'error'); return; }   // 失败还原勾选态
-      // 回写 state.customers 该院（服务端回传更新后 customer，含嵌套 deployTasks）
-      if (b.customer) { for (var i = 0; i < state.customers.length; i++) { if ((state.customers[i].name || '').trim() === String(site).trim()) { state.customers[i] = b.customer; break; } } }
-      showToast(done ? '已标记完成' : '已取消完成', 'success');
-      loadSubmissions();        // 重渲医院视图（部署区块进度 + 完成人/时间随之更新；折叠态 state.deployCollapsed 保持）
-    }).catch(function () { cb.disabled = false; cb.checked = !done; showToast('操作失败，请重试', 'error'); });
-  }
+  // ========== 2026-08-05 架构重构：删除「部署清单」（FS-06 场景1·标准模板每院勾选）整块 ==========
+  //   （原 deployIsNested/deployProdTasks/deployProductsOf/deployAggProgress/mkDeployChecklist/toggleDeployCollapse/mkDeployItem/doDeployToggle）
+  //   部署/更新清单改为跟随产品代码（各子系统仓 docs/deploy.json 按 tag 读）→ 见批次卡内「更新计划」块（mkUpdatePlanBlock/loadUpdatePlan，/api/field/update-plan）。
+  //   该块原本已不在医院视图渲染路径中调用（dead），此次一并清除，避免残留对 /api/customer-deploy-task 的引用。
 
   // 下载更新包：调 batch-download → downloads+1（幂等）+ 覆盖单转待验证 + 返回 bumps → 渲染改版本条 + 刷新列表状态
   function doBatchDownload(g, btn, card) {
@@ -1867,7 +1746,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     var listBatch = $('fListBatch');
     listBatch.style.display = 'none'; box.style.display = 'block';
     box.innerHTML = '';
-    // FS-06 场景1（2026-08-04）：按用户反馈，医院视图（按类型）不再显示部署清单块（运营端模板与数据保留，仅去掉此处展示）。
+    // 2026-08-05 架构重构：医院视图不显示部署清单块（原 FS-06 场景1 标准模板已废，部署清单跟随产品代码 → 批次卡「更新计划」块）。
     // 空态（该医院无记录 / 筛选后为空）
     var total = 0;
     groups.forEach(function (g) { total += (g.items || []).length; });
@@ -3316,7 +3195,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   })();
 
   // 暴露给测试/调试（不含敏感数据）
-  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, newConversation: newConversation, sendChat: sendChat, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast, openMaintainEdit: openMaintainEdit, doMaintainSave: doMaintainSave, maintainChipHtml: maintainChipHtml, maintainDaysLeft: maintainDaysLeft, renderTodoBody: renderTodoBody, mkUpdatePlanBlock: mkUpdatePlanBlock, loadUpdatePlan: loadUpdatePlan, renderUpdatePlan: renderUpdatePlan, mkPlanTaskItem: mkPlanTaskItem, mkSqlBundleItem: mkSqlBundleItem, doTaskToggle: doTaskToggle, doSqlBundleToggle: doSqlBundleToggle, mkDeployChecklist: mkDeployChecklist, toggleDeployCollapse: toggleDeployCollapse, deployProductsOf: deployProductsOf, deployProdTasks: deployProdTasks, deployIsNested: deployIsNested, deployAggProgress: deployAggProgress, mkDeployItem: mkDeployItem, doDeployToggle: doDeployToggle };
+  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, newConversation: newConversation, sendChat: sendChat, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast, openMaintainEdit: openMaintainEdit, doMaintainSave: doMaintainSave, maintainChipHtml: maintainChipHtml, maintainDaysLeft: maintainDaysLeft, renderTodoBody: renderTodoBody, mkUpdatePlanBlock: mkUpdatePlanBlock, loadUpdatePlan: loadUpdatePlan, renderUpdatePlan: renderUpdatePlan, mkPlanTaskItem: mkPlanTaskItem, mkSqlBundleItem: mkSqlBundleItem, doTaskToggle: doTaskToggle, doSqlBundleToggle: doSqlBundleToggle };
 })();
 </script>
 </body>

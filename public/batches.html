@@ -284,8 +284,9 @@ async function openDetail(id){
   if(pkgCancel) pkgCancel.addEventListener('click',()=>{ $('#pkgEdit').style.display='none'; $('#pkgView').style.display='block'; if(pkgEditBtn) pkgEditBtn.style.display='inline-flex'; });
   const pkgSave=$('#btnPkgSave'); if(pkgSave) pkgSave.addEventListener('click',()=>savePkgInfo(b.id));
 }
-// 注：更新包「实施任务清单 + SQL 脚本」已从批次内改为「版本发版登记」页按版本独立维护（跨版本累积到现场），
-//     批次详情不再内嵌 implTasks 编辑区。实施端按 (现场版本, 目标版本] 自动累积展示，见 releases.html / field.html。
+// 注：更新包「实施任务清单 + SQL 脚本」不在 intake 内维护——2026-08-05 架构重构后改为「跟随产品代码」：
+//     各子系统仓 docs/deploy.json 按 git tag 声明该版本 delta 任务+SQL；批次详情不内嵌 implTasks。
+//     实施端按 (现场版本, 目标版本] 自动跨版本累积展示，见 field.html「更新计划」块（/api/field/update-plan）。
 
 /* ---------- 改排期（batch-update，即点即存 + toast + 刷新） ---------- */
 async function saveSchedule(id){

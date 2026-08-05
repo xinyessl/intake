@@ -207,6 +207,50 @@
           "specRef": "BP-01"
         }
       ]
+    },
+    {
+      "id": "B-20260805-部署清单从代码读",
+      "source": "CLI窗口·用户口述",
+      "importedAt": "2026-08-05",
+      "ref": "部署/更新清单改为跟随产品·从代码读(docs/deploy.json per子系统仓·按tag)：定约定+intake读取器+跨版本累积+合并SQL(读引用.sql)；废手工「版本发版登记」/全局部署模板；保留完成度追踪",
+      "tasks": [
+        {
+          "id": "DC-1",
+          "title": "约定文档 docs/约定-产品部署清单.md：docs/deploy.json schema(tasks/sql·file引用) + intake按tag读/聚合/累积规则",
+          "status": "done",
+          "specRef": "BP-01"
+        },
+        {
+          "id": "DC-2",
+          "title": "server：readDeployManifest(proj,tag) 读各子系统仓 docs/deploy.json(git show)+聚合；update-plan 改从代码累积；update-sql-merged 改读引用.sql拼接",
+          "status": "done",
+          "specRef": "FS-05"
+        },
+        {
+          "id": "DC-3",
+          "title": "server：删 version-releases + version-release-save + deploy-template(+save) + customer-deploy-task + batch-task 等；保留 update-toggle/updateProgress",
+          "status": "done",
+          "specRef": "FS-05"
+        },
+        {
+          "id": "DC-4",
+          "title": "前端：删 releases.html + shell.js 版本发版导航；customers.html 清 tplDrawer/函数 dead code；field.html 清部署清单 dead code；更新计划UI只换数据源",
+          "status": "done",
+          "specRef": "FS-05"
+        },
+        {
+          "id": "DC-5",
+          "title": "演示：本地克隆仓造样本 docs/deploy.json + sql/*.sql + 建测试tag，端到端跑通累积+合并SQL；空态友好提示",
+          "status": "done",
+          "specRef": "FS-05"
+        },
+        {
+          "id": "DC-6",
+          "title": "spec：BP-01/FS-05 改「清单/SQL 事实源=产品代码 docs/deploy.json(按tag)」，废登记页AC",
+          "status": "done",
+          "specRef": "BP-01"
+        }
+      ]
     }
   ]
 }
