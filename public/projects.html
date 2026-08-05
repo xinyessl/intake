@@ -19,6 +19,30 @@
   .pm-git{font-size:11.5px;color:var(--color-text-tertiary);font-family:var(--font-num);margin-top:2px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .pm-git.none{font-style:italic}
   .subcnt{font-size:11.5px;font-weight:600;padding:1px 8px;border-radius:var(--radius);background:var(--color-accent-light);color:var(--color-accent);white-space:nowrap}
+  .pm-row{cursor:pointer}
+  .pm-row:hover{background:var(--color-surface-alt)}
+  /* 产品详情抽屉 */
+  #dtSub .text-link,#dtSub a{color:var(--color-primary);text-decoration:none;font-family:var(--font-num);font-size:12px}
+  #dtSub .text-link:hover,#dtSub a:hover{text-decoration:underline}
+  .dt-sec{padding:12px 0;border-top:1px solid var(--color-border)}
+  .dt-sec:first-child{border-top:none;padding-top:2px}
+  .dt-h{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:var(--color-text);margin-bottom:8px}
+  .dt-h .ti{color:var(--color-primary);font-size:16px}
+  .dt-h .dt-cnt{font-size:11.5px;font-weight:600;color:var(--color-accent);background:var(--color-accent-light);border-radius:var(--radius-pill);padding:0 7px}
+  .dt-none{font-size:12.5px;color:var(--color-text-tertiary);font-style:italic}
+  .dt-subs{display:flex;flex-direction:column;gap:5px}
+  .dt-sub{display:flex;align-items:baseline;gap:8px;font-size:13px}
+  .dt-subname{font-weight:600;font-family:var(--font-num);min-width:90px}
+  .dt-subdesc{color:var(--color-text-secondary)}
+  .dt-commit{font-size:12px;line-height:1.7;font-family:var(--font-num);padding:3px 0;border-bottom:1px dashed var(--color-border)}
+  .dt-commit:last-child{border-bottom:none}
+  .dt-commit .dt-cname{color:var(--color-text-tertiary);font-family:var(--font-sans);margin-right:4px}
+  .dt-commit .chash{color:var(--color-primary);font-weight:600}
+  .dt-commit .cdate{color:var(--color-text-tertiary)}
+  .dt-commit .csub{color:var(--color-text-secondary);font-family:var(--font-sans)}
+  .dt-vers{display:flex;flex-wrap:wrap;gap:6px}
+  .dt-vtag{font-size:11.5px;font-weight:600;font-family:var(--font-num);color:var(--color-primary);background:var(--color-primary-light);border:1px solid var(--color-primary-border,#C7D6E8);border-radius:var(--radius);padding:1px 8px}
+  .dt-synctime{margin-top:8px;font-size:11.5px;color:var(--color-text-tertiary)}
   .subnames{font-size:11.5px;color:var(--color-text-secondary);margin-top:3px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .subnames.none{color:var(--color-text-tertiary);font-style:italic}
   .commit-cell{font-size:12px;line-height:1.7;font-family:var(--font-num);max-width:340px}
@@ -75,12 +99,11 @@
     <table class="data-table">
       <thead>
         <tr>
-          <th style="width:120px">id</th>
-          <th style="width:200px">产品名</th>
-          <th style="width:200px">子系统</th>
-          <th>最新提交</th>
-          <th style="width:118px">版本</th>
-          <th style="width:150px">操作</th>
+          <th style="width:110px">id</th>
+          <th>产品名</th>
+          <th style="width:120px">子系统</th>
+          <th style="width:130px">版本</th>
+          <th style="width:170px">操作</th>
         </tr>
       </thead>
       <tbody id="listBody"></tbody>
@@ -126,6 +149,24 @@
   <div class="drawer-footer">
     <button class="btn" data-close-drawer="editDrawer">取消</button>
     <button class="btn btn-primary" id="saveBtn"><i class="ti ti-check"></i> <span>新增</span></button>
+  </div>
+</div>
+
+<!-- ============ 产品详情抽屉（列表精简，全量信息看这里） ============ -->
+<div class="drawer wide" id="detailDrawer">
+  <div class="drawer-header">
+    <div>
+      <div class="drawer-title" id="dtTitle">产品详情</div>
+      <div class="drawer-subtitle" id="dtSub"></div>
+    </div>
+    <span class="modal-close" data-close-drawer="detailDrawer"><i class="ti ti-x"></i></span>
+  </div>
+  <div class="drawer-body" id="dtBody"></div>
+  <div class="drawer-footer">
+    <button class="btn" id="dtSyncBtn"><i class="ti ti-refresh"></i> 同步代码</button>
+    <button class="btn" id="dtLinkBtn"><i class="ti ti-link"></i> 提交链接</button>
+    <div style="flex:1"></div>
+    <button class="btn btn-primary" id="dtEditBtn"><i class="ti ti-edit"></i> 编辑</button>
   </div>
 </div>
 
@@ -216,17 +257,12 @@ function render(){
   $('#listCnt').textContent=PROJECTS.length?('共 '+PROJECTS.length+' 个'):'';
   const body=$('#listBody');
   if(!PROJECTS.length){
-    body.innerHTML='<tr><td colspan="6"><div class="empty"><div class="empty-illu"><i class="ti ti-folder-off"></i></div><div class="empty-title">还没有产品</div><div class="empty-desc">点右上「新增产品」贴 Git 地址登记一个产品。</div></div></td></tr>';
+    body.innerHTML='<tr><td colspan="5"><div class="empty"><div class="empty-illu"><i class="ti ti-folder-off"></i></div><div class="empty-title">还没有产品</div><div class="empty-desc">点右上「新增产品」贴 Git 地址登记一个产品。</div></div></td></tr>';
     return;
   }
   body.innerHTML=PROJECTS.map(p=>{
     const names=(p.subsystems||[]).map(s=>typeof s==='string'?s:(s&&s.name)||'').filter(Boolean);
-    const descs=(p.subsystems||[]).map(s=>(s&&s.desc)||'').filter(Boolean);
-    // 子系统数（含中文 desc 优先展示的名列表）
-    const subLabels=(p.subsystems||[]).map(s=>{ if(typeof s==='string')return s; const nm=(s&&s.name)||''; const dc=(s&&s.desc)||''; return dc && dc!==nm ? nm+'（'+dc+'）' : nm; }).filter(Boolean);
-    const subCell = names.length
-      ? `<span class="subcnt">${names.length} 子系统</span><div class="subnames" title="${esc(subLabels.join('、'))}">${esc(subLabels.join('、'))}</div>`
-      : `<span class="subnames none">无子系统</span>`;
+    const subCell = names.length ? `<span class="subcnt">${names.length} 子系统</span>` : `<span class="subnames none">无子系统</span>`;
     const gitCell = p.gitUrl
       ? `<div class="pm-git" title="${esc(p.gitUrl)}">${esc(p.gitUrl)}</div>`
       : `<div class="pm-git none">未接 Git</div>`;
@@ -234,27 +270,22 @@ function render(){
     const verCell = hasRepo
       ? `<span class="vchip load" data-ver="${esc(p.id)}"><i class="ti ti-loader-2"></i> 读取…</span>`
       : `<span class="vchip warn"><i class="ti ti-alert-triangle"></i> —</span>`;
-    const commitCell = hasRepo
-      ? `<div class="commit-cell" data-head="${esc(p.id)}"><span class="none">读取中…</span></div><div class="synctime" data-sync="${esc(p.id)}" style="display:none"></div>`
-      : `<div class="commit-cell"><span class="none">未接 Git</span></div>`;
-    return `<tr data-row="${esc(p.id)}">
+    return `<tr data-row="${esc(p.id)}" class="pm-row" title="点击查看详情">
       <td><span class="pm-id">${esc(p.id)}</span></td>
       <td><div class="pm-name" title="${esc(p.name)}">${esc(p.name)}</div>${gitCell}</td>
       <td>${subCell}</td>
-      <td>${commitCell}</td>
       <td>${verCell}</td>
       <td>
         <div class="row-actions">
-          ${hasRepo?`<span class="row-action" data-act="sync" data-id="${esc(p.id)}" title="同步代码：拉取最新，更新 spec 与版本(git tag)"><i class="ti ti-refresh" style="vertical-align:-2px"></i> 同步</span>`:''}
-          <span class="row-action" data-act="link" data-id="${esc(p.id)}" title="生成提交链接"><i class="ti ti-link" style="vertical-align:-2px"></i> 链接</span>
+          <span class="row-action" data-act="detail" data-id="${esc(p.id)}" title="查看详情"><i class="ti ti-eye" style="vertical-align:-2px"></i> 详情</span>
           <span class="row-action" data-act="edit" data-id="${esc(p.id)}" title="编辑产品"><i class="ti ti-edit" style="vertical-align:-2px"></i> 编辑</span>
           <span class="row-action danger" data-act="del" data-id="${esc(p.id)}" title="删除产品"><i class="ti ti-trash" style="vertical-align:-2px"></i> 删除</span>
         </div>
       </td>
     </tr>`;
   }).join('');
-  // 三源合成：静态列已渲染，异步拉 /api/project-git（提交 + 最后同步）+ /api/versions（版本数）
-  PROJECTS.filter(p=>p.gitUrl||(p.subsystems&&p.subsystems.length)||p.repoPath).forEach(p=>{ loadGitInfo(p); loadVerBadge(p); });
+  // 版本徽标异步拉取；提交明细 / 各子系统 / 最后同步 移到「详情抽屉」按需拉取（列表不再塞满）
+  PROJECTS.filter(p=>p.gitUrl||(p.subsystems&&p.subsystems.length)||p.repoPath).forEach(p=>{ loadVerBadge(p); });
 }
 
 // "e4c812a｜2026-07-03 10:22:01 +0800｜标题" → 高亮短 hash · 到分钟日期 · 标题
@@ -293,14 +324,53 @@ async function loadVerBadge(p){
 
 /* ===================== 表格事件委托 ===================== */
 $('#listBody').addEventListener('click',e=>{
-  const tg=e.target.closest('.commit-toggle');
-  if(tg){ const more=tg.parentElement.querySelector('.commit-more'); if(more){ if(more.hasAttribute('hidden')){ more.removeAttribute('hidden'); tg.textContent='收起 ▴'; } else { more.setAttribute('hidden',''); tg.textContent='展开其余 '+tg.dataset.n+' 条 ▾'; } } return; }
-  const a=e.target.closest('[data-act]'); if(!a)return;
-  const id=a.dataset.id, act=a.dataset.act;
-  if(act==='sync') syncRepo(id);
-  else if(act==='link') openLink(id);
-  else if(act==='edit') startEdit(id);
-  else if(act==='del') askDelete(id);
+  const a=e.target.closest('[data-act]');
+  if(a){ const id=a.dataset.id, act=a.dataset.act;
+    if(act==='detail') openDetail(id);
+    else if(act==='edit') startEdit(id);
+    else if(act==='del') askDelete(id);
+    return;
+  }
+  // 点行其它任意处 → 打开详情抽屉
+  const tr=e.target.closest('tr[data-row]'); if(tr) openDetail(tr.getAttribute('data-row'));
+});
+
+/* ===================== 详情抽屉 ===================== */
+let detailId=null;
+async function openDetail(id){
+  const p=PROJECTS.find(x=>x.id===id); if(!p)return;
+  detailId=id;
+  $('#dtTitle').textContent=p.name||id;
+  $('#dtSub').innerHTML='<span class="mono">'+esc(id)+'</span>'+(p.gitUrl?' · <a href="'+esc(p.gitUrl)+'" target="_blank" rel="noopener">'+esc(p.gitUrl)+'</a>':' · <span class="text-tertiary">未接 Git</span>');
+  const subs=(p.subsystems||[]).map(s=>typeof s==='string'?{name:s,desc:''}:{name:(s&&s.name)||'',desc:(s&&s.desc)||''}).filter(s=>s.name);
+  $('#dtBody').innerHTML=
+    '<div class="dt-sec"><div class="dt-h"><i class="ti ti-stack-2"></i> 子系统 <span class="dt-cnt">'+subs.length+'</span></div>'+
+      (subs.length?'<div class="dt-subs">'+subs.map(s=>'<div class="dt-sub"><span class="dt-subname">'+esc(s.name)+'</span>'+(s.desc&&s.desc!==s.name?'<span class="dt-subdesc">'+esc(s.desc)+'</span>':'')+'</div>').join('')+'</div>':'<div class="dt-none">无子系统</div>')+
+    '</div>'+
+    '<div class="dt-sec"><div class="dt-h"><i class="ti ti-git-commit"></i> 各子系统最新提交</div><div id="dtCommits"><span class="dt-none">读取中…</span></div><div class="dt-synctime" id="dtSync"></div></div>'+
+    '<div class="dt-sec"><div class="dt-h"><i class="ti ti-tag"></i> 版本（git tag）</div><div id="dtVers"><span class="dt-none">读取中…</span></div></div>';
+  openDrawer('detailDrawer');
+  const hasRepo=p.gitUrl||(p.subsystems&&p.subsystems.length)||p.repoPath;
+  $('#dtSyncBtn').style.display=hasRepo?'':'none';
+  if(!hasRepo){ $('#dtCommits').innerHTML='<span class="dt-none">未接 Git</span>'; $('#dtVers').innerHTML='<span class="dt-none">未接 Git</span>'; return; }
+  try{ const r=await (await fetch('/api/project-git?project='+encodeURIComponent(id))).json();
+    const cs=((r&&r.subs)||[]).filter(s=>s&&s.head);
+    if($('#dtCommits')) $('#dtCommits').innerHTML = cs.length ? cs.map(s=>'<div class="dt-commit">'+(s.name&&cs.length>1?'<span class="dt-cname">'+esc(s.name)+'：</span>':'')+fmtHead(s.head)+'</div>').join('') : '<span class="dt-none">未读到提交</span>';
+    if($('#dtSync')) $('#dtSync').innerHTML = (r&&r.syncedAt)?'<i class="ti ti-clock" style="vertical-align:-1px"></i> 最后同步 '+esc(fmtTime(r.syncedAt)):'';
+  }catch(e){ if($('#dtCommits')) $('#dtCommits').innerHTML='<span class="dt-none">读取失败</span>'; }
+  try{ const rv=await (await fetch('/api/versions?project='+encodeURIComponent(id))).json(); const vs=rv.versions||[];
+    if($('#dtVers')) $('#dtVers').innerHTML = vs.length ? '<div class="dt-vers">'+vs.map(v=>'<span class="dt-vtag">'+esc(v)+'</span>').join('')+'</div>' : '<span class="dt-none">未读到版本（子系统仓下无 git tag）</span>';
+  }catch(e){ if($('#dtVers')) $('#dtVers').innerHTML='<span class="dt-none">读取失败</span>'; }
+}
+$('#dtEditBtn').addEventListener('click',()=>{ if(detailId){ closeDrawer('detailDrawer'); startEdit(detailId); } });
+$('#dtLinkBtn').addEventListener('click',()=>{ if(detailId) openLink(detailId); });
+$('#dtSyncBtn').addEventListener('click',async()=>{
+  if(!detailId)return; const b=$('#dtSyncBtn'), old=b.innerHTML; b.innerHTML='<i class="ti ti-loader-2"></i> 同步中…'; b.disabled=true;
+  try{ const r=await (await fetch('/api/git-refresh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({project:detailId})})).json();
+    if(r.ok){ toast('已同步到最新'+(r.syncedAt?'（'+fmtTime(r.syncedAt)+'）':''),'success'); const p=PROJECTS.find(x=>x.id===detailId); if(p) loadVerBadge(p); openDetail(detailId); }
+    else toast(r.error||'同步失败','error');
+  }catch(e){ toast('同步失败：'+e.message,'error'); }
+  finally{ b.innerHTML=old; b.disabled=false; }
 });
 
 async function syncRepo(id){
