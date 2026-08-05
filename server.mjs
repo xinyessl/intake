@@ -544,34 +544,59 @@ function codeSearch(proj, ver, query, specHits, n = 4, subKey = '') {
   const ref = safeRef(ver), terms = new Set();
   const zh = String(query).replace(/[^一-龥]/g, '');
   for (let i = 0; i + 2 <= zh.length; i++) terms.add(zh.slice(i, i + 2));   // 中文 bigram（匹配代码里的中文标签/注释）
-  for (let i = 0; i + 4 <= zh.length; i++) terms.add(zh.slice(i, i + 4));   // 4-gram（更具体，靠命中数排名）
+  for (let i = 0; i + 4 <= zh.length; i++) terms.add(zh.slice(i, i + 4));   // 4-gram（更具体、判别性强）
   (String(query).match(/[A-Za-z_][A-Za-z0-9_]{3,}/g) || []).forEach(w => terms.add(w));
   const specText = (specHits || []).map(h => h.text || '').join('\n');
   (specText.match(/\b[a-z][a-z0-9]*_[a-z0-9_]{2,}\b/g) || []).forEach(w => terms.add(w));   // 表名/字段
   (specText.match(/\/(api|comm)\/[A-Za-z0-9_]+/g) || []).forEach(w => terms.add(w));         // 接口路径段
   const OK = /\.(vue|[cm]?[jt]sx?|java|kt|xml|sql|py|go|cs|php|rb|c|cc|cpp|h|hpp|scala|sh|yaml|yml)$/i;   // 只看真源码
   const SKIPDIR = /node_modules\/|\/dist\/|iconfont|\.min\.|\/mock\//i;
-  const termList = [...terms].filter(t => t && t.length >= 2).slice(0, 18);
+  // 词特异性打分：英文标识（表名 x_y / 接口路径段 / 驼峰）判别性最强给最高分；中文 n-gram 越长越具体分越高（4-gram > 2-gram）。
+  const isIdent = t => /[A-Za-z_]/.test(t);
+  const spec = t => isIdent(t) ? 100 + t.length : t.length;   // 英文标识 >> 4-gram > bigram
+  const lenBonus = t => isIdent(t) ? 3 : (t.length >= 4 ? 2 : 1);   // IDF 加权时长词/英文标识的系数
+  // 先按特异性降序，判别性 4-gram / 英文标识一定进预算，不被大众 bigram 挤掉；预算放宽到 24
+  const termList = [...terms].filter(t => t && t.length >= 2).sort((a, b) => spec(b) - spec(a)).slice(0, 24);
   if (!termList.length) return [];
   const files = {};   // key -> {dir,path,terms:Set,lines:Set}
+  const df = {};      // 文档频率：命中每个词的不同文件数（跨本次 grep 的所有仓）
   let dirs = repoDirsOf(proj);
   if (subKey) { const sc = dirs.filter(d => (d.name || '') === subKey); if (sc.length) dirs = sc; }   // 指定子系统 → 只 grep 该子系统仓（匹配不到才回退全部）
-  for (const { dir } of dirs) {
-    if (!fs.existsSync(dir)) continue;
-    for (const t of termList) {
-      const out = gitOut(dir, ['grep', '-n', '-i', '-F', t, ...(ref ? [ref] : [])]);
-      for (const line of out.split('\n')) {
-        if (!line.trim()) continue;
-        const rest = ref ? line.replace(new RegExp('^' + ref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ':'), '') : line;
-        const m = rest.match(/^(.+?):(\d+):/); if (!m || !OK.test(m[1]) || SKIPDIR.test(m[1])) continue;
-        const key = dir + '|' + m[1], f = files[key] || (files[key] = { dir, path: m[1], terms: new Set(), lines: new Set() });
-        f.terms.add(t); if (f.lines.size < 40) f.lines.add(+m[2]);
+  const grepDirs = (dlist, useRef) => {   // 对给定仓集合跑一遍 grep，累计到 files/df；useRef=false → 用工作树/HEAD（跨仓回退时各仓 tag 不同，非当前仓 tag 可能不存在）
+    for (const { dir } of dlist) {
+      if (!fs.existsSync(dir)) continue;
+      const r = useRef ? ref : '';
+      for (const t of termList) {
+        const out = gitOut(dir, ['grep', '-n', '-i', '-F', t, ...(r ? [r] : [])]);
+        const seen = new Set();   // 本词在本仓命中的不同文件（算 df 用，每文件每词只记一次）
+        for (const line of out.split('\n')) {
+          if (!line.trim()) continue;
+          const rest = r ? line.replace(new RegExp('^' + r.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ':'), '') : line;
+          const m = rest.match(/^(.+?):(\d+):/); if (!m || !OK.test(m[1]) || SKIPDIR.test(m[1])) continue;
+          const key = dir + '|' + m[1], f = files[key] || (files[key] = { dir, path: m[1], ref: r, terms: new Set(), lines: new Set() });
+          f.terms.add(t); if (f.lines.size < 40) f.lines.add(+m[2]);
+          seen.add(key);
+        }
+        if (seen.size) df[t] = (df[t] || 0) + seen.size;
       }
     }
+  };
+  grepDirs(dirs, true);
+  // 稀有词加权（IDF 式）：稀有词 df 小 → 权重高；大众词 df 大 → 权重趋 0；长词/英文标识再加成
+  const weight = t => lenBonus(t) / Math.log2(2 + (df[t] || 0));
+  const scoreOf = f => { let s = 0; for (const t of f.terms) s += weight(t); return s; };
+  // subKey 收敛后本子系统加权 top 得分文件过少（<2）→ 回退到全部子系统再 grep 一遍补齐
+  //   跨仓时各仓 tag 不同：非当前仓统一用无 ref（工作树/HEAD），避免 git grep <不存在的tag> 返回空
+  if (subKey) {
+    const scored = Object.values(files).filter(f => scoreOf(f) > 0);
+    if (scored.length < 2) {
+      const all = repoDirsOf(proj), rest = all.filter(d => (d.name || '') !== subKey);
+      if (rest.length) grepDirs(rest, false);
+    }
   }
-  const top = Object.values(files).sort((a, b) => b.terms.size - a.terms.size || b.lines.size - a.lines.size).slice(0, n);
-  return top.map(f => {   // 每个文件取匹配行 ±6 行窗口、合并相邻、截断
-    const full = String(specFileText(f.dir, ref, f.path) || '').split('\n');
+  const top = Object.values(files).sort((a, b) => scoreOf(b) - scoreOf(a) || b.lines.size - a.lines.size).slice(0, n);
+  return top.map(f => {   // 每个文件取匹配行 ±6 行窗口、合并相邻、截断（f.ref：当前仓用 tag，回退仓用空=工作树/HEAD）
+    const full = String(specFileText(f.dir, f.ref, f.path) || '').split('\n');
     const keep = new Set();
     for (const ln of f.lines) for (let i = Math.max(1, ln - 6); i <= Math.min(full.length, ln + 6); i++) keep.add(i);
     const nums = [...keep].sort((a, b) => a - b); let snip = '', last = 0;
