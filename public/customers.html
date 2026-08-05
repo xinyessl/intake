@@ -48,7 +48,6 @@
       <div class="filter-field"><label>状态</label><select class="select" id="fStatus"><option value="">全部状态</option><option value="已开通">已开通</option><option value="未开通">未开通</option></select></div>
       <div class="filter-field"><label>关键词</label><div class="input-with-icon"><i class="ti ti-search"></i><input class="input" id="fKw" placeholder="医院名，回车搜索"></div></div>
     </div>
-    <button class="btn" id="btnDeployTpl"><i class="ti ti-list-check"></i>部署清单模板</button>
     <button class="btn btn-primary" id="btnAdd"><i class="ti ti-plus"></i>新增医院</button>
   </div>
 </div>
@@ -63,7 +62,6 @@
             <th>上线产品 · 版本</th>
             <th style="width:92px">状态</th>
             <th style="width:120px">维保到期</th>
-            <th style="width:96px">部署进度</th>
             <th style="width:74px">工单数</th>
             <th style="width:160px">操作</th>
           </tr>
@@ -232,7 +230,6 @@ function render(){
       <td>${prodCell}</td>
       <td><span class="tag ${on?'tag-success':'tag-gray'} tag-dot">${esc(c.status||'—')}</span></td>
       <td>${maintainCell(c.maintainEnd)}</td>
-      <td>${deployCell(c)}</td>
       <td><span class="mono ${tc?'text-link':'text-tertiary'}" data-tickets="${esc(c.name)}">${tc}</span></td>
       <td>
         <div class="row-actions">
@@ -491,7 +488,6 @@ async function saveDeployTpl(){
 }
 
 /* ---------- 事件绑定 ---------- */
-$('#btnDeployTpl').addEventListener('click',openDeployTpl);
 $('#btnAddTplTask').addEventListener('click',()=>addTplTaskRow('',''));
 $('#btnTplSave').addEventListener('click',saveDeployTpl);
 $('#btnAdd').addEventListener('click',()=>openEdit(null));
