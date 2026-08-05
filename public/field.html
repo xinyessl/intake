@@ -504,6 +504,28 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
 <!-- 轻提示容器（FS-05：下载/改版本/验证 即点即执行 + toast；复用 theme.css .toast-container/.toast） -->
 <div class="toast-container" id="fToastBox"></div>
 
+<!-- 样式化输入弹窗（替代浏览器 native prompt；维保到期编辑 / 验证不通过说明等用，统一 app 风格） -->
+<style>
+  .f-modal-mask{position:fixed;inset:0;background:rgba(15,25,40,.42);display:none;align-items:center;justify-content:center;z-index:600}
+  .f-modal-mask.open{display:flex}
+  .f-modal{background:var(--color-surface,#fff);border:1px solid var(--color-border,#E5E9F0);border-radius:12px;box-shadow:0 24px 64px rgba(15,25,40,.28);width:420px;max-width:calc(100vw - 40px);padding:20px 22px}
+  .f-modal h4{font-size:15.5px;font-weight:700;margin:0 0 6px;color:var(--color-text,#1B2733)}
+  .f-modal .f-modal-msg{font-size:13px;color:var(--color-text-secondary,#5A6B7B);margin:0 0 14px;line-height:1.6}
+  .f-modal .input{width:100%;box-sizing:border-box}
+  .f-modal-foot{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}
+</style>
+<div class="f-modal-mask" id="fModalMask" aria-hidden="true">
+  <div class="f-modal" role="dialog" aria-modal="true">
+    <h4 id="fmTitle"></h4>
+    <div class="f-modal-msg" id="fmMsg"></div>
+    <div id="fmBody"></div>
+    <div class="f-modal-foot">
+      <button class="btn" id="fmCancel">取消</button>
+      <button class="btn btn-primary" id="fmOk">确定</button>
+    </div>
+  </div>
+</div>
+
 <!-- ================= 登录门（gate） ================= -->
 <div class="f-login" id="fLogin">
   <div class="f-login-card">
@@ -1725,13 +1747,14 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     }).catch(function () { if (btn) btn.disabled = false; showToast('操作失败，请重试', 'error'); });
   }
 
-  // 反馈问题：弹输入 note（field.html 无 ui.js prompt，用就地 AI 气泡引导过重——此处用轻量 window.prompt 承载反馈说明；空/取消不提交）
+  // 反馈问题：样式化 textarea 弹窗承载"验证不通过"说明；空/取消不提交
   function promptReject(t) {
-    var note = window.prompt('请填写验证不通过的问题说明（将打回工单、通知运营/开发处理）：', '');
-    if (note == null) return;                 // 取消
-    note = String(note).trim();
-    if (!note) { showToast('请填写反馈说明', 'error'); return; }
-    doVerify(t, 'fail', note, null);
+    fPrompt({ title: '验证不通过', message: '请填写问题说明（将打回工单、通知运营/开发处理）', type: 'textarea', value: '' }).then(function (note) {
+      if (note == null) return;                 // 取消
+      note = String(note).trim();
+      if (!note) { showToast('请填写反馈说明', 'error'); return; }
+      doVerify(t, 'fail', note, null);
+    });
   }
 
   function emptyHtml(icon, title, desc) {
@@ -2096,17 +2119,44 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     var btn = $('fMaintainEdit');
     if (btn) btn.addEventListener('click', function (e) { e.stopPropagation(); openMaintainEdit(site); });
   }
-  // 弹编辑（field.html 无 ui.js prompt，沿用轻量 window.prompt；前端校验 yyyy-MM-dd）→ POST /api/customer-maintain
+  // 样式化输入弹窗（替代 native prompt）→ Promise<string|null>（取消=null）。type: 'date' | 'text' | 'textarea'
+  function fPrompt(opts) {
+    opts = opts || {};
+    return new Promise(function (resolve) {
+      var mask = $('fModalMask');
+      if (!mask) { resolve(window.prompt(opts.message || opts.title || '', opts.value || '')); return; }
+      $('fmTitle').textContent = opts.title || '';
+      $('fmMsg').textContent = opts.message || '';
+      var type = opts.type === 'date' ? 'date' : (opts.type === 'textarea' ? 'textarea' : 'text');
+      $('fmBody').innerHTML = type === 'textarea'
+        ? '<textarea class="input" id="fmInput" rows="3" style="resize:vertical"></textarea>'
+        : '<input type="' + type + '" class="input" id="fmInput">';
+      var inp = $('fmInput'); inp.value = opts.value || ''; if (opts.placeholder) inp.placeholder = opts.placeholder;
+      mask.classList.add('open');
+      setTimeout(function () { try { inp.focus(); } catch (e) {} }, 30);
+      function cleanup() { mask.classList.remove('open'); $('fmOk').onclick = null; $('fmCancel').onclick = null; mask.onclick = null; document.removeEventListener('keydown', onKey); }
+      function done(v) { cleanup(); resolve(v); }
+      function onKey(e) { if (e.key === 'Escape') done(null); else if (e.key === 'Enter' && type !== 'textarea') done(inp.value); }
+      $('fmOk').onclick = function () { done(inp.value); };
+      $('fmCancel').onclick = function () { done(null); };
+      mask.onclick = function (e) { if (e.target === mask) done(null); };
+      document.addEventListener('keydown', onKey);
+    });
+  }
+
+  // 维保到期编辑 → 样式化 date 弹窗（app 风格）→ POST /api/customer-maintain
   function openMaintainEdit(site) {
     var nm = String(site || '').trim();
     if (!nm) { showToast('请先选择医院', 'error'); return; }
     var cust = custBySite(nm);
     var cur = cust ? String(cust.maintainEnd || '').trim() : '';
-    var val = window.prompt('设置「' + nm + '」维保到期日期（格式 yyyy-MM-dd，如 2027-03-31）：', cur);
-    if (val == null) return;                 // 取消
-    val = String(val).trim();
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(val)) { showToast('日期格式须为 yyyy-MM-dd', 'error'); return; }
-    doMaintainSave(nm, val);
+    fPrompt({ title: '设置维保到期', message: '医院：' + nm, type: 'date', value: cur }).then(function (val) {
+      if (val == null) return;                 // 取消
+      val = String(val).trim();
+      if (!val) return;                        // 空 = 不改（本期不支持清空）
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(val)) { showToast('日期格式须为 yyyy-MM-dd', 'error'); return; }
+      doMaintainSave(nm, val);
+    });
   }
   function doMaintainSave(site, val) {
     api('/api/customer-maintain', { method: 'POST', body: JSON.stringify({ site: site, maintainEnd: val }) }).then(function (r) {
