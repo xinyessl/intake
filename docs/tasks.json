@@ -10,60 +10,61 @@
         {
           "id": "T-FS01",
           "title": "FS-01 实施端外壳·登录门·工作空间隔离·维度切换（20 AC，P1）：评审 draft→ready 后 /build",
-          "status": "todo",
+          "status": "done",
           "specRef": "FS-01",
           "note": "其它 FS 都依赖它；含清理 scopedForField 死码 + 坐实新 field 端点走内联 sites 收敛。NH-a~e 待裁决。"
         },
         {
           "id": "T-FS02",
           "title": "FS-02 医院视图·提交清单（按批次/按类型，20 AC）：P1类型16/P2批次4",
-          "status": "todo",
+          "status": "done",
           "specRef": "FS-02",
           "note": "按类型+医院tab+子项目筛选 P1；按批次分组 P2 卡 BP-01 batches 表。depends_on FS-01,BP-01。"
         },
         {
           "id": "T-FS03",
           "title": "FS-03 系统视图·跨医院聚合·归档版本模型（21 AC，P1）",
-          "status": "todo",
+          "status": "done",
           "specRef": "FS-03",
           "note": "运营tag版本=/api/versions?project=（非product=）；SUB_PRODUCT无表待裁(NH-g/h)。depends_on FS-01,FS-02。"
         },
         {
           "id": "T-FS04",
           "title": "FS-04 AI对话提交（判类/补要素/归档→建单/咨询，24 AC，P1）",
-          "status": "todo",
+          "status": "done",
           "specRef": "FS-04",
           "note": "复用 intake-chat(合并模式建单)/consult(SSE)/intake-analyze；/api/ai/classify 不存在。NH-i~k 待裁。depends_on FS-01。"
         },
         {
           "id": "T-FS05",
           "title": "FS-05 更新包下载·版本回写·待办闭环（23 AC，全P2）",
-          "status": "todo",
+          "status": "done",
           "specRef": "FS-05",
           "note": "全条卡 BP-01（batches/发包/下载记录未建）。版本回写落 customers.json products[].version。depends_on FS-02,BP-01,CU-01。"
         },
         {
           "id": "T-FS06",
           "title": "FS-06 免登录提交链接（访客模式，25 AC，P1）",
-          "status": "todo",
+          "status": "done",
           "specRef": "FS-06",
           "note": "复用 submit-link(HMAC)+linkUserFrom+submit.html；/api/s/{token} 不存在；无token库→无法单条吊销(NH-o)。depends_on FS-04。"
         },
         {
           "id": "T-FS07",
           "title": "FS-07 经验库入口（现场检索，8 AC，P1，Could）",
-          "status": "todo",
+          "status": "done",
           "specRef": "FS-07",
           "note": "kb-list 现不在 FIELD_OK(403)，需加白名单+新增/扩检索端点(NH-p)。depends_on FS-01,KB-01。"
         },
         {
           "id": "T-FS08",
           "title": "FS-08 双域名部署·访问隔离（决策D，P1）：两独立域名共用后端+库，nginx双vhost同源反代+server.mjs按Host访问闸/根路由+submit-link绝对地址+运维文档",
-          "status": "todo",
+          "status": "done",
           "specRef": "FS-08",
           "note": "2026-07-21 裁决决策D：admin/field 两独立域名、共用同一 server.mjs+MySQL、只拆web层。改现 server.mjs:1099 按role分发→按Host；submit-link 返 FIELD_ORIGIN 绝对地址。NH-q域名值/HTTPS、NH-r未知Host兜底。depends_on FS-01；牵动 FS-06/运维部署.md。"
         }
-      ]
+      ],
+      "note": "2026-08-05 状态对齐：该批 FS/AM 特性均已建成上线，历史未回写，统一置 done"
     },
     {
       "id": "B-manual-20260720",
@@ -74,11 +75,12 @@
         {
           "id": "T-AM01-enabled",
           "title": "AM-01 落地 enabled 列：加列(ALTER)+loadAll兜底+replaceAccounts+pubUser+account-save+/api/login停用拦截+AC-19停用保护",
-          "status": "doing",
+          "status": "done",
           "specRef": "AM-01",
           "note": "NH-1 已裁决并并入 spec；实现前 AM-01 仍 draft，待 draft→ready 或经确认后 /build。真库冒烟注意：既有 accounts 表需 ALTER 补列，CREATE TABLE IF NOT EXISTS 不会加列。"
         }
-      ]
+      ],
+      "note": "2026-08-05 状态对齐：该批 FS/AM 特性均已建成上线，历史未回写，统一置 done"
     },
     {
       "id": "B-20260731-维保提醒",

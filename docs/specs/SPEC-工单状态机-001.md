@@ -2,7 +2,7 @@
 id: SPEC-工单状态机-001
 module: 工单闭环
 title: 进件工单生命周期状态机（接收→分析→回复/立项→开发→出包→验证→关闭）
-status: draft
+status: accepted
 version: since v0.2（M4）
 depends_on: [架构设计.md §12]
 ---
