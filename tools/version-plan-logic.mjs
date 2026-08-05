@@ -58,6 +58,16 @@ export function normDeployManifest(raw, subsystem, gen) {
   return { tasks, sql };
 }
 
+// ---------- 版本号语义升序排序（目录形态草稿用）----------
+// 2026-08-05 核心更新流重构：草稿源改为 docs/deploy/ 目录（一版一文件），版本序不再来自 git tag，
+//   而是由文件名（=版本号）按语义（numeric）升序排。与 listVersions 的 localeCompare(numeric) 口径一致。
+//   入参 versions：版本号数组（乱序/含重复）；返回：去重 + 语义升序（旧→新）。
+export function sortVersions(versions) {
+  const set = [];
+  for (const v of (Array.isArray(versions) ? versions : [])) { const s = String(v == null ? '' : v).trim(); if (s && set.indexOf(s) < 0) set.push(s); }
+  return set.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+}
+
 // ---------- 区间计算 ：(from, to] ----------
 // orderedTags：**升序**（旧→新）git tag 列表（调用方把 listVersions 倒序结果 reverse 后传入）。
 // from：现场版本；to：目标版本。返回落在 (from, to] 区间的 tag（升序）。
@@ -243,6 +253,104 @@ export function mergeSql(sqls, meta) {
     const content = String(s.content == null ? '' : s.content).replace(/\s+$/, '');
     lines.push(content || '-- （脚本正文为空或读取失败）');
     // 段间补空行分隔（不强改用户 SQL）
+    lines.push('');
+  }
+  return lines.join('\n');
+}
+
+// ===== 2026-08-05 核心更新流重构：批次快照完成度（per 批次 × 医院）=====
+//   实施侧读的是 batch.deployPlan 快照（发包时审核冻结的一整份 tasks/sql，**无 version 概念**），
+//   完成度存 customer.updateProgress[batchId] = { tasks:{[id]:{done,by,at}}, sqlBundle:{done,by,at} }。
+//   与旧的 [productId][version] 结构键空间不撞（batchId 有前缀），normCustomer 用 'updateProgress' in b 保留。
+
+// 快照任务左连完成度：tasks=快照 deployPlan.tasks（各带 id）；prog = customer.updateProgress[batchId]（形状 {tasks:{},sqlBundle:{}}）。
+//   返回每项挂 done/by/at + 汇总 {rows,done,total}。
+export function joinBatchProgress(tasks, prog) {
+  const p = prog && typeof prog === 'object' ? prog : {};
+  const bucket = p.tasks && typeof p.tasks === 'object' ? p.tasks : {};
+  const list = Array.isArray(tasks) ? tasks : [];
+  let done = 0;
+  const rows = list.map(t => {
+    const st = bucket[t.id];
+    const isDone = !!(st && st.done);
+    if (isDone) done++;
+    return { id: t.id, title: t.title || '', desc: t.desc || '', done: isDone, by: (st && st.by) || '', at: (st && st.at) || '' };
+  });
+  return { rows, done, total: list.length };
+}
+
+// 快照 SQL 单点汇总：sql=快照 deployPlan.sql（各带 id/title/desc/content）；prog = customer.updateProgress[batchId]。
+//   返回 { hasSql, scriptCount, done, by, at }（一整份合并 = 一个完成点，挂 prog.sqlBundle）。
+export function batchSqlSummary(sqlItems, prog) {
+  const list = Array.isArray(sqlItems) ? sqlItems : [];
+  const p = prog && typeof prog === 'object' ? prog : {};
+  const st = p.sqlBundle && typeof p.sqlBundle === 'object' ? p.sqlBundle : null;
+  return { hasSql: list.length > 0, scriptCount: list.length, done: !!(st && st.done), by: (st && st.by) || '', at: (st && st.at) || '' };
+}
+
+// 应用一次快照任务勾选/取消（幂等·不改入参）：prog=customer.updateProgress[batchId]（可空）→ 写/删 prog.tasks[id]。
+export function applyBatchTaskToggle(prog, itemId, done, by, at) {
+  const src = prog && typeof prog === 'object' ? prog : {};
+  const id = String(itemId || '');
+  const next = Object.assign({}, src);
+  const curB = next.tasks && typeof next.tasks === 'object' ? next.tasks : {};
+  const nextB = Object.assign({}, curB);
+  if (done) {
+    if (nextB[id] && nextB[id].done) return { progress: next, changed: false };   // 幂等
+    nextB[id] = { done: true, by: clip(by, 40), at: clip(at, 40) };
+  } else {
+    if (!(id in nextB)) return { progress: next, changed: false };
+    delete nextB[id];
+  }
+  next.tasks = nextB;
+  return { progress: next, changed: true };
+}
+
+// 应用一次快照 SQL 单点勾选/取消（幂等·不改入参）：prog=customer.updateProgress[batchId] → 写/删 prog.sqlBundle。
+export function applyBatchSqlToggle(prog, done, by, at) {
+  const src = prog && typeof prog === 'object' ? prog : {};
+  const next = Object.assign({}, src);
+  if (done) {
+    if (next.sqlBundle && next.sqlBundle.done) return { progress: next, changed: false };
+    next.sqlBundle = { done: true, by: clip(by, 40), at: clip(at, 40) };
+  } else {
+    if (!('sqlBundle' in next)) return { progress: next, changed: false };
+    delete next.sqlBundle;
+  }
+  return { progress: next, changed: true };
+}
+
+// 合并快照 SQL 为单文件（正文已冻结在快照里，无需读 git）。items=deployPlan.sql（各带 title/desc/content）。
+//   meta：{productName, from, to, site}。按快照顺序拼接 + 分隔注释。空 → 含说明注释不抛错。
+export function mergeBatchSql(items, meta) {
+  const m = meta && typeof meta === 'object' ? meta : {};
+  const productName = clip(m.productName, 120) || '（未知产品）';
+  const from = clip(m.from, 60);
+  const to = clip(m.to, 60);
+  const site = clip(m.site, 120);
+  const list = Array.isArray(items) ? items : [];
+  const lines = [];
+  lines.push('-- =========================================================');
+  lines.push('-- 更新 SQL 合并脚本（发包时审核冻结的批次快照 · 正文已固化）');
+  lines.push('-- 产品：' + productName);
+  lines.push('-- 医院：' + (site || '（未指定）'));
+  lines.push('-- 版本区间：(' + (from || '最早') + ', ' + (to || '?') + ']');
+  lines.push('-- 脚本段数：' + list.length);
+  lines.push('-- 说明：请按顺序在目标库手动执行；执行完毕后到系统勾选「已执行」。');
+  lines.push('-- =========================================================');
+  lines.push('');
+  if (!list.length) {
+    lines.push('-- （该批次快照暂无 SQL 脚本）');
+    lines.push('');
+    return lines.join('\n');
+  }
+  for (const s of list) {
+    const label = clip(s && s.title, 200) || '（未命名）';
+    lines.push('');
+    lines.push('-- ==== ' + productName + ' ' + label + ' ====');
+    if (s && s.desc) lines.push('-- 说明：' + clip(s.desc, 200));
+    const content = String((s && s.content) == null ? '' : s.content).replace(/\s+$/, '');
+    lines.push(content || '-- （脚本正文为空）');
     lines.push('');
   }
   return lines.join('\n');

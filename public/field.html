@@ -1519,7 +1519,8 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   function loadUpdatePlan(g, box) {
     var site = state.curSite || '';
     if (!site) { box.innerHTML = ''; return; }
-    var qs = '?site=' + encodeURIComponent(site) + '&product=' + encodeURIComponent(g.product) + '&target=' + encodeURIComponent(g.pkgVersion || '');
+    // 2026-08-05 核心更新流重构：数据源换成批次快照（batch.deployPlan），按 batchId 拉。
+    var qs = '?site=' + encodeURIComponent(site) + '&batchId=' + encodeURIComponent(g.batchId || '');
     api('/api/field/update-plan' + qs, { method: 'GET' }).then(function (r) {
       var b = r.body || {};
       if (!b.ok) { box.innerHTML = ''; return; }   // 产品不存在等 → 静默不显（不打断卡）
@@ -1551,7 +1552,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     if (!tasks.length && !sql.hasSql) {
       var em = document.createElement('div');
       em.className = 'f-plan-empty';
-      em.textContent = '该版本区间暂无登记的更新任务（运营端在「版本发版」登记后会出现在这里）';
+      em.textContent = plan.noManifest ? (plan.noManifestHint || '该批次尚未审核部署清单（运营审核确认后会出现在这里）') : '该批次部署清单为空';
       body.appendChild(em);
     } else {
       // 一份统一实施任务清单（累积任务逐条 + 末尾 SQL 执行条目）——总进度 = 任务完成 + SQL 单点（若有）
@@ -1603,7 +1604,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     dl.innerHTML = '<i class="ti ti-download"></i> 下载合并 SQL';
     dl.addEventListener('click', function () {
       var site = state.curSite || '';
-      var u = '/api/field/update-sql-merged?site=' + encodeURIComponent(site) + '&product=' + encodeURIComponent(g.product) + '&target=' + encodeURIComponent(g.pkgVersion || '');
+      var u = '/api/field/update-sql-merged?site=' + encodeURIComponent(site) + '&batchId=' + encodeURIComponent(g.batchId || '');
       window.open(u, '_blank');
     });
     main.innerHTML = titleLine + metaHtml;
@@ -1615,22 +1616,22 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     var box = document.querySelector('.f-plan-block[data-batch="' + (g.batchId || '') + '"]');
     if (box) loadUpdatePlan(g, box); else loadBatchView();
   }
-  // 勾选/取消一条累积任务 → /api/field/update-toggle {kind:'task'}；成功后刷新该批 plan。
+  // 勾选/取消一条快照任务 → /api/field/update-toggle {kind:'task', batchId, itemId}；成功后刷新该批 plan。
   function doTaskToggle(g, it, done, cb) {
     cb.disabled = true;
     var site = state.curSite || '';
-    api('/api/field/update-toggle', { method: 'POST', body: JSON.stringify({ site: site, product: g.product, version: it.version, kind: 'task', itemId: it.id, done: done }) }).then(function (r) {
+    api('/api/field/update-toggle', { method: 'POST', body: JSON.stringify({ site: site, batchId: g.batchId, kind: 'task', itemId: it.id, done: done }) }).then(function (r) {
       var b = r.body || {};
       if (!b.ok) { cb.disabled = false; cb.checked = !done; showToast(b.error || '操作失败', 'error'); return; }
       showToast(done ? '已标记完成' : '已取消完成', 'success');
       refreshPlanBlock(g);
     }).catch(function () { cb.disabled = false; cb.checked = !done; showToast('操作失败，请重试', 'error'); });
   }
-  // 勾选/取消「合并 SQL 单点」→ /api/field/update-toggle {kind:'sql', target:目标版本}；一个完成态（非逐脚本）。
+  // 勾选/取消「合并 SQL 单点」→ /api/field/update-toggle {kind:'sql', batchId}；一个完成态（非逐脚本）。
   function doSqlBundleToggle(g, plan, done, cb) {
     cb.disabled = true;
     var site = state.curSite || '';
-    api('/api/field/update-toggle', { method: 'POST', body: JSON.stringify({ site: site, product: g.product, kind: 'sql', target: (plan.toVersion || g.pkgVersion || ''), done: done }) }).then(function (r) {
+    api('/api/field/update-toggle', { method: 'POST', body: JSON.stringify({ site: site, batchId: g.batchId, kind: 'sql', done: done }) }).then(function (r) {
       var b = r.body || {};
       if (!b.ok) { cb.disabled = false; cb.checked = !done; showToast(b.error || '操作失败', 'error'); return; }
       showToast(done ? '已标记 SQL 执行完成' : '已取消 SQL 执行标记', 'success');

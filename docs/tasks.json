@@ -251,6 +251,50 @@
           "specRef": "BP-01"
         }
       ]
+    },
+    {
+      "id": "B-20260806-发包审核快照",
+      "source": "CLI窗口·用户口述",
+      "importedAt": "2026-08-06",
+      "ref": "部署清单/SQL 改「代码=草稿源 → 发包时人审可改 → 快照进批次 → 实施用快照」；累积在发包时算好存一整份；首装单独审核入口；串进现有批次上传包流程",
+      "tasks": [
+        {
+          "id": "RS-1",
+          "title": "读取器改目录@HEAD docs/deploy/<版本>.json（拉草稿用）",
+          "status": "done",
+          "specRef": "BP-01"
+        },
+        {
+          "id": "RS-2",
+          "title": "server 发包审核：batch-deploy-draft(拉(from,to]累积草稿·管理员) + batch-deploy-save(存快照进 batch.deployPlan·SQL正文冻结·标 reviewed)",
+          "status": "done",
+          "specRef": "BP-01"
+        },
+        {
+          "id": "RS-3",
+          "title": "batches.html 上传包表单加「部署清单审核」区：起始版本+目标版本→拉草稿→可增删改→保存快照",
+          "status": "done",
+          "specRef": "BP-01"
+        },
+        {
+          "id": "RS-4",
+          "title": "实施侧 update-plan/update-sql-merged 改读 batch.deployPlan 快照(不再实时读代码/不跨版累积)；完成度 per(批次,医院)",
+          "status": "done",
+          "specRef": "FS-05"
+        },
+        {
+          "id": "RS-5",
+          "title": "逻辑测试 + spec BP-01/FS-05 改为发包审核快照模型；开发规范补「代码=草稿源·发包人审」",
+          "status": "done",
+          "specRef": "BP-01"
+        },
+        {
+          "id": "RS-6",
+          "title": "(第二步)首装单独审核/发放入口 + 实施端医院视图未部署产品显示已发放首装清单",
+          "status": "todo",
+          "specRef": "FS-05"
+        }
+      ]
     }
   ]
 }

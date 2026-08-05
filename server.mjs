@@ -28,8 +28,9 @@ import * as db from './db.mjs';
 // 现场实施代办清单纯逻辑（部署清单模板/进度/合并/勾选/越权判断，可独立单测：tools/fs-06-checklist.logic.test.mjs）
 // 2026-08-05 架构重构：checklist-logic（部署清单模板/批次实施清单纯逻辑）随「跟随产品代码」重构一并废弃，不再 import。
 // 更新包「按版本独立维护 + 跨版本累积」纯逻辑（区间/累积/左连/勾选/合并SQL，可独立单测：tools/version-plan.logic.test.mjs）
-import { rangeVersions, accumulateManifests, joinProgress as vpJoinProgress, applyToggle as vpApplyToggle, applySqlBundleToggle as vpApplySqlBundleToggle, sqlBundleSummary as vpSqlBundleSummary, mergeSql as vpMergeSql } from './tools/version-plan-logic.mjs';
-import { readSqlAtTag, readDeployManifestFromSubs } from './tools/deploy-manifest-reader.mjs';
+import { rangeVersions, accumulateManifests, joinProgress as vpJoinProgress, applyToggle as vpApplyToggle, applySqlBundleToggle as vpApplySqlBundleToggle, sqlBundleSummary as vpSqlBundleSummary, mergeSql as vpMergeSql, joinBatchProgress as vpJoinBatchProgress, batchSqlSummary as vpBatchSqlSummary, applyBatchTaskToggle as vpApplyBatchTaskToggle, applyBatchSqlToggle as vpApplyBatchSqlToggle, mergeBatchSql as vpMergeBatchSql } from './tools/version-plan-logic.mjs';
+import { readSqlAtTag, readDeployManifestFromSubs, readDeployDirFromSubs, readSqlFileAtHead } from './tools/deploy-manifest-reader.mjs';
+import { sortVersions as vpSortVersions } from './tools/version-plan-logic.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));           // 收件项目根目录
 const PORT = process.env.PORT || 5180;
@@ -382,6 +383,72 @@ function readDeployManifest(proj, tag) {
   const out = readDeployManifestFromSubs(subs, t);
   DEPLOY_MANIFEST_CACHE.set(ck, out);
   return out;
+}
+
+// ===== 2026-08-05 架构重构（核心更新流 · 草稿源 = 代码目录 @HEAD）=====
+//   模型：代码 docs/deploy/<版本>.json + sql/*.sql = 清单/SQL 的**草稿源**（读 @HEAD，一版一文件）。
+//     发包时 intake 从代码拉出 (起始版本, 目标版本] 累积草稿 → 运营人审可改 → 快照冻结进 batch.deployPlan。
+//     实施侧读批次快照（见 update-plan/update-sql-merged 改造），不再实时读代码、不再跨版累积。
+//   本函数只做「拉草稿」：读 @HEAD 目录 → 取区间 → 累积 → SQL 正文一并读出（供审核 + 冻结）。缓存不做（发包低频，且要读最新代码）。
+function subsOfProj(proj) {
+  const subs = [];
+  ((proj && proj.subsystems) || []).forEach(s => { if (s && s.repoPath) subs.push({ name: String(s.name || s.key || '').trim(), repoPath: s.repoPath }); });
+  if (proj && proj.repoPath) subs.push({ name: '', repoPath: proj.repoPath });   // 兼容顶层单仓
+  return subs;
+}
+// 拉某产品 (from, to] 区间的累积部署清单草稿（@HEAD 目录形态）。
+//   from 空 = 从头（首装场景由 RS-6 另做，这里更新流一般 from 有值；空则 include 全部 ≤to）。
+//   返回 { from, to, versions:[实际有清单的版本·升序], tasks:[{id(=gid),title,desc,version,subsystem}], sql:[{id(=gid),title,desc,version,subsystem,file,content}] }。
+//     · id 用 gid（跨子系统唯一，作为快照条目稳定 id）；title：task 用 title、sql 用 file/desc 兜底。
+//     · sql.content：优先读 file 正文（readSqlFileAtHead @HEAD），file 缺用内联 content，读不到留说明占位（供审核可见）。
+function computeDeployDraft(proj, from, to) {
+  const subs = subsOfProj(proj);
+  const byVersion = readDeployDirFromSubs(subs);                        // { [version]: {tasks,sql} }（@HEAD 全版本）
+  const allVersions = vpSortVersions(Object.keys(byVersion));           // 语义升序（文件名=版本号）
+  const range = rangeVersions(allVersions, from, to);                   // (from, to] 升序
+  const manifestByVersion = {};
+  for (const v of range) manifestByVersion[v] = byVersion[v] || { tasks: [], sql: [] };
+  const acc = accumulateManifests(range, manifestByVersion);           // 复用累积（tasks/sqls 各带 version）
+  // 组织成审核用草稿：tasks 直用；sql 逐条读正文（@HEAD file 引用 → readSqlFileAtHead，供审核可见 + 冻结）。
+  const tasks = acc.tasks.map(t => ({ id: t.id, title: t.title || '', desc: t.desc || '', version: t.version, subsystem: t.subsystem || '' }));
+  const sql = acc.sqls.map(s => {
+    let content = String(s.content || '');
+    if (s.file) {
+      const fileText = readSqlFileAtHead(s.repoPath, s.file);           // @HEAD 读文件正文
+      content = fileText || content || ('-- （无法读取文件 ' + s.file + ' @ HEAD，请核对产品仓该路径是否存在）');
+    }
+    return { id: s.id, title: s.file || s.desc || s.id, desc: s.desc || '', version: s.version, subsystem: s.subsystem || '', file: s.file || '', content };
+  });
+  return { from: String(from || '').trim(), to: String(to || '').trim(), versions: acc.versionsInRange, tasks, sql };
+}
+// 快照存/取工具：batch.deployPlan = { from, to, tasks:[{id,title,desc}], sql:[{id,title,desc,content}], reviewedBy, reviewedAt }。
+//   规范化审核提交的 tasks/sql（长度约束对齐 normDeployManifest：title≤120、desc≤2000、sql desc≤200、content≤20000；title 非空丢弃）。
+function normDeployPlanItems(rawTasks, rawSql) {
+  const clip = (v, n) => String(v == null ? '' : v).trim().slice(0, n);
+  const tasks = [];
+  const seenT = new Set();
+  for (const t of (Array.isArray(rawTasks) ? rawTasks : [])) {
+    const title = clip(t && t.title, 120);
+    if (!title) continue;                                              // title 非空才收
+    let id = clip(t && t.id, 80) || ('dt' + crypto.randomBytes(3).toString('hex'));
+    if (seenT.has(id)) id = 'dt' + crypto.randomBytes(3).toString('hex');
+    seenT.add(id);
+    tasks.push({ id, title, desc: clip(t && t.desc, 2000) });
+    if (tasks.length >= 300) break;
+  }
+  const sql = [];
+  const seenS = new Set();
+  for (const s of (Array.isArray(rawSql) ? rawSql : [])) {
+    const content = String((s && s.content) != null ? s.content : '').slice(0, 20000);
+    const title = clip(s && s.title, 200);
+    if (!content.trim() && !title) continue;                          // 空 SQL（无正文无标题）丢弃
+    let id = clip(s && s.id, 80) || ('ds' + crypto.randomBytes(3).toString('hex'));
+    if (seenS.has(id)) id = 'ds' + crypto.randomBytes(3).toString('hex');
+    seenS.add(id);
+    sql.push({ id, title: title || '升级 SQL', desc: clip(s && s.desc, 200), content });
+    if (sql.length >= 300) break;
+  }
+  return { tasks, sql };
 }
 
 // spec 来源：产品可挂 N 个子系统仓（各 subsystem.repoPath），也兼容顶层单 repoPath / specsPath
@@ -1107,8 +1174,16 @@ const server = http.createServer((req, res) => {
 
   // ---------- 批次管理（BP-01 第 1 期 · 均 admin：未进 FIELD_OK/LINK_OK 白名单 → authGate 已对非 admin 返 403/401，无需页内再判）----------
   // 派生：给批次挂 ticketCount + 冗余 productName（读时派生，不落存），倒序按 createdAt。
-  // 2026-08-05 架构重构：批次不再内嵌 implTasks（实施清单跟随产品代码）。batchOut 只出基础字段 + 派生计数。
-  function batchOut(bt) { return { ...bt, scheduleDate: String(bt.scheduleDate || ''), ticketCount: Array.isArray(bt.ticketIds) ? bt.ticketIds.length : 0, productName: (projById(bt.product) || {}).name || bt.product }; }
+  // 2026-08-05 架构重构（核心更新流）：批次不再内嵌 implTasks。清单/SQL 改为「发包时人审快照」：
+  //   batch.deployPlan = { from,to,tasks[],sql[],reviewedBy,reviewedAt }。batchOut 派生 deployReviewed（是否已审核）+ 计数供列表标记。
+  function batchOut(bt) {
+    const dp = bt && bt.deployPlan && typeof bt.deployPlan === 'object' ? bt.deployPlan : null;
+    const deployReviewed = !!(dp && dp.reviewedAt);
+    const deployTaskCount = dp && Array.isArray(dp.tasks) ? dp.tasks.length : 0;
+    const deploySqlCount = dp && Array.isArray(dp.sql) ? dp.sql.length : 0;
+    return { ...bt, scheduleDate: String(bt.scheduleDate || ''), ticketCount: Array.isArray(bt.ticketIds) ? bt.ticketIds.length : 0, productName: (projById(bt.product) || {}).name || bt.product,
+      deployReviewed, deployTaskCount, deploySqlCount };
+  }
   if (url.pathname === '/api/batch-arrange' && req.method === 'POST') {   // 定档建批：归入该产品全部「已立项且未归批」工单（跨院合并），初始态「开发中」
     return readBody(req, async (b, err) => {
       if (!b) return send(res, 400, JSON.stringify({ ok: false, error: err }));
@@ -1200,6 +1275,41 @@ const server = http.createServer((req, res) => {
       //   实施清单改为「跟随产品代码」（各子系统仓 docs/deploy.json 按 tag 读 → 累积更新计划）。batch-update 只保留改包信息。
       if (changed) saveBatches(list);
       return send(res, 200, JSON.stringify({ ok: true, item: batchOut(bt) }));
+    });
+  }
+
+  // ---------- 发包·部署清单审核（2026-08-05 核心更新流 · admin：未进 FIELD_OK/LINK_OK → 非 admin 自动 403）----------
+  //   GET /api/batch-deploy-draft?batchId=&from= ：从代码 @HEAD 拉该批次 (from, pkgVersion] 累积草稿（tasks + sql 含正文），供运营审核。
+  //     · from 空 = 从头（include 全部 ≤to）；to = 批次 pkgVersion（发包时的目标版本，未填则用 from 上限兜底空）。
+  //     · 若批次已审核过（有 deployPlan）→ 也回已存快照 saved，前端优先回显 saved、可再「重新拉取草稿」。
+  if (url.pathname === '/api/batch-deploy-draft' && req.method === 'GET') {
+    const batchId = String(url.searchParams.get('batchId') || '').trim();
+    const from = String(url.searchParams.get('from') || '').trim();
+    const bt = loadBatches().find(x => x.id === batchId); if (!bt) return send(res, 404, JSON.stringify({ ok: false, error: 'not found' }));
+    const proj = projById(bt.product); if (!proj) return send(res, 400, JSON.stringify({ ok: false, error: '产品不存在' }));
+    const to = String(bt.pkgVersion || '').trim();                     // 目标版本 = 批次包版本
+    try { refreshRepos(proj, false); } catch {}                        // 确保仓 @HEAD 已对齐远端最新（草稿源）
+    let draft; try { draft = computeDeployDraft(proj, from, to); } catch (e) { draft = { from, to, versions: [], tasks: [], sql: [] }; }
+    const saved = bt.deployPlan && typeof bt.deployPlan === 'object' && bt.deployPlan.reviewedAt ? bt.deployPlan : null;
+    return send(res, 200, JSON.stringify({ ok: true, batchId, product: bt.product, productName: proj.name || bt.product, pkgVersion: to, draft, saved }));
+  }
+  //   POST /api/batch-deploy-save ：运营审核后保存快照进批次（SQL 正文一并冻结）。body { batchId, from, tasks:[{id,title,desc}], sql:[{id,title,desc,content}] }。
+  //     · 规范化 + 长度约束（normDeployPlanItems）→ 写 batch.deployPlan = { from, to:pkgVersion, tasks, sql(含content冻结), reviewedBy, reviewedAt }。
+  //     · history 加一条 deploy-review 留痕。允许重复保存（再审核覆盖）。
+  if (url.pathname === '/api/batch-deploy-save' && req.method === 'POST') {
+    return readBody(req, async (b, err) => {
+      if (!b) return send(res, 400, JSON.stringify({ ok: false, error: err }));
+      const batchId = String((b && b.batchId) || '').trim(); if (!batchId) return send(res, 400, JSON.stringify({ ok: false, error: '缺少 batchId' }));
+      const list = loadBatches();
+      const bt = list.find(x => x.id === batchId); if (!bt) return send(res, 404, JSON.stringify({ ok: false, error: 'not found' }));
+      const from = String((b && b.from) || '').trim();
+      const to = String(bt.pkgVersion || '').trim();
+      const norm = normDeployPlanItems(b && b.tasks, b && b.sql);      // 规范化 + 长度约束 + title 非空丢弃
+      const at = nowStamp(); const by = user ? (user.name || user.username) : 'admin';
+      bt.deployPlan = { from, to, tasks: norm.tasks, sql: norm.sql, reviewedBy: by, reviewedAt: at };
+      bt.history = bt.history || []; bt.history.push({ action: 'deploy-review', by, at, note: '审核部署清单（任务 ' + norm.tasks.length + ' 项·SQL ' + norm.sql.length + ' 段·区间 ' + (from || '最早') + '→' + (to || '?') + '）' });
+      saveBatches(list);
+      return send(res, 200, JSON.stringify({ ok: true, item: batchOut(bt), deployPlan: bt.deployPlan }));
     });
   }
 
@@ -1533,125 +1643,106 @@ const server = http.createServer((req, res) => {
   //   删：GET/POST /api/deploy-template(-save)（标准部署清单模板）、POST /api/customer-deploy-task（每院勾选）、POST /api/batch-task（批次实施清单勾选）。
   //   部署/更新清单改为「跟随产品代码」——各子系统仓 docs/deploy.json 按 tag 读 → 累积更新计划（见下方 update-plan/update-toggle/update-sql-merged）。
 
-  // ========== 更新包「跟随产品代码 · 按 tag 读 docs/deploy.json + 跨版本累积」（2026-08-05 架构重构）==========
-  // 累积更新计划的公共算子：给定 (医院, 产品, 目标版本) → 算区间/读代码清单/累积/左连完成态。返回 null=产品不存在。
-  //   fromVersion = 该院该产品现场版本（custProductVersion，含糊即空 include-all）；toVersion = target。
-  //   orderedTags = listVersions(proj) 倒序 → reverse 成升序喂 version-plan-logic。
-  //   数据源 = 各子系统仓 docs/deploy.json（readDeployManifest，按 tag 读，缺失/非法优雅降级为空清单）。
-  function computeUpdatePlan(site, productId, target) {
-    const proj = projById(productId); if (!proj) return null;
-    try { refreshRepos(proj, false); } catch {}   // 确保仓已 clone/更新（tag 可读）
+  // ========== 更新计划「实施侧读批次快照」（2026-08-05 核心更新流重构）==========
+  //   模型变更：不再实时读代码/跨版累积。发包时运营审核冻结 batch.deployPlan 快照（tasks + sql 含正文）——
+  //     实施侧只**读并执行该批次那份审核过的快照**。完成度 per(批次, 医院)：updateProgress[batchId]={tasks:{},sqlBundle:{}}。
+  //   公共算子：给定 (医院, 批次) → 取 batch.deployPlan 快照 + 左连该院该批完成度。返回 null=批次不存在。
+  function computeBatchPlan(site, batchId) {
+    const bt = loadBatches().find(x => x.id === String(batchId || '').trim());
+    if (!bt) return null;
+    const proj = projById(bt.product);
     const cust = loadCustomers().find(c => (c.name || '').trim() === String(site || '').trim()) || null;
-    const fromVersion = custProductVersion(cust, productId);
-    const toVersion = String(target || '').trim();
-    let tags = [];
-    try { tags = listVersions(proj).slice().reverse(); } catch { tags = []; }   // listVersions 倒序 → 升序
-    const range = rangeVersions(tags, fromVersion, toVersion);
-    // 区间内每个 tag → 从代码读该产品该版本的部署清单（跨子系统聚合）。缺失/非法 → 空清单（该 tag 跳过）。
-    const manifestByVersion = {};
-    for (const v of range) { try { manifestByVersion[v] = readDeployManifest(proj, v); } catch { manifestByVersion[v] = { tasks: [], sql: [] }; } }
-    const acc = accumulateManifests(range, manifestByVersion);
-    const progressForProduct = (cust && cust.updateProgress && typeof cust.updateProgress === 'object' && cust.updateProgress[productId]) || {};
-    const jt = vpJoinProgress(acc.tasks, progressForProduct, 'tasks');
-    // 2026-08-04 re-target：SQL 不再逐脚本给前端/逐个完成态——整个区间合并成「一个点」（一个完成态 + 一个合并下载）。
-    //   sql 汇总 = {hasSql,scriptCount,versions,done,by,at}；完成态挂 updateProgress[product][toVersion].sqlBundle。
-    const sql = vpSqlBundleSummary(acc.sqls, progressForProduct, toVersion);
+    const dp = bt.deployPlan && typeof bt.deployPlan === 'object' && bt.deployPlan.reviewedAt ? bt.deployPlan : null;
+    // 完成度按 (批次, 医院)：updateProgress[batchId]={tasks:{},sqlBundle:{}}（键空间与旧 [productId][version] 不撞）。
+    const progForBatch = (cust && cust.updateProgress && typeof cust.updateProgress === 'object' && cust.updateProgress[bt.id]) || {};
+    const jt = vpJoinBatchProgress(dp ? dp.tasks : [], progForBatch);
+    const sql = vpBatchSqlSummary(dp ? dp.sql : [], progForBatch);
     return {
-      proj, cust, fromVersion, toVersion, gitTags: tags, versionsInRange: acc.versionsInRange,
-      tasks: jt.rows, sql, accSqls: acc.sqls,
-      taskDone: jt.done, taskTotal: jt.total
+      bt, proj, cust, deployPlan: dp,
+      fromVersion: dp ? String(dp.from || '') : '', toVersion: dp ? String(dp.to || bt.pkgVersion || '') : String(bt.pkgVersion || ''),
+      tasks: jt.rows, sql, taskDone: jt.done, taskTotal: jt.total
     };
   }
 
-  // ---------- GET /api/field/update-plan?site=&product=&target=：累积更新计划（管理员 + field·按 sites 越权收敛）----------
-  //   算该院该产品「现场版本 → 目标版本」区间累积任务/SQL + 完成态 → 供实施端批次卡渲染。
-  //   数据源 = 各子系统仓 docs/deploy.json（按 tag 读，2026-08-05 架构重构，废弃手工版本发版登记）。
+  // ---------- GET /api/field/update-plan?site=&batchId=：该批次快照更新计划（管理员 + field·按 sites 越权收敛）----------
+  //   数据源 = batch.deployPlan（发包时审核冻结的快照，2026-08-05 核心更新流重构，不再实时读代码）。
+  //   兼容旧参数 product+target（前端仍带）：忽略，一律按 batchId 找快照；缺 batchId 则报错。
   if (url.pathname === '/api/field/update-plan' && req.method === 'GET') {
     if (!user) return send(res, 401, JSON.stringify({ ok: false, error: '未登录' }));
     const site = String(url.searchParams.get('site') || '').trim();
-    const productId = String(url.searchParams.get('product') || '').trim();
-    const target = String(url.searchParams.get('target') || '').trim();
+    const batchId = String(url.searchParams.get('batchId') || '').trim();
     if (!site) return send(res, 400, JSON.stringify({ ok: false, error: '缺少医院' }));
+    if (!batchId) return send(res, 400, JSON.stringify({ ok: false, error: '缺少批次' }));
     // 越权：site 不在当前账号 sites（管理员不限）——与 customer-version/customer-maintain 一致
     if (user && !isAdmin(user) && (!Array.isArray(user.sites) || !user.sites.map(String).includes(site))) return send(res, 403, JSON.stringify({ ok: false, error: '无权查看该医院更新计划' }));
-    const plan = computeUpdatePlan(site, productId, target);
-    if (!plan) return send(res, 400, JSON.stringify({ ok: false, error: '产品不存在' }));
-    // 区间内任何 tag 都无 docs/deploy.json（或全非法）→ 友好提示（前端显示：该版本区间未在代码中声明部署清单）。
-    const noManifest = (plan.tasks.length === 0 && !plan.sql.hasSql);
+    const plan = computeBatchPlan(site, batchId);
+    if (!plan) return send(res, 404, JSON.stringify({ ok: false, error: '批次不存在' }));
+    // 批次未审核部署清单（无 deployPlan）→ noManifest：提示运营先审核。
+    const noManifest = !plan.deployPlan;
     return send(res, 200, JSON.stringify({
-      ok: true, site, product: productId, productName: plan.proj.name || productId,
-      fromVersion: plan.fromVersion, toVersion: plan.toVersion, versionsInRange: plan.versionsInRange,
-      tasks: plan.tasks,          // 累积实施任务（逐条，仍逐条完成态）
-      sql: plan.sql,              // 2026-08-04：SQL 汇总为「一个点」{hasSql,scriptCount,versions,done,by,at}（明细只在合并下载里）
+      ok: true, site, batchId, product: plan.bt.product, productName: (plan.proj && plan.proj.name) || plan.bt.product,
+      fromVersion: plan.fromVersion, toVersion: plan.toVersion,
+      tasks: plan.tasks,          // 快照实施任务（逐条完成态·per 批次×医院）
+      sql: plan.sql,              // SQL 汇总为「一个点」{hasSql,scriptCount,done,by,at}（正文在合并下载）
       taskDone: plan.taskDone, taskTotal: plan.taskTotal,
-      noManifest,                 // 2026-08-05：区间内无 docs/deploy.json → true（前端提示 dev 团队需在产品仓补）
-      noManifestHint: noManifest ? '该版本区间未在产品代码中声明部署清单 docs/deploy.json（请由产品 dev 团队在对应子系统仓补充，见约定文档）。' : ''
+      noManifest,                 // 批次尚未审核部署清单 → true
+      noManifestHint: noManifest ? '该批次尚未审核部署清单（运营在「上传包」时审核确认后，实施才可见此更新计划）。' : ''
     }));
   }
 
-  // ---------- POST /api/field/update-toggle：勾选/取消一条累积「任务」或「合并 SQL 单点」（管理员 + field·按 sites 收敛）----------
-  //   两种 kind（2026-08-04 re-target）：
-  //     · kind:'task' → 逐条任务完成态：{site,product,version,itemId,done} → 写 updateProgress[product][version].tasks[itemId]（version=该任务所属登记版本）。
-  //     · kind:'sql'  → **合并 SQL 单点**完成态：{site,product,target(或version),done} → 写 updateProgress[product][targetVersion].sqlBundle（一个点，非逐脚本，itemId 忽略）。
-  //   幂等；返回 changed。前端刷 update-plan 拿全量进度。
+  // ---------- POST /api/field/update-toggle：勾选/取消一条快照「任务」或「合并 SQL 单点」（管理员 + field·按 sites 收敛）----------
+  //   两种 kind：kind:'task' {site,batchId,itemId,done} → 写 updateProgress[batchId].tasks[itemId]；
+  //             kind:'sql'  {site,batchId,done} → 写 updateProgress[batchId].sqlBundle（一个点，itemId 忽略）。
+  //   完成度 per(批次, 医院)。幂等；返回 changed。前端刷 update-plan 拿全量进度。
   if (url.pathname === '/api/field/update-toggle' && req.method === 'POST') {
     return readBody(req, async (b, err) => {
       if (!b) return send(res, 400, JSON.stringify({ ok: false, error: err }));
       const site = String((b && (b.site || b.customerName)) || '').trim();
-      const productId = String((b && b.product) || '').trim();
+      const batchId = String((b && b.batchId) || '').trim();
       const isSql = (b && b.kind === 'sql');
-      // task：version = 该任务所属登记版本；sql：目标版本（优先 target，兼容 version）——合并点挂在目标版本下。
-      const version = String((b && (isSql ? (b.target || b.version) : b.version)) || '').trim();
       const itemId = String((b && b.itemId) || '').trim();
       const done = !!(b && b.done);
       if (!site) return send(res, 400, JSON.stringify({ ok: false, error: '缺少医院' }));
-      if (!productId) return send(res, 400, JSON.stringify({ ok: false, error: '缺少产品' }));
-      if (!version) return send(res, 400, JSON.stringify({ ok: false, error: isSql ? '缺少目标版本' : '缺少版本' }));
+      if (!batchId) return send(res, 400, JSON.stringify({ ok: false, error: '缺少批次' }));
       if (!isSql && !itemId) return send(res, 400, JSON.stringify({ ok: false, error: '缺少条目' }));   // task 必须带 itemId；sql 单点不需要
-      if (!projById(productId)) return send(res, 400, JSON.stringify({ ok: false, error: '产品不存在' }));
+      const bt = loadBatches().find(x => x.id === batchId); if (!bt) return send(res, 404, JSON.stringify({ ok: false, error: '批次不存在' }));
       // 越权：site 不在当前账号 sites（管理员不限）
       if (user && !isAdmin(user) && (!Array.isArray(user.sites) || !user.sites.map(String).includes(site))) return send(res, 403, JSON.stringify({ ok: false, error: '无权操作该医院更新计划' }));
       const list = loadCustomers();
       const c = list.find(x => (x.name || '').trim() === site.trim());
       if (!c) return send(res, 400, JSON.stringify({ ok: false, error: '客户不存在' }));
       const at = nowStamp(); const by = (user && user.username) || '';
-      // updateProgress 顶层 {[productId]:{[version]:{tasks:{},sqlBundle:{}}}}——只改该 product 分支，其余不动。
+      // updateProgress 顶层 {[batchId]:{tasks:{},sqlBundle:{}}}——只改该批次分支，其余不动。
       const up = (c.updateProgress && typeof c.updateProgress === 'object') ? c.updateProgress : {};
-      const prevProd = (up[productId] && typeof up[productId] === 'object') ? up[productId] : {};
+      const prevBatch = (up[batchId] && typeof up[batchId] === 'object') ? up[batchId] : {};
       const r = isSql
-        ? vpApplySqlBundleToggle(prevProd, version, done, by, at)   // 合并 SQL 单点（挂目标版本 sqlBundle）
-        : vpApplyToggle(prevProd, version, 'tasks', itemId, done, by, at);   // 逐条任务
+        ? vpApplyBatchSqlToggle(prevBatch, done, by, at)              // 合并 SQL 单点（挂 batchId.sqlBundle）
+        : vpApplyBatchTaskToggle(prevBatch, itemId, done, by, at);    // 逐条任务
       if (r.changed) {
-        const nextUp = Object.assign({}, up); nextUp[productId] = r.progress;
+        const nextUp = Object.assign({}, up); nextUp[batchId] = r.progress;
         c.updateProgress = nextUp; c.updatedAt = at; saveCustomers(list);
       }
-      return send(res, 200, JSON.stringify({ ok: true, changed: r.changed, site, product: productId, version, kind: isSql ? 'sql' : 'task', itemId: isSql ? '' : itemId, done }));
+      return send(res, 200, JSON.stringify({ ok: true, changed: r.changed, site, batchId, kind: isSql ? 'sql' : 'task', itemId: isSql ? '' : itemId, done }));
     });
   }
 
-  // ---------- GET /api/field/update-sql-merged?site=&product=&target=：合并 (from,target] 累积 SQL 为单文件下载（管理员 + field·按 sites 收敛）----------
+  // ---------- GET /api/field/update-sql-merged?site=&batchId=：合并批次快照 SQL 为单文件下载（管理员 + field·按 sites 收敛）----------
+  //   正文已冻结在 batch.deployPlan.sql[].content（发包时读出固化），无需再读 git。
   if (url.pathname === '/api/field/update-sql-merged' && req.method === 'GET') {
     if (!user) return send(res, 401, JSON.stringify({ ok: false, error: '未登录' }));
     const site = String(url.searchParams.get('site') || '').trim();
-    const productId = String(url.searchParams.get('product') || '').trim();
-    const target = String(url.searchParams.get('target') || '').trim();
+    const batchId = String(url.searchParams.get('batchId') || '').trim();
     if (!site) return send(res, 400, JSON.stringify({ ok: false, error: '缺少医院' }));
+    if (!batchId) return send(res, 400, JSON.stringify({ ok: false, error: '缺少批次' }));
     if (user && !isAdmin(user) && (!Array.isArray(user.sites) || !user.sites.map(String).includes(site))) return send(res, 403, JSON.stringify({ ok: false, error: '无权下载该医院更新 SQL' }));
-    const plan = computeUpdatePlan(site, productId, target);
-    if (!plan) return send(res, 400, JSON.stringify({ ok: false, error: '产品不存在' }));
-    // 逐条解析 SQL 正文：file 引用 → git show <tag>:<file> 读（readSqlAtTag，读不到→注明失败）；file 缺则用内联 content。
-    const resolved = (plan.accSqls || []).map(s => {
-      let content = String(s.content || '');
-      if (s.file) {
-        const fileText = readSqlAtTag(s.repoPath, s.version, s.file);   // 按该脚本所属 tag 读文件正文
-        content = fileText || content || ('-- （无法读取文件 ' + s.file + ' @ ' + (s.version || '') + '，请核对产品仓该 tag 下该路径是否存在）');
-      }
-      return Object.assign({}, s, { content });
-    });
-    const text = vpMergeSql(resolved, { productName: plan.proj.name || productId, from: plan.fromVersion, to: plan.toVersion, site });
-    // 文件名：<product>_<from>_to_<to>.sql（无版本用 all/latest 兜底，避免非法文件名）
+    const plan = computeBatchPlan(site, batchId);
+    if (!plan) return send(res, 404, JSON.stringify({ ok: false, error: '批次不存在' }));
+    const sqlItems = plan.deployPlan ? plan.deployPlan.sql : [];        // 快照冻结正文，直接拼
+    const productName = (plan.proj && plan.proj.name) || plan.bt.product;
+    const text = vpMergeBatchSql(sqlItems, { productName, from: plan.fromVersion, to: plan.toVersion, site });
+    // 文件名：<product>_<from>_to_<to>.sql（无版本兜底，避免非法文件名）
     const safe = s => String(s || '').replace(/[^A-Za-z0-9._\-]+/g, '-').replace(/^-+|-+$/g, '') || 'x';
-    const fname = safe(productId) + '_' + safe(plan.fromVersion || 'from') + '_to_' + safe(plan.toVersion || 'to') + '.sql';
+    const fname = safe(plan.bt.product) + '_' + safe(plan.fromVersion || 'from') + '_to_' + safe(plan.toVersion || 'to') + '.sql';
     res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Content-Disposition': 'attachment; filename="' + fname + '"' });
     return res.end(text);
   }

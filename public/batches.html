@@ -63,6 +63,28 @@
   .itbox .it-empty{color:var(--color-text-tertiary);font-size:13px;padding:6px 0}
   .itbox .it-edit-row{display:flex;gap:8px;align-items:flex-start;margin-bottom:8px}
   .itbox .it-edit-row input{box-sizing:border-box;padding:7px 10px;border:1px solid var(--color-border);border-radius:6px;font-size:13px;font-family:inherit}
+  /* 部署清单审核区（发包时人审草稿 → 快照冻结进批次） */
+  .dpbox{border:1px solid var(--color-border);border-radius:8px;padding:12px 14px;margin-bottom:16px;background:var(--color-bg-subtle,#f5f7fa)}
+  .dpbox .rlhd{font-weight:600;font-size:13px;margin-bottom:10px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .dpbox .dp-badge{font-size:11.5px;padding:1px 8px;border-radius:10px;font-weight:600}
+  .dpbox .dp-badge.ok{background:#E6F4EA;color:#1E8E4E}
+  .dpbox .dp-badge.no{background:#FDECEC;color:#C0392B}
+  .dpbox .dp-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+  .dpbox .dp-toolbar label{font-size:12px;color:var(--color-text-tertiary)}
+  .dpbox .dp-toolbar input.dp-from{width:120px;box-sizing:border-box;padding:6px 9px;border:1px solid var(--color-border);border-radius:6px;font-size:13px;font-family:inherit}
+  .dpbox .dp-toolbar .dp-to{font-family:var(--font-num,monospace);font-weight:600}
+  .dpbox .dp-sec-hd{font-size:12.5px;font-weight:600;color:var(--color-text-secondary);margin:12px 0 6px;display:flex;align-items:center;gap:6px}
+  .dpbox .dp-item{border:1px solid var(--color-border);border-radius:7px;padding:8px 10px;margin-bottom:8px;background:var(--color-bg,#fff)}
+  .dpbox .dp-item .dp-row{display:flex;gap:8px;align-items:center;margin-bottom:6px}
+  .dpbox .dp-item .dp-row:last-child{margin-bottom:0}
+  .dpbox .dp-item input,.dpbox .dp-item textarea{box-sizing:border-box;padding:6px 9px;border:1px solid var(--color-border);border-radius:6px;font-size:13px;font-family:inherit;width:100%}
+  .dpbox .dp-item textarea{resize:vertical}
+  .dpbox .dp-item textarea.dp-sql{min-height:64px;font-family:var(--font-num,monospace);font-size:12px}
+  .dpbox .dp-item .dp-del{flex:0 0 auto;color:#C0392B;cursor:pointer;font-size:16px;line-height:1}
+  .dpbox .dp-item .dp-ver{font-size:11px;color:var(--color-text-tertiary);font-family:var(--font-num,monospace);flex:0 0 auto}
+  .dpbox .dp-add{font-size:12.5px;color:var(--color-primary);cursor:pointer;display:inline-flex;align-items:center;gap:4px;margin-top:2px}
+  .dpbox .dp-empty{font-size:12.5px;color:var(--color-text-tertiary);padding:6px 0}
+  .dpbox .dp-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:12px;padding-top:10px;border-top:1px solid var(--color-border)}
 </style>
 </head>
 <body data-shell="admin" data-nav="batches" data-breadcrumb="交付管理 > 批次管理" data-content-layout="list">
@@ -175,6 +197,7 @@ function render(){
           <span><i class="ti ti-ticket"></i> ${esc(b.ticketCount||0)} 个工单</span>
           <span class="mono"><i class="ti ti-clock"></i> ${esc(fmtTime(b.createdAt))}</span>
           <span class="mono"><i class="ti ti-calendar-event"></i> 排期 ${b.scheduleDate?esc(b.scheduleDate):'<span class="text-tertiary">未排期</span>'}</span>
+          ${b.pkgVersion?`<span><i class="ti ti-clipboard-check"></i> 部署清单 ${b.deployReviewed?`<span style="color:#1E8E4E;font-weight:600">已审核·${(b.deployTaskCount||0)+(b.deploySqlCount||0)}项</span>`:'<span style="color:#C0392B;font-weight:600">未审核</span>'}</span>`:''}
         </div>
       </div>
       <i class="ti ti-chevron-right text-tertiary"></i>
@@ -266,6 +289,7 @@ async function openDetail(id){
       </div>
     </div>
     ${relHtml}
+    ${b.pkgVersion?'<div id="deployBox"></div>':''}
     <div class="dsec"><div class="dlab">覆盖医院（${hosps.length}）</div><div class="hospchips">${hospHtml}</div></div>
     <div class="dsec"><div class="dlab">覆盖工单（按子系统分组）</div></div>
     ${groupHtml}
@@ -283,6 +307,106 @@ async function openDetail(id){
   const pkgCancel=$('#btnPkgCancel');
   if(pkgCancel) pkgCancel.addEventListener('click',()=>{ $('#pkgEdit').style.display='none'; $('#pkgView').style.display='block'; if(pkgEditBtn) pkgEditBtn.style.display='inline-flex'; });
   const pkgSave=$('#btnPkgSave'); if(pkgSave) pkgSave.addEventListener('click',()=>savePkgInfo(b.id));
+  // 部署清单审核区（仅已有 pkgVersion 的批次）：拉草稿/回显已审快照 → 可编辑 → 保存快照
+  if(b.pkgVersion && $('#deployBox')) loadDeployBox(b);
+}
+
+/* ================= 部署清单审核（发包时人审草稿 → 快照冻结进 batch.deployPlan）================= */
+//   模型：代码 docs/deploy/<版本>.json = 草稿源（@HEAD）；发包时拉 (起始版本, 目标版本] 累积草稿 → 运营增删改 → 存快照；实施读快照。
+let DP_STATE={ batchId:'', to:'', tasks:[], sql:[] };   // 当前编辑中的部署清单（内存）
+function loadDeployBox(b){
+  const box=$('#deployBox'); if(!box) return;
+  DP_STATE={ batchId:b.id, to:b.pkgVersion||'', tasks:[], sql:[] };
+  const reviewed=!!b.deployReviewed;
+  box.innerHTML=`<div class="dpbox">
+    <div class="rlhd"><i class="ti ti-clipboard-check"></i>部署清单审核
+      <span class="dp-badge ${reviewed?'ok':'no'}" id="dpBadge">${reviewed?('已审核 · 任务 '+(b.deployTaskCount||0)+' · SQL '+(b.deploySqlCount||0)):'未审核'}</span>
+      <span style="font-size:11.5px;color:var(--color-text-tertiary);font-weight:400">发包时从代码拉草稿 → 人工确认 → 冻结进批次（实施照此执行）</span>
+    </div>
+    <div class="dp-toolbar">
+      <label>起始版本</label><input class="dp-from" id="dpFrom" placeholder="现场版本(可空=从头)" maxlength="60">
+      <label>目标版本</label><span class="dp-to">${esc(b.pkgVersion||'')}</span>
+      <button class="btn btn-sm" id="dpBtnDraft"><i class="ti ti-cloud-download"></i>从代码拉取草稿</button>
+    </div>
+    <div id="dpEditArea"><div class="dp-empty">点「从代码拉取草稿」按 起始→目标 版本区间累积代码清单；或直接手动添加。</div></div>
+    <div class="dp-actions">
+      <button class="btn btn-sm" id="dpAddTask"><i class="ti ti-plus"></i>加任务</button>
+      <button class="btn btn-sm" id="dpAddSql"><i class="ti ti-plus"></i>加 SQL</button>
+      <button class="btn btn-sm btn-primary" id="dpSave"><i class="ti ti-device-floppy"></i>保存部署清单快照</button>
+    </div>
+  </div>`;
+  // 拉已存快照回显（reviewed）或初始化 from
+  $('#dpBtnDraft').addEventListener('click',()=>fetchDeployDraft());
+  $('#dpAddTask').addEventListener('click',()=>{ DP_STATE.tasks.push({id:'',title:'',desc:'',version:''}); renderDeployEdit(); });
+  $('#dpAddSql').addEventListener('click',()=>{ DP_STATE.sql.push({id:'',title:'',desc:'',content:'',version:''}); renderDeployEdit(); });
+  $('#dpSave').addEventListener('click',()=>saveDeployPlan());
+  // 初次进入：拉一次（含 saved 回显 + from 默认）
+  fetchDeployDraft(true);
+}
+async function fetchDeployDraft(initial){
+  const from=($('#dpFrom')?.value||'').trim();
+  const btn=$('#dpBtnDraft'); if(btn&&!initial) btn.disabled=true;
+  try{
+    const qs='?batchId='+encodeURIComponent(DP_STATE.batchId)+'&from='+encodeURIComponent(from);
+    const r=await (await fetch('/api/batch-deploy-draft'+qs)).json();
+    if(!r.ok){ if(!initial) toast(r.error||'拉取草稿失败','warning'); return; }
+    if(initial && r.saved && r.saved.reviewedAt){
+      // 已审核：回显已存快照（可再改再存）
+      DP_STATE.tasks=(r.saved.tasks||[]).map(t=>({id:t.id||'',title:t.title||'',desc:t.desc||'',version:''}));
+      DP_STATE.sql=(r.saved.sql||[]).map(s=>({id:s.id||'',title:s.title||'',desc:s.desc||'',content:s.content||'',version:''}));
+      if($('#dpFrom')) $('#dpFrom').value=r.saved.from||'';
+    } else {
+      // 未审核 或 手动点拉取：用代码草稿覆盖当前编辑区
+      const d=r.draft||{tasks:[],sql:[]};
+      DP_STATE.tasks=(d.tasks||[]).map(t=>({id:t.id||'',title:t.title||'',desc:t.desc||'',version:t.version||''}));
+      DP_STATE.sql=(d.sql||[]).map(s=>({id:s.id||'',title:s.title||'',desc:s.desc||'',content:s.content||'',version:s.version||''}));
+      if(!initial){
+        const vc=(d.versions||[]).length;
+        toast('已拉取 '+DP_STATE.tasks.length+' 任务 · '+DP_STATE.sql.length+' SQL（覆盖 '+vc+' 个版本）','success');
+      }
+    }
+    renderDeployEdit();
+  }catch(e){ if(!initial) toast('拉取草稿失败：'+e.message,'error'); }
+  finally{ if(btn) btn.disabled=false; }
+}
+function renderDeployEdit(){
+  const area=$('#dpEditArea'); if(!area) return;
+  const taskHtml=DP_STATE.tasks.length? DP_STATE.tasks.map((t,i)=>`<div class="dp-item" data-tk="${i}">
+    <div class="dp-row"><input class="dp-t-title" data-i="${i}" placeholder="任务标题(必填)" maxlength="120" value="${esc(t.title||'')}">${t.version?`<span class="dp-ver">v${esc(t.version)}</span>`:''}<i class="ti ti-trash dp-del" data-del-task="${i}"></i></div>
+    <div class="dp-row"><input class="dp-t-desc" data-i="${i}" placeholder="说明(可空)" maxlength="2000" value="${esc(t.desc||'')}"></div>
+  </div>`).join('') : '<div class="dp-empty">暂无任务</div>';
+  const sqlHtml=DP_STATE.sql.length? DP_STATE.sql.map((s,i)=>`<div class="dp-item" data-sq="${i}">
+    <div class="dp-row"><input class="dp-s-title" data-i="${i}" placeholder="SQL 标题/文件名" maxlength="200" value="${esc(s.title||'')}">${s.version?`<span class="dp-ver">v${esc(s.version)}</span>`:''}<i class="ti ti-trash dp-del" data-del-sql="${i}"></i></div>
+    <div class="dp-row"><input class="dp-s-desc" data-i="${i}" placeholder="说明(可空)" maxlength="200" value="${esc(s.desc||'')}"></div>
+    <div class="dp-row"><textarea class="dp-sql dp-s-content" data-i="${i}" placeholder="-- SQL 正文（发包时冻结进批次）">${esc(s.content||'')}</textarea></div>
+  </div>`).join('') : '<div class="dp-empty">暂无 SQL</div>';
+  area.innerHTML=`<div class="dp-sec-hd"><i class="ti ti-list-check"></i>实施任务（${DP_STATE.tasks.length}）</div>${taskHtml}
+    <div class="dp-sec-hd"><i class="ti ti-database"></i>升级 SQL（${DP_STATE.sql.length}）</div>${sqlHtml}`;
+  // 绑输入回写内存（用事件委托，避免逐个 addEventListener）
+  area.querySelectorAll('.dp-t-title').forEach(el=>el.addEventListener('input',e=>{ DP_STATE.tasks[+e.target.dataset.i].title=e.target.value; }));
+  area.querySelectorAll('.dp-t-desc').forEach(el=>el.addEventListener('input',e=>{ DP_STATE.tasks[+e.target.dataset.i].desc=e.target.value; }));
+  area.querySelectorAll('.dp-s-title').forEach(el=>el.addEventListener('input',e=>{ DP_STATE.sql[+e.target.dataset.i].title=e.target.value; }));
+  area.querySelectorAll('.dp-s-desc').forEach(el=>el.addEventListener('input',e=>{ DP_STATE.sql[+e.target.dataset.i].desc=e.target.value; }));
+  area.querySelectorAll('.dp-s-content').forEach(el=>el.addEventListener('input',e=>{ DP_STATE.sql[+e.target.dataset.i].content=e.target.value; }));
+  area.querySelectorAll('[data-del-task]').forEach(el=>el.addEventListener('click',e=>{ DP_STATE.tasks.splice(+e.target.dataset.delTask,1); renderDeployEdit(); }));
+  area.querySelectorAll('[data-del-sql]').forEach(el=>el.addEventListener('click',e=>{ DP_STATE.sql.splice(+e.target.dataset.delSql,1); renderDeployEdit(); }));
+}
+async function saveDeployPlan(){
+  const from=($('#dpFrom')?.value||'').trim();
+  // 校验：任务标题非空（提交前提示）
+  const badTask=DP_STATE.tasks.find(t=>!(t.title||'').trim());
+  if(badTask){ toast('有任务标题为空，请填写或删除','warning'); return; }
+  const tasks=DP_STATE.tasks.filter(t=>(t.title||'').trim()).map(t=>({id:t.id||'',title:(t.title||'').trim(),desc:(t.desc||'').trim()}));
+  const sql=DP_STATE.sql.filter(s=>(s.content||'').trim()||(s.title||'').trim()).map(s=>({id:s.id||'',title:(s.title||'').trim(),desc:(s.desc||'').trim(),content:s.content||''}));
+  const btn=$('#dpSave'); if(btn) btn.disabled=true;
+  try{
+    const r=await (await fetch('/api/batch-deploy-save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({batchId:DP_STATE.batchId,from,tasks,sql})})).json();
+    if(!r.ok){ toast(r.error||'保存失败','warning'); return; }
+    toast('部署清单已审核并快照（任务 '+(r.deployPlan?.tasks?.length||0)+' · SQL '+(r.deployPlan?.sql?.length||0)+'）','success');
+    await loadBatches();
+    await openDetail(DP_STATE.batchId);   // 刷新详情（徽标转「已审核」）
+  }catch(e){ toast('保存失败：'+e.message,'error'); }
+  finally{ if(btn) btn.disabled=false; }
 }
 // 注：更新包「实施任务清单 + SQL 脚本」不在 intake 内维护——2026-08-05 架构重构后改为「跟随产品代码」：
 //     各子系统仓 docs/deploy.json 按 git tag 声明该版本 delta 任务+SQL；批次详情不内嵌 implTasks。

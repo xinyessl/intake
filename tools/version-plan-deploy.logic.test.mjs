@@ -15,9 +15,10 @@ import { spawnSync } from 'node:child_process';
 import {
   clip, genId, normDeployManifest,
   rangeVersions, accumulateManifests, joinProgress, applyToggle, mergeSql, siteAllowed,
-  sqlBundleSummary, applySqlBundleToggle
+  sqlBundleSummary, applySqlBundleToggle,
+  sortVersions, joinBatchProgress, batchSqlSummary, applyBatchTaskToggle, applyBatchSqlToggle, mergeBatchSql
 } from './version-plan-logic.mjs';
-import { readSqlAtTag, readDeployManifestFromSubs, gitOut } from './deploy-manifest-reader.mjs';
+import { readSqlAtTag, readDeployManifestFromSubs, gitOut, readDeployDirFromSubs, listDeployVersionsAtHead, readSqlFileAtHead, readDeployFileAtHead } from './deploy-manifest-reader.mjs';
 
 // ============ A) 纯逻辑 ============
 
@@ -235,6 +236,128 @@ test('端到端：现场 v1.0 升 v1.1 → 区间 (v1.0,v1.1] → 累积 + 合�
   assert.ok(merged.includes('UPDATE kwsb_t SET col1=0;'), 'kwsb 内联 SQL 保留');
   assert.ok(merged.includes('CREATE INDEX idx ON ph_t(id);'), 'ph file SQL 正文被读入');
   assert.ok(merged.includes('-- ==== 合理用药系统 v1.1 kwsb '), '分隔注释含子系统');
+});
+
+// ============ C) 2026-08-05 核心更新流重构：目录@HEAD 草稿源 + 批次快照 ============
+
+test('sortVersions：文件名版本号语义升序 + 去重', () => {
+  assert.deepEqual(sortVersions(['2.10.0', '2.9.0', '2.9.0', '2.8.0']), ['2.8.0', '2.9.0', '2.10.0']);
+  assert.deepEqual(sortVersions([]), []);
+  assert.deepEqual(sortVersions(['1.0', '  ', '', '1.0']), ['1.0']);
+});
+
+let DTMP = null, DREPO = null, DREPO2 = null;
+
+test('setup(目录形态)：造两个子系统仓 docs/deploy/*.json（一版一文件·@HEAD）+ sql/', () => {
+  DTMP = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-dir-test-'));
+  DREPO = path.join(DTMP, 'kwsb'); DREPO2 = path.join(DTMP, 'ph');
+  // kwsb：docs/deploy/{2.8.0,2.9.0,2.10.0}.json + sql
+  fs.mkdirSync(DREPO, { recursive: true });
+  git(DREPO, 'init', '-q'); git(DREPO, 'config', 'user.email', 't@t.com'); git(DREPO, 'config', 'user.name', 't');
+  write(DREPO, 'docs/deploy/2.8.0.json', JSON.stringify({ tasks: [{ id: 'stop', title: '停服务' }], sql: [{ id: 's280', file: 'sql/2.8.0.sql', desc: '2.8.0升级' }] }));
+  write(DREPO, 'docs/deploy/2.9.0.json', JSON.stringify({ tasks: [{ id: 'deploy', title: '部署2.9.0包' }], sql: [{ id: 's290', file: 'sql/2.9.0.sql' }] }));
+  write(DREPO, 'docs/deploy/2.10.0.json', JSON.stringify({ tasks: [{ id: 'verify', title: '回归验证' }], sql: [] }));
+  write(DREPO, 'docs/deploy/bad.json', '{ not valid json ');          // 非法 JSON（文件名 bad → 也当版本，但 parse 失败跳过）
+  write(DREPO, 'sql/2.8.0.sql', 'ALTER TABLE kwsb ADD c1 INT;\n');
+  write(DREPO, 'sql/2.9.0.sql', 'ALTER TABLE kwsb ADD c2 INT;\n');
+  git(DREPO, 'add', '-A'); git(DREPO, 'commit', '-q', '-m', 'kwsb deploy dir');
+  // ph：只有 2.9.0 有清单（内联 SQL）
+  fs.mkdirSync(DREPO2, { recursive: true });
+  git(DREPO2, 'init', '-q'); git(DREPO2, 'config', 'user.email', 't@t.com'); git(DREPO2, 'config', 'user.name', 't');
+  write(DREPO2, 'docs/deploy/2.9.0.json', JSON.stringify({ tasks: [{ id: 'mig', title: 'ph数据迁移' }], sql: [{ id: 'psx', content: 'UPDATE ph SET x=1;', desc: 'ph内联' }] }));
+  git(DREPO2, 'add', '-A'); git(DREPO2, 'commit', '-q', '-m', 'ph deploy dir');
+  assert.ok(fs.existsSync(DREPO) && fs.existsSync(DREPO2));
+});
+
+test('listDeployVersionsAtHead：列 docs/deploy/*.json 版本名（含 bad，跳过在 parse 层）', () => {
+  const vs = listDeployVersionsAtHead(DREPO);
+  assert.ok(vs.includes('2.8.0') && vs.includes('2.9.0') && vs.includes('2.10.0'), '列出各版本文件名');
+  assert.ok(vs.includes('bad'), 'bad.json 也被列（版本名=bad），parse 层再跳过');
+  assert.deepEqual(listDeployVersionsAtHead(path.join(DTMP, 'nope')), [], '仓不存在 → []');
+});
+
+test('readDeployFileAtHead / readSqlFileAtHead：@HEAD 读文件正文', () => {
+  const raw = readDeployFileAtHead(DREPO, '2.8.0');
+  assert.ok(raw.includes('停服务'), '读到 2.8.0.json 正文');
+  assert.equal(readSqlFileAtHead(DREPO, 'sql/2.8.0.sql').trim(), 'ALTER TABLE kwsb ADD c1 INT;');
+  assert.equal(readSqlFileAtHead(DREPO, 'sql/none.sql'), '', '缺文件 → 空');
+});
+
+test('readDeployDirFromSubs：跨子系统按版本聚合 @HEAD + JSON非法跳过 + gid 不撞号', () => {
+  const subs = [{ name: 'kwsb', repoPath: DREPO }, { name: 'ph', repoPath: DREPO2 }];
+  const byV = readDeployDirFromSubs(subs);
+  assert.ok(byV['2.8.0'] && byV['2.9.0'] && byV['2.10.0'], '各版本聚合');
+  assert.ok(!byV['bad'], 'bad.json（非法 JSON）→ 未产生版本条目');
+  // 2.9.0 跨子系统聚合：kwsb 1任务1SQL + ph 1任务1SQL
+  assert.equal(byV['2.9.0'].tasks.length, 2, '2.9.0 kwsb+ph 各 1 任务');
+  const gids = byV['2.9.0'].tasks.map(t => t.gid);
+  assert.ok(gids.includes('kwsb:deploy') && gids.includes('ph:mig'), '跨子系统 gid 唯一');
+  assert.equal(byV['2.9.0'].sql.length, 2);
+  const kwsbSql = byV['2.9.0'].sql.find(s => s.gid === 'kwsb:s290');
+  assert.equal(kwsbSql.repoPath, DREPO, 'sql 项带 repoPath 供读正文');
+});
+
+test('端到端(草稿)：现场 2.8.0 → 目标 2.10.0 → 区间累积草稿 + SQL 正文读入（模拟 computeDeployDraft）', () => {
+  const subs = [{ name: 'kwsb', repoPath: DREPO }, { name: 'ph', repoPath: DREPO2 }];
+  const byVersion = readDeployDirFromSubs(subs);
+  const allVersions = sortVersions(Object.keys(byVersion));            // 语义升序（bad 已不在，非法未产生条目）
+  const range = rangeVersions(allVersions, '2.8.0', '2.10.0');
+  assert.deepEqual(range, ['2.9.0', '2.10.0'], '(2.8.0, 2.10.0] = 2.9.0+2.10.0');
+  const manifestByVersion = {}; for (const v of range) manifestByVersion[v] = byVersion[v];
+  const acc = accumulateManifests(range, manifestByVersion);
+  assert.deepEqual(acc.versionsInRange, ['2.9.0', '2.10.0']);
+  assert.equal(acc.tasks.length, 3, '2.9.0(kwsb+ph)=2 + 2.10.0(kwsb)=1');
+  assert.equal(acc.sqls.length, 2, '2.9.0 kwsb file + ph 内联（2.10.0 无 SQL）');
+  // 模拟 server 读 SQL 正文（@HEAD）
+  const resolved = acc.sqls.map(s => { let c = s.content || ''; if (s.file) { const t = readSqlFileAtHead(s.repoPath, s.file); c = t || c; } return Object.assign({}, s, { content: c }); });
+  const kwsbSql = resolved.find(s => s.file === 'sql/2.9.0.sql');
+  assert.equal(kwsbSql.content.trim(), 'ALTER TABLE kwsb ADD c2 INT;', 'kwsb file 正文 @HEAD 读入');
+  const phSql = resolved.find(s => s.subsystem === 'ph');
+  assert.equal(phSql.content, 'UPDATE ph SET x=1;', 'ph 内联 content 保留');
+});
+
+test('快照完成度：joinBatchProgress + batchSqlSummary（per 批次×医院·无 version）', () => {
+  const dpTasks = [{ id: 'kwsb:deploy', title: '部署' }, { id: 'ph:mig', title: '迁移' }];
+  const dpSql = [{ id: 'kwsb:s290', title: 'sql', content: 'A;' }];
+  const prog = { tasks: { 'kwsb:deploy': { done: true, by: 'li', at: '2026-08-05 10:00' } }, sqlBundle: { done: false } };
+  const jt = joinBatchProgress(dpTasks, prog);
+  assert.equal(jt.done, 1); assert.equal(jt.total, 2);
+  assert.equal(jt.rows[0].done, true); assert.equal(jt.rows[0].by, 'li');
+  assert.equal(jt.rows[1].done, false);
+  const sm = batchSqlSummary(dpSql, prog);
+  assert.equal(sm.hasSql, true); assert.equal(sm.scriptCount, 1); assert.equal(sm.done, false);
+  const sm2 = batchSqlSummary([], {});
+  assert.equal(sm2.hasSql, false);
+});
+
+test('快照勾选幂等：applyBatchTaskToggle / applyBatchSqlToggle（不改入参·假删）', () => {
+  const src = {};
+  const r1 = applyBatchTaskToggle(src, 'kwsb:deploy', true, 'w', 't'); assert.equal(r1.changed, true);
+  assert.deepEqual(src, {}, '不改入参');
+  assert.equal(r1.progress.tasks['kwsb:deploy'].done, true);
+  const r2 = applyBatchTaskToggle(r1.progress, 'kwsb:deploy', true, 'w', 't'); assert.equal(r2.changed, false, '幂等');
+  const r3 = applyBatchTaskToggle(r1.progress, 'kwsb:deploy', false); assert.equal(r3.changed, true);
+  assert.ok(!('kwsb:deploy' in (r3.progress.tasks || {})), '取消=删键');
+  const s1 = applyBatchSqlToggle({}, true, 'w', 't'); assert.equal(s1.changed, true); assert.equal(s1.progress.sqlBundle.done, true);
+  const s2 = applyBatchSqlToggle(s1.progress, true, 'w', 't'); assert.equal(s2.changed, false, '幂等');
+  const s3 = applyBatchSqlToggle(s1.progress, false); assert.equal(s3.changed, true);
+  assert.ok(!('sqlBundle' in s3.progress), 'SQL 取消=删键');
+});
+
+test('mergeBatchSql：快照正文直拼（无需读 git）+ 分隔注释 + 空不抛错', () => {
+  const items = [{ id: 'a', title: 'sql/2.9.0.sql', desc: '升级a', content: 'ALTER TABLE a;' }, { id: 'b', title: 'ph内联', desc: '', content: 'UPDATE b;' }];
+  const out = mergeBatchSql(items, { productName: '合理用药', from: '2.8.0', to: '2.10.0', site: 'X院' });
+  assert.ok(out.includes('-- ==== 合理用药 sql/2.9.0.sql ===='), '分隔注释含标题');
+  assert.ok(out.indexOf('ALTER TABLE a;') < out.indexOf('UPDATE b;'), '按快照顺序');
+  assert.ok(out.includes('-- 说明：升级a'));
+  assert.ok(out.includes('冻结的批次快照'), '文件头标明快照');
+  const empty = mergeBatchSql([], { productName: '合理用药', to: '2.10.0' });
+  assert.ok(empty.includes('暂无 SQL'), '空不抛错');
+});
+
+test('teardown(目录形态)：清理临时仓', () => {
+  try { if (DTMP) fs.rmSync(DTMP, { recursive: true, force: true }); } catch {}
+  assert.ok(true);
 });
 
 test('teardown：清理临时仓', () => {
