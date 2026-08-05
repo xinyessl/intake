@@ -145,7 +145,7 @@ function renderStats(t){
 // 真实端点无 customer/updateTime：客户位用 site（现场）；更新时间用 submittedAt（overview.recent 只给 submittedAt）。
 function renderRecent(list){
   const el=$('#recentBody');
-  if(!list||!list.length){ el.innerHTML='<tr><td colspan="5" class="wb-ph"><i class="ti ti-mailbox"></i>暂无进件，去<a class="text-primary" href="/submit.html">提交</a>一条试试</td></tr>'; return; }
+  if(!list||!list.length){ el.innerHTML='<tr><td colspan="5" class="wb-ph"><i class="ti ti-mailbox"></i>暂无进件 —— 现场端提交、或到<a class="text-primary" href="/projects.html">产品管理</a>生成免登录提交链接后，进件在此出现</td></tr>'; return; }
   el.innerHTML=list.map(i=>`
     <tr class="clickable" onclick="location.href='/detail.html?project=${encodeURIComponent(i.project)}&id=${encodeURIComponent(i.id)}'">
       <td><div class="cell-id">${esc(i.id)}</div><div style="margin-top:4px">${typeTag(i.type)}</div></td>
