@@ -232,14 +232,14 @@ function prodOptions(sel){ return '<option value="">选择产品</option>'+PROJE
 function syncProdEmpty(){ const box=$('#edProdRows'); const has=box.querySelector('.prow'); let e=box.querySelector('.prodempty'); if(!has){ if(!e){ e=document.createElement('div'); e.className='prodempty'; e.textContent='还没关联产品，点「添加产品」。'; box.appendChild(e);} } else if(e){ e.remove(); } }
 
 /* 产品 id → 运营 tag 版本数组（/api/versions?project= 结果缓存，最新在前）；仿 field.html ensureVersions */
-const VER_CACHE={};
-function fetchVersions(pid, cb){
-  if(!pid){ cb([]); return; }
+const VER_CACHE={};   // pid -> { versions:[产品级并集], bySub:{子系统name:[各自仓tag]} }
+function ensureVersions(pid, cb){
+  if(!pid){ cb({versions:[],bySub:{}}); return; }
   if(VER_CACHE[pid]){ cb(VER_CACHE[pid]); return; }
   fetch('/api/versions?project='+encodeURIComponent(pid)).then(r=>r.json()).then(r=>{
-    const vs=Array.isArray(r&&r.versions)?r.versions:[];   // 最新在前（后端已倒序）
-    VER_CACHE[pid]=vs; cb(vs);
-  }).catch(()=>{ VER_CACHE[pid]=[]; cb([]); });
+    const data={ versions: Array.isArray(r&&r.versions)?r.versions:[], bySub: (r&&r.bySub&&typeof r.bySub==='object')?r.bySub:{} };   // bySub=每个子系统仓各自 tag（各显各的）
+    VER_CACHE[pid]=data; cb(data);
+  }).catch(()=>{ VER_CACHE[pid]={versions:[],bySub:{}}; cb(VER_CACHE[pid]); });
 }
 /* 填 .cver 版本下拉选项：首项「未指定」(value='')；候选=该产品 tag 版本；cur 不在候选里则作为「历史值」选项保留（避免下拉丢值/保存被清空）；无版本则加禁用提示项。选完回写 value 并派发 change 让 ui.js 自定义下拉重同步。 */
 function fillVerOptions(sel, versions, cur){
@@ -258,7 +258,7 @@ function subsystemsOf(pid){
   const p=PROJECTS.find(x=>x.id===pid); if(!p||!Array.isArray(p.subsystems)) return [];
   return p.subsystems.map(s=> typeof s==='string' ? {name:s,desc:s} : {name:(s.name||''),desc:(s.desc||s.name||'')}).filter(o=>o.name);
 }
-/* 建一个子系统行：[☑勾选] 子系统中文名 [版本下拉]。checked=是否上线，version=已维护版本。版本下拉复用 fetchVersions/fillVerOptions（被 ui.js 增强）。 */
+/* 建一个子系统行：[☑勾选] 子系统中文名 [版本下拉]。checked=是否上线，version=已维护版本。版本下拉复用 ensureVersions/fillVerOptions（被 ui.js 增强）。 */
 function makeSubsysRow(pid, sub, checked, version){
   const row=document.createElement('div'); row.className='subsysrow'+(checked?'':' off'); row.dataset.sub=sub.name;
   const lab=document.createElement('label'); lab.className='subck';
@@ -268,8 +268,12 @@ function makeSubsysRow(pid, sub, checked, version){
   const v=document.createElement('select'); v.className='select cver'; v.innerHTML='<option value="">未指定</option>'; v.value=version||'';
   ck.addEventListener('change',()=>{ row.classList.toggle('off',!ck.checked); });
   row.appendChild(lab); row.appendChild(v);
-  // 拉该产品版本填充版本下拉，选中已维护版本（历史值不在 tag 列表也保留）
-  fetchVersions(pid, vs=>fillVerOptions(v, vs, version||''));
+  // 拉版本填充下拉：用「该子系统仓自己的 tag」（各子系统 git 地址/tag 不同），而非产品级并集。老后端无 bySub 时兜底用并集。
+  ensureVersions(pid, data=>{
+    var hasBySub = data && data.bySub && Object.keys(data.bySub).length;
+    var vs = hasBySub ? (data.bySub[sub.name]||[]) : ((data&&data.versions)||[]);
+    fillVerOptions(v, vs, version||'');
+  });
   return row;
 }
 /* 按产品重建子系统清单：checkedMap={子系统name:version}（回填时该医院已维护的子系统→版本；新产品/未指定则全空=默认不勾） */

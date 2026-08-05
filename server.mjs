@@ -360,6 +360,19 @@ function listVersions(proj) {   // 产品版本候选 = 各子系统仓 git tag 
   for (const rp of repos) { if (!fs.existsSync(rp)) continue; gitOut(rp, ['tag', '-l', '--sort=-v:refname']).split('\n').forEach(t => { t = t.trim(); if (t) set.add(t); }); }
   return [...set].sort((a, b) => b.localeCompare(a, undefined, { numeric: true })).slice(0, 200);
 }
+// 每个子系统仓各自的 git tag（各子系统 git 地址/tag 不同 → 各显各的，别用产品级并集）。返回 { 子系统name: [tag倒序] }。
+function versionsBySubsystem(proj) {
+  const out = {};
+  ((proj && proj.subsystems) || []).forEach(s => {
+    const name = (typeof s === 'string') ? s : (s && s.name);
+    const rp = (typeof s === 'string') ? '' : (s && s.repoPath);
+    if (!name) return;
+    let tags = [];
+    if (rp && fs.existsSync(rp)) { try { tags = gitOut(rp, ['tag', '-l', '--sort=-v:refname']).split('\n').map(t => t.trim()).filter(Boolean); } catch {} }
+    out[name] = tags.sort((a, b) => b.localeCompare(a, undefined, { numeric: true })).slice(0, 200);
+  });
+  return out;
+}
 function specFilesAt(repoPath, ref) {   // 列出某版本(或工作树) docs/specs 下的 .md
   if (ref) { const out = gitOut(repoPath, ['ls-tree', '-r', '--name-only', ref, '--', 'docs/specs']); return out.split('\n').map(s => s.trim()).filter(f => f.endsWith('.md') && !path.basename(f).startsWith('_') && path.basename(f).toLowerCase() !== 'readme.md'); }
   try { const d = path.join(repoPath, 'docs', 'specs'); return fs.readdirSync(d).filter(f => f.endsWith('.md') && !f.startsWith('_') && f.toLowerCase() !== 'readme.md').map(f => 'docs/specs/' + f); } catch { return []; }
@@ -1837,7 +1850,7 @@ const server = http.createServer((req, res) => {
       send(res, 200, JSON.stringify({ ok: true, projects: ps, keptData: kept }));
     });
   }
-  if (url.pathname === '/api/versions') { const proj = projById(url.searchParams.get('project')); if (proj) try { refreshRepos(proj, false); } catch {} return send(res, 200, JSON.stringify({ versions: proj ? listVersions(proj) : [], syncedAt: proj ? fmtSyncAt(REPO_SYNC_AT.get(proj.id)) : '' })); }
+  if (url.pathname === '/api/versions') { const proj = projById(url.searchParams.get('project')); if (proj) try { refreshRepos(proj, false); } catch {} return send(res, 200, JSON.stringify({ versions: proj ? listVersions(proj) : [], bySub: proj ? versionsBySubsystem(proj) : {}, syncedAt: proj ? fmtSyncAt(REPO_SYNC_AT.get(proj.id)) : '' })); }
   if (url.pathname === '/api/project-git') {   // 本地读取：各子系统仓 HEAD 提交 + 最后同步时间（不走网络，秒回，供项目卡常驻展示）
     const proj = projById(url.searchParams.get('project'));
     if (!proj) return send(res, 200, JSON.stringify({ subs: [] }));
