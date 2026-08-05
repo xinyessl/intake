@@ -2769,6 +2769,8 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     if (replyText && chat.lastQ) appendKbSink();
     scrollChatBottom();
     saveDraft();
+    // 咨询落库后即时刷新左侧提交清单（否则新咨询记录不出现、切模式/新对话后"消失"，须刷新页面才见——与建单流对齐）
+    try { if (chat.convId) refreshLeftList(); } catch (e) {}
   }
 
   // AC-19-KB：咨询「解决了/沉淀经验库」→ kb-from-consult（带 project/q/a）

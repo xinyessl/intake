@@ -295,6 +295,32 @@
           "specRef": "FS-05"
         }
       ]
+    },
+    {
+      "id": "B-20260805-咨询转工单",
+      "source": "CLI窗口·用户口述",
+      "importedAt": "2026-08-05",
+      "ref": "咨询答疑：①标题改第一句问话(已修) ②正式转工单流程——触发时弹转工单按钮→实施确认→直接建单，不再AI生成模板继续对话",
+      "tasks": [
+        {
+          "id": "CT-1",
+          "title": "咨询标题改第一句问话+续聊保留(已完成)",
+          "status": "done",
+          "specRef": "FS-04"
+        },
+        {
+          "id": "CT-2",
+          "title": "server /api/consult-to-intake：按convId读咨询→建工单(type/title/desc=会话摘要·site收敛·lifecycle待处理)+白名单双Set；标记咨询已转",
+          "status": "doing",
+          "specRef": "FS-04"
+        },
+        {
+          "id": "CT-3",
+          "title": "field.html 咨询模式加转工单按钮→确认弹窗(选需求/BUG+改标题)→调建单→已建单卡+刷新；去掉AI模板续聊",
+          "status": "doing",
+          "specRef": "FS-04"
+        }
+      ]
     }
   ]
 }
