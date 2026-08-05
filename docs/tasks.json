@@ -311,13 +311,13 @@
         {
           "id": "CT-2",
           "title": "server /api/consult-to-intake：按convId读咨询→建工单(type/title/desc=会话摘要·site收敛·lifecycle待处理)+白名单双Set；标记咨询已转",
-          "status": "doing",
+          "status": "done",
           "specRef": "FS-04"
         },
         {
           "id": "CT-3",
           "title": "field.html 咨询模式加转工单按钮→确认弹窗(选需求/BUG+改标题)→调建单→已建单卡+刷新；去掉AI模板续聊",
-          "status": "doing",
+          "status": "done",
           "specRef": "FS-04"
         }
       ]

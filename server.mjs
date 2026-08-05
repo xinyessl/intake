@@ -933,12 +933,12 @@ function authGate(pathname, user, link) {
   if (!user) return 'login';
   if (isAdmin(user)) return 'allow';                                    // 管理员：全放行
   // 现场侧（产品经理 / 实施工程师）：只允许 提交面 + 工单查看 + 验证
-  const FIELD_OK = new Set(['/', '/submit.html', '/detail.html', '/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/consult', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-transition', '/api/field/submissions', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/field/update-plan', '/api/field/update-toggle', '/api/field/update-sql-merged']);   // FS-05：现场端新端点（按批次视图/下载/改版本/维保回写/逐单验证）+ 累积更新计划（读代码 docs/deploy.json/累积计划/勾选/合并SQL），均端点内按 user.sites 二次收敛。2026-08-05 架构重构删 deploy-template/customer-deploy-task/batch-task/version-releases（跟随产品代码，废弃手工登记与部署模板）
+  const FIELD_OK = new Set(['/', '/submit.html', '/detail.html', '/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/consult', '/api/consult-to-intake', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-transition', '/api/field/submissions', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/field/update-plan', '/api/field/update-toggle', '/api/field/update-sql-merged']);   // FS-05：现场端新端点（按批次视图/下载/改版本/维保回写/逐单验证）+ 累积更新计划（读代码 docs/deploy.json/累积计划/勾选/合并SQL），均端点内按 user.sites 二次收敛。2026-08-05 架构重构删 deploy-template/customer-deploy-task/batch-task/version-releases（跟随产品代码，废弃手工登记与部署模板）
   return FIELD_OK.has(pathname) ? 'allow' : 'forbidden';
 }
 // FS-08 §4①：field 域接口允许集 = LINK_OK ∪ FIELD_OK（供访客链接 + 现场账号），与 authGate 内 FIELD_OK 同源，避免漂移。
 //   注意：这里是 authGate 里那份 FIELD_OK 的镜像常量——两者若改一处务必同步（authGate 用于登录态白名单，本集用于 field 域名层外层闸）。
-const FS08_FIELD_API = new Set(['/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/consult', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-transition', '/api/field/submissions', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/field/update-plan', '/api/field/update-toggle', '/api/field/update-sql-merged', '/api/model-config']);   // FS-05 端点须与 FIELD_OK 同步，否则实施域(field)整个流被 originGate deny→forbidden（实测坑，见 fs-08 防漂移断言）；update-plan/update-toggle/update-sql-merged 为累积更新计划现场端。2026-08-05 架构重构删 deploy-template/customer-deploy-task/batch-task/version-releases（跟随产品代码）
+const FS08_FIELD_API = new Set(['/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/consult', '/api/consult-to-intake', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-transition', '/api/field/submissions', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/field/update-plan', '/api/field/update-toggle', '/api/field/update-sql-merged', '/api/model-config']);   // FS-05 端点须与 FIELD_OK 同步，否则实施域(field)整个流被 originGate deny→forbidden（实测坑，见 fs-08 防漂移断言）；update-plan/update-toggle/update-sql-merged 为累积更新计划现场端。2026-08-05 架构重构删 deploy-template/customer-deploy-task/batch-task/version-releases（跟随产品代码）
 // field 域可加载的静态页（现场提交面 + 实施端外壳 + 现场可看的详情 + 登录页）。console/inbox/customers/kb/model-config/accounts/projects 等后台页不在其中 → 越域拒。
 const FS08_FIELD_PAGES = new Set(['/', '/field.html', '/submit.html', '/detail.html', '/login.html']);
 // 鉴权/健康端点：两域都放（field 域现场登录/查身份/登出/健康探测需要）。
@@ -2067,6 +2067,46 @@ const server = http.createServer((req, res) => {
       } catch (e) { convId = ''; }
       sse({ done: true, convId, kbHits: hits.length, stopped });
       try { res.end(); } catch {}
+    });
+  }
+  if (url.pathname === '/api/consult-to-intake' && req.method === 'POST') {   // FS-04：咨询答疑「转工单」——把一条 consult 记录建成真实工单（待处理），交运营端评审。不跑 AI（咨询里已讨论过）。现场+管理员可调（已进 FIELD_OK/FS08_FIELD_API）。
+    return readBody(req, async (b, err) => {
+      if (!b) return send(res, 400, JSON.stringify({ ok: false, error: err }));
+      const proj = projById(link ? link.project : b.project); if (!proj) return send(res, 400, JSON.stringify({ ok: false, error: '请选择项目' }));
+      const convId = String(b.convId || '').trim(); if (!convId) return send(res, 400, JSON.stringify({ ok: false, error: '缺少咨询会话 id' }));
+      const src = CACHE.intakes[proj.id] && CACHE.intakes[proj.id][convId];
+      if (!src || src.type !== 'consult') return send(res, 400, JSON.stringify({ ok: false, error: '咨询记录不存在' }));   // 只允许对真实 consult 记录转单
+      const type = b.type === 'bug' ? 'bug' : 'requirement';                                   // 白名单：仅 bug/requirement，其余归为需求
+      const version = String(src.version || '').trim();
+      if (type === 'bug' && !version) return send(res, 400, JSON.stringify({ ok: false, error: '报BUG 需产品版本' }));   // BUG 必须有版本（沿用 intake-submit 规则）
+      const site = convergeSite(user, src.site);                                               // 越权收敛到当前账号合法医院（决策 B）；无 user（链接）→ 原样
+      const title = ((String(b.title || '').trim()) || String(src.title || '').trim() || '系统咨询转工单').slice(0, 300);   // 标题：body 优先、空则用咨询标题（第一句问话），≤300
+      // 把咨询对话整理成可读背景 desc：逐条拼「Q:/A:」，供运营评审时看清来龙去脉。
+      const chatArr = Array.isArray(src.chat) ? src.chat : [];
+      const bgLines = ['【咨询背景】（本工单由咨询答疑转来）'];
+      for (const m of chatArr) { const t = String((m && m.text) || '').trim(); if (!t) continue; bgLines.push((m.role === 'assistant' ? 'A: ' : 'Q: ') + t); }
+      if (bgLines.length === 1) bgLines.push('Q: ' + (title));                                 // 极端兜底：无 chat 时至少放标题
+      const bg = bgLines.join('\n');
+      const id = intakeGenId(proj, type), stamp = nowStamp();
+      const reporter = user ? (user.name || user.username) : (link ? link.name : '现场');
+      const byRole = user ? user.role : 'field';
+      const media = Array.isArray(src.media) ? src.media.slice() : [];                         // 咨询截图带过来（media 路径不变，同 project 下 /api/intake-media 仍可取）
+      // 咨询对话带进工单 chat 做上下文（role/text；assistant 保持 assistant，其余归 user）
+      const chat = chatArr.map(m => ({ role: (m && m.role === 'assistant') ? 'assistant' : 'user', text: String((m && m.text) || ''), ts: Date.now() })).filter(m => m.text);
+      const e = {
+        id, type, project: proj.id, version, site, subsystem: String(src.subsystem || '').trim(), module: '',
+        title, priority: '中', severity: '', scope: '', env: '', freq: '',
+        reporter, role: byRole, contact: '',
+        // 需求侧背景/BUG 侧现象都放 desc（可读背景）；bg 也填，兼容需求正文渲染
+        bg, reqDesc: '', scene: '', accept: '', relate: '', desc: bg, errorInfo: '', steps: '', expectResult: '',
+        media, status: '待处理', lifecycle: '待处理', assignee: '',
+        history: [{ from: '', to: '待处理', by: reporter, byRole, at: stamp, note: '由咨询转工单' }],
+        analysis: null, resolution: {}, submittedAt: stamp, chat,
+      };
+      await saveIntake(proj, e);
+      // 给咨询记录标 convertedTo=id（留痕 + 前端显「已转工单」防重复）
+      try { const cur = CACHE.intakes[proj.id][convId]; if (cur && !cur.convertedTo) { cur.convertedTo = id; cur.updatedAt = nowStamp(); await saveIntake(proj, cur); } } catch {}
+      send(res, 200, JSON.stringify({ ok: true, id }));
     });
   }
   if (url.pathname === '/api/kb-search') {   // FS-07：现场只读检索经验库（全库跨产品聚合，方案 A）。已加入 FIELD_OK（现场可调）。

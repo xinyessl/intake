@@ -196,6 +196,8 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
 /* 咨询记录可点击续聊（问题②）：hover 提示可交互 */
 .f-item.clickable { cursor: pointer; transition: border-color .12s, box-shadow .12s; }
 .f-item.clickable:hover { border-color: var(--ticket-consult, #7A5BA6); box-shadow: 0 1px 6px rgba(122, 91, 166, .12); }
+/* Bug B：左侧记录选中态（当前打开续聊的那条）—— 左边框高亮 + 浅底，与 app 风格一致 */
+.f-item.active { border-color: var(--color-primary, #1A6DBE); border-left-width: 3px; background: var(--color-primary-bg, #F4F9FE); box-shadow: 0 1px 8px rgba(26, 109, 190, .14); }
 .f-item-top { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-bottom: 5px; }
 .f-item-title { font-size: 13.5px; font-weight: 600; color: var(--color-text); line-height: 1.45; margin-bottom: 5px; }
 .f-item-ctx { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 11.5px; color: var(--color-text-tertiary); }
@@ -513,6 +515,11 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   .f-modal .f-modal-msg{font-size:13px;color:var(--color-text-secondary,#5A6B7B);margin:0 0 14px;line-height:1.6}
   .f-modal .input{width:100%;box-sizing:border-box}
   .f-modal-foot{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}
+  /* CT-3 转工单弹窗：类型切换（需求/报BUG）分段按钮 */
+  .f-tt-type{display:inline-flex;gap:0;border:1px solid var(--color-border,#E5E9F0);border-radius:8px;overflow:hidden}
+  .f-tt-type button{border:none;border-radius:0;background:var(--color-surface,#fff);color:var(--color-text-secondary,#5A6B7B);padding:6px 18px;font-weight:600;cursor:pointer}
+  .f-tt-type button + button{border-left:1px solid var(--color-border,#E5E9F0)}
+  .f-tt-type button.on{background:var(--color-primary,#1A6DBE);color:#fff}
 </style>
 <div class="f-modal-mask" id="fModalMask" aria-hidden="true">
   <div class="f-modal" role="dialog" aria-modal="true">
@@ -1788,6 +1795,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       if (!g || !(g.items || []).length) return;   // AC-12：空组不渲染
       box.appendChild(mkTypeGroup(g));
     });
+    reapplyLeftActive();   // Bug B：重渲后据当前打开的会话重新标 active（保持选中态）
   }
 
   function mkTypeGroup(g) {
@@ -1857,7 +1865,23 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   function bindReopen(el, it) {
     if (!isReopenable(it)) return;
     el.style.cursor = 'pointer';
+    // Bug B：把该条的 reopen 归属藏进 DOM（consult 用 convId=id；intake 用工单 id），供选中态标记/refreshLeftList 重渲后重新命中 active。
+    el.setAttribute('data-rid', it.id);
+    el.setAttribute('data-rkind', it.type === 'consult' ? 'consult' : 'intake');
     el.addEventListener('click', function () { if (it.type === 'consult') reopenConsult(it); else reopenIntake(it); });
+  }
+  // Bug B：把左侧对应条标为选中（清其它条的 active）。kind='consult'→按 convId；'intake'→按工单 savedId。id 空则只清空。
+  function markLeftActive(kind, id) {
+    var all = document.querySelectorAll('.f-item.active'); for (var i = 0; i < all.length; i++) all[i].classList.remove('active');
+    if (!id) return;
+    var sel = '.f-item[data-rkind="' + kind + '"][data-rid="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]';
+    var hits; try { hits = document.querySelectorAll(sel); } catch (e) { hits = []; }
+    for (var j = 0; j < hits.length; j++) hits[j].classList.add('active');
+  }
+  // Bug B：refreshLeftList 重渲后，据当前打开的会话（consult=convId / intake=savedId）重新标 active（保持选中态不因重渲丢失）。
+  function reapplyLeftActive() {
+    if (chat.convId) markLeftActive('consult', chat.convId);
+    else if (chat.savedId) markLeftActive('intake', chat.savedId);
   }
 
   // 点击咨询记录 → 拉详情、把该会话恢复进对话区，可继续追问（consult 同 convId 续存，AC-18/22）。
@@ -1881,6 +1905,8 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       // 清空对话流后逐条渲染进气泡（assistant 用 md()，user 纯文本转义——appendBubble 已按 who 区分：ai 走 md、me 走 md 但内容纯文本无 markdown）
       var box = chatBox(); if (box) box.innerHTML = '';
       msgs.forEach(function (m) { appendBubble(m.role === 'user' ? 'me' : 'ai', m.content); });
+      appendMediaBubble(item.project || it.project, item.media);   // Bug A：恢复该咨询附的截图（记录级 media → /api/intake-media 取图）
+      markLeftActive('consult', chat.convId);                       // Bug B：左侧对应条标为选中
       clearPendingImages();   // reopen 续聊 → 重置待附截图（输入态）
       scrollChatBottom();
       saveDraft();
@@ -1906,7 +1932,9 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       setSubmitKind('intake');                            // 切到提需求/报BUG 模式（intake）
       var box = chatBox(); if (box) box.innerHTML = '';
       msgs.forEach(function (m) { appendBubble(m.role === 'user' ? 'me' : 'ai', m.content); });
+      appendMediaBubble(item.project || it.project, item.media);   // Bug A：恢复该工单附的截图（记录级 media → /api/intake-media 取图）
       appendArchiveCard({ id: chat.savedId, type: item.type || it.type, site: item.site || '', subsystem: item.subsystem || '', version: item.version || '' });   // 显「已建单 <id>（<类型>）」归档卡片
+      markLeftActive('intake', chat.savedId);                       // Bug B：左侧对应条标为选中
       clearPendingImages();
       scrollChatBottom();
       saveDraft();
@@ -1956,6 +1984,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     }
     // 各系统一分组（后端已按稳定顺序返回；选某系统时只有一组）
     groups.forEach(function (g) { if ((g.items || []).length) box.appendChild(mkSysGroup(g)); });
+    reapplyLeftActive();   // Bug B：重渲后据当前打开的会话重新标 active（保持选中态）
   }
 
   function mkSysGroup(g) {
@@ -2446,7 +2475,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     box.appendChild(msg); scrollChatBottom();
     return bub;
   }
-  // 构造气泡内的截图缩略图区（点击在新标签看原图）；imgs = data URL 数组。
+  // 构造气泡内的截图缩略图区（点击在新标签看原图）；imgs = URL 数组（data URL 或普通 URL 皆可，直接作 href/src）。
   function bubbleImgs(imgs) {
     var wrap = document.createElement('div'); wrap.className = 'f-bub-imgs';
     imgs.forEach(function (du) {
@@ -2455,6 +2484,24 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       a.appendChild(im); wrap.appendChild(a);
     });
     return wrap;
+  }
+  // Bug A（reopen 显图）：记录级 media 路径数组（如 media/<id>/img-1.png）→ /api/intake-media?project=&file= 完整 URL 数组。
+  function mediaUrls(project, media) {
+    if (!Array.isArray(media) || !media.length || !project) return [];
+    return media.map(function (p) { return '/api/intake-media?project=' + encodeURIComponent(project) + '&file=' + encodeURIComponent(String(p)); });
+  }
+  // Bug A：reopen 恢复会话时，把该记录附的截图（item.media）作为一条 AI 侧图片消息插入对话流（同款缩略图样式，点开原图）。
+  function appendMediaBubble(project, media) {
+    var urls = mediaUrls(project, media); if (!urls.length) return;
+    var box = chatBox(); if (!box) return;
+    var msg = document.createElement('div'); msg.className = 'f-msg me';
+    var av = document.createElement('div'); av.className = 'av';
+    av.textContent = (state.me && (state.me.name || state.me.username) || '我').slice(0, 1);
+    var bub = document.createElement('div'); bub.className = 'bub';
+    bub.innerHTML = md('（本次咨询附的截图）');
+    bub.appendChild(bubbleImgs(urls));
+    msg.appendChild(av); msg.appendChild(bub);
+    box.appendChild(msg);
   }
 
   // ---------- 截图附件：选图 / 粘贴 / 压缩 / 预览 / 清空（本次输入态） ----------
@@ -2767,6 +2814,8 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     if (replyText) { chat.messages.push({ role: 'assistant', content: replyText }); chat.lastA = replyText; }
     // 咨询「已解决 → 沉淀经验库」入口（AC-19-KB）：结束后在气泡下追加一枚小按钮
     if (replyText && chat.lastQ) appendKbSink();
+    // 咨询「转工单」入口（CT-3）：AI 答复结束且已有咨询会话（chat.convId）→ 追加一枚转工单按钮，实施判断该升级时点它 → 弹确认弹窗 → 直接建单（不再靠 AI 生成工单模板续聊）。
+    if (replyText && chat.convId) appendConsultToIntake();
     scrollChatBottom();
     saveDraft();
     // 咨询落库后即时刷新左侧提交清单（否则新咨询记录不出现、切模式/新对话后"消失"，须刷新页面才见——与建单流对齐）
@@ -2794,6 +2843,80 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     card.appendChild(btn);
     msg.appendChild(av); msg.appendChild(card);
     box.appendChild(msg); scrollChatBottom();
+  }
+
+  // CT-3：咨询「转工单」入口 —— 结束后在气泡下追加一枚「转工单」按钮（同 appendKbSink 小卡片风格）。
+  //   实施判断该升级为需求/BUG 时点它 → 弹确认弹窗（选类型 + 改标题）→ 确认 → POST /api/consult-to-intake 直接建单（不再靠 AI 生成工单模板续聊）。
+  //   幂等：每个咨询会话（convId）只挂一枚（重复 finishConsult 不叠加）；建单成功后按钮置「已转工单」禁用（防重复建单）。
+  function appendConsultToIntake() {
+    var box = chatBox(); if (!box) return;
+    var convId = chat.convId; if (!convId) return;
+    if (box.querySelector('.f-toticket[data-conv="' + convId + '"]')) return;   // 同会话已挂过 → 不重复追加
+    var archive = currentArchive();
+    var msg = document.createElement('div'); msg.className = 'f-msg ai';
+    var av = document.createElement('div'); av.className = 'av'; av.innerHTML = '<i class="ti ti-ticket"></i>';
+    var card = document.createElement('div'); card.className = 'f-arch f-toticket'; card.setAttribute('data-conv', convId);
+    card.innerHTML = '<div class="rowk">这个咨询需要升级为需求 / BUG 交运营端处理吗？可直接转成工单。</div>';
+    var btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn btn-sm btn-primary'; btn.style.marginTop = '8px';
+    btn.innerHTML = '<i class="ti ti-ticket"></i> 🎫 转工单';
+    btn.addEventListener('click', function () { openConsultToIntake(convId, archive, btn); });
+    card.appendChild(btn);
+    msg.appendChild(av); msg.appendChild(card);
+    box.appendChild(msg); scrollChatBottom();
+  }
+
+  // CT-3：转工单确认弹窗（app 风格，参考 fPrompt 那套遮罩，多字段版：类型切换 + 标题输入 + 说明）。
+  //   确认 → POST /api/consult-to-intake {convId, type, title} → 成功：toast「已转工单 <id>」+ 显「已建单」归档卡 + 刷新左侧清单 + 按钮置「已转工单」禁用。
+  function openConsultToIntake(convId, archive, srcBtn) {
+    var mask = $('fModalMask');
+    var defTitle = (chat.lastQ || '').replace(/\s+/g, ' ').trim().slice(0, 300) || '';   // 默认标题 = 该咨询第一句问话（lastQ 首轮即第一句）；可改
+    if (!mask) {   // 无遮罩兜底：走原生 confirm（极端环境，一般不触发）
+      if (window.confirm('转为工单？（默认需求）')) doConsultToIntake(convId, archive, 'requirement', defTitle, srcBtn);
+      return;
+    }
+    $('fmTitle').textContent = '转工单';
+    $('fmMsg').textContent = '将把本次咨询对话作为工单背景一并提交给运营评审。';
+    // 多字段：类型切换（需求/报BUG）+ 标题输入
+    $('fmBody').innerHTML =
+      '<div class="f-tt-type" id="fmTtType">' +
+        '<button type="button" class="btn btn-sm on" data-tt="requirement">需求</button>' +
+        '<button type="button" class="btn btn-sm" data-tt="bug">报BUG</button>' +
+      '</div>' +
+      '<input type="text" class="input" id="fmTtTitle" maxlength="300" placeholder="工单标题（可改）" style="margin-top:10px">';
+    var typeWrap = $('fmTtType'); var titleInp = $('fmTtTitle'); titleInp.value = defTitle;
+    var curType = 'requirement';
+    var tbtns = typeWrap.querySelectorAll('button');
+    for (var i = 0; i < tbtns.length; i++) tbtns[i].addEventListener('click', function () {
+      curType = this.getAttribute('data-tt') === 'bug' ? 'bug' : 'requirement';
+      for (var j = 0; j < tbtns.length; j++) tbtns[j].classList.toggle('on', tbtns[j] === this);
+    });
+    mask.classList.add('open');
+    setTimeout(function () { try { titleInp.focus(); } catch (e) {} }, 30);
+    function cleanup() { mask.classList.remove('open'); $('fmOk').onclick = null; $('fmCancel').onclick = null; mask.onclick = null; document.removeEventListener('keydown', onKey); }
+    function onKey(e) { if (e.key === 'Escape') { cleanup(); } }
+    $('fmOk').onclick = function () { var t = titleInp.value.trim(); cleanup(); doConsultToIntake(convId, archive, curType, t, srcBtn); };
+    $('fmCancel').onclick = function () { cleanup(); };
+    mask.onclick = function (e) { if (e.target === mask) cleanup(); };
+    document.addEventListener('keydown', onKey);
+  }
+
+  // CT-3：提交转工单 → 建单成功后显归档卡 + 刷新左侧 + 按钮置「已转工单」禁用（防重复）。
+  function doConsultToIntake(convId, archive, type, title, srcBtn) {
+    if (srcBtn) srcBtn.disabled = true;
+    api('/api/consult-to-intake', { method: 'POST', body: JSON.stringify({ convId: convId, project: archive.project, type: type, title: title }) })
+      .then(function (r) {
+        var b = (r && r.body) || {};
+        if (!b.ok || !b.id) {
+          if (srcBtn) srcBtn.disabled = false;
+          showToast(b.error || '转工单失败', 'error');
+          return;
+        }
+        showToast('已转工单 ' + b.id, 'success');
+        appendArchiveCard({ id: b.id, type: type, site: archive.site, subsystem: archive.subsystem, version: archive.version });   // 显「已建单」
+        try { refreshLeftList(); } catch (e) {}
+        if (srcBtn) { srcBtn.disabled = true; srcBtn.innerHTML = '<i class="ti ti-check"></i> 已转工单 ' + b.id; }
+      })
+      .catch(function () { if (srcBtn) srcBtn.disabled = false; showToast('转工单失败，请重试', 'error'); });
   }
 
   // ---------- AI 兜底：人工提交面板（AC-14/15，走 intake-submit） ----------
@@ -2920,6 +3043,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     }
     var input = $('fChatInput'); if (input) input.value = '';
     clearPendingImages();   // 新对话清掉未发送的待附截图
+    markLeftActive('', '');   // Bug B：开新对话 → 清左侧选中态（当前无打开的记录）
     setSending(false);
     syncDeep();       // 深入思考已重置为关 → 刷新开关按钮态（去高亮）
     updateScope();
@@ -3254,7 +3378,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   })();
 
   // 暴露给测试/调试（不含敏感数据）
-  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, newConversation: newConversation, sendChat: sendChat, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast, openMaintainEdit: openMaintainEdit, doMaintainSave: doMaintainSave, maintainChipHtml: maintainChipHtml, maintainDaysLeft: maintainDaysLeft, renderTodoBody: renderTodoBody, mkUpdatePlanBlock: mkUpdatePlanBlock, loadUpdatePlan: loadUpdatePlan, renderUpdatePlan: renderUpdatePlan, mkPlanTaskItem: mkPlanTaskItem, mkSqlBundleItem: mkSqlBundleItem, doTaskToggle: doTaskToggle, doSqlBundleToggle: doSqlBundleToggle };
+  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, newConversation: newConversation, sendChat: sendChat, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast, openMaintainEdit: openMaintainEdit, doMaintainSave: doMaintainSave, maintainChipHtml: maintainChipHtml, maintainDaysLeft: maintainDaysLeft, renderTodoBody: renderTodoBody, mkUpdatePlanBlock: mkUpdatePlanBlock, loadUpdatePlan: loadUpdatePlan, renderUpdatePlan: renderUpdatePlan, mkPlanTaskItem: mkPlanTaskItem, mkSqlBundleItem: mkSqlBundleItem, doTaskToggle: doTaskToggle, doSqlBundleToggle: doSqlBundleToggle, appendConsultToIntake: appendConsultToIntake, openConsultToIntake: openConsultToIntake, doConsultToIntake: doConsultToIntake, appendMediaBubble: appendMediaBubble, mediaUrls: mediaUrls, markLeftActive: markLeftActive, reapplyLeftActive: reapplyLeftActive, bindReopen: bindReopen };
 })();
 </script>
 </body>
