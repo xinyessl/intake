@@ -139,7 +139,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
 
 /* ---------- 对话记录入口按钮 + 抽屉（FS-04 · 2026-08-06） ---------- */
 /* 工具条上「对话记录」按钮：中性态，与「新对话」区分（新对话是主色胶囊，这里用描边中性） */
-.f-rtool .f-convrec { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--color-border); background: var(--color-bg); color: var(--color-text-secondary); border-radius: var(--radius); padding: 6px 12px; font-size: 12.5px; font-weight: 600; cursor: pointer; user-select: none; white-space: nowrap; }
+.f-rtool .f-convrec { margin-left: auto; flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--color-border); background: var(--color-bg); color: var(--color-text-secondary); border-radius: var(--radius); padding: 6px 12px; font-size: 12.5px; font-weight: 600; cursor: pointer; user-select: none; white-space: nowrap; }
 .f-rtool .f-convrec:hover { border-color: var(--color-primary-border); color: var(--color-primary); background: var(--color-primary-light); }
 .f-rtool .f-convrec .ti { font-size: 15px; }
 .f-conv-drawer { width: 520px; max-width: calc(100vw - 60px); }
@@ -400,7 +400,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
 .f-arch-pri[data-pri="中"] select { color: var(--color-primary); border-color: var(--color-primary-border); background: var(--color-primary-light); }
 .f-arch-pri[data-pri="低"] select { color: var(--color-text-secondary); border-color: var(--color-border); background: var(--color-bg); }
 /* 新对话 */
-.f-rtool .newc { margin-left: auto; border: 1px solid var(--color-primary-border); background: var(--color-primary-light); color: var(--color-primary); border-radius: var(--radius); padding: 6px 12px; font-size: 12.5px; font-weight: 600; cursor: pointer; display: inline-flex; gap: 5px; align-items: center; flex: 0 0 auto; user-select: none; white-space: nowrap; }
+.f-rtool .newc { margin-left: 0; border: 1px solid var(--color-primary-border); background: var(--color-primary-light); color: var(--color-primary); border-radius: var(--radius); padding: 6px 12px; font-size: 12.5px; font-weight: 600; cursor: pointer; display: inline-flex; gap: 5px; align-items: center; flex: 0 0 auto; user-select: none; white-space: nowrap; }
 .f-rtool .newc:hover { background: var(--color-primary); color: #fff; }
 .f-rtool .newc .ti { font-size: 14px; }
 /* 对话流气泡（我 / AI） */
