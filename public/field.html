@@ -137,6 +137,28 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
 .f-kb-empty .d { font-size: 12.5px; margin-bottom: 16px; }
 .f-kb-hollow { text-align: center; padding: 46px 20px; color: var(--color-text-tertiary); font-size: 13px; }
 
+/* ---------- 对话记录入口按钮 + 抽屉（FS-04 · 2026-08-06） ---------- */
+/* 工具条上「对话记录」按钮：中性态，与「新对话」区分（新对话是主色胶囊，这里用描边中性） */
+.f-rtool .f-convrec { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--color-border); background: var(--color-bg); color: var(--color-text-secondary); border-radius: var(--radius); padding: 6px 12px; font-size: 12.5px; font-weight: 600; cursor: pointer; user-select: none; white-space: nowrap; }
+.f-rtool .f-convrec:hover { border-color: var(--color-primary-border); color: var(--color-primary); background: var(--color-primary-light); }
+.f-rtool .f-convrec .ti { font-size: 15px; }
+.f-conv-drawer { width: 520px; max-width: calc(100vw - 60px); }
+.f-conv-hint { font-size: 12px; color: var(--color-text-tertiary); margin: 0 0 14px; line-height: 1.6; }
+.f-conv-results { display: flex; flex-direction: column; gap: 9px; }
+.f-conv-item { border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface); padding: 11px 13px; cursor: pointer; transition: border-color .12s, background .12s; }
+.f-conv-item:hover { border-color: var(--color-primary-border); background: var(--color-bg); }
+.f-conv-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+/* 会话类型徽标：咨询紫、需求主色、BUG 危险色（对齐左侧 TYPE_META 语义） */
+.f-conv-kind { display: inline-flex; align-items: center; gap: 4px; height: 21px; padding: 0 9px; border-radius: var(--radius-pill); font-size: 11.5px; font-weight: 600; }
+.f-conv-kind.k-consult { background: #F1ECF8; color: #7A5BA6; }
+.f-conv-kind.k-intake { background: var(--color-primary-light); color: var(--color-primary); border: 1px solid var(--color-primary-border); }
+/* 这次聊天建了几张单（多单聊天关键提示） */
+.f-conv-cnt { display: inline-flex; align-items: center; height: 21px; padding: 0 8px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 600; background: var(--color-surface-alt); color: var(--color-text-secondary); border: 1px solid var(--color-border); }
+.f-conv-title { font-size: 13.5px; font-weight: 600; color: var(--color-text); line-height: 1.5; word-break: break-word; }
+.f-conv-ctx { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; margin-top: 5px; font-size: 11.5px; color: var(--color-text-tertiary); }
+.f-conv-ctx .sep { opacity: .5; }
+.f-conv-hollow { text-align: center; padding: 46px 20px; color: var(--color-text-tertiary); font-size: 13px; }
+
 /* ---------- 工作空间容器（FS-02 提交清单 · 左；FS-04 AI 对话 · 右留占位） ---------- */
 .f-workspace { flex: 1 1 auto; min-height: 0; overflow: hidden; display: flex; }
 .f-ws-placeholder { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: var(--color-text-tertiary); gap: 8px; padding: 40px; }
@@ -673,6 +695,8 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
         <!-- 深入思考开关：仅咨询答疑模式显示；开启则 sendConsult 带 deep:true，后端检索源码更深入分析（提需求/报BUG 无此语义、隐藏） -->
         <button type="button" class="f-deep" id="fDeep" title="开启后结合系统源码更深入分析成因/实现，稍慢；答复以开发确认为准"><i class="ti ti-bulb"></i> 深入思考</button>
         <!-- AC-32（2026-08-06 改·per-ticket）：紧急程度不再放这里的全局选择器——改到每张「已建单」卡片各设各的（一次对话多张单、各条紧急程度不同）。见 appendArchiveCard。 -->
+        <!-- FS-04（2026-08-06）：对话记录入口——列「对话会话」（咨询每条 + 提需求/报BUG 聊天按 sessionId 归一条），点开抽屉恢复整段对话续聊。与左侧「工单提交清单」分离。 -->
+        <span class="f-convrec" id="fConvRecBtn" title="查看历史对话会话（咨询 + 提需求/报BUG 聊天），点开可恢复续聊"><i class="ti ti-message-2"></i> 对话记录</span>
         <span class="newc" id="fNewC" title="清空当前对话，开新会话"><i class="ti ti-plus"></i> 新对话</span>
       </div>
       <!-- 对话流 f-chat-b（我 / AI 气泡）；空态占位 fWsScope 显示当前工作范围 -->
@@ -716,6 +740,24 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     <div class="f-kb-hint">跨全公司所有产品检索问题 → 解法（只读）；结果按产品区分。</div>
     <div class="f-kb-results" id="fKbResults"></div>
     <div class="f-kb-hollow" id="fKbHollow">输入关键词后开始检索</div>
+  </div>
+</aside>
+
+<!-- ================= 对话记录面板（FS-04 · 抽屉，自实现 open/close · 复用 theme.css .drawer/.drawer-mask） ================= -->
+<!-- 列「对话会话」：咨询（每条）+ 提需求/报BUG 聊天（一次聊天多张单按 sessionId 归一条）。点某条 → 恢复整段对话续聊。 -->
+<div class="drawer-mask" id="fConvMask"></div>
+<aside class="drawer f-conv-drawer" id="fConvDrawer" aria-hidden="true">
+  <div class="drawer-header">
+    <div>
+      <div class="drawer-title"><i class="ti ti-messages"></i> 对话记录</div>
+      <div class="drawer-subtitle">历史对话会话 · 咨询 + 提需求/报BUG 聊天（一次聊天归一条）· 点开恢复续聊</div>
+    </div>
+    <button class="btn btn-icon btn-sm btn-ghost" id="fConvClose" type="button" title="关闭"><i class="ti ti-x"></i></button>
+  </div>
+  <div class="drawer-body">
+    <div class="f-conv-hint">左侧「提交清单」只列需求/BUG 工单；这里是你和 AI 的对话会话——一次聊天里提的多张单会归成一条对话记录。</div>
+    <div class="f-conv-results" id="fConvResults"></div>
+    <div class="f-conv-hollow" id="fConvHollow">加载中…</div>
   </div>
 </aside>
 
@@ -1795,17 +1837,17 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     listBatch.style.display = 'none'; box.style.display = 'block';
     box.innerHTML = '';
     // 2026-08-05 架构重构：医院视图不显示部署清单块（原 FS-06 场景1 标准模板已废，部署清单跟随产品代码 → 批次卡「更新计划」块）。
-    // 空态（该医院无记录 / 筛选后为空）
+    // 空态（该医院无需求/BUG 工单 / 筛选后为空）——只数需求/BUG，咨询已移右上「对话记录」不计入左侧空态判定（否则只有咨询的医院会显 0 组却不显空态）
     var total = 0;
-    groups.forEach(function (g) { total += (g.items || []).length; });
+    groups.forEach(function (g) { if (g.key === 'requirement' || g.key === 'bug') total += (g.items || []).length; });
     if (!total) {
       var em = document.createElement('div');
-      em.innerHTML = emptyHtml('ti-inbox', '暂无提交记录', state.curSub ? ('「' + subLabel(state.curSub) + '」子项目下暂无记录') : '该医院还没有提交记录');
+      em.innerHTML = emptyHtml('ti-inbox', '暂无需求/BUG 工单', state.curSub ? ('「' + subLabel(state.curSub) + '」子项目下暂无工单') : '该医院还没有需求/BUG 工单（咨询记录在右上「对话记录」）');
       box.appendChild(em);
       return;
     }
-    // 组顺序稳定：需求 / BUG / 咨询
-    var order = ['requirement', 'bug', 'consult'];
+    // 组顺序稳定：需求 / BUG（2026-08-06：左侧「提交清单」只列需求/BUG 工单；咨询移到右上「对话记录」，避免一个聊天多张单混一列分不清）
+    var order = ['requirement', 'bug'];
     order.forEach(function (key) {
       var g = null;
       for (var i = 0; i < groups.length; i++) { if (groups[i].key === key) { g = groups[i]; break; } }
@@ -2406,6 +2448,8 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     messages: [],           // 会话历史 [{role:'user'|'assistant', content}]（传后端 + 恢复草稿）
     savedId: '',            // 幂等：本会话已建工单 id（非空=已建单，不重复建 · AC-12/22）
     convId: '',             // 咨询续问会话 id（同 convId 续存不新建 · AC-18/22）
+    sessionId: '',          // FS-04（2026-08-06）：提需求/报BUG 聊天的「会话 id」——一次聊天建的多张单同此 id → 右上「对话记录」按它归成一条。newConversation 时重置生成新 id；随 intake-chat 发；随草稿/快照 save/restore
+    reopenSessionId: '',    // reopen 某条 intake 对话记录时锁定的 sessionId（恢复整段对话 + 该会话建的多张已建单卡；续聊仍走 intake-reply 到代表单）
     analyzed: false,        // 是否已展示过 AI 初判（避免重复 analyze）
     sending: false,         // 发送中（防并发/防重复）
     lastQ: '', lastA: '',   // 最近一轮问答（供咨询「沉淀经验库」kb-from-consult）
@@ -2439,6 +2483,8 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       submitKind: chat.submitKind,
       convId: chat.convId,
       savedId: chat.savedId,
+      sessionId: chat.sessionId || '',            // FS-04：会话 id 随系统会话快照记（切回续聊建的新单仍归同一条对话记录）
+      reopenSessionId: chat.reopenSessionId || '', // reopen 的 intake 会话 sessionId（切回仍指同一条对话记录）
       analyzed: chat.analyzed,
       lastQ: chat.lastQ,
       lastA: chat.lastA,
@@ -2456,6 +2502,8 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     chat.submitKind = (snap.submitKind === 'intake') ? 'intake' : 'consult';
     chat.convId = snap.convId || '';
     chat.savedId = snap.savedId || '';
+    chat.sessionId = snap.sessionId || newSessionId();       // FS-04：恢复会话 id（无则给新的，续聊建单仍归一条对话记录）
+    chat.reopenSessionId = snap.reopenSessionId || '';
     chat.analyzed = !!snap.analyzed;
     chat.lastQ = snap.lastQ || '';
     chat.lastA = snap.lastA || '';
@@ -2779,6 +2827,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       body: JSON.stringify({
         project: archive.project, type: 'intake', version: archive.version,
         site: archive.site, subsystem: archive.subsystem, messages: chat.messages,
+        sessionId: (chat.sessionId || (chat.sessionId = newSessionId())),   // FS-04：会话 id——这次聊天建的多张单同此 id → 右上「对话记录」归一条（兜底：无则即时生成）
         // AC-32（2026-08-06 改）：不再传全局 priority——紧急程度改 per-ticket，AI 每条 record 自判、建单后现场在卡片上逐条改（/api/intake-set-priority）
         images: (Array.isArray(imgs) && imgs.length) ? imgs : undefined   // 附图 → 后端多模态看图 + 建 record 时落 media
       })
@@ -3179,9 +3228,13 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       .catch(function () { if (selEl) { selEl.disabled = false; selEl.value = prev; } if (wrap) wrap.setAttribute('data-pri', prev); showToast('设置失败，请重试', 'error'); });
   }
 
-  // AC-20：新对话 → 清空对话流/输入、开新会话（新 convId/无 savedId），不影响已提交工单
+  // FS-04：为一次新的「提需求/报BUG」聊天生成会话 id（浏览器端，Date.now()+随机；本项目工作流对 Date.now/Math.random 的限制仅针对 node 侧代码，此为浏览器内联 JS 不受限）。
+  //   同一次聊天里建的多张单都带这个 id → 右上「对话记录」按它归成一条。
+  function newSessionId() { return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+
+  // AC-20：新对话 → 清空对话流/输入、开新会话（新 convId/新 sessionId/无 savedId），不影响已提交工单
   function newConversation() {
-    chat.messages = []; chat.savedId = ''; chat.convId = ''; chat.analyzed = false; chat.sending = false; chat.lastQ = ''; chat.lastA = ''; chat.reopenProject = ''; chat.reopenSubsystem = ''; chat.reopenIntakeProject = ''; chat.deep = false;   // 新对话重置深入思考为关（合理默认：新会话不默认耗时的源码检索）；清 reopenIntakeProject（不再锁旧工单）。AC-32：紧急程度已移到 per-ticket 卡片，无全局态可重置
+    chat.messages = []; chat.savedId = ''; chat.convId = ''; chat.sessionId = newSessionId(); chat.reopenSessionId = ''; chat.analyzed = false; chat.sending = false; chat.lastQ = ''; chat.lastA = ''; chat.reopenProject = ''; chat.reopenSubsystem = ''; chat.reopenIntakeProject = ''; chat.deep = false;   // 新对话重置深入思考为关（合理默认：新会话不默认耗时的源码检索）；清 reopenIntakeProject（不再锁旧工单）；新 sessionId（这次聊天建的单归新的一条对话记录）。AC-32：紧急程度已移到 per-ticket 卡片，无全局态可重置
     var box = chatBox();
     if (box) {
       box.innerHTML = '';
@@ -3209,7 +3262,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   function saveDraft() {
     try {
       var input = $('fChatInput');
-      var d = { kind: chat.submitKind, messages: chat.messages, savedId: chat.savedId, convId: chat.convId, reopenProject: chat.reopenProject || '', reopenSubsystem: chat.reopenSubsystem || '', reopenIntakeProject: chat.reopenIntakeProject || '', deep: !!chat.deep, input: input ? input.value : '', user: (state.me && (state.me.username || state.me.name)) || '' };
+      var d = { kind: chat.submitKind, messages: chat.messages, savedId: chat.savedId, convId: chat.convId, sessionId: chat.sessionId || '', reopenSessionId: chat.reopenSessionId || '', reopenProject: chat.reopenProject || '', reopenSubsystem: chat.reopenSubsystem || '', reopenIntakeProject: chat.reopenIntakeProject || '', deep: !!chat.deep, input: input ? input.value : '', user: (state.me && (state.me.username || state.me.name)) || '' };
       sessionStorage.setItem(DRAFT_KEY, JSON.stringify(d));
     } catch (e) {}
   }
@@ -3222,7 +3275,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       if (d.user && state.me && (state.me.username || state.me.name) && d.user !== (state.me.username || state.me.name)) { clearDraft(); return; }
       chat.deep = !!d.deep;   // 先恢复深入思考设置，再 setSubmitKind（内部 syncDeep 会据此点亮开关）
       setSubmitKind(d.kind || 'intake');
-      chat.savedId = d.savedId || ''; chat.convId = d.convId || ''; chat.reopenProject = d.reopenProject || ''; chat.reopenSubsystem = d.reopenSubsystem || ''; chat.reopenIntakeProject = d.reopenIntakeProject || '';
+      chat.savedId = d.savedId || ''; chat.convId = d.convId || ''; chat.sessionId = d.sessionId || newSessionId(); chat.reopenSessionId = d.reopenSessionId || ''; chat.reopenProject = d.reopenProject || ''; chat.reopenSubsystem = d.reopenSubsystem || ''; chat.reopenIntakeProject = d.reopenIntakeProject || '';   // FS-04：恢复会话 id（无则新的，刷新后续聊建单仍归一条对话记录）
       syncDeep();   // 刷新开关显隐/高亮（草稿 kind + deep 都恢复后）
       if (Array.isArray(d.messages) && d.messages.length) {
         chat.messages = d.messages.slice();
@@ -3319,6 +3372,83 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     $('fKbMask').classList.remove('open');
     $('fKbDrawer').classList.remove('open');
     $('fKbDrawer').setAttribute('aria-hidden', 'true');
+  }
+
+  // ========== FS-04（2026-08-06）· 对话记录抽屉 ==========
+  //   数据源 /api/field/conversations（服务端按 user.sites/projects 收敛）：咨询每条一项 + 提需求/报BUG 聊天按 sessionId 归一条。
+  //   点某条 → 恢复整段对话续聊（consult→reopenConsult；intake 会话→reopenConversation 恢复代表工单 chat + 该会话建的多张已建单卡）。
+  function openConvRec() {
+    $('fConvMask').classList.add('open');
+    $('fConvDrawer').classList.add('open');
+    $('fConvDrawer').setAttribute('aria-hidden', 'false');
+    loadConversations();
+  }
+  function closeConvRec() {
+    $('fConvMask').classList.remove('open');
+    $('fConvDrawer').classList.remove('open');
+    $('fConvDrawer').setAttribute('aria-hidden', 'true');
+  }
+  function loadConversations() {
+    var results = $('fConvResults'), hollow = $('fConvHollow');
+    hollow.style.display = 'block'; hollow.textContent = '加载中…'; results.innerHTML = '';
+    api('/api/field/conversations', { method: 'GET' }).then(function (r) {
+      var items = (r.body && Array.isArray(r.body.items)) ? r.body.items : [];
+      if (!items.length) { results.innerHTML = ''; hollow.style.display = 'block'; hollow.textContent = '暂无对话记录（发起咨询或提需求/报BUG 后会出现在这里）'; return; }
+      hollow.style.display = 'none';
+      results.innerHTML = '';
+      items.forEach(function (it) { results.appendChild(mkConvItem(it)); });
+    }).catch(function () { results.innerHTML = ''; hollow.style.display = 'block'; hollow.textContent = '加载失败，请重试'; });
+  }
+  // 一条对话记录卡片：类型徽标 +（intake 多单时）「N 单」计数 + 概要标题 + 上下文（子系统·医院·时间）。点击 → reopen 续聊。
+  function mkConvItem(it) {
+    var el = document.createElement('div');
+    el.className = 'f-conv-item';
+    var isConsult = it.kind === 'consult';
+    var kindHtml = isConsult
+      ? '<span class="f-conv-kind k-consult"><i class="ti ti-message-question"></i> 咨询</span>'
+      : '<span class="f-conv-kind k-intake"><i class="ti ti-pencil-plus"></i> 提需求/报BUG</span>';
+    // intake 会话：显这次聊天建了几张单 + 需求/BUG 拆分（多单聊天关键：让用户一眼知这条对话建了多张单）
+    var cntHtml = '';
+    if (!isConsult && it.ticketCount != null) {
+      var parts = [];
+      if (it.reqCount) parts.push(it.reqCount + ' 需求');
+      if (it.bugCount) parts.push(it.bugCount + ' BUG');
+      cntHtml = '<span class="f-conv-cnt"><i class="ti ti-files"></i> ' + it.ticketCount + ' 单' + (parts.length ? '（' + parts.join(' · ') + '）' : '') + '</span>';
+    }
+    var sub = it.subsystem ? (subLabel(it.subsystem) || it.subsystem) : '';
+    var ctx = [];
+    if (sub) ctx.push('<span>' + escapeHtml(sub) + '</span>');
+    if (it.site) ctx.push('<span>' + escapeHtml(it.site) + '</span>');
+    ctx.push('<span>' + escapeHtml(fmtTime(it.updatedAt)) + '</span>');
+    el.innerHTML =
+      '<div class="f-conv-meta">' + kindHtml + cntHtml + '</div>' +
+      '<div class="f-conv-title">' + escapeHtml(it.title || '（无标题）') + '</div>' +
+      '<div class="f-conv-ctx">' + ctx.join('<span class="sep">·</span>') + '</div>';
+    el.addEventListener('click', function () {
+      closeConvRec();
+      if (isConsult) reopenConsult({ type: 'consult', project: it.project, id: it.id });
+      else reopenConversation(it);   // intake 会话：恢复整段对话 + 该会话建的多张已建单卡
+    });
+    return el;
+  }
+  // reopen 一条 intake 对话会话（提需求/报BUG 聊天，可能一次建了多张单）：
+  //   ① 用代表工单 reopenIntake 恢复整段对话（chat = 这次会话历史，落在代表单=首张）+ 代表单归档卡；
+  //   ② 该会话建了多张单（it.tickets）→ 除代表单外，逐张补一张「已建单」卡（复用刚上线的多卡逻辑）；
+  //   ③ 锁 chat.reopenSessionId（切系统随快照带、续聊建的新单仍归同一条对话记录）。
+  //   续聊仍走 intake-reply append 到代表单（reopenIntake 已设 savedId=代表单 id / reopenIntakeProject），不建重单。
+  function reopenConversation(it) {
+    var repId = it.id;                                  // 代表工单 = 首张（后端按 submittedAt 排，tickets[0]）
+    reopenIntake({ type: 'requirement', project: it.project, id: repId });   // reopenIntake 内按详情真实 type 恢复；type 仅用于其入口守卫（requirement|bug 均放行）
+    // reopenIntake 是异步（拉 detail 后重渲对话流）；补卡要排在其重渲之后，故用微延时挂到消息末尾（此时代表单卡已 append）。
+    var extra = (Array.isArray(it.tickets) ? it.tickets : []).filter(function (t) { return t && t.id && t.id !== repId; });
+    if (!extra.length) { chat.reopenSessionId = ''; return; }   // 单单会话：无需补卡
+    setTimeout(function () {
+      chat.reopenSessionId = '';   // 恢复的是已建单，续聊走 intake-reply（append 代表单）；无需新 sessionId（多卡只是回显）
+      extra.forEach(function (t) {
+        appendArchiveCard({ id: t.id, type: t.type || '', site: it.site || '', subsystem: t.subsystem || it.subsystem || '', version: t.version || '', priority: t.priority, project: it.project });   // 逐张补「已建单」卡 + per-ticket 紧急程度（AC-32）
+      });
+      scrollChatBottom();
+    }, 260);
   }
 
   // AC-2：回车或点按钮触发（自由文本框不即输即查，对齐全局规范 #11）；不传 project = 全库所有产品
@@ -3489,6 +3619,10 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     // 深入思考开关（仅咨询答疑显示；开→sendConsult 带 deep:true）
     var deepBtn = $('fDeep'); if (deepBtn) deepBtn.addEventListener('click', toggleDeep);
     // AC-32：紧急程度改 per-ticket（每张已建单卡片各设各的，绑定见 appendArchiveCard 内 select.onchange → setTicketPriority），此处无全局选择器绑定
+    // FS-04：对话记录抽屉（右上入口 + 遮罩点空关 + 关闭按钮）
+    var convBtn = $('fConvRecBtn'); if (convBtn) convBtn.addEventListener('click', openConvRec);
+    var convMask = $('fConvMask'); if (convMask) convMask.addEventListener('click', closeConvRec);
+    var convClose = $('fConvClose'); if (convClose) convClose.addEventListener('click', closeConvRec);
     // 新对话
     $('fNewC').addEventListener('click', function () { newConversation(); });
     // 发送：点按钮 + 回车（AC-9/17：自然语言输入回车发送）
@@ -3530,7 +3664,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   })();
 
   // 暴露给测试/调试（不含敏感数据）
-  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, setTicketPriority: setTicketPriority, newConversation: newConversation, sendChat: sendChat, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast, openMaintainEdit: openMaintainEdit, doMaintainSave: doMaintainSave, maintainChipHtml: maintainChipHtml, maintainDaysLeft: maintainDaysLeft, renderTodoBody: renderTodoBody, mkUpdatePlanBlock: mkUpdatePlanBlock, loadUpdatePlan: loadUpdatePlan, renderUpdatePlan: renderUpdatePlan, mkPlanTaskItem: mkPlanTaskItem, mkSqlBundleItem: mkSqlBundleItem, doTaskToggle: doTaskToggle, doSqlBundleToggle: doSqlBundleToggle, appendConsultToIntake: appendConsultToIntake, openConsultToIntake: openConsultToIntake, doConsultToIntake: doConsultToIntake, appendMediaBubble: appendMediaBubble, mediaUrls: mediaUrls, markLeftActive: markLeftActive, reapplyLeftActive: reapplyLeftActive, bindReopen: bindReopen, fConfirm: fConfirm, doDeleteItem: doDeleteItem, bindDelete: bindDelete };
+  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, openConvRec: openConvRec, closeConvRec: closeConvRec, loadConversations: loadConversations, mkConvItem: mkConvItem, reopenConversation: reopenConversation, newSessionId: newSessionId, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, setTicketPriority: setTicketPriority, newConversation: newConversation, sendChat: sendChat, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast, openMaintainEdit: openMaintainEdit, doMaintainSave: doMaintainSave, maintainChipHtml: maintainChipHtml, maintainDaysLeft: maintainDaysLeft, renderTodoBody: renderTodoBody, mkUpdatePlanBlock: mkUpdatePlanBlock, loadUpdatePlan: loadUpdatePlan, renderUpdatePlan: renderUpdatePlan, mkPlanTaskItem: mkPlanTaskItem, mkSqlBundleItem: mkSqlBundleItem, doTaskToggle: doTaskToggle, doSqlBundleToggle: doSqlBundleToggle, appendConsultToIntake: appendConsultToIntake, openConsultToIntake: openConsultToIntake, doConsultToIntake: doConsultToIntake, appendMediaBubble: appendMediaBubble, mediaUrls: mediaUrls, markLeftActive: markLeftActive, reapplyLeftActive: reapplyLeftActive, bindReopen: bindReopen, fConfirm: fConfirm, doDeleteItem: doDeleteItem, bindDelete: bindDelete };
 })();
 </script>
 </body>

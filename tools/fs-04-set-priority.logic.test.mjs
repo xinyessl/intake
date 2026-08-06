@@ -103,7 +103,8 @@ test('B9 field：每张卡片有 per-ticket 选择器（buildTicketPriPicker + s
   // appendArchiveCard 建卡时挂选择器，且四档配色 CSS 齐（紧急/高/中/低 data-pri）
   ['紧急', '高', '中', '低'].forEach(v => assert.match(FIELD_HTML, new RegExp('data-pri="' + v + '"'), '配色 CSS data-pri=' + v));
   // 建单/reopen 建卡都把 priority + project 传进 appendArchiveCard
-  assert.match(FIELD_HTML, /appendArchiveCard\(\{ id: b\.savedId,[\s\S]*?priority: b\.priority, project: archive\.project \}\)/, '新建单卡片带 b.priority + project');
+  // 2026-08-06：多单直建后建卡改遍历 savedIds → appendArchiveCard({ id: t.id, ..., priority: t.priority, project: archive.project })（原 b.savedId 单卡形已被多卡逻辑替代，见 CHG-FS04-对话多单直建）。
+  assert.match(FIELD_HTML, /appendArchiveCard\(\{ id: t\.id,[\s\S]*?priority: t\.priority, project: archive\.project \}\)/, '新建单卡片（多单遍历 savedIds）带 t.priority + project');
   assert.match(FIELD_HTML, /appendArchiveCard\(\{ id: chat\.savedId, type: item\.type[\s\S]*?priority: item\.priority, project:/, 'reopen 卡片带 item.priority + project');
 });
 
