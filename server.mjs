@@ -541,22 +541,34 @@ function specSearch(proj, ver, query, n = 5, subKey = '') {   // chunk 级检索
 }
 // 「深入思考」：spec 不够时直接 git grep 克隆的源码，把最相关的几段代码喂给 AI。用问题里的中文长词 + 英文标识 + spec 里的表名/接口路径当搜索词。
 function codeSearch(proj, ver, query, specHits, n = 4, subKey = '') {
-  const ref = safeRef(ver), terms = new Set();
-  const zh = String(query).replace(/[^一-龥]/g, '');
-  for (let i = 0; i + 2 <= zh.length; i++) terms.add(zh.slice(i, i + 2));   // 中文 bigram（匹配代码里的中文标签/注释）
-  for (let i = 0; i + 4 <= zh.length; i++) terms.add(zh.slice(i, i + 4));   // 4-gram（更具体、判别性强）
-  (String(query).match(/[A-Za-z_][A-Za-z0-9_]{3,}/g) || []).forEach(w => terms.add(w));
-  const specText = (specHits || []).map(h => h.text || '').join('\n');
-  (specText.match(/\b[a-z][a-z0-9]*_[a-z0-9_]{2,}\b/g) || []).forEach(w => terms.add(w));   // 表名/字段
-  (specText.match(/\/(api|comm)\/[A-Za-z0-9_]+/g) || []).forEach(w => terms.add(w));         // 接口路径段
-  const OK = /\.(vue|[cm]?[jt]sx?|java|kt|xml|sql|py|go|cs|php|rb|c|cc|cpp|h|hpp|scala|sh|yaml|yml)$/i;   // 只看真源码
-  const SKIPDIR = /node_modules\/|\/dist\/|iconfont|\.min\.|\/mock\//i;
+  const ref = safeRef(ver);
   // 词特异性打分：英文标识（表名 x_y / 接口路径段 / 驼峰）判别性最强给最高分；中文 n-gram 越长越具体分越高（4-gram > 2-gram）。
   const isIdent = t => /[A-Za-z_]/.test(t);
   const spec = t => isIdent(t) ? 100 + t.length : t.length;   // 英文标识 >> 4-gram > bigram
+  // ① query 自己的词（主信号，永远优先、满权重）：中文 bigram/4-gram + query 里的英文标识
+  const qSet = new Set();
+  const zh = String(query).replace(/[^一-龥]/g, '');
+  for (let i = 0; i + 2 <= zh.length; i++) qSet.add(zh.slice(i, i + 2));   // 中文 bigram（匹配代码里的中文标签/注释）
+  for (let i = 0; i + 4 <= zh.length; i++) qSet.add(zh.slice(i, i + 4));   // 4-gram（更具体、判别性强）
+  (String(query).match(/[A-Za-z_][A-Za-z0-9_]{3,}/g) || []).forEach(w => qSet.add(w));
+  // ② spec 注入词（次要·仅作「中文问题→英文表名」的桥）：从召回的 spec 正文抽表名/接口路径段
+  //    ⚠️ specSearch 可能召回跑题 spec，其注入的稀有英文表名（特异性 100+）若与 query 词混塞同一预算/权重，
+  //    会把 query 自身判别性中文词（如「说明书」）挤出预算/盖过得分，把答案文件挤出 top（第四层 bug，CHG 记）。
+  //    ⇒ 分源建词：spec 词去掉与 query 重复的、限量填预算剩余、打分乘 <1 降权系数，绝不许挤掉/盖过 query 词。
+  const sSet = new Set();
+  const specText = (specHits || []).map(h => h.text || '').join('\n');
+  (specText.match(/\b[a-z][a-z0-9]*_[a-z0-9_]{2,}\b/g) || []).forEach(w => sSet.add(w));   // 表名/字段
+  (specText.match(/\/(api|comm)\/[A-Za-z0-9_]+/g) || []).forEach(w => sSet.add(w));         // 接口路径段
+  for (const t of qSet) sSet.delete(t);   // spec 词去重（与 query 重复的归 query，享满权重）
+  const OK = /\.(vue|[cm]?[jt]sx?|java|kt|xml|sql|py|go|cs|php|rb|c|cc|cpp|h|hpp|scala|sh|yaml|yml)$/i;   // 只看真源码
+  const SKIPDIR = /node_modules\/|\/dist\/|iconfont|\.min\.|\/mock\//i;
   const lenBonus = t => isIdent(t) ? 3 : (t.length >= 4 ? 2 : 1);   // IDF 加权时长词/英文标识的系数
-  // 先按特异性降序，判别性 4-gram / 英文标识一定进预算，不被大众 bigram 挤掉；预算放宽到 24
-  const termList = [...terms].filter(t => t && t.length >= 2).sort((a, b) => spec(b) - spec(a)).slice(0, 24);
+  const bySpec = (a, b) => spec(b) - spec(a);   // 各源内部仍按特异性降序（英文标识/4-gram > bigram）
+  // 预算保底：query 词优先占大头（≤20），spec 词只填剩余且限量（≤4）——判别性 query 词（说明书/药品说明…）必须在预算内。
+  const qTerms = [...qSet].filter(t => t && t.length >= 2).sort(bySpec).slice(0, 20);
+  const sTerms = [...sSet].filter(t => t && t.length >= 2).sort(bySpec).slice(0, 4);
+  const specSourced = new Set(sTerms);   // 标记 spec 注入词：打分时降权，防跑题 spec 表名盖过 query 词
+  const termList = [...qTerms, ...sTerms];
   if (!termList.length) return [];
   const files = {};   // key -> {dir,path,terms:Set,lineTerms:Map(行号→命中它的词集合)}
   const df = {};      // 文档频率：命中每个词的不同文件数（跨本次 grep 的所有仓）
@@ -584,8 +596,10 @@ function codeSearch(proj, ver, query, specHits, n = 4, subKey = '') {
     }
   };
   grepDirs(dirs, true);
-  // 稀有词加权（IDF 式）：稀有词 df 小 → 权重高；大众词 df 大 → 权重趋 0；长词/英文标识再加成
-  const weight = t => lenBonus(t) / Math.log2(2 + (df[t] || 0));
+  // 稀有词加权（IDF 式）：稀有词 df 小 → 权重高；大众词 df 大 → 权重趋 0；长词/英文标识再加成。
+  //   spec 注入词乘 0.5 降权：即便某个 spec 表名很稀有（高 IDF），也不会盖过同样稀有的 query 词（说明书），
+  //   off-topic 的 mapper XML 就压不过真答案文件（第四层 bug 修法，CHG 记）。
+  const weight = t => (specSourced.has(t) ? 0.5 : 1) * lenBonus(t) / Math.log2(2 + (df[t] || 0));
   const scoreOf = f => { let s = 0; for (const t of f.terms) s += weight(t); return s; };
   // subKey 收敛后本子系统加权 top 得分文件过少（<2）→ 回退到全部子系统再 grep 一遍补齐
   //   跨仓时各仓 tag 不同：非当前仓统一用无 ref（工作树/HEAD），避免 git grep <不存在的tag> 返回空
