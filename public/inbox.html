@@ -608,7 +608,7 @@ function renderViewBody(e){
   // 决策回复（chat 里 role=dev）
   const chat=Array.isArray(e.chat)?e.chat:[];
   const devMsgs=chat.filter(m=>m.role==='dev');
-  if(devMsgs.length){ html+=`<div class="alert alert-info mt-16"><i class="ti ti-message-2"></i><div><b>决策回复：</b>${devMsgs.map(m=>esc(m.text)).join('<br>')}</div></div>`; }
+  if(devMsgs.length){ html+=`<div class="alert alert-info mt-16"><i class="ti ti-message-2"></i><div><b>决策回复：</b>${devMsgs.map(m=>`<div class="md-body">${window.mdToHtml?window.mdToHtml(m.text):esc(m.text)}</div>`).join('')}</div></div>`; }
   // 流转留痕
   const hist=Array.isArray(e.history)?e.history:[];
   if(hist.length){
