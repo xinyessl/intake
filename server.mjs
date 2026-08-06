@@ -1280,16 +1280,18 @@ const server = http.createServer((req, res) => {
       // 扫该产品全部工单（含 requirement/bug，consult 明确排除；跨全部医院不按 site 过滤）：
       //   收 lifecycle=已立项(已落实) 且 data.batch(=e.batch) 为空(未归批) 的工单 id。
       const store = CACHE.intakes[proj.id] || {};
+      const list = loadBatches();
+      const liveBatchIds = new Set(list.map(bt => String((bt && bt.id) || '')));   // 真实存在的批次 id（孤儿引用不算已归批）
       const ticketIds = [];
       for (const e of Object.values(store)) {
         if (!e || e.type === 'consult') continue;                       // consult 不进批次
         if (e.deleted) continue;                                        // 软删记录不归批（即便还挂着已立项态）
         if (deriveLifecycle(e) !== '已立项') continue;                   // 仅已落实
-        if (String(e.batch || '').trim()) continue;                      // 已归批不重复归入
+        // 已归批不重复归入——但必须是【真实存在】的批次；孤儿批次号（残留脏数据/批次已删）当未归批，纳入新批次自愈（归批时 e.batch 会被覆盖成新的真实 B-xx）
+        if (String(e.batch || '').trim() && liveBatchIds.has(String(e.batch).trim())) continue;
         ticketIds.push(e.id);
       }
       if (!ticketIds.length) return send(res, 200, JSON.stringify({ ok: false, error: '该产品当前没有已落实待分批的工单' }));
-      const list = loadBatches();
       const by = user ? (user.name || user.username) : 'admin';
       const at = nowStamp();
       const scheduleDate = normScheduleDate(b && b.scheduleDate);   // 计划交付日期（可空，非法则空、不报错）
