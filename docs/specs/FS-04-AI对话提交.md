@@ -76,7 +76,11 @@ depends_on: [FS-01]
 ### E. 咨询答疑（consult · SSE · 不进批次 · 可沉淀经验库）
 - **AC-17** Given 切到「咨询答疑」模式 When 现场发问并回车 Then 以 `messages[]` 调 `POST /api/consult`（SSE 流式，带 `project`/`version`/`site`/`subsystem`），AI 答复**逐字流式**追加到 AI 气泡（`data: {v:片段}`），结束事件 `{done:true, convId, kbHits}`。
 - **AC-18** Given 咨询会话产生答复 When `consult` 落库 Then 生成 `type='consult'` 记录（`lifecycle='已答复'`），**不进运营端工单收件箱**（`listIntake` 默认 `withConsult=false` 过滤掉）、**不进批次**；`convId` 返回供同会话续问（同 `convId` 续存，不新建）。
-- **AC-19-KB** Given 咨询"解决了"（现场点「已解决/沉淀经验库」）When 触发 Then 调 `POST /api/kb-from-consult`（带 `project`/`q`/`a`）沉淀为经验库条目（`from='consult'`），成功反馈；不解决则不沉淀。
+- **AC-19-KB** Given 咨询"解决了"（现场点「已解决/沉淀经验库」）When 触发 Then 调 `POST /api/kb-from-consult`（带 `project`/`convId`；兼容旧入参 `q`/`a`）沉淀为经验库条目（`from='consult'`），成功反馈；不解决则不沉淀。
+  - **整段对话 AI 整理（非只抓最后一轮）**：带 `convId` 时后端取该 consult 记录**整段 `chat`**，用 AI 整理成一条条目——`q`=用户**核心问题**（抓真正要解决的那个，**不是最后一个追问**）、`a`=**最终解决方案**且**涵盖整段排查脉络**（核心问题→关键排查→最终定位与解法）；`subsystem` 取 `src.subsystem`。
+  - **兜底**：未配模型 / AI 失败 / 解析失败 → `q`=chat 首条 user 文本（核心问题）、`a`=末条 assistant 文本（不再只取最后一轮）。
+  - **数据权限**：现场账号只能沉淀自己 `sites` 内医院的咨询（`src.site ∈ user.sites`），管理员不限，越权→403。
+  - **兼容**：`convId` 缺失时回落旧的 `q`/`a` 直存路径（向后兼容不破坏）。
 
 ### F. 新对话 / 数据权限 / 幂等 / 兜底（贯穿）
 - **AC-20** Given 当前会话已有多轮对话（含已建单）When 点「新对话」`.newc` Then 清空对话流与输入、开新会话（新 `convId`/无 `savedId`），**不影响已提交的工单**，可重新走四步。
@@ -109,7 +113,7 @@ depends_on: [FS-01]
 | POST | `/api/intake-submit` | **表单直提（兜底/人工路径）**：建需求/BUG 工单 + AI 首轮沟通 | `project`、`type`（→ `bug` 或 `requirement`）、`version`（BUG 必填）、`site`、`subsystem`、`title`、`desc`、`errorInfo`、`steps`、`expectResult`、`bg`、`reqDesc`、`accept`、`priority`、`images?` | `{ok:true, id, no, reply, configured, status}`；BUG 缺版本 → 400 | 在 `FIELD_OK`；`reporter` 服务端取登录用户（L884）；`site` 缺省取 link（🔧 见 4.3） |
 | POST | `/api/consult` | **咨询答疑（SSE 流式）**：spec + 经验库检索直接答、不进批次 | `project`、`version`、`site`、`subsystem`、`messages:[{role,content}]`、`convId?`、`deep?` | SSE：`data:{v:片段}` … `data:{done:true, convId, kbHits, stopped}`；落 `type='consult'`（`lifecycle='已答复'`） | 在 `FIELD_OK`；`reporter` 服务端取登录用户（L963） |
 | POST | `/api/intake-analyze` | **版本感知初判**（对**已建工单**做 AI 分类/结论/建议） | `project`、`id`（**已存在的工单 id**） | `{ok:true, analysis:{category:'非bug\|bug\|该版本已修\|需求', verdict, suggestion:'reply\|file', detail}, lifecycle}`；工单转「分析中」 | ⚠️ **需已建单**（先 `intake-submit`/`intake-chat` 拿到 id 再 analyze）；未在 `FIELD_OK`（当前仅管理员/后台调用，见 §4.4 NEEDS-HUMAN） |
-| POST | `/api/kb-from-consult` | 咨询"解决了"→沉淀经验库 | `project`、`q`、`a` | `{ok:true}`；条目 `from='consult'` | 在 `FIELD_OK` |
+| POST | `/api/kb-from-consult` | 咨询"解决了"→沉淀经验库（带 `convId` 时取整段 chat 经 AI 整理成核心问题 Q + 全脉络 A；`subsystem` 取 src） | `project`、`convId`（兼容旧 `q`/`a`） | `{ok:true}`；条目 `from='consult'`。convId 无效/非 consult→400；越权 site→403 | 在 `FIELD_OK`；按 `user.sites` 收敛 |
 | GET | `/api/me` | 当前用户 + role + `sites`（归档医院边界数据源） | — | `{me:{role, name, sites, projects, …}}` | 公开自身 |
 | GET | `/api/versions?project=` | 运营维护 tag 版本（系统视图 chip 版本下拉源） | `project` | `{versions:[…], syncedAt}`（最新在前） | 在 `FIELD_OK` |
 | GET | `/api/customers` | 客户/医院台账（含现场版本 `products:[{project,version}]`，医院视图 chip 源） | — | `{customers:[{name, products:[{project,version}], …}]}` | 在 `FIELD_OK` |
@@ -180,7 +184,7 @@ depends_on: [FS-01]
 | 系统视图 · tag 版本▾ | `GET /api/versions?project=`（git tag，最新在前） | 运营维护 tag 版本；选定→提交 `version` |
 
 ### 5.4 咨询记录（`type='consult'`，`consult` 端点落库）
-`consult` 落 `intakes` 一条：`type='consult'`、`lifecycle='已答复'`、`chat` = 会话（含 AI 答复）、`title` = 首个用户问题前 60 字。**默认被 `listIntake`（`withConsult=false`）过滤**，不进运营端工单收件箱、不进批次（PRD §4.3：咨询不进批次）。经验库沉淀 → `kb-from-consult` 写 `kb_entries`（`from='consult'`，见 lessons 经验库条：`source='consult', from_ref='consult'`）。
+`consult` 落 `intakes` 一条：`type='consult'`、`lifecycle='已答复'`、`chat` = 会话（含 AI 答复）、`title` = 首个用户问题前 60 字。**默认被 `listIntake`（`withConsult=false`）过滤**，不进运营端工单收件箱、不进批次（PRD §4.3：咨询不进批次）。经验库沉淀 → `kb-from-consult` 写 `kb_entries`（`from='consult'`，见 lessons 经验库条：`source='consult', from_ref='consult'`）。（2026-08-06：带 convId 时取该 consult 整段 `chat` 经 AI 整理为「核心问题 Q + 全脉络 A」，避免只抓最后一轮丢核心问题；无模型/失败按首条 user + 末条 assistant 兜底；按 user.sites 收敛。）
 
 ## 6. 业务规则 / 非功能
 

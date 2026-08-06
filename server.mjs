@@ -2317,8 +2317,41 @@ const server = http.createServer((req, res) => {
     return readBody(req, async (b, err) => {
       if (!b) return send(res, 400, JSON.stringify({ ok: false, error: err }));
       const proj = projById(b.project); if (!proj) return send(res, 400, JSON.stringify({ ok: false, error: '项目不存在' }));
-      const q = String(b.q || '').trim(), a = String(b.a || '').trim(); if (!q || !a) return send(res, 400, JSON.stringify({ ok: false, error: '缺少问答内容' }));
-      const arr = loadKB(proj.id); arr.push({ id: 'k' + crypto.randomBytes(4).toString('hex'), from: 'consult', at: nowStamp(), subsystem: '', module: '', tags: [], q: q.slice(0, 400), a: a.slice(0, 2000) });
+      // 优先按 convId 取整段咨询对话，用 AI 整理成一条经验库条目（core Q + 涵盖全脉络 A）；无 convId 回落旧的 q/a 兼容。
+      const convId = String(b.convId || '').trim();
+      let q = '', a = '', sub = '';
+      if (convId) {
+        const src = CACHE.intakes[proj.id] && CACHE.intakes[proj.id][convId];
+        if (!src || src.type !== 'consult' || src.deleted) return send(res, 400, JSON.stringify({ ok: false, error: '咨询记录不存在' }));
+        // 数据权限收敛：现场账号只能沉淀自己 sites 内医院的咨询（管理员不限）；越权拒（对齐 intake-verify/set-priority 范式）
+        if (user && !isAdmin(user) && (!Array.isArray(user.sites) || !user.sites.map(String).includes(String(src.site || '')))) return send(res, 403, JSON.stringify({ ok: false, error: '无权沉淀该医院的咨询' }));
+        const chat = Array.isArray(src.chat) ? src.chat : [];
+        // 兜底（AI 未配/失败/解析失败均用它）：q=第一条 user 文本（核心问题，非最后一个追问）、a=最后一条 assistant 文本
+        const firstUser = chat.find(m => m.role === 'user');
+        let lastAssistant = ''; for (let i = chat.length - 1; i >= 0; i--) { if (chat[i].role === 'assistant') { lastAssistant = chat[i].text || ''; break; } }
+        q = String((firstUser && firstUser.text) || '').trim();
+        a = String(lastAssistant || '').trim();
+        sub = String(src.subsystem || '').trim();
+        // 用 AI 把整段对话整理成一条经验库条目（涵盖核心问题→关键排查→最终定位与解法）
+        const cfg = readModelCfg();
+        if (cfg.apiKey && chat.length) {
+          const dialog = chat.map(m => `${m.role === 'assistant' ? 'AI' : (m.role === 'dev' ? '开发' : '现场')}：${String(m.text || '').trim()}`).join('\n');
+          const sys = '把下面这段现场咨询对话整理成一条「经验库」条目，输出严格 JSON `{"q":"…","a":"…"}`（不要任何解释文字、不要代码块围栏）：\n' +
+            'q = 用户遇到的**核心问题**（一句话，抓真正要解决的那个，**不是最后一个追问**，比如整段在排查"为什么功能没生效"，核心就是它，而非中途某个技术现象）；\n' +
+            'a = **最终解决方案/结论**，要**涵盖整段排查的关键脉络**（从核心问题 → 关键排查步骤 → 最终定位与解法），条理清晰、可操作，给下一个人照做。\n' +
+            '别把整段对话原样堆上来、别只写最后一步、别丢掉真正的核心问题。';
+          try {
+            const txt = await callModel(cfg, { system: sys, messages: [{ role: 'user', content: dialog }], maxTokens: 900 });
+            const mm = /\{[\s\S]*\}/.exec(String(txt || ''));
+            if (mm) { const o = JSON.parse(mm[0]); const oq = String(o.q || '').trim(), oa = String(o.a || '').trim(); if (oq && oa) { q = oq; a = oa; } }
+          } catch (e) { /* AI 失败 → 用上面兜底的 firstUser/lastAssistant */ }
+        }
+      } else {
+        // 向后兼容：老前端仍发 {project,q,a}（最后一轮问答）
+        q = String(b.q || '').trim(); a = String(b.a || '').trim();
+      }
+      if (!q || !a) return send(res, 400, JSON.stringify({ ok: false, error: '缺少问答内容' }));
+      const arr = loadKB(proj.id); arr.push({ id: 'k' + crypto.randomBytes(4).toString('hex'), from: 'consult', at: nowStamp(), subsystem: sub, module: '', tags: [], q: q.slice(0, 400), a: a.slice(0, 2000) });
       try { await saveKB(proj.id, arr); } catch (e) { return send(res, 500, JSON.stringify({ ok: false, error: String((e && e.message) || e) })); }
       send(res, 200, JSON.stringify({ ok: true }));
     });

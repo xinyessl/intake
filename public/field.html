@@ -2935,7 +2935,10 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     btn.innerHTML = '<i class="ti ti-book-upload"></i> 已解决 · 沉淀经验库';
     btn.addEventListener('click', function () {
       btn.disabled = true;
-      api('/api/kb-from-consult', { method: 'POST', body: JSON.stringify({ project: archive.project, q: chat.lastQ, a: chat.lastA }) })
+      // 沉淀整段咨询对话：优先发 convId，让后端用 AI 整理整段对话成一条经验库条目（core Q + 全脉络 A）；
+      // convId 为空（异常兜底）时回落发最后一轮 lastQ/lastA，后端向后兼容。
+      var payload = chat.convId ? { project: archive.project, convId: chat.convId } : { project: archive.project, q: chat.lastQ, a: chat.lastA };
+      api('/api/kb-from-consult', { method: 'POST', body: JSON.stringify(payload) })
         .then(function (r) {
           if (r.body && r.body.ok) { btn.innerHTML = '<i class="ti ti-check"></i> 已沉淀到经验库'; }
           else { btn.disabled = false; btn.innerHTML = '<i class="ti ti-book-upload"></i> 沉淀失败，重试'; }
