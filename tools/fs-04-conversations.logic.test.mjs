@@ -238,7 +238,7 @@ test('C6 reopen 分派：consult→reopenConsult，intake 会话→reopenConvers
   const seg2 = FIELD_HTML.slice(FIELD_HTML.indexOf('function reopenConversation'), FIELD_HTML.indexOf('function reopenIntakeConv'));
   assert.ok(/if \(it\.fromConv\) \{ reopenIntakeConv/.test(seg2), 'fromConv → 从会话记录 reopenIntakeConv');
   // reopenIntakeConv：拉会话记录 detail 恢复 chat + 已建单补卡 / 未建单锁 sessionId
-  const seg3 = FIELD_HTML.slice(FIELD_HTML.indexOf('function reopenIntakeConv'), FIELD_HTML.indexOf('function reopenIntakeConv') + 2200);
+  const seg3 = FIELD_HTML.slice(FIELD_HTML.indexOf('function reopenIntakeConv'), FIELD_HTML.indexOf('function reopenIntakeConv') + 2800);   // 窗口放宽：filedUpTo 注释行推后了 reopenConvProject 位置
   assert.ok(/api\('\/api\/intake-detail\?project=/.test(seg3), 'reopenIntakeConv 拉会话记录 detail 取整段 chat');
   assert.ok(/appendArchiveCard\(/.test(seg3), '已建单会话补「已建单」卡');
   assert.ok(/chat\.reopenConvProject = it\.project/.test(seg3), '未建单会话锁归档上下文（续聊走 intake-chat 同 sessionId）');

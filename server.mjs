@@ -790,7 +790,10 @@ function intakeSystem(type, proj, ver) {
 }
 function subsystemNames(proj) { return ((proj && proj.subsystems) || []).map(s => (typeof s === 'string' ? s : (s && s.name) || '')).filter(Boolean); }
 // 对话式进件：AI 主导按「提交标准」逐条问齐 + 推断子系统/模块，够了就输出 intake-record 归档块
-function intakeChatSystem(proj, type, ver, subKey) {
+// hasArchivedBg：本轮 messages 前面切了「已归档建单·只读背景」段（filedUpTo>0）——提示词里点明只对「当前待处理」段判建单。
+//   顺序流坑（2026-08-06）：AI 回复里的 record 块建单后被服务端剥掉再回前端，历史里看不到"已归档"，
+//   导致隔几轮再提新需求时 AI 把已建单的旧需求当"还在讨论"、跟新需求合并/重复。主修=前后端「已建单水位线」代码切上下文（见 /api/intake-chat）；本参数让提示词与之呼应。
+function intakeChatSystem(proj, type, ver, subKey, hasArchivedBg) {
   const idx = specIndex(proj, ver), subs = subsystemNames(proj);
   const merged = type !== 'bug' && type !== 'requirement';   // 合并模式：AI 自己判是需求还是 BUG
   const typ = merged ? '需求 / BUG' : (type === 'bug' ? 'BUG' : '需求');
@@ -819,6 +822,9 @@ ${std}
 {"type":"","subsystem":"","module":"","title":"","priority":"中","desc":"","errorInfo":"","steps":"","expectResult":"","severity":"","scope":"","env":"","freq":"","bg":"","reqDesc":"","accept":"","relate":"","opinion":""}
 \`\`\`
 【一条问题一个块 · 多条就输出多个块】TA 一次可能说了**多条**需求/BUG——每条独立问题各自输出**一个 intake-record 块**（系统会据此各建一张单）；有几条齐了就在回复末尾接连附几个 intake-record 块（块与块之间可空行），**绝不**把多条塞进一个块、也绝不因"有多条"就退化成纯文字让用户自己复制。哪几条还没问清就先别为那几条出块，继续追问补齐即可（已齐的照常出块）。
+【N 条 = N 个块 · 一个都不能少 · 硬性】只要你已经识别/确认/拆分出 **N 条独立**的需求或 BUG（哪怕你嘴上说了"拆成两条""一起打包转开发""都已登记"），你就**必须**在这条回复的末尾**为每一条各输出一个 intake-record 块**——N 条就 **N 个块**，一个都不能少、绝不合并成一个块、也**绝不**用"打包转开发/一起排期/已登记/已闭环"这类**文字**代替出块。**少出一个块 = 漏建单 = 错。**"打包转开发排期"只是**话术**，不改变"一条需求 = 一个块 = 一张单"：你说了几条、就得出几个块。若其中某条还差澄清、另一条已齐 → **已齐的那条现在就出块建单**，没齐的继续追问补齐（别为了"一起提交"而都不出块）。
+【建单逐条独立 · 顺序流别重复别合并】建单是**逐条独立**的：**一旦你为某条需求/BUG 出过归档块（intake-record），那条就算已归档建单、已闭环**——之后用户再说的东西，默认是**另一条新的、和它无关的**需求/BUG，要**单独澄清、单独出块建新单**，**绝不**把新说的内容揉进（合并到）那条已建单里、也**绝不**为已建单再出一次块。只有当用户**明确针对某条已建单做补充/追问**（如"刚才那个导出再加个筛选"）时，那才是对该单的补充；否则一律当独立新条处理。${hasArchivedBg ? `
+【已建单归档背景 · 只读 · 禁止再建/合并】本轮对话开头有一段【已建单归档·只读背景】——那是本次会话里**此前已归档建单、已闭环**的需求/BUG，**只供你理解上下文**。你**只对「当前待处理」这段（背景之后的对话）判断有没有新需求/BUG 要建单**：绝不为「已归档背景」里的内容再出归档块、绝不把它们合并进「当前待处理」的新需求。若用户在「当前待处理」里明确针对某条已建单做补充/追问，用文字回应即可、别新建单。` : ''}
 ${merged ? 'type 必填："bug"(问题/缺陷) 或 "requirement"(需求/改进)，按你判断的类别填；' : `type 填 "${type}"；`}priority 必填，按问题严重度/影响面判定，取值仅限【紧急/高/中/低】：紧急=线上阻断/资损/大面积无法使用；高=核心流程受阻但有临时办法或影响部分人；中=一般问题/改进(默认)；低=轻微/优化建议。拿不准填「中」。只有信息按标准基本齐才输出 record；还在澄清阶段就别输出。`;
 }
 async function intakeAI(proj, e) {   // 组装对话喂模型，返回 AI 文本
@@ -2266,10 +2272,21 @@ const server = http.createServer((req, res) => {
       const sub = String(b.subsystem || '').trim();   // 用户指定的子系统
       const sessionId = String(b.sessionId || '').trim().slice(0, 40);   // FS-04 会话分组：一次聊天的多张单同一 sessionId → 右上「对话记录」归成一条。前端「新对话」重置生成新 id；随草稿/快照带。落 data JSON（不加库列）；旧单无此字段→前端兜底每单自成一条。
       const cfg = readModelCfg(); if (!cfg.apiKey) return send(res, 200, JSON.stringify({ ok: true, reply: '（管理员还没配置模型 API，暂时不能对话；配好后即可用。）' }));
-      const msgs = (Array.isArray(b.messages) ? b.messages : []).filter(m => m && m.content).slice(-24).map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content).slice(0, 4000) }));
-      if (!msgs.length) return send(res, 400, JSON.stringify({ ok: false, error: 'empty' }));
+      // 全量归一化（filter 内容），filedUpTo 是前端 chat.messages 的下标——与此对齐（本流程消息恒有 content，filter 一般不丢）。
+      const allMsgs = (Array.isArray(b.messages) ? b.messages : []).filter(m => m && m.content).map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content).slice(0, 4000) }));
+      if (!allMsgs.length) return send(res, 400, JSON.stringify({ ok: false, error: 'empty' }));
+      // FS-04「已建单水位线」（2026-08-06 主修·确定性防上下文污染）：前端每次建单后把 filedUpTo 上移到 messages.length；
+      //   这里用代码把历史切两段——archived=已归档建单只读背景（禁止再建/合并），active=当前待处理（只对它判是否建新单）。
+      //   filedUpTo 夹到 [0, allMsgs.length]（越界/不传/老前端=0 → active 为全量，行为完全同现状、不回归）。
+      const filedUpTo = Math.min(Math.max(0, parseInt(b.filedUpTo, 10) || 0), allMsgs.length);
+      const archivedMsgs = allMsgs.slice(0, filedUpTo);
+      const activeMsgs = allMsgs.slice(filedUpTo).slice(-24);   // 待处理段仍限最近 24 轮预算
+      // 组给模型：archived 折叠成一条「只读背景」user 说明（原文拼接，标注已建单、禁止再建/合并）+ active 原样多轮。只有 active 被当"待判断建单"的正文。
+      const msgs = archivedMsgs.length
+        ? [{ role: 'user', content: '【已建单归档·只读背景·禁止再为这些内容建单或合并进新需求】以下是本次会话此前已归档建单、已闭环的对话，仅供你理解上下文：\n' + archivedMsgs.map(m => (m.role === 'user' ? '用户：' : '助手：') + m.content).join('\n') + '\n【以上为已建单背景，结束】' }, ...activeMsgs]
+        : activeMsgs;
       const imgs = (Array.isArray(b.images) ? b.images : []).slice(0, 6);   // 本轮附的截图（data URL，≤6）→ 多模态并进末条 user，让 AI 结合图判类/建单
-      let reply; try { reply = await callModel(cfg, { system: intakeChatSystem(proj, type, version, sub) + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题/复现场景。' : ''), messages: msgs, images: imgs, maxTokens: 800 }); }
+      let reply; try { reply = await callModel(cfg, { system: intakeChatSystem(proj, type, version, sub, archivedMsgs.length > 0) + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题/复现场景。' : ''), messages: msgs, images: imgs, maxTokens: 800 }); }
       catch (e) { return send(res, 200, JSON.stringify({ ok: true, reply: '（AI 暂时连不上：' + String((e && e.message) || e) + '，稍后再试。）' })); }
       let savedId = '', savedPriority = '';   // 单条兼容：老前端只读 savedId/priority（首张单），保持不变
       const savedIds = [];                     // Part A：多条需求 → 多个 intake-record 块 → 多张单，逐张回带 {id,type,priority} 供前端建多张卡
@@ -2284,7 +2301,8 @@ const server = http.createServer((req, res) => {
         // Part B：本轮附图存到「该单」media 目录（多张单各存一份，保持每张单自包含、便于单独清理），路径记 e.media（detail.html 用）+ 挂到该单 chat 末条 user 消息（reopen 按轮显图）。
         try { const mdir = path.join(intakeDir(proj), 'media', id); if (imgs.length) fs.mkdirSync(mdir, { recursive: true }); imgs.forEach((du, i) => { const mm = /^data:image\/\w+;base64,(.+)$/.exec(du || ''); if (mm) { fs.writeFileSync(path.join(mdir, `img-${i + 1}.png`), Buffer.from(mm[1], 'base64')); media.push(`media/${id}/img-${i + 1}.png`); } }); } catch {}
         // Part B（per-message media）：把本轮图挂到该单 chat 的「最后一条 user」消息上（=本轮发言）；旧记录无 msg.media 时前端兜底走记录级 e.media。
-        const chatMsgs = msgs.map(x => ({ role: x.role, text: x.content, ts: Date.now() }));
+        // ⚠️ 存的是**真实完整对话** allMsgs（不是喂模型时按水位线折叠的 msgs——后者含合成的「已建单背景」说明，别落库/别 reopen 显示）。
+        const chatMsgs = allMsgs.map(x => ({ role: x.role, text: x.content, ts: Date.now() }));
         if (media.length) { for (let i = chatMsgs.length - 1; i >= 0; i--) { if (chatMsgs[i].role === 'user') { chatMsgs[i].media = media.slice(); break; } } }
         // AC-32（2026-08-06 改）：紧急程度改「per-ticket」——不再被全局 b.priority 覆盖；按 AI 每条 record 判定的 rec.priority 规范到四档（非法/空→中）。现场逐条改档走 /api/intake-set-priority（本次响应回带 priority 作现场卡片默认档）。
         const e = { id, type: recType, project: proj.id, version, site, subsystem: sub || rec.subsystem || '', module: rec.module || '', title: (rec.title || '').trim(), priority: normPriority(rec.priority, '中'), severity: rec.severity || '', scope: rec.scope || '', env: rec.env || '', freq: rec.freq || '', reporter, role: '', contact: '', bg: rec.bg || '', reqDesc: rec.reqDesc || '', scene: '', accept: rec.accept || '', relate: rec.relate || '', desc: rec.desc || '', errorInfo: rec.errorInfo || '', steps: rec.steps || '', expectResult: rec.expectResult || '', opinion: rec.opinion || '', media, sessionId, status: '待处理', lifecycle: '待处理', assignee: '', history: [{ from: '', to: '待处理', by: reporter, byRole: (user ? user.role : 'field'), at: stamp, note: '对话提交' }], analysis: null, resolution: {}, submittedAt: stamp, chat: chatMsgs };   // sessionId：同一次聊天建的多张单同值 → 右上「对话记录」按它归一条
@@ -2298,7 +2316,7 @@ const server = http.createServer((req, res) => {
       //   按 sessionId upsert 一条 type='intake-conv'（幂等，同会话每轮命中同一条）；建单逻辑不变、别重复建工单。
       try {
         const reporter = user ? (user.name || user.username) : (link ? link.name : '现场');
-        const convChat = msgs.map(x => ({ role: x.role, text: x.content, ts: Date.now() }));
+        const convChat = allMsgs.map(x => ({ role: x.role, text: x.content, ts: Date.now() }));   // 真实完整对话（非水位线折叠的 msgs）
         if (reply) convChat.push({ role: 'assistant', text: reply, ts: Date.now() });   // 只在有可见回复时并入（纯结构块无可见文本则不并、避免空 AI 气泡）
         await saveConvRecord(proj, { sessionId, site, subsystem: sub, version, reporter, role: user ? user.role : 'field', chat: convChat });
       } catch {}

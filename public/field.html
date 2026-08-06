@@ -2458,6 +2458,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     submitKind: 'consult',   // 'intake'（提需求/报BUG，走 intake-chat/intake-submit + analyze）| 'consult'（咨询答疑，走 consult SSE）；2026-07-23 裁决默认咨询答疑
     messages: [],           // 会话历史 [{role:'user'|'assistant', content}]（传后端 + 恢复草稿）
     savedId: '',            // 幂等：本会话已建工单 id（非空=已建单，不重复建 · AC-12/22）
+    filedUpTo: 0,           // FS-04（2026-08-06）「已建单水位线」：chat.messages 里已归档建单覆盖到第几条（前 filedUpTo 条=已闭环背景）。intake-chat 每次返回 savedIds 非空→上移到当轮 messages.length。发 intake-chat 带上；后端据它切「已归档背景 vs 当前待处理」，只对后段判建单，杜绝把已建单旧需求跟新需求合并/重复（顺序流上下文污染）。随草稿/快照 save/restore；newConversation 归 0；reopen 已建单会话设为 messages.length、未建单设 0
     convId: '',             // 咨询续问会话 id（同 convId 续存不新建 · AC-18/22）
     sessionId: '',          // FS-04（2026-08-06）：提需求/报BUG 聊天的「会话 id」——一次聊天建的多张单同此 id → 右上「对话记录」按它归成一条。newConversation 时重置生成新 id；随 intake-chat 发；随草稿/快照 save/restore
     reopenSessionId: '',    // reopen 某条 intake 对话记录时锁定的 sessionId（恢复整段对话 + 该会话建的多张已建单卡；续聊仍走 intake-reply 到代表单）
@@ -2497,6 +2498,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       submitKind: chat.submitKind,
       convId: chat.convId,
       savedId: chat.savedId,
+      filedUpTo: chat.filedUpTo || 0,             // FS-04 已建单水位线随会话快照（切回续聊时后端仍从水位线切「已归档背景 vs 待处理」，不翻旧已建单）
       sessionId: chat.sessionId || '',            // FS-04：会话 id 随系统会话快照记（切回续聊建的新单仍归同一条对话记录）
       reopenSessionId: chat.reopenSessionId || '', // reopen 的 intake 会话 sessionId（切回仍指同一条对话记录）
       analyzed: chat.analyzed,
@@ -2517,6 +2519,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     chat.submitKind = (snap.submitKind === 'intake') ? 'intake' : 'consult';
     chat.convId = snap.convId || '';
     chat.savedId = snap.savedId || '';
+    chat.filedUpTo = Math.min(Math.max(0, snap.filedUpTo | 0), chat.messages.length);   // FS-04 恢复已建单水位线（夹到 [0, messages.length] 防越界）
     chat.sessionId = snap.sessionId || newSessionId();       // FS-04：恢复会话 id（无则给新的，续聊建单仍归一条对话记录）
     chat.reopenSessionId = snap.reopenSessionId || '';
     chat.analyzed = !!snap.analyzed;
@@ -2877,6 +2880,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       body: JSON.stringify({
         project: archive.project, type: 'intake', version: archive.version,
         site: archive.site, subsystem: archive.subsystem, messages: chat.messages,
+        filedUpTo: chat.filedUpTo || 0,   // FS-04 已建单水位线：前 filedUpTo 条 messages=已归档建单背景（只读、禁止再建/合并）；后端只对 messages.slice(filedUpTo) 判是否要建新单 → 杜绝把已建单旧需求跟新需求混一起
         sessionId: (chat.sessionId || (chat.sessionId = newSessionId())),   // FS-04：会话 id——这次聊天建的多张单同此 id → 右上「对话记录」归一条（兜底：无则即时生成）
         // AC-32（2026-08-06 改）：不再传全局 priority——紧急程度改 per-ticket，AI 每条 record 自判、建单后现场在卡片上逐条改（/api/intake-set-priority）
         images: (Array.isArray(imgs) && imgs.length) ? imgs : undefined   // 附图 → 后端多模态看图 + 建 record 时落 media
@@ -2894,6 +2898,9 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       var tickets = Array.isArray(b.savedIds) && b.savedIds.length
         ? b.savedIds
         : (b.savedId ? [{ id: b.savedId, type: (archive._recType || ''), priority: b.priority }] : []);
+      // FS-04 已建单水位线上移：本轮建了单（本轮 AI 出了 record 块）→ 把水位线推到当前 messages 末尾（含本轮 user + 本轮归档回复），
+      //   下一轮 active=messages.slice(filedUpTo) 从新内容起，AI 不会再翻出这些已闭环需求（顺序流不重复不合并）。即便已 savedId（前面建过单）也照样上移覆盖本轮新建的。
+      if (tickets.length) chat.filedUpTo = chat.messages.length;
       if (tickets.length && !chat.savedId) {
         chat.savedId = tickets[0].id;   // 幂等锚点：本会话已建单（首张）；同会话续聊不再建新单/新卡
         tickets.forEach(function (t) {
@@ -2901,6 +2908,13 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
           showAnalyze(archive, t.id);   // NH-3：每张单建单后即时 AI 初判
         });
         refreshLeftList();              // 建单后刷新左侧提交清单（可回链，多张单都在）
+      } else if (tickets.length && chat.savedId) {
+        // 同会话「先建单 A，隔几轮再提 B」：A 之后 savedId 已置，但 B 仍会经此分支（intake-chat 每轮独立判建单）→ 为 B 补卡 + 初判 + 刷新左侧。
+        tickets.forEach(function (t) {
+          appendArchiveCard({ id: t.id, type: t.type || '', site: archive.site, subsystem: archive.subsystem, version: archive.version, priority: t.priority, project: archive.project });
+          showAnalyze(archive, t.id);
+        });
+        refreshLeftList();
       }
       scrollChatBottom();
       saveDraft();
@@ -3312,7 +3326,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     // 「停止」：切新对话/切系统时若上一轮还在发送中 → 先 abort 旧请求（signal 传进三条路径），避免旧响应/流式串进新对话
     if (chat.sending && chat.abortCtrl) { try { chat.abortCtrl.abort(); } catch (e) {} }
     chat.abortCtrl = null;
-    chat.messages = []; chat.savedId = ''; chat.convId = ''; chat.sessionId = newSessionId(); chat.reopenSessionId = ''; chat.analyzed = false; chat.sending = false; chat.lastQ = ''; chat.lastA = ''; chat.reopenProject = ''; chat.reopenSubsystem = ''; chat.reopenIntakeProject = ''; chat.reopenConvProject = ''; chat.reopenConvSite = ''; chat.reopenConvSubsystem = ''; chat.reopenConvVersion = ''; chat.deep = false;   // 新对话重置深入思考为关（合理默认：新会话不默认耗时的源码检索）；清 reopenIntakeProject/reopenConv*（不再锁旧工单/旧会话记录）；新 sessionId（这次聊天建的单归新的一条对话记录）。AC-32：紧急程度已移到 per-ticket 卡片，无全局态可重置
+    chat.messages = []; chat.savedId = ''; chat.filedUpTo = 0; chat.convId = ''; chat.sessionId = newSessionId(); chat.reopenSessionId = ''; chat.analyzed = false; chat.sending = false; chat.lastQ = ''; chat.lastA = ''; chat.reopenProject = ''; chat.reopenSubsystem = ''; chat.reopenIntakeProject = ''; chat.reopenConvProject = ''; chat.reopenConvSite = ''; chat.reopenConvSubsystem = ''; chat.reopenConvVersion = ''; chat.deep = false;   // 新对话重置深入思考为关（合理默认：新会话不默认耗时的源码检索）；清 reopenIntakeProject/reopenConv* + filedUpTo=0（水位线归零，新会话不带旧已建单背景）；新 sessionId（这次聊天建的单归新的一条对话记录）。AC-32：紧急程度已移到 per-ticket 卡片，无全局态可重置
     var box = chatBox();
     if (box) {
       box.innerHTML = '';
@@ -3340,7 +3354,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   function saveDraft() {
     try {
       var input = $('fChatInput');
-      var d = { kind: chat.submitKind, messages: chat.messages, savedId: chat.savedId, convId: chat.convId, sessionId: chat.sessionId || '', reopenSessionId: chat.reopenSessionId || '', reopenProject: chat.reopenProject || '', reopenSubsystem: chat.reopenSubsystem || '', reopenIntakeProject: chat.reopenIntakeProject || '', reopenConvProject: chat.reopenConvProject || '', reopenConvSite: chat.reopenConvSite || '', reopenConvSubsystem: chat.reopenConvSubsystem || '', reopenConvVersion: chat.reopenConvVersion || '', deep: !!chat.deep, input: input ? input.value : '', user: (state.me && (state.me.username || state.me.name)) || '' };
+      var d = { kind: chat.submitKind, messages: chat.messages, savedId: chat.savedId, filedUpTo: chat.filedUpTo || 0, convId: chat.convId, sessionId: chat.sessionId || '', reopenSessionId: chat.reopenSessionId || '', reopenProject: chat.reopenProject || '', reopenSubsystem: chat.reopenSubsystem || '', reopenIntakeProject: chat.reopenIntakeProject || '', reopenConvProject: chat.reopenConvProject || '', reopenConvSite: chat.reopenConvSite || '', reopenConvSubsystem: chat.reopenConvSubsystem || '', reopenConvVersion: chat.reopenConvVersion || '', deep: !!chat.deep, input: input ? input.value : '', user: (state.me && (state.me.username || state.me.name)) || '' };
       sessionStorage.setItem(DRAFT_KEY, JSON.stringify(d));
     } catch (e) {}
   }
@@ -3357,6 +3371,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       syncDeep();   // 刷新开关显隐/高亮（草稿 kind + deep 都恢复后）
       if (Array.isArray(d.messages) && d.messages.length) {
         chat.messages = d.messages.slice();
+        chat.filedUpTo = Math.min(Math.max(0, d.filedUpTo | 0), chat.messages.length);   // FS-04 恢复已建单水位线（夹到 [0, messages.length]，老草稿无此字段→0=退化为全量 active，不回归）
         // 重放气泡（含已建单则显示已归档提示；不重复调后端，纯还原视图）
         clearPlaceholder();
         chat.messages.forEach(function (m) { appendBubble(m.role === 'user' ? 'me' : 'ai', m.content); });
@@ -3592,6 +3607,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
         // 已建单会话：续聊 append 到代表单（首张）；逐张补「已建单」卡
         var rep = built[0];
         chat.savedId = rep.id;
+        chat.filedUpTo = chat.messages.length;   // FS-04：已建单会话 reopen → 整段历史都是已归档背景（续聊虽走 intake-reply，但水位线置满以保证语义一致：恢复的历史不再被当"待建单"）
         chat.reopenIntakeProject = it.project;
         chat.reopenConvProject = ''; chat.reopenConvSite = ''; chat.reopenConvSubsystem = ''; chat.reopenConvVersion = '';
         chat.reopenSessionId = '';
@@ -3599,6 +3615,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       } else {
         // 未建单会话：续聊走 intake-chat 同 sessionId（够了再建单落该 sessionId）；锁归档上下文
         chat.savedId = '';
+        chat.filedUpTo = 0;   // FS-04：未建单会话 reopen → 恢复的历史都还没建单，全部当"待处理"（水位线 0），续聊 AI 据此判建单
         chat.reopenIntakeProject = '';
         chat.sessionId = it.sessionId || item.sessionId || newSessionId();
         chat.reopenConvProject = it.project || '';
