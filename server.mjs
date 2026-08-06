@@ -558,7 +558,7 @@ function codeSearch(proj, ver, query, specHits, n = 4, subKey = '') {
   // 先按特异性降序，判别性 4-gram / 英文标识一定进预算，不被大众 bigram 挤掉；预算放宽到 24
   const termList = [...terms].filter(t => t && t.length >= 2).sort((a, b) => spec(b) - spec(a)).slice(0, 24);
   if (!termList.length) return [];
-  const files = {};   // key -> {dir,path,terms:Set,lines:Set}
+  const files = {};   // key -> {dir,path,terms:Set,lineTerms:Map(行号→命中它的词集合)}
   const df = {};      // 文档频率：命中每个词的不同文件数（跨本次 grep 的所有仓）
   let dirs = repoDirsOf(proj);
   if (subKey) { const sc = dirs.filter(d => (d.name || '') === subKey); if (sc.length) dirs = sc; }   // 指定子系统 → 只 grep 该子系统仓（匹配不到才回退全部）
@@ -573,8 +573,10 @@ function codeSearch(proj, ver, query, specHits, n = 4, subKey = '') {
           if (!line.trim()) continue;
           const rest = r ? line.replace(new RegExp('^' + r.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ':'), '') : line;
           const m = rest.match(/^(.+?):(\d+):/); if (!m || !OK.test(m[1]) || SKIPDIR.test(m[1])) continue;
-          const key = dir + '|' + m[1], f = files[key] || (files[key] = { dir, path: m[1], ref: r, terms: new Set(), lines: new Set() });
-          f.terms.add(t); if (f.lines.size < 40) f.lines.add(+m[2]);
+          const key = dir + '|' + m[1], f = files[key] || (files[key] = { dir, path: m[1], ref: r, terms: new Set(), lineTerms: new Map() });
+          f.terms.add(t);
+          // 记「每个命中行是被哪些词命中的」（取片阶段按行的最高词权重优先选，别只按 grep 顺序封顶 40）
+          const lnNo = +m[2]; let ls = f.lineTerms.get(lnNo); if (!ls) { if (f.lineTerms.size < 400) { ls = new Set(); f.lineTerms.set(lnNo, ls); } } if (ls) ls.add(t);
           seen.add(key);
         }
         if (seen.size) df[t] = (df[t] || 0) + seen.size;
@@ -594,14 +596,25 @@ function codeSearch(proj, ver, query, specHits, n = 4, subKey = '') {
       if (rest.length) grepDirs(rest, false);
     }
   }
-  const top = Object.values(files).sort((a, b) => scoreOf(b) - scoreOf(a) || b.lines.size - a.lines.size).slice(0, n);
-  return top.map(f => {   // 每个文件取匹配行 ±6 行窗口、合并相邻、截断（f.ref：当前仓用 tag，回退仓用空=工作树/HEAD）
+  const top = Object.values(files).sort((a, b) => scoreOf(b) - scoreOf(a) || b.lineTerms.size - a.lineTerms.size).slice(0, n);
+  // 每行的判别性 = 命中它的词里的最高权重（稀有词/英文标识 → 高）。取片时按此降序选命中行，
+  // 让判别性命中行（连同 ±6 窗口）一定进片段；大众词命中行用剩余预算补。否则大众词命中行（如「医嘱」占满文件顶部）会把答案行挤出窗口。
+  const lineWeight = ls => { let w = 0; for (const t of ls) { const tw = weight(t); if (tw > w) w = tw; } return w; };
+  return top.map(f => {   // 取匹配行 ±6 行窗口、稀有词优先选、合并相邻、截断（f.ref：当前仓用 tag，回退仓用空=工作树/HEAD）
     const full = String(specFileText(f.dir, f.ref, f.path) || '').split('\n');
+    // 候选命中行按「该行最高词权重」降序（判别性强的先选）；同权按行号，稳定
+    const cand = [...f.lineTerms.entries()].map(([ln, ls]) => ({ ln, w: lineWeight(ls) })).sort((a, b) => b.w - a.w || a.ln - b.ln);
     const keep = new Set();
-    for (const ln of f.lines) for (let i = Math.max(1, ln - 6); i <= Math.min(full.length, ln + 6); i++) keep.add(i);
+    let lineBudget = 40, charEst = 0;   // 行预算 40；字符预算按窗口估（2200，容纳相距较远的两处判别性窗口，如 L301 与 L1610）
+    for (const { ln } of cand) {
+      if (lineBudget <= 0 || charEst > 2200) break;
+      let added = 0;
+      for (let i = Math.max(1, ln - 6); i <= Math.min(full.length, ln + 6); i++) { if (!keep.has(i)) { keep.add(i); added++; charEst += (full[i - 1] || '').length + 1; } }
+      lineBudget -= (added || 1);   // 已被前一窗口覆盖的命中行几乎不耗预算，仍算 1 防死循环
+    }
     const nums = [...keep].sort((a, b) => a - b); let snip = '', last = 0;
-    for (const i of nums) { if (snip.length > 1500) { snip += '\n…'; break; } if (last && i > last + 1) snip += '\n…'; snip += '\n' + (full[i - 1] || ''); last = i; }
-    return { file: f.path, text: snip.trim().slice(0, 1600) };
+    for (const i of nums) { if (snip.length > 2000) { snip += '\n…'; break; } if (last && i > last + 1) snip += '\n…'; snip += '\n' + (full[i - 1] || ''); last = i; }
+    return { file: f.path, text: snip.trim().slice(0, 2200) };
   });
 }
 
