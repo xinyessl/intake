@@ -718,7 +718,34 @@ async function saveIntake(proj, e) {   // 缓存 + MySQL(为准) + 导出 .md/.j
   try { const dir = intakeDir(proj); fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, e.id + '.json'), JSON.stringify(e, null, 2)); fs.writeFileSync(path.join(dir, e.id + '.md'), renderIntakeMd(e)); } catch {}
 }
 function loadIntake(proj, id) { const e = CACHE.intakes[proj.id] && CACHE.intakes[proj.id][id]; return e ? ensureLifecycle(structuredClone(e)) : null; }
-function listIntake(proj, opts = {}) { const m = CACHE.intakes[proj.id] || {}; let arr = Object.values(m).filter(e => !e.deleted); if (!opts.withConsult) arr = arr.filter(e => e.type !== 'consult'); const out = arr.map(e => ({ id: e.id, type: e.type, title: e.title, subsystem: e.subsystem || '', module: e.module, version: e.version || '', site: e.site || '', priority: e.priority, reporter: e.reporter, status: e.status, lifecycle: deriveLifecycle(e), assignee: e.assignee || '', batch: e.batch || '', convertedTo: e.convertedTo || '', submittedAt: e.submittedAt, updatedAt: e.updatedAt || e.submittedAt, unread: !!e.needReply })); return out.sort((a, b) => (b.updatedAt || b.submittedAt || '').localeCompare(a.updatedAt || a.submittedAt || '')); }
+// FS-04 AC-36：会话记录（type='intake-conv'）持久化——「提需求/报BUG」聊天**沟通过就存**（不必建单）。
+//   id 由 sessionId 派生（CONV-<sessionId>）→ 同一次聊天每轮 upsert 同一条（幂等）；随 intakes 表 + data JSON（无新库列，type=VARCHAR(20) 容得下 'intake-conv'）。
+//   会话记录 ≠ 工单：不进左侧提交清单（listIntake 已排除 intake-conv）、不进批次、不建重单；工单与它靠 sessionId 关联。
+//   sessionId 为空（异常）→ 不存（回落现状，交由前端草稿兜底）。返回落库的会话记录 id，或 '' 未存。
+async function saveConvRecord(proj, { sessionId, site, subsystem, version, reporter, role, chat }) {
+  const sid = String(sessionId || '').trim(); if (!sid) return '';
+  const chatArr = Array.isArray(chat) ? chat : [];
+  // 「沟通过」判据：至少有一条有内容的 user + 一条有内容的 assistant（用户发了、AI 回了）
+  const hasUser = chatArr.some(m => m && m.role === 'user' && String(m.text || '').trim());
+  const hasAi = chatArr.some(m => m && m.role === 'assistant' && String(m.text || '').trim());
+  if (!hasUser || !hasAi) return '';
+  const id = 'CONV-' + sid.slice(0, 34);   // 'CONV-'(5) + 34 ≤ 40（intakes.id VARCHAR(40)）；确定性派生→同会话每轮命中同一条
+  const prev = CACHE.intakes[proj.id] && CACHE.intakes[proj.id][id];
+  if (prev && prev.deleted) return '';   // 该会话记录已被软删 → 不复活（与 consult 软删不复活续聊一致）
+  const firstUser = chatArr.find(m => m && m.role === 'user' && String(m.text || '').trim());
+  const title = ((prev && String(prev.title || '').trim()) || (firstUser ? String(firstUser.text).replace(/\s+/g, ' ').trim() : '') || '对话提交').slice(0, 60);
+  const rec = {
+    id, type: 'intake-conv', project: proj.id, version: String(version || '').trim(),
+    site: String(site || '').trim(), subsystem: String(subsystem || '').trim(), module: '',
+    title, priority: '', reporter: reporter || '', role: role || 'field', contact: '',
+    sessionId: sid, media: [], status: '沟通中', lifecycle: '沟通中', assignee: '',
+    analysis: null, resolution: {}, chat: chatArr,
+    submittedAt: (prev && prev.submittedAt) || nowStamp(), updatedAt: nowStamp(),
+  };
+  await saveIntake(proj, rec);
+  return id;
+}
+function listIntake(proj, opts = {}) { const m = CACHE.intakes[proj.id] || {}; let arr = Object.values(m).filter(e => !e.deleted && e.type !== 'intake-conv'); if (!opts.withConsult) arr = arr.filter(e => e.type !== 'consult'); const out = arr.map(e => ({ id: e.id, type: e.type, title: e.title, subsystem: e.subsystem || '', module: e.module, version: e.version || '', site: e.site || '', priority: e.priority, reporter: e.reporter, status: e.status, lifecycle: deriveLifecycle(e), assignee: e.assignee || '', batch: e.batch || '', convertedTo: e.convertedTo || '', submittedAt: e.submittedAt, updatedAt: e.updatedAt || e.submittedAt, unread: !!e.needReply })); return out.sort((a, b) => (b.updatedAt || b.submittedAt || '').localeCompare(a.updatedAt || a.submittedAt || '')); }
 // 多现场归并：按 标题(归一化)+模块 聚合，展开 现场/版本/条数，看"通病 vs 某版本回归"
 function aggregateIntake(proj) {
   const norm = t => String(t || '').toLowerCase().replace(/\s+/g, '').replace(/[，,。.、!！?？:：]/g, '');
@@ -2221,7 +2248,10 @@ const server = http.createServer((req, res) => {
       if (rRoundMedia.length) e.media = rPrevMedia.concat(rRoundMedia);   // 记录级 media 累加（detail.html 兼容）
       const userMsg = { role: 'user', text: msg, ts: Date.now() }; if (rRoundMedia.length) userMsg.media = rRoundMedia.slice();
       e.chat = e.chat || []; e.chat.push(userMsg); await saveIntake(proj, e);
-      const ai = await intakeAI(proj, e); e.chat.push({ role: 'assistant', text: ai.reply, ts: Date.now() }); saveIntake(proj, e);
+      const ai = await intakeAI(proj, e); e.chat.push({ role: 'assistant', text: ai.reply, ts: Date.now() }); await saveIntake(proj, e);
+      // FS-04 AC-36：续聊已建单的会话 → 同步刷新它的会话记录（intake-conv）chat/updatedAt，让「对话记录」显最新对话（工单沿 sessionId 关联，不建重单）。
+      //   chat 用工单最新 e.chat（含本轮问答）；media 简化不带（会话记录只回显对话，媒体在工单 detail 里）。
+      try { if (String(e.sessionId || '').trim()) { const convChat = (Array.isArray(e.chat) ? e.chat : []).map(m => ({ role: m.role, text: m.text || '', ts: m.ts })); await saveConvRecord(proj, { sessionId: e.sessionId, site: e.site, subsystem: e.subsystem, version: e.version, reporter: e.reporter, role: e.role || 'field', chat: convChat }); } } catch {}
       send(res, 200, JSON.stringify({ ok: true, reply: ai.reply }));
     });
   }
@@ -2264,6 +2294,14 @@ const server = http.createServer((req, res) => {
       }
       // 把所有归档块从可见正文里剔除（用户不该看到结构块）
       reply = (reply || '').replace(blockRe, '').trim();
+      // FS-04 AC-36：会话记录持久化——**沟通过就存**（不必建单）。整段 chat = 本轮 messages（去空）+ 剔除结构块后的 AI 可见回复。
+      //   按 sessionId upsert 一条 type='intake-conv'（幂等，同会话每轮命中同一条）；建单逻辑不变、别重复建工单。
+      try {
+        const reporter = user ? (user.name || user.username) : (link ? link.name : '现场');
+        const convChat = msgs.map(x => ({ role: x.role, text: x.content, ts: Date.now() }));
+        if (reply) convChat.push({ role: 'assistant', text: reply, ts: Date.now() });   // 只在有可见回复时并入（纯结构块无可见文本则不并、避免空 AI 气泡）
+        await saveConvRecord(proj, { sessionId, site, subsystem: sub, version, reporter, role: user ? user.role : 'field', chat: convChat });
+      } catch {}
       send(res, 200, JSON.stringify({ ok: true, reply, savedId, priority: savedPriority, savedIds }));
     });
   }
@@ -2640,25 +2678,34 @@ const server = http.createServer((req, res) => {
     return send(res, 200, JSON.stringify({ dimension, hospitalId: hospitalId || '', groupBy: 'type', degraded: false, groups }));
   }
   if (url.pathname === '/api/field/conversations') {
-    // FS-04（2026-08-06）：右上「对话记录」数据源——把「对话会话」从左侧「提交清单（工单）」里分出来。
+    // FS-04（AC-36，2026-08-06 全量持久化改造）：右上「对话记录」数据源——列**会话记录**（不再靠工单归组），沟通过就在这。
     //   ① 咨询（consult）：每条记录=一次会话，各自一项（reopen 走 reopenConsult）。
-    //   ② 提需求/报BUG 聊天：一次聊天可能一次建多张单 → 按 sessionId 归成「一条对话记录」（无 sessionId 的旧单每张自成一组，兜底不丢）；
-    //      每组显这次聊天概要（首条 user 文本或首张单标题）、建的单数/类型、代表工单 id（供 reopenIntake 恢复整段对话 + 多卡）。
-    //   收敛口径与 /api/field/submissions 完全一致（user.projects 圈可读产品 + scopedForField 按 sites 过滤，忽略越权传参）。均按 updatedAt 倒序。
+    //   ② 提需求/报BUG 会话：以 type='intake-conv' 会话记录为主（一条=一次聊天，**含未建单的**，reopen 从它恢复整段 chat）；
+    //      每条按 sessionId 关联本会话建的 requirement/bug 工单，统计 reqCount/bugCount/tickets 供前端补「已建单」卡。
+    //   ③ 兼容旧数据：老 session（有工单但无 intake-conv 会话记录）→ 仍按工单 sessionId 归组兜底（代表工单=最早提交，chat 从它取），别让历史工单会话消失。
+    //   过滤 deleted（软删的会话记录/咨询不出现）。收敛口径与 /api/field/submissions 一致（user.projects + scopedForField 按 sites）。均按 updatedAt 倒序。
     if (!user) return send(res, 401, JSON.stringify({ error: '未登录' }));
     const myProjects = Array.isArray(user.projects) ? user.projects : [];
-    // 取「原始记录」（含 sessionId/chat/type，listIntake 出参不带 sessionId、故直读缓存），仍按同一收敛链过滤越权。
+    // 取「原始记录」（含 sessionId/chat/type；listIntake 出参不带 sessionId 且已排除 intake-conv，故直读缓存），仍按同一收敛链过滤越权。
     let raw = [];
     for (const p of loadProjects()) {
       if (!isAdmin(user) && myProjects.length && !myProjects.includes(p.id)) continue;   // 产品范围收敛
       const m = CACHE.intakes[p.id] || {};
       for (const e of Object.values(m)) {
-        if (e.deleted) continue;
-        if (e.type !== 'consult' && e.type !== 'requirement' && e.type !== 'bug') continue;
+        if (e.deleted) continue;                                                          // 软删（会话记录/咨询/工单）不出现
+        if (e.type !== 'consult' && e.type !== 'requirement' && e.type !== 'bug' && e.type !== 'intake-conv') continue;
         raw.push(Object.assign({ project: p.id }, e));
       }
     }
     raw = scopedForField(user, raw);   // 按 me.sites（+project）过滤越权（与 submissions 同源，收敛数据）
+    // 软删掉的会话记录（intake-conv）其 session 键——用于让「删对话记录」后该会话**从对话记录彻底消失**：
+    //   即便它建过工单，也不要在下面用旧数据兜底把它按工单 sessionId 重新拉回来（工单仍在左侧提交清单，只是不在对话记录）。
+    const deletedConvKeys = new Set();
+    for (const p of loadProjects()) {
+      if (!isAdmin(user) && myProjects.length && !myProjects.includes(p.id)) continue;
+      const m = CACHE.intakes[p.id] || {};
+      for (const e of Object.values(m)) { if (e.type === 'intake-conv' && e.deleted) { const sid = String(e.sessionId || '').trim(); if (sid) deletedConvKeys.add(p.id + '|' + sid); } }
+    }
     const firstUserText = (e) => { const c = Array.isArray(e.chat) ? e.chat : []; const u = c.find(m => m && m.role === 'user' && (m.text || '').trim()); return u ? String(u.text).trim() : ''; };
     const items = [];
     // consult：每条一项
@@ -2666,27 +2713,42 @@ const server = http.createServer((req, res) => {
       if (e.type !== 'consult') continue;
       items.push({ kind: 'consult', id: e.id, project: e.project, title: (e.title || firstUserText(e) || '系统咨询').slice(0, 60), site: e.site || '', subsystem: e.subsystem || '', updatedAt: e.updatedAt || e.submittedAt || '' });
     }
-    // intake（requirement/bug）：按 sessionId 归组（无 sessionId 的旧单每张自成一组，兜底不丢）
-    const groupsMap = new Map();   // key → { rep(代表工单·最早建), tickets:[{id,type}], site, subsystem, updatedAt(组内最新), summary }
+    // 先把 requirement/bug 工单按 (project, sessionId) 索引，供会话记录关联 + 兜底归组共用
+    const ticketsBySession = new Map();   // 'proj|sid' → [{id,type,priority,subsystem,version,submittedAt,updatedAt,site,chat}]
     for (const e of raw) {
       if (e.type !== 'requirement' && e.type !== 'bug') continue;
       const sid = String(e.sessionId || '').trim();
-      const key = sid ? ('sess:' + e.project + ':' + sid) : ('solo:' + e.project + ':' + e.id);   // 有 sessionId 归一组；无则单条自成一组
-      let g = groupsMap.get(key);
-      if (!g) { g = { rep: e, tickets: [], site: e.site || '', subsystem: e.subsystem || '', updatedAt: e.updatedAt || e.submittedAt || '', summary: '' }; groupsMap.set(key, g); }
-      g.tickets.push({ id: e.id, type: e.type, priority: e.priority || '中', subsystem: e.subsystem || '', version: e.version || '', submittedAt: e.submittedAt || '' });   // 该会话下每张单明细（供前端 reopen 多单会话时逐张补「已建单」卡）
-      // 代表工单 = 组内最早提交（submittedAt 最小）→ 恢复整段对话从它拿 chat（第一张单的 chat 含整段会话历史）
-      if ((e.submittedAt || '') < (g.rep.submittedAt || '')) g.rep = e;
-      const ua = e.updatedAt || e.submittedAt || '';
-      if (ua > g.updatedAt) g.updatedAt = ua;
+      const k = sid ? (e.project + '|' + sid) : ('solo|' + e.project + '|' + e.id);   // 有 sessionId 归一组；无则单条自成一组
+      (ticketsBySession.get(k) || (ticketsBySession.set(k, []).get(k))).push(e);
     }
-    for (const g of groupsMap.values()) {
-      const rep = g.rep;
-      const summary = (firstUserText(rep) || rep.title || '对话提交').slice(0, 60);   // 概要：这次聊天首条 user 文本，回落代表单标题
-      const reqN = g.tickets.filter(t => t.type === 'requirement').length;
-      const bugN = g.tickets.filter(t => t.type === 'bug').length;
-      const tickets = g.tickets.slice().sort((a, b) => String(a.submittedAt || '').localeCompare(String(b.submittedAt || '')));   // 该会话下各单（按提交先后；代表单=首张，reopen 从它取整段 chat）
-      items.push({ kind: 'intake', id: rep.id, project: rep.project, title: summary, site: g.site, subsystem: g.subsystem || rep.subsystem || '', ticketCount: g.tickets.length, reqCount: reqN, bugCount: bugN, tickets, updatedAt: g.updatedAt });
+    const usedTicketKeys = new Set();   // 已被 intake-conv 会话记录关联掉的工单组（避免兜底重复列）
+    // ② intake-conv 会话记录：一条=一次聊天（含未建单）；关联本会话工单统计单数
+    for (const e of raw) {
+      if (e.type !== 'intake-conv') continue;
+      const sid = String(e.sessionId || '').trim();
+      const k = e.project + '|' + sid;
+      const rel = (sid && ticketsBySession.get(k)) || [];   // 本会话建的工单（可能 0 张=未建单）
+      if (sid) usedTicketKeys.add(k);
+      const tickets = rel.map(t => ({ id: t.id, type: t.type, priority: t.priority || '中', subsystem: t.subsystem || '', version: t.version || '', submittedAt: t.submittedAt || '' }))
+        .sort((a, b) => String(a.submittedAt || '').localeCompare(String(b.submittedAt || '')));
+      const reqN = tickets.filter(t => t.type === 'requirement').length;
+      const bugN = tickets.filter(t => t.type === 'bug').length;
+      // updatedAt 取会话记录与关联工单里最新，避免建单/续聊后会话记录排序落后
+      let ua = e.updatedAt || e.submittedAt || '';
+      for (const t of rel) { const tu = t.updatedAt || t.submittedAt || ''; if (tu > ua) ua = tu; }
+      items.push({ kind: 'intake', id: e.id, project: e.project, sessionId: sid, title: (firstUserText(e) || e.title || '对话提交').slice(0, 60), site: e.site || '', subsystem: e.subsystem || '', ticketCount: tickets.length, reqCount: reqN, bugCount: bugN, tickets, updatedAt: ua, fromConv: true });
+    }
+    // ③ 兜底：有工单但无 intake-conv 会话记录的旧 session → 按工单 sessionId 归组（代表工单=最早提交，reopen 从它取整段 chat）
+    for (const [k, arr] of ticketsBySession.entries()) {
+      if (usedTicketKeys.has(k)) continue;   // 已被（未删）会话记录关联 → 不重复
+      if (deletedConvKeys.has(k)) continue;  // 该会话记录已被软删 → 从对话记录彻底消失（工单仍在左侧提交清单，此处不兜底拉回）
+      let rep = arr[0]; let site = arr[0].site || ''; let subsystem = arr[0].subsystem || ''; let updatedAt = '';
+      for (const e of arr) { if ((e.submittedAt || '') < (rep.submittedAt || '')) rep = e; const eu = e.updatedAt || e.submittedAt || ''; if (eu > updatedAt) updatedAt = eu; }
+      const tickets = arr.map(t => ({ id: t.id, type: t.type, priority: t.priority || '中', subsystem: t.subsystem || '', version: t.version || '', submittedAt: t.submittedAt || '' }))
+        .sort((a, b) => String(a.submittedAt || '').localeCompare(String(b.submittedAt || '')));
+      const reqN = tickets.filter(t => t.type === 'requirement').length;
+      const bugN = tickets.filter(t => t.type === 'bug').length;
+      items.push({ kind: 'intake', id: rep.id, project: rep.project, sessionId: String(rep.sessionId || '').trim(), title: (firstUserText(rep) || rep.title || '对话提交').slice(0, 60), site, subsystem: subsystem || rep.subsystem || '', ticketCount: tickets.length, reqCount: reqN, bugCount: bugN, tickets, updatedAt, fromConv: false });
     }
     items.sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));   // 均按 updatedAt 倒序
     return send(res, 200, JSON.stringify({ items }));

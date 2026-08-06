@@ -109,7 +109,7 @@ test('AC-DEL-7 三类型（咨询/需求/BUG）均可删（无禁删态时）', 
 test('AC-DEL-8 listIntake 过滤 deleted（软删记录不再出现在任何 listIntake 消费点）', () => {
   const line = SRC.split('\n').find(l => l.includes('function listIntake'));
   assert.ok(line, '应能找到 listIntake 定义');
-  assert.match(line, /\.filter\(e\s*=>\s*!e\.deleted\)/, 'listIntake 必须先滤掉 e.deleted（覆盖 intake-list/field-submissions/aggregate/export/todo 等所有消费点）');
+  assert.match(line, /\.filter\(e\s*=>\s*!e\.deleted( &&[^)]*)?\)/, 'listIntake 必须先滤掉 e.deleted（覆盖 intake-list/field-submissions/aggregate/export/todo 等所有消费点）；FS-04 AC-36 追加排除 intake-conv 会话记录不影响此保证');
 });
 
 test('AC-DEL-9 batch-arrange 归批扫描跳过 deleted（软删记录不被扫进新批次）', () => {

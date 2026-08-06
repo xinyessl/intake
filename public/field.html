@@ -154,10 +154,18 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
 .f-conv-kind.k-intake { background: var(--color-primary-light); color: var(--color-primary); border: 1px solid var(--color-primary-border); }
 /* 这次聊天建了几张单（多单聊天关键提示） */
 .f-conv-cnt { display: inline-flex; align-items: center; height: 21px; padding: 0 8px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 600; background: var(--color-surface-alt); color: var(--color-text-secondary); border: 1px solid var(--color-border); }
+.f-conv-cnt.f-conv-cnt-none { background: transparent; color: var(--color-text-tertiary); border-style: dashed; }   /* 未建单：弱化虚线，区别于「N 单」实心 */
+.f-conv-cnt .ti { font-size: 12px; margin-right: 3px; }
 .f-conv-title { font-size: 13.5px; font-weight: 600; color: var(--color-text); line-height: 1.5; word-break: break-word; }
 .f-conv-ctx { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; margin-top: 5px; font-size: 11.5px; color: var(--color-text-tertiary); }
 .f-conv-ctx .sep { opacity: .5; }
 .f-conv-hollow { text-align: center; padding: 46px 20px; color: var(--color-text-tertiary); font-size: 13px; }
+/* AC-36：对话记录删除入口（软删）——右上角小 ✕，镜像左侧工单卡 .f-item-del */
+.f-conv-hasdel { position: relative; }
+.f-conv-hasdel .f-conv-meta { padding-right: 26px; }
+.f-conv-del { position: absolute; top: 8px; right: 8px; width: 22px; height: 22px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--color-text-tertiary); cursor: pointer; font-size: 14px; line-height: 1; transition: background .12s, color .12s, border-color .12s; }
+.f-conv-del:hover { background: var(--color-danger-light, #FDECEC); color: var(--color-danger, #D14343); border-color: var(--color-danger-border, #F0C0C0); }
+.f-conv-del .ti { font-size: 14px; }
 
 /* ---------- 工作空间容器（FS-02 提交清单 · 左；FS-04 AI 对话 · 右留占位） ---------- */
 .f-workspace { flex: 1 1 auto; min-height: 0; overflow: hidden; display: flex; }
@@ -2460,6 +2468,8 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     reopenProject: '',      // 点击咨询记录续聊时锁定该 consult 的 project（保证续问 append 到同一条 consult：同 convId + 同 project）
     reopenSubsystem: '',     // 续聊时锁定该 consult 的原子系统（续问 append 时不清空 subsystem；且续聊不触发咨询必选拦截）
     reopenIntakeProject: '', // 点击 需求/BUG 记录 reopen 后锁定该工单的 project（续聊走 intake-reply append 到同一张单、绝不建重单；配合 savedId=工单 id）
+    // AC-36：reopen 一条**未建单**的会话记录（intake-conv）→ 锁定其归档上下文，续聊仍走 intake-chat（同 sessionId → 同一条会话记录、AI 够了再建单落该 sessionId），不受当前视图切换影响。
+    reopenConvProject: '', reopenConvSite: '', reopenConvSubsystem: '', reopenConvVersion: '',
     deep: false,             // 「深入思考」开关（默认关=基于 spec+经验库；开=sendConsult 带 deep:true，后端检索源码更深入分析）；仅 consult 生效
     // AC-32（2026-08-06 改）：紧急程度改 per-ticket——不再挂 chat.priority（全局一个值），移到每张已建单卡片各设各的（见 appendArchiveCard / setTicketPriority）
     // FS-04 · 每个"系统上下文"各记一段会话（会话内内存态；切系统时保存旧段 + 恢复新段，未聊过→空会话）
@@ -2495,6 +2505,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       reopenProject: chat.reopenProject || '',
       reopenSubsystem: chat.reopenSubsystem || '',
       reopenIntakeProject: chat.reopenIntakeProject || '',   // 随系统会话记录：切回 reopen 的工单仍锁 project，续聊仍走 intake-reply（不建重单）
+      reopenConvProject: chat.reopenConvProject || '', reopenConvSite: chat.reopenConvSite || '', reopenConvSubsystem: chat.reopenConvSubsystem || '', reopenConvVersion: chat.reopenConvVersion || '',   // AC-36：未建单会话记录续聊锁定上下文
       deep: !!chat.deep,   // 「深入思考」设置随每个系统会话各记各的，切回恢复
       input: input ? input.value : ''
     };
@@ -2514,6 +2525,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     chat.reopenProject = snap.reopenProject || '';
     chat.reopenSubsystem = snap.reopenSubsystem || '';
     chat.reopenIntakeProject = snap.reopenIntakeProject || '';   // 恢复 reopen 的工单锁定 project（切回续聊仍走 intake-reply）
+    chat.reopenConvProject = snap.reopenConvProject || ''; chat.reopenConvSite = snap.reopenConvSite || ''; chat.reopenConvSubsystem = snap.reopenConvSubsystem || ''; chat.reopenConvVersion = snap.reopenConvVersion || '';   // AC-36：恢复未建单会话记录续聊上下文
     chat.deep = !!snap.deep;   // 恢复该系统会话的「深入思考」设置
     // 「停止」：切系统恢复会话时若上一段还在发送中 → abort 旧请求（避免旧流式串进恢复出的会话）
     if (chat.sending && chat.abortCtrl) { try { chat.abortCtrl.abort(); } catch (e) {} }
@@ -2564,6 +2576,14 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       out.subsystem = chat.reopenSubsystem || '';   // 保留原 consult 的子系统：续问 append 时服务端 subsystem: sub 不被清空（修 reopen 续聊丢 subsystem 隐患）
       out.site = state.curSite || (state.sites.length ? state.sites[0] : '');
       out.version = state.ctxVer || '';
+      return out;
+    }
+    // AC-36：reopen 一条**未建单**的会话记录（intake-conv）续聊 → 锁其原上下文，续聊走 intake-chat 同 sessionId（AI 够了再建单落对该 project/site/subsystem）；不受当前视图切换影响。
+    if (chat.reopenConvProject && chat.submitKind === 'intake' && !chat.savedId) {
+      out.project = chat.reopenConvProject;
+      out.subsystem = chat.reopenConvSubsystem || '';
+      out.site = chat.reopenConvSite || state.curSite || (state.sites.length ? state.sites[0] : '');
+      out.version = chat.reopenConvVersion || state.ctxVer || '';
       return out;
     }
     if (state.mode === 'sys') {
@@ -3292,7 +3312,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     // 「停止」：切新对话/切系统时若上一轮还在发送中 → 先 abort 旧请求（signal 传进三条路径），避免旧响应/流式串进新对话
     if (chat.sending && chat.abortCtrl) { try { chat.abortCtrl.abort(); } catch (e) {} }
     chat.abortCtrl = null;
-    chat.messages = []; chat.savedId = ''; chat.convId = ''; chat.sessionId = newSessionId(); chat.reopenSessionId = ''; chat.analyzed = false; chat.sending = false; chat.lastQ = ''; chat.lastA = ''; chat.reopenProject = ''; chat.reopenSubsystem = ''; chat.reopenIntakeProject = ''; chat.deep = false;   // 新对话重置深入思考为关（合理默认：新会话不默认耗时的源码检索）；清 reopenIntakeProject（不再锁旧工单）；新 sessionId（这次聊天建的单归新的一条对话记录）。AC-32：紧急程度已移到 per-ticket 卡片，无全局态可重置
+    chat.messages = []; chat.savedId = ''; chat.convId = ''; chat.sessionId = newSessionId(); chat.reopenSessionId = ''; chat.analyzed = false; chat.sending = false; chat.lastQ = ''; chat.lastA = ''; chat.reopenProject = ''; chat.reopenSubsystem = ''; chat.reopenIntakeProject = ''; chat.reopenConvProject = ''; chat.reopenConvSite = ''; chat.reopenConvSubsystem = ''; chat.reopenConvVersion = ''; chat.deep = false;   // 新对话重置深入思考为关（合理默认：新会话不默认耗时的源码检索）；清 reopenIntakeProject/reopenConv*（不再锁旧工单/旧会话记录）；新 sessionId（这次聊天建的单归新的一条对话记录）。AC-32：紧急程度已移到 per-ticket 卡片，无全局态可重置
     var box = chatBox();
     if (box) {
       box.innerHTML = '';
@@ -3320,7 +3340,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   function saveDraft() {
     try {
       var input = $('fChatInput');
-      var d = { kind: chat.submitKind, messages: chat.messages, savedId: chat.savedId, convId: chat.convId, sessionId: chat.sessionId || '', reopenSessionId: chat.reopenSessionId || '', reopenProject: chat.reopenProject || '', reopenSubsystem: chat.reopenSubsystem || '', reopenIntakeProject: chat.reopenIntakeProject || '', deep: !!chat.deep, input: input ? input.value : '', user: (state.me && (state.me.username || state.me.name)) || '' };
+      var d = { kind: chat.submitKind, messages: chat.messages, savedId: chat.savedId, convId: chat.convId, sessionId: chat.sessionId || '', reopenSessionId: chat.reopenSessionId || '', reopenProject: chat.reopenProject || '', reopenSubsystem: chat.reopenSubsystem || '', reopenIntakeProject: chat.reopenIntakeProject || '', reopenConvProject: chat.reopenConvProject || '', reopenConvSite: chat.reopenConvSite || '', reopenConvSubsystem: chat.reopenConvSubsystem || '', reopenConvVersion: chat.reopenConvVersion || '', deep: !!chat.deep, input: input ? input.value : '', user: (state.me && (state.me.username || state.me.name)) || '' };
       sessionStorage.setItem(DRAFT_KEY, JSON.stringify(d));
     } catch (e) {}
   }
@@ -3333,7 +3353,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       if (d.user && state.me && (state.me.username || state.me.name) && d.user !== (state.me.username || state.me.name)) { clearDraft(); return; }
       chat.deep = !!d.deep;   // 先恢复深入思考设置，再 setSubmitKind（内部 syncDeep 会据此点亮开关）
       setSubmitKind(d.kind || 'intake');
-      chat.savedId = d.savedId || ''; chat.convId = d.convId || ''; chat.sessionId = d.sessionId || newSessionId(); chat.reopenSessionId = d.reopenSessionId || ''; chat.reopenProject = d.reopenProject || ''; chat.reopenSubsystem = d.reopenSubsystem || ''; chat.reopenIntakeProject = d.reopenIntakeProject || '';   // FS-04：恢复会话 id（无则新的，刷新后续聊建单仍归一条对话记录）
+      chat.savedId = d.savedId || ''; chat.convId = d.convId || ''; chat.sessionId = d.sessionId || newSessionId(); chat.reopenSessionId = d.reopenSessionId || ''; chat.reopenProject = d.reopenProject || ''; chat.reopenSubsystem = d.reopenSubsystem || ''; chat.reopenIntakeProject = d.reopenIntakeProject || ''; chat.reopenConvProject = d.reopenConvProject || ''; chat.reopenConvSite = d.reopenConvSite || ''; chat.reopenConvSubsystem = d.reopenConvSubsystem || ''; chat.reopenConvVersion = d.reopenConvVersion || '';   // FS-04：恢复会话 id（无则新的，刷新后续聊建单仍归一条对话记录）+ 未建单会话记录续聊上下文（AC-36）
       syncDeep();   // 刷新开关显隐/高亮（草稿 kind + deep 都恢复后）
       if (Array.isArray(d.messages) && d.messages.length) {
         chat.messages = d.messages.slice();
@@ -3465,13 +3485,17 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     var kindHtml = isConsult
       ? '<span class="f-conv-kind k-consult"><i class="ti ti-message-question"></i> 咨询</span>'
       : '<span class="f-conv-kind k-intake"><i class="ti ti-pencil-plus"></i> 提需求/报BUG</span>';
-    // intake 会话：显这次聊天建了几张单 + 需求/BUG 拆分（多单聊天关键：让用户一眼知这条对话建了多张单）
+    // intake 会话：显这次聊天建了几张单 + 需求/BUG 拆分（多单聊天关键：让用户一眼知这条对话建了多张单）；AC-36：未建单（沟通过但还没建单）也在列，显「未建单」
     var cntHtml = '';
     if (!isConsult && it.ticketCount != null) {
-      var parts = [];
-      if (it.reqCount) parts.push(it.reqCount + ' 需求');
-      if (it.bugCount) parts.push(it.bugCount + ' BUG');
-      cntHtml = '<span class="f-conv-cnt"><i class="ti ti-files"></i> ' + it.ticketCount + ' 单' + (parts.length ? '（' + parts.join(' · ') + '）' : '') + '</span>';
+      if (it.ticketCount === 0) {
+        cntHtml = '<span class="f-conv-cnt f-conv-cnt-none"><i class="ti ti-message-dots"></i> 未建单</span>';   // 沟通过但尚未建单（AI 还在澄清）
+      } else {
+        var parts = [];
+        if (it.reqCount) parts.push(it.reqCount + ' 需求');
+        if (it.bugCount) parts.push(it.bugCount + ' BUG');
+        cntHtml = '<span class="f-conv-cnt"><i class="ti ti-files"></i> ' + it.ticketCount + ' 单' + (parts.length ? '（' + parts.join(' · ') + '）' : '') + '</span>';
+      }
     }
     var sub = it.subsystem ? (subLabel(it.subsystem) || it.subsystem) : '';
     var ctx = [];
@@ -3487,7 +3511,39 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       if (isConsult) reopenConsult({ type: 'consult', project: it.project, id: it.id });
       else reopenConversation(it);   // intake 会话：恢复整段对话 + 该会话建的多张已建单卡
     });
+    // AC-36：删除入口（软删对话记录）。仅对真正的「会话记录」开放——咨询 或 有会话记录的 intake 会话（it.fromConv）；
+    //   旧数据兜底项（it.fromConv=false，it.id 是代表工单）不给删除入口，避免误删真实工单（工单请到左侧提交清单删，FS-02）。
+    //   删对话记录 ≠ 删它建的工单：只软删这一条会话记录（consult id / CONV-<sessionId> id），工单按 sessionId 独立留存。
+    if (isConsult || it.fromConv) bindConvDelete(el, it);
     return el;
+  }
+  // 给对话记录卡挂删除入口（软删）：右上角小 ✕，点击 stopPropagation 不触发 reopen。参考左侧工单卡 bindDelete。
+  function bindConvDelete(el, it) {
+    el.classList.add('f-conv-hasdel');
+    var btn = document.createElement('button');
+    btn.className = 'f-conv-del';
+    btn.type = 'button';
+    btn.title = '删除这条对话记录';
+    btn.setAttribute('aria-label', '删除');
+    btn.innerHTML = '<i class="ti ti-trash"></i>';
+    btn.addEventListener('click', function (e) { e.stopPropagation(); e.preventDefault(); doDeleteConversation(it, el); });
+    el.appendChild(btn);
+  }
+  // 软删一条对话记录（咨询记录 / 未建单或已建单会话记录）：POST /api/intake-delete {project,id}（id=会话记录自身 id，非工单 id）→ 从抽屉移除该条。
+  //   不连带删它建的工单（工单在左侧提交清单各自删）。若被删的正是右侧当前打开的会话 → 清空右侧对话区。
+  function doDeleteConversation(it, cardEl) {
+    if (!it || !it.project || !it.id) return;
+    fConfirm({ title: '删除对话记录', message: '删除这条对话记录？删除后将从对话记录中移除（它建的工单不受影响，仍在左侧提交清单）。', okText: '删除', danger: true }).then(function (yes) {
+      if (!yes) return;
+      api('/api/intake-delete', { method: 'POST', body: JSON.stringify({ project: it.project, id: it.id }) }).then(function (r) {
+        var b = r.body || {};
+        if (!b.ok) { showToast(b.error || '删除失败', 'error'); return; }
+        showToast('已删除', 'success');
+        // 若被删的正是右侧当前打开的会话（consult=convId、会话记录=sessionId 恢复态 / savedId）→ 清空右侧
+        if (chat.convId === it.id || chat.savedId === it.id || (it.sessionId && chat.sessionId === it.sessionId && chat.reopenConvProject)) { try { newConversation(); } catch (e) {} }
+        if (cardEl && cardEl.parentNode) cardEl.parentNode.removeChild(cardEl);
+      }).catch(function () { showToast('删除失败，请重试', 'error'); });
+    });
   }
   // reopen 一条 intake 对话会话（提需求/报BUG 聊天，可能一次建了多张单）：
   //   ① 用代表工单 reopenIntake 恢复整段对话（chat = 这次会话历史，落在代表单=首张）+ 代表单归档卡；
@@ -3495,18 +3551,65 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   //   ③ 锁 chat.reopenSessionId（切系统随快照带、续聊建的新单仍归同一条对话记录）。
   //   续聊仍走 intake-reply append 到代表单（reopenIntake 已设 savedId=代表单 id / reopenIntakeProject），不建重单。
   function reopenConversation(it) {
-    var repId = it.id;                                  // 代表工单 = 首张（后端按 submittedAt 排，tickets[0]）
-    reopenIntake({ type: 'requirement', project: it.project, id: repId });   // reopenIntake 内按详情真实 type 恢复；type 仅用于其入口守卫（requirement|bug 均放行）
-    // reopenIntake 是异步（拉 detail 后重渲对话流）；补卡要排在其重渲之后，故用微延时挂到消息末尾（此时代表单卡已 append）。
-    var extra = (Array.isArray(it.tickets) ? it.tickets : []).filter(function (t) { return t && t.id && t.id !== repId; });
-    if (!extra.length) { chat.reopenSessionId = ''; return; }   // 单单会话：无需补卡
+    // AC-36：以「会话记录」为主。it.fromConv=true → it.id 是会话记录（intake-conv）id：从它恢复整段 chat（含未建单）；
+    //   ① 该会话已建单（it.tickets 非空）→ 恢复 chat 后逐张补「已建单」卡，续聊走 intake-reply（append 代表单=首张），不建重单；
+    //   ② 未建单会话 → 恢复 chat + 锁 sessionId/上下文，续聊走 intake-chat（同 sessionId → 同一条会话记录、够了再建单）。
+    //   it.fromConv=false（旧数据兜底）→ 无会话记录、it.id 是代表工单：沿用从代表工单恢复。
+    var tickets = (Array.isArray(it.tickets) ? it.tickets : []).filter(function (t) { return t && t.id; });
+    if (it.fromConv) { reopenIntakeConv(it, tickets); return; }
+    // —— 旧数据兜底：从代表工单恢复（原逻辑） ——
+    var repId = it.id;
+    reopenIntake({ type: 'requirement', project: it.project, id: repId });
+    var extra = tickets.filter(function (t) { return t.id !== repId; });
+    if (!extra.length) { chat.reopenSessionId = ''; return; }
     setTimeout(function () {
-      chat.reopenSessionId = '';   // 恢复的是已建单，续聊走 intake-reply（append 代表单）；无需新 sessionId（多卡只是回显）
+      chat.reopenSessionId = '';
       extra.forEach(function (t) {
-        appendArchiveCard({ id: t.id, type: t.type || '', site: it.site || '', subsystem: t.subsystem || it.subsystem || '', version: t.version || '', priority: t.priority, project: it.project });   // 逐张补「已建单」卡 + per-ticket 紧急程度（AC-32）
+        appendArchiveCard({ id: t.id, type: t.type || '', site: it.site || '', subsystem: t.subsystem || it.subsystem || '', version: t.version || '', priority: t.priority, project: it.project });
       });
       scrollChatBottom();
     }, 260);
+  }
+
+  // AC-36：从会话记录（intake-conv）恢复整段对话续聊。
+  //   拉 /api/intake-detail?id=<会话记录id> 取整段 chat → 渲染气泡；再按有无已建单分两路续聊锁定。
+  function reopenIntakeConv(it, tickets) {
+    api('/api/intake-detail?project=' + encodeURIComponent(it.project) + '&id=' + encodeURIComponent(it.id), { method: 'GET' }).then(function (r) {
+      var item = (r.body && r.body.item) || null;
+      if (!item) return;
+      var rawChat = Array.isArray(item.chat) ? item.chat : [];
+      var msgs = rawChat.map(function (m) { return { role: (m.role === 'user' ? 'user' : 'assistant'), content: m.text || '' }; }).filter(function (m) { return m.content; });
+      chat.messages = msgs.slice();
+      chat.convId = '';
+      chat.reopenProject = ''; chat.reopenSubsystem = '';
+      chat.analyzed = false; chat.lastQ = ''; chat.lastA = ''; chat.deep = false;
+      for (var i = msgs.length - 1; i >= 0; i--) { if (!chat.lastA && msgs[i].role === 'assistant') chat.lastA = msgs[i].content; if (!chat.lastQ && msgs[i].role === 'user') chat.lastQ = msgs[i].content; }
+      setSubmitKind('intake');
+      var box = chatBox(); if (box) box.innerHTML = '';
+      msgs.forEach(function (m) { appendBubble(m.role === 'user' ? 'me' : 'ai', m.content, false, []); });
+      var built = (Array.isArray(tickets) ? tickets : []).slice().sort(function (a, b) { return String(a.submittedAt || '').localeCompare(String(b.submittedAt || '')); });
+      if (built.length) {
+        // 已建单会话：续聊 append 到代表单（首张）；逐张补「已建单」卡
+        var rep = built[0];
+        chat.savedId = rep.id;
+        chat.reopenIntakeProject = it.project;
+        chat.reopenConvProject = ''; chat.reopenConvSite = ''; chat.reopenConvSubsystem = ''; chat.reopenConvVersion = '';
+        chat.reopenSessionId = '';
+        built.forEach(function (t) { appendArchiveCard({ id: t.id, type: t.type || '', site: it.site || '', subsystem: t.subsystem || it.subsystem || '', version: t.version || '', priority: t.priority, project: it.project }); });
+      } else {
+        // 未建单会话：续聊走 intake-chat 同 sessionId（够了再建单落该 sessionId）；锁归档上下文
+        chat.savedId = '';
+        chat.reopenIntakeProject = '';
+        chat.sessionId = it.sessionId || item.sessionId || newSessionId();
+        chat.reopenConvProject = it.project || '';
+        chat.reopenConvSite = it.site || item.site || '';
+        chat.reopenConvSubsystem = it.subsystem || item.subsystem || '';
+        chat.reopenConvVersion = item.version || '';
+      }
+      clearPendingImages();
+      scrollChatBottom();
+      saveDraft();
+    }).catch(function () {});
   }
 
   // AC-2：回车或点按钮触发（自由文本框不即输即查，对齐全局规范 #11）；不传 project = 全库所有产品
@@ -3724,7 +3827,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   })();
 
   // 暴露给测试/调试（不含敏感数据）
-  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, openConvRec: openConvRec, closeConvRec: closeConvRec, loadConversations: loadConversations, mkConvItem: mkConvItem, reopenConversation: reopenConversation, newSessionId: newSessionId, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, setTicketPriority: setTicketPriority, newConversation: newConversation, sendChat: sendChat, stopSending: stopSending, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast, openMaintainEdit: openMaintainEdit, doMaintainSave: doMaintainSave, maintainChipHtml: maintainChipHtml, maintainDaysLeft: maintainDaysLeft, renderTodoBody: renderTodoBody, mkUpdatePlanBlock: mkUpdatePlanBlock, loadUpdatePlan: loadUpdatePlan, renderUpdatePlan: renderUpdatePlan, mkPlanTaskItem: mkPlanTaskItem, mkSqlBundleItem: mkSqlBundleItem, doTaskToggle: doTaskToggle, doSqlBundleToggle: doSqlBundleToggle, appendConsultToIntake: appendConsultToIntake, openConsultToIntake: openConsultToIntake, doConsultToIntake: doConsultToIntake, appendMediaBubble: appendMediaBubble, mediaUrls: mediaUrls, markLeftActive: markLeftActive, reapplyLeftActive: reapplyLeftActive, bindReopen: bindReopen, fConfirm: fConfirm, doDeleteItem: doDeleteItem, bindDelete: bindDelete };
+  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, openConvRec: openConvRec, closeConvRec: closeConvRec, loadConversations: loadConversations, mkConvItem: mkConvItem, reopenConversation: reopenConversation, reopenIntakeConv: reopenIntakeConv, bindConvDelete: bindConvDelete, doDeleteConversation: doDeleteConversation, newSessionId: newSessionId, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, setTicketPriority: setTicketPriority, newConversation: newConversation, sendChat: sendChat, stopSending: stopSending, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast, openMaintainEdit: openMaintainEdit, doMaintainSave: doMaintainSave, maintainChipHtml: maintainChipHtml, maintainDaysLeft: maintainDaysLeft, renderTodoBody: renderTodoBody, mkUpdatePlanBlock: mkUpdatePlanBlock, loadUpdatePlan: loadUpdatePlan, renderUpdatePlan: renderUpdatePlan, mkPlanTaskItem: mkPlanTaskItem, mkSqlBundleItem: mkSqlBundleItem, doTaskToggle: doTaskToggle, doSqlBundleToggle: doSqlBundleToggle, appendConsultToIntake: appendConsultToIntake, openConsultToIntake: openConsultToIntake, doConsultToIntake: doConsultToIntake, appendMediaBubble: appendMediaBubble, mediaUrls: mediaUrls, markLeftActive: markLeftActive, reapplyLeftActive: reapplyLeftActive, bindReopen: bindReopen, fConfirm: fConfirm, doDeleteItem: doDeleteItem, bindDelete: bindDelete };
 })();
 </script>
 </body>
