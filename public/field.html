@@ -367,11 +367,16 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
 .f-deep.on:hover { border-color: var(--color-primary); color: #fff; }
 .f-deep.on .ti { color: #fff; }
 .f-deep.hide { display: none; }
-/* 紧急程度选择（仅提需求/报BUG 模式显示；四档紧急/高/中/低，现场自选，默认「中」；风格对齐页面小控件） */
-.f-pri { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--color-border); background: var(--color-bg); color: var(--color-text-secondary); border-radius: var(--radius); padding: 4px 8px 4px 12px; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
-.f-pri .ti { font-size: 15px; }
-.f-pri select { border: 0; background: transparent; color: var(--color-text); font-size: 12.5px; font-weight: 600; cursor: pointer; outline: none; padding: 2px 2px 2px 4px; }
-.f-pri.hide { display: none; }
+/* 紧急程度选择（AC-32 · per-ticket）：挂在每张「已建单」卡片上，默认=AI 对该单判的档，现场可逐条改；四档配色对齐后台 inbox.html priHtml（紧急=danger/高=warning/中=primary/低=gray） */
+.f-arch-pri { display: inline-flex; align-items: center; gap: 5px; margin-top: 8px; font-size: 12.5px; color: var(--color-text-secondary); }
+.f-arch-pri .lbl { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; }
+.f-arch-pri .lbl .ti { font-size: 14px; }
+.f-arch-pri select { border: 1px solid var(--color-border); background: var(--color-bg); color: var(--color-text); border-radius: var(--radius); padding: 3px 6px; font-size: 12.5px; font-weight: 700; cursor: pointer; outline: none; }
+/* 选中档配色（与 inbox.html priHtml 一致；配 data-pri 上色） */
+.f-arch-pri[data-pri="紧急"] select { color: var(--color-danger); border-color: var(--color-danger-border); background: var(--color-danger-light); }
+.f-arch-pri[data-pri="高"] select { color: var(--color-warning); border-color: var(--color-warning-border); background: var(--color-warning-light); }
+.f-arch-pri[data-pri="中"] select { color: var(--color-primary); border-color: var(--color-primary-border); background: var(--color-primary-light); }
+.f-arch-pri[data-pri="低"] select { color: var(--color-text-secondary); border-color: var(--color-border); background: var(--color-bg); }
 /* 新对话 */
 .f-rtool .newc { margin-left: auto; border: 1px solid var(--color-primary-border); background: var(--color-primary-light); color: var(--color-primary); border-radius: var(--radius); padding: 6px 12px; font-size: 12.5px; font-weight: 600; cursor: pointer; display: inline-flex; gap: 5px; align-items: center; flex: 0 0 auto; user-select: none; white-space: nowrap; }
 .f-rtool .newc:hover { background: var(--color-primary); color: #fff; }
@@ -667,10 +672,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
         </div>
         <!-- 深入思考开关：仅咨询答疑模式显示；开启则 sendConsult 带 deep:true，后端检索源码更深入分析（提需求/报BUG 无此语义、隐藏） -->
         <button type="button" class="f-deep" id="fDeep" title="开启后结合系统源码更深入分析成因/实现，稍慢；答复以开发确认为准"><i class="ti ti-bulb"></i> 深入思考</button>
-        <!-- 紧急程度选择：仅提需求/报BUG 模式显示；现场自选四档（顺序/配色与后台 inbox.html 一致），默认「中」，随会话草稿/快照各记各的；提交时随 body 带 priority 覆盖 AI 猜测 -->
-        <span class="f-pri" id="fPri" title="标注这条需求/BUG 的紧急程度（默认中）"><i class="ti ti-flag"></i> 紧急程度
-          <select id="fPriSel"><option>中</option><option>高</option><option>紧急</option><option>低</option></select>
-        </span>
+        <!-- AC-32（2026-08-06 改·per-ticket）：紧急程度不再放这里的全局选择器——改到每张「已建单」卡片各设各的（一次对话多张单、各条紧急程度不同）。见 appendArchiveCard。 -->
         <span class="newc" id="fNewC" title="清空当前对话，开新会话"><i class="ti ti-plus"></i> 新对话</span>
       </div>
       <!-- 对话流 f-chat-b（我 / AI 气泡）；空态占位 fWsScope 显示当前工作范围 -->
@@ -1944,13 +1946,12 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       chat.reopenIntakeProject = item.project || it.project; // ★ 锁定工单 project（intake-reply 据此 append 到同一张单）
       chat.reopenProject = ''; chat.reopenSubsystem = ''; // 清 consult 续聊锁定（本次是 intake reopen，非 consult）
       chat.analyzed = false; chat.lastQ = ''; chat.lastA = ''; chat.deep = false;
-      chat.priority = PRI_SET[item.priority] ? item.priority : '中';   // reopen 回显该工单已有优先级（仅显示；续聊走 intake-reply 不带 priority、不改工单档位）
       for (var i = msgs.length - 1; i >= 0; i--) { if (!chat.lastA && msgs[i].role === 'assistant') chat.lastA = msgs[i].content; if (!chat.lastQ && msgs[i].role === 'user') chat.lastQ = msgs[i].content; }
       setSubmitKind('intake');                            // 切到提需求/报BUG 模式（intake）
       var box = chatBox(); if (box) box.innerHTML = '';
       msgs.forEach(function (m) { appendBubble(m.role === 'user' ? 'me' : 'ai', m.content); });
       appendMediaBubble(item.project || it.project, item.media);   // Bug A：恢复该工单附的截图（记录级 media → /api/intake-media 取图）
-      appendArchiveCard({ id: chat.savedId, type: item.type || it.type, site: item.site || '', subsystem: item.subsystem || '', version: item.version || '' });   // 显「已建单 <id>（<类型>）」归档卡片
+      appendArchiveCard({ id: chat.savedId, type: item.type || it.type, site: item.site || '', subsystem: item.subsystem || '', version: item.version || '', priority: item.priority, project: item.project || it.project });   // 显「已建单 <id>（<类型>）」归档卡片 + per-ticket 紧急程度（AC-32，回显工单已有档）
       markLeftActive('intake', chat.savedId);                       // Bug B：左侧对应条标为选中
       clearPendingImages();
       scrollChatBottom();
@@ -2397,7 +2398,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     reopenSubsystem: '',     // 续聊时锁定该 consult 的原子系统（续问 append 时不清空 subsystem；且续聊不触发咨询必选拦截）
     reopenIntakeProject: '', // 点击 需求/BUG 记录 reopen 后锁定该工单的 project（续聊走 intake-reply append 到同一张单、绝不建重单；配合 savedId=工单 id）
     deep: false,             // 「深入思考」开关（默认关=基于 spec+经验库；开=sendConsult 带 deep:true，后端检索源码更深入分析）；仅 consult 生效
-    priority: '中',           // 紧急程度（现场自选四档 紧急/高/中/低，默认中）；仅提需求/报BUG（intake）生效，随每个系统会话草稿/快照各记各的；提交时随 body 带覆盖 AI 猜测
+    // AC-32（2026-08-06 改）：紧急程度改 per-ticket——不再挂 chat.priority（全局一个值），移到每张已建单卡片各设各的（见 appendArchiveCard / setTicketPriority）
     // FS-04 · 每个"系统上下文"各记一段会话（会话内内存态；切系统时保存旧段 + 恢复新段，未聊过→空会话）
     bySystem: {},           // 系统上下文键 systemKey() → 会话快照（切系统时存/取；纯内存态，不进任何端存储，刷新丢失可接受——已发咨询可点记录 reopen）
     lastSystemKey: null      // 上一次同步时的系统上下文键（null=尚未建立基线；首次切换据它把当前会话存进旧桶）
@@ -2430,7 +2431,6 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       reopenSubsystem: chat.reopenSubsystem || '',
       reopenIntakeProject: chat.reopenIntakeProject || '',   // 随系统会话记录：切回 reopen 的工单仍锁 project，续聊仍走 intake-reply（不建重单）
       deep: !!chat.deep,   // 「深入思考」设置随每个系统会话各记各的，切回恢复
-      priority: PRI_SET[chat.priority] ? chat.priority : '中',   // 「紧急程度」随每个系统会话各记各的，切回恢复（非法兜底中）
       input: input ? input.value : ''
     };
   }
@@ -2448,14 +2448,13 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     chat.reopenSubsystem = snap.reopenSubsystem || '';
     chat.reopenIntakeProject = snap.reopenIntakeProject || '';   // 恢复 reopen 的工单锁定 project（切回续聊仍走 intake-reply）
     chat.deep = !!snap.deep;   // 恢复该系统会话的「深入思考」设置
-    chat.priority = PRI_SET[snap.priority] ? snap.priority : '中';   // 恢复该系统会话的「紧急程度」（非法兜底中）
     chat.sending = false;
-    setSubmitKind(chat.submitKind);   // 同步类型切换器按钮态 + 输入框 placeholder + 深入思考/紧急程度显隐（内部会 syncDeep + syncPriority + saveDraft）
+    setSubmitKind(chat.submitKind);   // 同步类型切换器按钮态 + 输入框 placeholder + 深入思考显隐（内部会 syncDeep + saveDraft）
     var box = chatBox();
     if (box) {
       box.innerHTML = '';
       chat.messages.forEach(function (m) { appendBubble(m.role === 'user' ? 'me' : 'ai', m.content); });
-      if (chat.savedId) appendArchiveCard({ id: chat.savedId, type: '', site: '', subsystem: '', version: '' });
+      if (chat.savedId) appendArchiveCard({ id: chat.savedId, type: '', site: '', subsystem: '', version: '', project: chat.reopenIntakeProject || '' });   // 恢复会话重建卡片：带 project（若有）→ 卡片懒加载 per-ticket 紧急程度（AC-32）
       if (!chat.messages.length) {
         // 该桶曾聊过但被清空（如新对话后又切走）→ 复用新对话占位
         var ph = document.createElement('div'); ph.className = 'f-ws-placeholder'; ph.id = 'fWsPlaceholder';
@@ -2667,9 +2666,32 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       '</div>';
     card.innerHTML = '<div class="hd"><i class="ti ti-clipboard-check"></i> 已建单，进入运营端工单流</div>' + rows +
       '<div class="anz" id="fAnz-' + info.id + '" style="display:none"></div>';
+    // AC-32（per-ticket）：本张单的紧急程度选择器——默认=AI 对该单判的 info.priority，现场可逐条改（一次对话多张单各设各的）。
+    //   project 已知 → 直接建选择器；priority 缺失（草稿/系统恢复只带 id）→ 用 /api/intake-detail 懒加载补该单当前档再回填。
+    var proj = info.project || '';
+    if (proj) card.appendChild(buildTicketPriPicker(proj, info.id, info.priority));
     var msg = document.createElement('div'); msg.className = 'f-msg ai';
     msg.appendChild(av); msg.appendChild(card);
     box.appendChild(msg); scrollChatBottom();
+  }
+
+  // 构造某张已建单的「紧急程度」选择器（四档 紧急/高/中/低，配色对齐后台 inbox.html；默认=该单当前档）。
+  //   defPri 缺失 → 先建默认「中」并按 project+id 懒加载真实档回填（不阻塞卡片渲染）。change → setTicketPriority（POST 落库+留痕，只动本单）。
+  function buildTicketPriPicker(project, id, defPri) {
+    var cur = PRI_SET[defPri] ? defPri : '中';
+    var span = document.createElement('span'); span.className = 'f-arch-pri'; span.setAttribute('data-pri', cur);
+    var lbl = document.createElement('span'); lbl.className = 'lbl'; lbl.innerHTML = '<i class="ti ti-flag"></i> 紧急程度';
+    var sel = document.createElement('select');
+    ['紧急', '高', '中', '低'].forEach(function (v) { var o = document.createElement('option'); o.value = v; o.textContent = v; if (v === cur) o.selected = true; sel.appendChild(o); });
+    sel.addEventListener('change', function () { span.setAttribute('data-pri', this.value); setTicketPriority(project, id, this.value, this); });
+    span.appendChild(lbl); span.appendChild(sel);
+    // 懒加载：未带 priority（草稿/系统恢复重建卡片）→ 拉详情补该单真实档回填（仅显示，不发 set）。
+    if (!PRI_SET[defPri]) {
+      api('/api/intake-detail?project=' + encodeURIComponent(project) + '&id=' + encodeURIComponent(id), { method: 'GET' })
+        .then(function (r) { var it = (r.body && r.body.item) || null; if (it && PRI_SET[it.priority]) { sel.value = it.priority; span.setAttribute('data-pri', it.priority); } })
+        .catch(function () {});
+    }
+    return span;
   }
 
   // AI 版本感知初判（intake-analyze，建单后即时展示 · NH-3）。未配模型/越权/失败 → 静默不展示（不阻断）。
@@ -2738,7 +2760,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       body: JSON.stringify({
         project: archive.project, type: 'intake', version: archive.version,
         site: archive.site, subsystem: archive.subsystem, messages: chat.messages,
-        priority: (PRI_SET[chat.priority] ? chat.priority : '中'),   // 现场手选紧急程度 → 后端建 record 时覆盖 AI 猜测（非法后端再校验回落）
+        // AC-32（2026-08-06 改）：不再传全局 priority——紧急程度改 per-ticket，AI 每条 record 自判、建单后现场在卡片上逐条改（/api/intake-set-priority）
         images: (Array.isArray(imgs) && imgs.length) ? imgs : undefined   // 附图 → 后端多模态看图 + 建 record 时落 media
       })
     }).then(function (r) {
@@ -2753,7 +2775,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
         chat.savedId = b.savedId;
         var info = { id: b.savedId, type: (archive._recType || ''), site: archive.site, subsystem: archive.subsystem, version: archive.version };
         // 建单后回读类型：从 intake-list 拿不划算，直接据 chip 展示；type 由 analyze 卡补充。默认按当前视图无法判 req/bug → 用中性展示
-        appendArchiveCard({ id: b.savedId, type: info.type, site: archive.site, subsystem: archive.subsystem, version: archive.version });
+        appendArchiveCard({ id: b.savedId, type: info.type, site: archive.site, subsystem: archive.subsystem, version: archive.version, priority: b.priority, project: archive.project });   // AC-32：卡片带该单 AI 判的紧急程度（响应 b.priority）+ project → 现场可逐条改
         showAnalyze(archive, b.savedId);   // NH-3：建单后即时 AI 初判
         refreshLeftList();                 // 建单后刷新左侧提交清单（可回链）
       }
@@ -3088,7 +3110,6 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       ? '问问这个系统怎么用、遇到的报错原因…回车发送'
       : '说说想要的功能改进，或遇到的问题…回车发送';
     syncDeep();   // 按 submitKind 显隐「深入思考」开关（仅 consult 可用）+ 刷新按钮态
-    syncPriority();   // 按 submitKind 显隐「紧急程度」选择器（仅 intake 可用）+ 回填当前值
     saveDraft();
   }
 
@@ -3108,26 +3129,33 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     saveDraft();
   }
 
-  // 「紧急程度」选择器：仅提需求/报BUG（submitKind==='intake'）显示/可用；咨询答疑（consult）无此语义 → 隐藏。
-  //   同步显隐 + 把当前 chat.priority 回填到 select（非法值兜底「中」）；不改值本身（切模式不丢选择，切回仍恢复）。
-  var PRI_SET = { '紧急': 1, '高': 1, '中': 1, '低': 1 };   // 前端四档白名单（与后端 PRIORITY_SET 一致；仅用于回填兜底）
-  function syncPriority() {
-    var p = $('fPri'); if (!p) return;
-    var show = chat.submitKind === 'intake';
-    p.classList.toggle('hide', !show);
-    if (!PRI_SET[chat.priority]) chat.priority = '中';   // 兜底：非法/空回落中
-    var sel = $('fPriSel'); if (sel && show) sel.value = chat.priority;
-  }
-  // 选紧急程度：更新 chat.priority（仅 intake 生效）+ 存草稿（刷新恢复）。
-  function setPriority(v) {
-    if (chat.submitKind !== 'intake') return;   // 咨询模式（选择器本已隐藏）不响应
-    chat.priority = PRI_SET[v] ? v : '中';
-    saveDraft();
+  // AC-32（2026-08-06 · per-ticket）：紧急程度改「每张已建单卡片各设各的」。
+  //   四档白名单（与后端 PRIORITY_SET 一致；用于卡片默认档兜底 + change 校验）。
+  var PRI_SET = { '紧急': 1, '高': 1, '中': 1, '低': 1 };
+  // 现场改某张工单的紧急程度：POST /api/intake-set-priority {project,id,priority} → 成功 toast + 卡片视觉更新；失败回滚 toast。
+  //   selEl=该卡片的 <select>；wrap=外层 .f-arch-pri（承 data-pri 上色）。只影响这一张单。
+  function setTicketPriority(project, id, priority, selEl) {
+    var p = PRI_SET[priority] ? priority : '中';
+    if (!project || !id) { if (selEl) selEl.disabled = false; return; }
+    var wrap = selEl ? selEl.closest('.f-arch-pri') : null;
+    var prev = wrap ? (wrap.getAttribute('data-pri') || '中') : '中';   // 失败回滚用
+    if (selEl) selEl.disabled = true;
+    api('/api/intake-set-priority', { method: 'POST', body: JSON.stringify({ project: project, id: id, priority: p }) })
+      .then(function (r) {
+        var b = r.body || {};
+        if (selEl) selEl.disabled = false;
+        if (!b.ok) { if (selEl) selEl.value = prev; if (wrap) wrap.setAttribute('data-pri', prev); showToast((b.error || '设置失败'), 'error'); return; }
+        var np = PRI_SET[b.priority] ? b.priority : p;
+        if (selEl) selEl.value = np;
+        if (wrap) wrap.setAttribute('data-pri', np);
+        showToast('已设为' + np);
+      })
+      .catch(function () { if (selEl) { selEl.disabled = false; selEl.value = prev; } if (wrap) wrap.setAttribute('data-pri', prev); showToast('设置失败，请重试', 'error'); });
   }
 
   // AC-20：新对话 → 清空对话流/输入、开新会话（新 convId/无 savedId），不影响已提交工单
   function newConversation() {
-    chat.messages = []; chat.savedId = ''; chat.convId = ''; chat.analyzed = false; chat.sending = false; chat.lastQ = ''; chat.lastA = ''; chat.reopenProject = ''; chat.reopenSubsystem = ''; chat.reopenIntakeProject = ''; chat.deep = false; chat.priority = '中';   // 新对话重置深入思考为关（合理默认：新会话不默认耗时的源码检索）；紧急程度回默认「中」；清 reopenIntakeProject（不再锁旧工单）
+    chat.messages = []; chat.savedId = ''; chat.convId = ''; chat.analyzed = false; chat.sending = false; chat.lastQ = ''; chat.lastA = ''; chat.reopenProject = ''; chat.reopenSubsystem = ''; chat.reopenIntakeProject = ''; chat.deep = false;   // 新对话重置深入思考为关（合理默认：新会话不默认耗时的源码检索）；清 reopenIntakeProject（不再锁旧工单）。AC-32：紧急程度已移到 per-ticket 卡片，无全局态可重置
     var box = chatBox();
     if (box) {
       box.innerHTML = '';
@@ -3143,7 +3171,6 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     markLeftActive('', '');   // Bug B：开新对话 → 清左侧选中态（当前无打开的记录）
     setSending(false);
     syncDeep();       // 深入思考已重置为关 → 刷新开关按钮态（去高亮）
-    syncPriority();   // 紧急程度已重置为「中」→ 刷新选择器显隐/回填
     updateScope();
     clearDraft();
     // FS-04：清当前系统上下文桶那份会话（否则切走再切回会恢复出已被清掉的旧对话）
@@ -3156,7 +3183,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   function saveDraft() {
     try {
       var input = $('fChatInput');
-      var d = { kind: chat.submitKind, messages: chat.messages, savedId: chat.savedId, convId: chat.convId, reopenProject: chat.reopenProject || '', reopenSubsystem: chat.reopenSubsystem || '', reopenIntakeProject: chat.reopenIntakeProject || '', deep: !!chat.deep, priority: (PRI_SET[chat.priority] ? chat.priority : '中'), input: input ? input.value : '', user: (state.me && (state.me.username || state.me.name)) || '' };
+      var d = { kind: chat.submitKind, messages: chat.messages, savedId: chat.savedId, convId: chat.convId, reopenProject: chat.reopenProject || '', reopenSubsystem: chat.reopenSubsystem || '', reopenIntakeProject: chat.reopenIntakeProject || '', deep: !!chat.deep, input: input ? input.value : '', user: (state.me && (state.me.username || state.me.name)) || '' };
       sessionStorage.setItem(DRAFT_KEY, JSON.stringify(d));
     } catch (e) {}
   }
@@ -3168,17 +3195,15 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       // 换了登录用户 → 丢弃旧草稿（避免串号）
       if (d.user && state.me && (state.me.username || state.me.name) && d.user !== (state.me.username || state.me.name)) { clearDraft(); return; }
       chat.deep = !!d.deep;   // 先恢复深入思考设置，再 setSubmitKind（内部 syncDeep 会据此点亮开关）
-      chat.priority = PRI_SET[d.priority] ? d.priority : '中';   // 先恢复紧急程度，再 setSubmitKind（内部 syncPriority 会据此回填选择器）
       setSubmitKind(d.kind || 'intake');
       chat.savedId = d.savedId || ''; chat.convId = d.convId || ''; chat.reopenProject = d.reopenProject || ''; chat.reopenSubsystem = d.reopenSubsystem || ''; chat.reopenIntakeProject = d.reopenIntakeProject || '';
       syncDeep();   // 刷新开关显隐/高亮（草稿 kind + deep 都恢复后）
-      syncPriority();   // 刷新选择器显隐/回填（草稿 kind + priority 都恢复后）
       if (Array.isArray(d.messages) && d.messages.length) {
         chat.messages = d.messages.slice();
         // 重放气泡（含已建单则显示已归档提示；不重复调后端，纯还原视图）
         clearPlaceholder();
         chat.messages.forEach(function (m) { appendBubble(m.role === 'user' ? 'me' : 'ai', m.content); });
-        if (chat.savedId) appendArchiveCard({ id: chat.savedId, type: '', site: '', subsystem: '', version: '' });
+        if (chat.savedId) appendArchiveCard({ id: chat.savedId, type: '', site: '', subsystem: '', version: '', project: chat.reopenIntakeProject || '' });   // 恢复会话重建卡片：带 project（若有）→ 卡片懒加载 per-ticket 紧急程度（AC-32）
       }
       var input = $('fChatInput'); if (input && d.input) input.value = d.input;
     } catch (e) {}
@@ -3437,8 +3462,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     }
     // 深入思考开关（仅咨询答疑显示；开→sendConsult 带 deep:true）
     var deepBtn = $('fDeep'); if (deepBtn) deepBtn.addEventListener('click', toggleDeep);
-    // 紧急程度选择（仅提需求/报BUG 显示；选中即入 chat.priority，提交时带上覆盖 AI 猜测）
-    var priSel = $('fPriSel'); if (priSel) priSel.addEventListener('change', function () { setPriority(this.value); });
+    // AC-32：紧急程度改 per-ticket（每张已建单卡片各设各的，绑定见 appendArchiveCard 内 select.onchange → setTicketPriority），此处无全局选择器绑定
     // 新对话
     $('fNewC').addEventListener('click', function () { newConversation(); });
     // 发送：点按钮 + 回车（AC-9/17：自然语言输入回车发送）
@@ -3480,7 +3504,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   })();
 
   // 暴露给测试/调试（不含敏感数据）
-  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, syncPriority: syncPriority, setPriority: setPriority, newConversation: newConversation, sendChat: sendChat, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast, openMaintainEdit: openMaintainEdit, doMaintainSave: doMaintainSave, maintainChipHtml: maintainChipHtml, maintainDaysLeft: maintainDaysLeft, renderTodoBody: renderTodoBody, mkUpdatePlanBlock: mkUpdatePlanBlock, loadUpdatePlan: loadUpdatePlan, renderUpdatePlan: renderUpdatePlan, mkPlanTaskItem: mkPlanTaskItem, mkSqlBundleItem: mkSqlBundleItem, doTaskToggle: doTaskToggle, doSqlBundleToggle: doSqlBundleToggle, appendConsultToIntake: appendConsultToIntake, openConsultToIntake: openConsultToIntake, doConsultToIntake: doConsultToIntake, appendMediaBubble: appendMediaBubble, mediaUrls: mediaUrls, markLeftActive: markLeftActive, reapplyLeftActive: reapplyLeftActive, bindReopen: bindReopen, fConfirm: fConfirm, doDeleteItem: doDeleteItem, bindDelete: bindDelete };
+  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, setTicketPriority: setTicketPriority, newConversation: newConversation, sendChat: sendChat, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast, openMaintainEdit: openMaintainEdit, doMaintainSave: doMaintainSave, maintainChipHtml: maintainChipHtml, maintainDaysLeft: maintainDaysLeft, renderTodoBody: renderTodoBody, mkUpdatePlanBlock: mkUpdatePlanBlock, loadUpdatePlan: loadUpdatePlan, renderUpdatePlan: renderUpdatePlan, mkPlanTaskItem: mkPlanTaskItem, mkSqlBundleItem: mkSqlBundleItem, doTaskToggle: doTaskToggle, doSqlBundleToggle: doSqlBundleToggle, appendConsultToIntake: appendConsultToIntake, openConsultToIntake: openConsultToIntake, doConsultToIntake: doConsultToIntake, appendMediaBubble: appendMediaBubble, mediaUrls: mediaUrls, markLeftActive: markLeftActive, reapplyLeftActive: reapplyLeftActive, bindReopen: bindReopen, fConfirm: fConfirm, doDeleteItem: doDeleteItem, bindDelete: bindDelete };
 })();
 </script>
 </body>

@@ -789,7 +789,7 @@ ${std}
 \`\`\`intake-record
 {"type":"","subsystem":"","module":"","title":"","priority":"中","desc":"","errorInfo":"","steps":"","expectResult":"","severity":"","scope":"","env":"","freq":"","bg":"","reqDesc":"","accept":"","relate":"","opinion":""}
 \`\`\`
-${merged ? 'type 必填："bug"(问题/缺陷) 或 "requirement"(需求/改进)，按你判断的类别填；' : `type 填 "${type}"；`}只有信息按标准基本齐才输出 record；还在澄清阶段就别输出。`;
+${merged ? 'type 必填："bug"(问题/缺陷) 或 "requirement"(需求/改进)，按你判断的类别填；' : `type 填 "${type}"；`}priority 必填，按问题严重度/影响面判定，取值仅限【紧急/高/中/低】：紧急=线上阻断/资损/大面积无法使用；高=核心流程受阻但有临时办法或影响部分人；中=一般问题/改进(默认)；低=轻微/优化建议。拿不准填「中」。只有信息按标准基本齐才输出 record；还在澄清阶段就别输出。`;
 }
 async function intakeAI(proj, e) {   // 组装对话喂模型，返回 AI 文本
   const cfg = readModelCfg(); if (!cfg.apiKey) return { ok: false, reply: '（未配置模型 API，管理员配置后 AI 才会自动沟通。内容已收到并存档。）', configured: false };
@@ -1006,12 +1006,12 @@ function authGate(pathname, user, link) {
   if (!user) return 'login';
   if (isAdmin(user)) return 'allow';                                    // 管理员：全放行
   // 现场侧（产品经理 / 实施工程师）：只允许 提交面 + 工单查看 + 验证
-  const FIELD_OK = new Set(['/', '/submit.html', '/detail.html', '/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/consult', '/api/consult-to-intake', '/api/intake-delete', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-media', '/api/intake-transition', '/api/field/submissions', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/field/update-plan', '/api/field/update-toggle', '/api/field/update-sql-merged']);   // FS-05：现场端新端点（按批次视图/下载/改版本/维保回写/逐单验证）+ 累积更新计划（读代码 docs/deploy.json/累积计划/勾选/合并SQL），均端点内按 user.sites 二次收敛。2026-08-05 架构重构删 deploy-template/customer-deploy-task/batch-task/version-releases（跟随产品代码，废弃手工登记与部署模板）
+  const FIELD_OK = new Set(['/', '/submit.html', '/detail.html', '/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/consult', '/api/consult-to-intake', '/api/intake-delete', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-media', '/api/intake-transition', '/api/field/submissions', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/intake-set-priority', '/api/field/update-plan', '/api/field/update-toggle', '/api/field/update-sql-merged']);   // FS-05：现场端新端点（按批次视图/下载/改版本/维保回写/逐单验证）+ 累积更新计划（读代码 docs/deploy.json/累积计划/勾选/合并SQL），均端点内按 user.sites 二次收敛。2026-08-05 架构重构删 deploy-template/customer-deploy-task/batch-task/version-releases（跟随产品代码，废弃手工登记与部署模板）
   return FIELD_OK.has(pathname) ? 'allow' : 'forbidden';
 }
 // FS-08 §4①：field 域接口允许集 = LINK_OK ∪ FIELD_OK（供访客链接 + 现场账号），与 authGate 内 FIELD_OK 同源，避免漂移。
 //   注意：这里是 authGate 里那份 FIELD_OK 的镜像常量——两者若改一处务必同步（authGate 用于登录态白名单，本集用于 field 域名层外层闸）。
-const FS08_FIELD_API = new Set(['/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/consult', '/api/consult-to-intake', '/api/intake-delete', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-media', '/api/intake-transition', '/api/field/submissions', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/field/update-plan', '/api/field/update-toggle', '/api/field/update-sql-merged', '/api/model-config']);   // FS-05 端点须与 FIELD_OK 同步，否则实施域(field)整个流被 originGate deny→forbidden（实测坑，见 fs-08 防漂移断言）；update-plan/update-toggle/update-sql-merged 为累积更新计划现场端。2026-08-05 架构重构删 deploy-template/customer-deploy-task/batch-task/version-releases（跟随产品代码）
+const FS08_FIELD_API = new Set(['/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/consult', '/api/consult-to-intake', '/api/intake-delete', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-media', '/api/intake-transition', '/api/field/submissions', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/intake-set-priority', '/api/field/update-plan', '/api/field/update-toggle', '/api/field/update-sql-merged', '/api/model-config']);   // FS-05 端点须与 FIELD_OK 同步，否则实施域(field)整个流被 originGate deny→forbidden（实测坑，见 fs-08 防漂移断言）；update-plan/update-toggle/update-sql-merged 为累积更新计划现场端。2026-08-05 架构重构删 deploy-template/customer-deploy-task/batch-task/version-releases（跟随产品代码）
 // field 域可加载的静态页（现场提交面 + 实施端外壳 + 现场可看的详情 + 登录页）。console/inbox/customers/kb/model-config/accounts/projects 等后台页不在其中 → 越域拒。
 const FS08_FIELD_PAGES = new Set(['/', '/field.html', '/submit.html', '/detail.html', '/login.html']);
 // 鉴权/健康端点：两域都放（field 域现场登录/查身份/登出/健康探测需要）。
@@ -1882,6 +1882,31 @@ const server = http.createServer((req, res) => {
     });
   }
 
+  // ---------- POST /api/intake-set-priority：现场逐条改工单紧急程度（AC-32 · per-ticket）----------
+  //   {project, id, priority} → 校验 site ∈ user.sites（管理员不限）；仅 requirement/bug 可设（consult 恒空、拒）；
+  //     normPriority 显式选择合法即用、非法回落原值；history 留痕「调整紧急程度→X」；saveIntake。
+  //   白名单已进 FIELD_OK + FS08_FIELD_API（现场域可调，否则被 originGate deny，见 fs-08 教训）。
+  if (url.pathname === '/api/intake-set-priority' && req.method === 'POST') {
+    return readBody(req, async (b, err) => {
+      if (!b) return send(res, 400, JSON.stringify({ ok: false, error: err }));
+      const proj = projById(String((b && b.project) || '').trim()); if (!proj) return send(res, 400, JSON.stringify({ ok: false, error: '项目不存在' }));
+      const e = loadIntake(proj, String((b && b.id) || '').trim());
+      if (!e || e.deleted) return send(res, 404, JSON.stringify({ ok: false, error: '工单不存在' }));
+      if (e.type !== 'requirement' && e.type !== 'bug') return send(res, 400, JSON.stringify({ ok: false, error: '仅需求/BUG 可设紧急程度' }));   // consult priority 恒空
+      // 越权：该单 site 不在当前账号 sites（管理员不限）——对齐 intake-verify 收敛
+      if (user && !isAdmin(user) && (!Array.isArray(user.sites) || !user.sites.map(String).includes(String(e.site || '')))) return send(res, 403, JSON.stringify({ ok: false, error: '无权设置该工单紧急程度' }));
+      const from = e.priority || '中';
+      const to = normPriority(b.priority, from || '中');   // 显式选择：合法四档→采用；非法/空→回落原值
+      if (to !== from) {   // 有变更才写留痕（同值幂等，不刷 history）
+        e.priority = to;
+        e.history = e.history || [];
+        e.history.push({ from, to, by: (user ? (user.name || user.username) : '现场'), byRole: user ? user.role : 'field', at: nowStamp(), note: '调整紧急程度→' + to });
+        await saveIntake(proj, e);
+      }
+      return send(res, 200, JSON.stringify({ ok: true, priority: e.priority }));
+    });
+  }
+
   if (url.pathname === '/api/overview') {   // 工作台聚合：项目/进件统计 + 最近进件 + 模型状态（单一入口用）
     const projs = loadProjects(), perProj = [], recent = [];
     const totals = { total: 0, requirement: 0, bug: 0, '待处理': 0, '沟通中': 0, '已归档': 0, '已处理': 0 };
@@ -2090,19 +2115,20 @@ const server = http.createServer((req, res) => {
       const imgs = (Array.isArray(b.images) ? b.images : []).slice(0, 6);   // 本轮附的截图（data URL，≤6）→ 多模态并进末条 user，让 AI 结合图判类/建单
       let reply; try { reply = await callModel(cfg, { system: intakeChatSystem(proj, type, version, sub) + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题/复现场景。' : ''), messages: msgs, images: imgs, maxTokens: 800 }); }
       catch (e) { return send(res, 200, JSON.stringify({ ok: true, reply: '（AI 暂时连不上：' + String((e && e.message) || e) + '，稍后再试。）' })); }
-      let savedId = '';
+      let savedId = '', savedPriority = '';   // savedPriority：建单后回带该单 priority（AC-32 per-ticket，现场卡片默认档）
       const m = /```intake-record\s*([\s\S]*?)```/.exec(reply || '');
       if (m) { let rec = null; try { rec = JSON.parse(m[1].trim()); } catch {}
         if (rec && (rec.title || '').trim()) {
           const recType = type === 'intake' ? (String(rec.type || '').toLowerCase() === 'bug' ? 'bug' : 'requirement') : type;   // 合并模式取 AI 判定的类型
           const id = intakeGenId(proj, recType), stamp = nowStamp(), reporter = user ? (user.name || user.username) : (link ? link.name : ''), media = [];
           try { const mdir = path.join(intakeDir(proj), 'media', id); const imgs = (b.images || []).slice(0, 6); if (imgs.length) fs.mkdirSync(mdir, { recursive: true }); imgs.forEach((du, i) => { const mm = /^data:image\/\w+;base64,(.+)$/.exec(du || ''); if (mm) { fs.writeFileSync(path.join(mdir, `img-${i + 1}.png`), Buffer.from(mm[1], 'base64')); media.push(`media/${id}/img-${i + 1}.png`); } }); } catch {}
-          const e = { id, type: recType, project: proj.id, version, site, subsystem: sub || rec.subsystem || '', module: rec.module || '', title: (rec.title || '').trim(), priority: normPriority(b.priority, rec.priority || '中'), severity: rec.severity || '', scope: rec.scope || '', env: rec.env || '', freq: rec.freq || '', reporter, role: '', contact: '', bg: rec.bg || '', reqDesc: rec.reqDesc || '', scene: '', accept: rec.accept || '', relate: rec.relate || '', desc: rec.desc || '', errorInfo: rec.errorInfo || '', steps: rec.steps || '', expectResult: rec.expectResult || '', opinion: rec.opinion || '', media, status: '待处理', lifecycle: '待处理', assignee: '', history: [{ from: '', to: '待处理', by: reporter, byRole: (user ? user.role : 'field'), at: stamp, note: '对话提交' }], analysis: null, resolution: {}, submittedAt: stamp, chat: msgs.map(x => ({ role: x.role, text: x.content, ts: Date.now() })) };
-          await saveIntake(proj, e); savedId = id;
+          // AC-32（2026-08-06 改）：紧急程度改「per-ticket」——不再被全局 b.priority 覆盖；按 AI 每条 record 判定的 rec.priority 规范到四档（非法/空→中）。现场逐条改档走 /api/intake-set-priority（本次响应回带 priority 作现场卡片默认档）。
+          const e = { id, type: recType, project: proj.id, version, site, subsystem: sub || rec.subsystem || '', module: rec.module || '', title: (rec.title || '').trim(), priority: normPriority(rec.priority, '中'), severity: rec.severity || '', scope: rec.scope || '', env: rec.env || '', freq: rec.freq || '', reporter, role: '', contact: '', bg: rec.bg || '', reqDesc: rec.reqDesc || '', scene: '', accept: rec.accept || '', relate: rec.relate || '', desc: rec.desc || '', errorInfo: rec.errorInfo || '', steps: rec.steps || '', expectResult: rec.expectResult || '', opinion: rec.opinion || '', media, status: '待处理', lifecycle: '待处理', assignee: '', history: [{ from: '', to: '待处理', by: reporter, byRole: (user ? user.role : 'field'), at: stamp, note: '对话提交' }], analysis: null, resolution: {}, submittedAt: stamp, chat: msgs.map(x => ({ role: x.role, text: x.content, ts: Date.now() })) };
+          await saveIntake(proj, e); savedId = id; savedPriority = e.priority;   // 回带该单最终 priority → 现场卡片显默认档、可逐条改
         }
         reply = reply.replace(m[0], '').trim();
       }
-      send(res, 200, JSON.stringify({ ok: true, reply, savedId }));
+      send(res, 200, JSON.stringify({ ok: true, reply, savedId, priority: savedPriority }));
     });
   }
   if (url.pathname === '/api/consult' && req.method === 'POST') {   // 答疑：直连 spec + 经验库直接回答 + 给解决思路
