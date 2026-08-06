@@ -1282,9 +1282,12 @@ const server = http.createServer((req, res) => {
       const proj = projById(String((b && b.product) || '').trim()); if (!proj) return send(res, 400, JSON.stringify({ ok: false, error: '产品不存在' }));
       // 扫该产品全部工单（含 requirement/bug，consult 明确排除；跨全部医院不按 site 过滤）：
       //   收 lifecycle=已立项(已落实) 且 data.batch(=e.batch) 为空(未归批) 的工单 id。
+      // 【勾选子集·2026-08-06】入参可选 ticketIds:[] —— 传了就只归这些（每个仍须 已立项+未归批+同 product，非法跳过）；没传则维持原「全部已立项未归批」（向后兼容）。
       const store = CACHE.intakes[proj.id] || {};
       const list = loadBatches();
       const liveBatchIds = new Set(list.map(bt => String((bt && bt.id) || '')));   // 真实存在的批次 id（孤儿引用不算已归批）
+      const pickRaw = Array.isArray(b && b.ticketIds) ? b.ticketIds.map(x => String(x || '').trim()).filter(Boolean) : null;
+      const pickSet = pickRaw ? new Set(pickRaw) : null;
       const ticketIds = [];
       for (const e of Object.values(store)) {
         if (!e || e.type === 'consult') continue;                       // consult 不进批次
@@ -1292,9 +1295,10 @@ const server = http.createServer((req, res) => {
         if (deriveLifecycle(e) !== '已立项') continue;                   // 仅已落实
         // 已归批不重复归入——但必须是【真实存在】的批次；孤儿批次号（残留脏数据/批次已删）当未归批，纳入新批次自愈（归批时 e.batch 会被覆盖成新的真实 B-xx）
         if (String(e.batch || '').trim() && liveBatchIds.has(String(e.batch).trim())) continue;
+        if (pickSet && !pickSet.has(String(e.id))) continue;            // 传了勾选子集 → 只归勾中的（非勾中的跳过）
         ticketIds.push(e.id);
       }
-      if (!ticketIds.length) return send(res, 200, JSON.stringify({ ok: false, error: '该产品当前没有已落实待分批的工单' }));
+      if (!ticketIds.length) return send(res, 200, JSON.stringify({ ok: false, error: pickSet ? '所勾选工单均不可归批（须已立项且未归批）' : '该产品当前没有已落实待分批的工单' }));
       const by = user ? (user.name || user.username) : 'admin';
       const at = nowStamp();
       const scheduleDate = normScheduleDate(b && b.scheduleDate);   // 计划交付日期（可空，非法则空、不报错）
@@ -1307,6 +1311,114 @@ const server = http.createServer((req, res) => {
       return send(res, 200, JSON.stringify({ ok: true, item: batchOut(bt) }));
     });
   }
+
+  // ---------- 工单↔批次编辑（2026-08-06 · 双向 · admin：未进 FIELD_OK/LINK_OK → 非 admin 自动 403）----------
+  // 核心：单工单指派/换/移 —— 两边引用同步维护（旧批 ticketIds 删、新批 ticketIds 加）+ 工单/批次双向 history 留痕。
+  //   护栏：仅 lifecycle=已立项 工单可归批/换批；仅 status=开发中 批次可增减成员（可下载/已交付批次锁定）；工单 project == 批次 product。
+  //   返回 {ok:boolean, error?, batch?} 或（供批量复用）内部对象。isBulk=true 时不发送响应、返回结果对象供 batch-add-tickets 聚合。
+  //   liveBatchIds 由调用方传入（避免每单重复 loadBatches 构 Set），list 为 loadBatches() 引用（原地改 ticketIds，调用方统一 saveBatches）。
+  async function assignTicketToBatch(proj, e, targetBatch, list, liveBatchIds, by, at) {
+    // e: 已 loadIntake 出来的工单副本；targetBatch: '' 表示移出，否则批次 id。返回 {ok, error, from, to}
+    if (!e) return { ok: false, error: '工单不存在' };
+    if (e.type === 'consult') return { ok: false, error: '咨询单不可归批' };
+    if (e.deleted) return { ok: false, error: '工单已删除' };
+    if (deriveLifecycle(e) !== '已立项') return { ok: false, error: '仅「已立项」工单可归批/换批（当前：' + deriveLifecycle(e) + '）' };
+    const oldBatchId = String(e.batch || '').trim();
+    const target = String(targetBatch || '').trim();
+    if (target) {
+      const nb = list.find(x => x.id === target);
+      if (!nb) return { ok: false, error: '目标批次不存在' };
+      if (nb.status !== '开发中') return { ok: false, error: '仅开发中批次可增减工单（该批已' + nb.status + '·锁定）' };
+      if (String(nb.product) !== String(proj.id)) return { ok: false, error: '工单产品与批次产品不一致，不可归入' };
+      if (oldBatchId === target) return { ok: true, error: '', from: oldBatchId, to: target, noop: true };   // 已在该批·幂等
+    }
+    // 旧批（若真实存在）移除该工单 + 留痕（护栏：旧批若非开发中，仍允许「移出/换出」——已出包批次成员被换走属边界，
+    //   但主场景是把未归批单指派进开发中批。为稳妥：换批时旧批若已锁定则拒绝，避免破坏已发包批次成员集。）
+    if (oldBatchId && liveBatchIds.has(oldBatchId)) {
+      const ob = list.find(x => x.id === oldBatchId);
+      if (ob) {
+        if (ob.status !== '开发中') return { ok: false, error: '原批次已' + ob.status + '·锁定，不可移出/换出其成员' };
+        ob.ticketIds = (ob.ticketIds || []).filter(t => String(t) !== String(e.id));
+        ob.history = ob.history || [];
+        ob.history.push({ action: 'update', by, at, note: (target ? 'remove ticket ' + e.id + '（换入 ' + target + '）' : 'remove ticket ' + e.id) });
+      }
+    }
+    if (target) {
+      const nb = list.find(x => x.id === target);
+      nb.ticketIds = nb.ticketIds || [];
+      if (!nb.ticketIds.map(String).includes(String(e.id))) nb.ticketIds.push(e.id);   // 去重
+      nb.history = nb.history || [];
+      nb.history.push({ action: 'update', by, at, note: 'add ticket ' + e.id + (oldBatchId ? '（自 ' + oldBatchId + ' 换入）' : '') });
+      e.batch = target;
+      e.history = e.history || [];
+      e.history.push({ from: e.lifecycle || deriveLifecycle(e), to: e.lifecycle || deriveLifecycle(e), by, byRole: 'admin', at, note: '调整批次 → ' + target + (oldBatchId ? '（原 ' + oldBatchId + '）' : '') });
+    } else {
+      e.batch = '';
+      e.history = e.history || [];
+      e.history.push({ from: e.lifecycle || deriveLifecycle(e), to: e.lifecycle || deriveLifecycle(e), by, byRole: 'admin', at, note: '移出批次' + (oldBatchId ? '（原 ' + oldBatchId + '）' : '') });
+    }
+    return { ok: true, error: '', from: oldBatchId, to: target };
+  }
+
+  if (url.pathname === '/api/ticket-set-batch' && req.method === 'POST') {   // 单工单指派/换/移批次
+    return readBody(req, async (b, err) => {
+      if (!b) return send(res, 400, JSON.stringify({ ok: false, error: err }));
+      const proj = projById(String((b && b.project) || '').trim()); if (!proj) return send(res, 400, JSON.stringify({ ok: false, error: '产品不存在' }));
+      const id = String((b && b.id) || '').trim(); if (!id) return send(res, 400, JSON.stringify({ ok: false, error: '缺少工单 id' }));
+      const e = loadIntake(proj, id); if (!e) return send(res, 404, JSON.stringify({ ok: false, error: '工单不存在' }));
+      const list = loadBatches();
+      const liveBatchIds = new Set(list.map(bt => String((bt && bt.id) || '')));
+      const by = user ? (user.name || user.username) : 'admin';
+      const at = nowStamp();
+      const r = await assignTicketToBatch(proj, e, String((b && b.batch) || ''), list, liveBatchIds, by, at);
+      if (!r.ok) return send(res, 400, JSON.stringify({ ok: false, error: r.error }));
+      if (!r.noop) { await saveIntake(proj, e); saveBatches(list); }
+      return send(res, 200, JSON.stringify({ ok: true, batch: e.batch || '' }));
+    });
+  }
+
+  if (url.pathname === '/api/batch-add-tickets' && req.method === 'POST') {   // 批次侧批量加工单（从未归批的已立项里挑）
+    return readBody(req, async (b, err) => {
+      if (!b) return send(res, 400, JSON.stringify({ ok: false, error: err }));
+      const batchId = String((b && b.batchId) || '').trim(); if (!batchId) return send(res, 400, JSON.stringify({ ok: false, error: '缺少 batchId' }));
+      const ids = Array.isArray(b && b.ticketIds) ? b.ticketIds.map(x => String(x || '').trim()).filter(Boolean) : [];
+      if (!ids.length) return send(res, 400, JSON.stringify({ ok: false, error: '未选择工单' }));
+      const list = loadBatches();
+      const bt = list.find(x => x.id === batchId); if (!bt) return send(res, 404, JSON.stringify({ ok: false, error: 'not found' }));
+      if (bt.status !== '开发中') return send(res, 200, JSON.stringify({ ok: false, error: '仅开发中批次可增减工单（该批已' + bt.status + '·锁定）' }));
+      const proj = projById(bt.product); if (!proj) return send(res, 400, JSON.stringify({ ok: false, error: '产品不存在' }));
+      const liveBatchIds = new Set(list.map(x => String((x && x.id) || '')));
+      const by = user ? (user.name || user.username) : 'admin';
+      const at = nowStamp();
+      const added = []; const skipped = []; const touched = [];   // touched: 需 saveIntake 的工单对象（去重）
+      for (const id of ids) {
+        const e = loadIntake(proj, id);
+        const r = await assignTicketToBatch(proj, e, batchId, list, liveBatchIds, by, at);
+        if (r.ok && !r.noop) { added.push(id); touched.push(e); }
+        else if (r.ok && r.noop) { skipped.push({ id, reason: '已在该批' }); }
+        else skipped.push({ id, reason: r.error });
+      }
+      if (touched.length) { for (const e of touched) await saveIntake(proj, e); saveBatches(list); }
+      return send(res, 200, JSON.stringify({ ok: true, added, skipped }));
+    });
+  }
+
+  if (url.pathname === '/api/batch-candidates') {   // 某产品「已立项 + 未归批」候选工单（供定档勾选 / 批次侧加工单勾选清单）· admin
+    const pid = String(url.searchParams.get('product') || '').trim();
+    const proj = pid ? projById(pid) : null; if (!proj) return send(res, 400, JSON.stringify({ ok: false, error: '产品不存在' }));
+    const store = CACHE.intakes[proj.id] || {};
+    const liveBatchIds = new Set(loadBatches().map(bt => String((bt && bt.id) || '')));
+    const items = [];
+    for (const e of Object.values(store)) {
+      if (!e || e.type === 'consult' || e.deleted) continue;
+      if (deriveLifecycle(e) !== '已立项') continue;
+      if (String(e.batch || '').trim() && liveBatchIds.has(String(e.batch).trim())) continue;   // 已归入真实存在批次 → 不算候选
+      items.push({ id: e.id, type: e.type, title: e.title || '', subsystem: e.subsystem || '', subsystemLabel: e.subsystem ? kbSubLabel(proj.id, e.subsystem) : '', site: e.site || '', version: e.version || '', submittedAt: e.submittedAt || '' });
+    }
+    items.sort((a, b) => String(b.submittedAt || '').localeCompare(String(a.submittedAt || '')));
+    return send(res, 200, JSON.stringify({ ok: true, items }));
+  }
+
   if (url.pathname === '/api/batches') {   // 批次列表（?product=&status= 可选筛选；按 createdAt 倒序；挂 ticketCount/productName）
     const fp = String(url.searchParams.get('product') || '').trim();
     const fs2 = String(url.searchParams.get('status') || '').trim();

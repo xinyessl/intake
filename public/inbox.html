@@ -609,6 +609,18 @@ function renderViewBody(e){
   const chat=Array.isArray(e.chat)?e.chat:[];
   const devMsgs=chat.filter(m=>m.role==='dev');
   if(devMsgs.length){ html+=`<div class="alert alert-info mt-16"><i class="ti ti-message-2"></i><div><b>决策回复：</b>${devMsgs.map(m=>`<div class="md-body">${window.mdToHtml?window.mdToHtml(m.text):esc(m.text)}</div>`).join('')}</div></div>`; }
+  // 批次编辑（仅「已立项」工单——含已归批的已立项，见 effLifecycle）：可指派到已有开发中批次 / 移出 / 新建一批
+  if(lc==='已立项'){
+    html+=`<div class="divider-h"></div>
+      <div style="font-size:14px;font-weight:600;margin-bottom:10px"><i class="ti ti-package" style="color:var(--color-primary);vertical-align:-2px"></i> 批次</div>
+      <div class="desc-mini" style="margin-bottom:0">
+        <div class="di"><span class="dk">当前批次</span><span class="dv" id="tbCur">${e.batch?`<span class="tag tag-info">${esc(e.batch)}</span>`:'<span class="text-tertiary">未归批</span>'}</span></div>
+        <div class="di full"><span class="dk">指派到批次</span><span class="dv" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <select class="input" id="tbSel" data-id="${esc(e.id)}" data-cur="${esc(e.batch||'')}" style="max-width:320px"><option value="__loading">加载中…</option></select>
+        </span></div>
+        <div class="di full"><span class="dv text-tertiary" style="font-size:12px">默认列该产品「开发中」批次；选「移出批次」把它撤出；「新建一批…」按当前未归批工单为该产品建批。</span></div>
+      </div>`;
+  }
   // 流转留痕
   const hist=Array.isArray(e.history)?e.history:[];
   if(hist.length){
@@ -617,6 +629,48 @@ function renderViewBody(e){
         return `<div class="timeline-item ${cls}"><div class="timeline-title">${esc(h.to)}${h.from?` <span class="text-tertiary" style="font-weight:400">← ${esc(h.from)}</span>`:''}</div><div class="timeline-meta">${esc(h.by||'')}${h.byRole?' / '+esc(h.byRole):''} · ${esc(fmtTime(h.at))}</div>${h.note?`<div class="timeline-body">${esc(h.note)}</div>`:''}</div>`; }).join('')+`</div>`;
   }
   $('#viewBody').innerHTML=html;
+  // 批次下拉：拉该产品「开发中」批次填充 + 绑 change → ticket-set-batch
+  if(lc==='已立项') initTicketBatchSel(e);
+}
+
+/* ---------- 工单侧批次编辑（指派/移出/新建 · 2026-08-06 BP-01） ---------- */
+async function initTicketBatchSel(e){
+  const sel=$('#tbSel'); if(!sel) return;
+  const cur=e.batch||'';
+  let batches=[];
+  try{ batches=(await (await fetch('/api/batches?product='+encodeURIComponent(curProject)+'&status='+encodeURIComponent('开发中'))).json()).items||[]; }catch(err){}
+  // 若当前批次不在「开发中」列表里（如已被查出但状态变了/边界），也补进选项，避免显示不出当前值
+  const opts=['<option value="">— 移出批次 —</option>'];
+  let hasCur=false;
+  batches.forEach(b=>{ if(b.id===cur) hasCur=true; opts.push(`<option value="${esc(b.id)}"${b.id===cur?' selected':''}>${esc(b.id)}（${esc(b.ticketCount||0)}单${b.scheduleDate?'·排期'+esc(b.scheduleDate):''}）</option>`); });
+  if(cur && !hasCur) opts.splice(1,0,`<option value="${esc(cur)}" selected>${esc(cur)}（当前）</option>`);
+  if(!cur) opts[0]='<option value="" selected>— 未归批（移出）—</option>';
+  opts.push('<option value="__new">＋ 新建一批（把本产品未归批工单归成新批）</option>');
+  sel.innerHTML=opts.join('');
+  sel.value=cur||'';
+  sel.addEventListener('change',()=>onTicketBatchChange(e, sel));
+}
+async function onTicketBatchChange(e, sel){
+  const val=sel.value;
+  const cur=e.batch||'';
+  if(val===cur){ return; }
+  if(val==='__new'){
+    // 新建一批：跳批次管理页更稳妥（那里有勾选清单）——避免此处误把全产品未归批单一次归光
+    toast('请到「批次管理」页对该产品定档建批（可勾选工单）','info');
+    sel.value=cur||'';   // 复位
+    return;
+  }
+  sel.disabled=true;
+  try{
+    const r=await (await fetch('/api/ticket-set-batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({project:curProject,id:e.id,batch:val})})).json();
+    if(!r.ok){ toast(r.error||'指派失败','warning'); sel.value=cur||''; return; }
+    e.batch=r.batch||'';
+    toast(r.batch?('已指派到批次 '+r.batch):'已移出批次','success');
+    // 刷新抽屉（当前批次徽标 + 下拉）与列表（漏斗随 effLifecycle 归位）
+    await openView(e.id);
+    await loadProject(curProject);
+  }catch(err){ toast('指派失败：'+err.message,'error'); sel.value=cur||''; }
+  finally{ if(sel) sel.disabled=false; }
 }
 
 /* ============ 后台代提工单 ============ */

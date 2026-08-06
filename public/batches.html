@@ -122,8 +122,15 @@
       <input type="date" id="arSchedule" style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid var(--color-border);border-radius:6px;font-size:13px;font-family:inherit">
       <div class="text-tertiary" style="font-size:12px;margin-top:4px">可留空，之后在批次详情里补设/修改。</div>
     </div>
+    <div class="form-group" style="margin-top:12px">
+      <label style="display:flex;align-items:center;gap:8px">纳入工单
+        <span class="text-tertiary" style="font-weight:400;font-size:12px">（该产品「已落实且未归批」工单，默认全选，可勾选子集）</span>
+        <span style="margin-left:auto;font-weight:400"><a href="javascript:;" id="arSelAll" style="font-size:12px;color:var(--color-primary)">全选</a> · <a href="javascript:;" id="arSelNone" style="font-size:12px;color:var(--color-primary)">全不选</a></span>
+      </label>
+      <div id="arCandBox" style="max-height:240px;overflow:auto;border:1px solid var(--color-border);border-radius:6px;padding:4px"><div class="text-tertiary" style="padding:12px;font-size:12.5px">请先选择产品。</div></div>
+    </div>
     <div class="text-tertiary" style="font-size:12.5px;margin-top:10px;line-height:1.6">
-      将该产品当前所有<b>「已落实」且未归批</b>的工单（跨全部医院合并）归成一个新批次，内部按子系统分组，初始状态「开发中」。
+      勾选的工单（跨全部医院合并）归成一个新批次，内部按子系统分组，初始状态「开发中」。
     </div>
   </div>
   <div class="modal-footer"><button class="btn" data-close-modal="arrangeModal">取消</button><button class="btn btn-primary" id="btnArrangeOk"><i class="ti ti-check"></i>确认建批</button></div>
@@ -137,6 +144,19 @@
   </div>
   <div class="drawer-body" id="detailBody"></div>
   <div class="drawer-footer"><button class="btn" data-close-drawer="detailDrawer">关闭</button></div>
+</div>
+
+<!-- 添加工单 modal（批次侧从「已立项+未归批」勾选加入） -->
+<div class="modal" id="addTicketModal">
+  <div class="modal-header"><div class="modal-title" id="addTkTitle">添加工单</div><span class="modal-close" data-close-modal="addTicketModal"><i class="ti ti-x"></i></span></div>
+  <div class="modal-body">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <span class="text-tertiary" style="font-size:12px">勾选该产品「已立项且未归批」工单加入本批次。</span>
+      <span style="margin-left:auto"><a href="javascript:;" id="addSelAll" style="font-size:12px;color:var(--color-primary)">全选</a> · <a href="javascript:;" id="addSelNone" style="font-size:12px;color:var(--color-primary)">全不选</a></span>
+    </div>
+    <div id="addTkBox" style="max-height:300px;overflow:auto;border:1px solid var(--color-border);border-radius:6px;padding:4px"></div>
+  </div>
+  <div class="modal-footer"><button class="btn" data-close-modal="addTicketModal">取消</button><button class="btn btn-primary" id="btnAddTkOk"><i class="ti ti-check"></i>加入批次</button></div>
 </div>
 
 <!-- 开发清单预览 modal（json 结构化预览） -->
@@ -220,6 +240,7 @@ async function openDetail(id){
   const tag=STATUS_TAG[b.status]||'tag-gray';
   $('#dSubtitle').textContent=(b.productName||pname(b.product))+' · '+(b.status||'');
   const hospHtml = hosps.length ? hosps.map(h=>`<span class="tag tag-gray">${esc(h)}</span>`).join('') : '<span class="text-tertiary">—</span>';
+  const canEditMembers = b.status==='开发中';   // 仅开发中批次可增减成员（可下载/已交付锁定）
   const groupHtml = groups.length ? groups.map(g=>{
     const rows=(g.tickets||[]).map(t=>`<div class="trow">
       <span class="tid">${esc(t.id)}</span>
@@ -228,6 +249,7 @@ async function openDetail(id){
         <span class="tag ${t.type==='bug'?'tag-danger':'tag-primary'}">${t.type==='bug'?'BUG':'需求'}</span>
         ${t.site?`<span>${esc(t.site)}</span>`:''}
         ${t.version?`<span class="mono">${esc(t.version)}</span>`:''}
+        ${canEditMembers?`<button class="btn btn-sm tkrm" data-tid="${esc(t.id)}" title="移出批次"><i class="ti ti-x"></i>移出</button>`:''}
       </span>
     </div>`).join('');
     return `<div class="subgrp">
@@ -291,7 +313,9 @@ async function openDetail(id){
     ${relHtml}
     ${b.pkgVersion?'<div id="deployBox"></div>':''}
     <div class="dsec"><div class="dlab">覆盖医院（${hosps.length}）</div><div class="hospchips">${hospHtml}</div></div>
-    <div class="dsec"><div class="dlab">覆盖工单（按子系统分组）</div></div>
+    <div class="dsec"><div class="dlab" style="display:flex;align-items:center;gap:8px">覆盖工单（按子系统分组）
+      ${canEditMembers?`<button class="btn btn-sm btn-primary" id="btnAddTickets" style="margin-left:auto"><i class="ti ti-plus"></i>添加工单</button>`:'<span class="text-tertiary" style="margin-left:auto;font-size:12px">'+(b.status||'')+'·成员已锁定</span>'}
+    </div></div>
     ${groupHtml}
   `;
   // 绑上传包提交
@@ -307,8 +331,53 @@ async function openDetail(id){
   const pkgCancel=$('#btnPkgCancel');
   if(pkgCancel) pkgCancel.addEventListener('click',()=>{ $('#pkgEdit').style.display='none'; $('#pkgView').style.display='block'; if(pkgEditBtn) pkgEditBtn.style.display='inline-flex'; });
   const pkgSave=$('#btnPkgSave'); if(pkgSave) pkgSave.addEventListener('click',()=>savePkgInfo(b.id));
+  // 工单↔批次成员编辑（仅开发中批次）：移出单工单 / 添加工单
+  if(canEditMembers){
+    $$('#detailBody .tkrm').forEach(btn=>btn.addEventListener('click',()=>removeTicketFromBatch(b, btn.getAttribute('data-tid'))));
+    const addBtn=$('#btnAddTickets'); if(addBtn) addBtn.addEventListener('click',()=>openAddTickets(b));
+  }
   // 部署清单审核区（仅已有 pkgVersion 的批次）：拉草稿/回显已审快照 → 可编辑 → 保存快照
   if(b.pkgVersion && $('#deployBox')) loadDeployBox(b);
+}
+
+/* ---------- 批次成员编辑：移出 / 添加工单（2026-08-06 BP-01） ---------- */
+async function removeTicketFromBatch(b, tid){
+  if(!tid) return;
+  if(!confirm('确认把工单 '+tid+' 移出批次 '+b.id+'？')) return;
+  try{
+    const r=await (await fetch('/api/ticket-set-batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({project:b.product,id:tid,batch:''})})).json();
+    if(!r.ok){ toast(r.error||'移出失败','warning'); return; }
+    toast('已移出工单 '+tid,'success');
+    await openDetail(b.id);   // 刷新详情
+    await loadBatches();      // 刷新列表工单数
+  }catch(e){ toast('移出失败：'+e.message,'error'); }
+}
+let ADD_CANDS=[];
+async function openAddTickets(b){
+  $('#addTkTitle').textContent='添加工单 → 批次 '+b.id;
+  $('#addTkBox').innerHTML='<div class="text-tertiary" style="padding:12px;font-size:12.5px">加载中…</div>';
+  $('#btnAddTkOk').dataset.bid=b.id; $('#btnAddTkOk').dataset.pid=b.product;
+  openModal('addTicketModal');
+  try{ ADD_CANDS=(await (await fetch('/api/batch-candidates?product='+encodeURIComponent(b.product))).json()).items||[]; }catch(e){ ADD_CANDS=[]; }
+  const box=$('#addTkBox');
+  box.innerHTML=ADD_CANDS.length ? ADD_CANDS.map(t=>candRow(t,false)).join('')
+    : '<div class="text-tertiary" style="padding:12px;font-size:12.5px">该产品当前无「已立项且未归批」工单可添加。</div>';
+}
+async function doAddTickets(){
+  const btn=$('#btnAddTkOk'); const bid=btn.dataset.bid;
+  const ticketIds=$$('#addTkBox .arCk:checked').map(c=>c.value);
+  if(!ticketIds.length){ toast('请至少勾选一条工单','warning'); return; }
+  btn.disabled=true;
+  try{
+    const r=await (await fetch('/api/batch-add-tickets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({batchId:bid,ticketIds})})).json();
+    if(!r.ok){ toast(r.error||'添加失败','warning'); return; }
+    const added=(r.added||[]).length, skipped=(r.skipped||[]).length;
+    toast('已添加 '+added+' 单'+(skipped?('，跳过 '+skipped+' 单'):''),added?'success':'warning');
+    closeModal('addTicketModal');
+    await openDetail(bid);
+    await loadBatches();
+  }catch(e){ toast('添加失败：'+e.message,'error'); }
+  finally{ btn.disabled=false; }
 }
 
 /* ================= 部署清单审核（发包时人审草稿 → 快照冻结进 batch.deployPlan）================= */
@@ -486,14 +555,36 @@ function fillProductOptions(){
   $('#fProduct').innerHTML=opts;
   $('#arProduct').innerHTML='<option value="">请选择产品</option>'+PROJECTS.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
 }
+/* 定档 modal 候选工单清单（该产品「已立项+未归批」，默认全选） */
+let AR_CANDS=[];
+async function loadArrangeCandidates(pid){
+  const box=$('#arCandBox');
+  if(!pid){ AR_CANDS=[]; box.innerHTML='<div class="text-tertiary" style="padding:12px;font-size:12.5px">请先选择产品。</div>'; return; }
+  box.innerHTML='<div class="text-tertiary" style="padding:12px;font-size:12.5px">加载中…</div>';
+  try{ AR_CANDS=(await (await fetch('/api/batch-candidates?product='+encodeURIComponent(pid))).json()).items||[]; }catch(e){ AR_CANDS=[]; }
+  if(!AR_CANDS.length){ box.innerHTML='<div class="text-tertiary" style="padding:12px;font-size:12.5px">该产品当前无已落实待分批工单。</div>'; return; }
+  box.innerHTML=AR_CANDS.map(t=>candRow(t,true)).join('');
+}
+function candRow(t,checked){
+  return `<label class="candrow" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:12.5px">
+    <input type="checkbox" class="arCk" value="${esc(t.id)}"${checked?' checked':''} style="flex:0 0 auto">
+    <span class="tag ${t.type==='bug'?'tag-danger':'tag-primary'}" style="flex:0 0 auto">${t.type==='bug'?'BUG':'需求'}</span>
+    <span class="mono text-tertiary" style="flex:0 0 auto">${esc(t.id)}</span>
+    <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.title||'（无标题）')}</span>
+    ${t.site?`<span class="text-tertiary" style="flex:0 0 auto">${esc(t.site)}</span>`:''}
+  </label>`;
+}
 async function doArrange(){
   // 读被 ui.js .ui-sel-* 增强的 select 值：用 select.类名（这里按 id 取，直接命中原生 select，无 wrapper 干扰）
   const pid=$('#arProduct').value;
   if(!pid){ toast('请先选择产品','warning'); return; }
+  if(!AR_CANDS.length){ toast('该产品当前无已落实待分批工单','warning'); return; }
+  const ticketIds=$$('#arCandBox .arCk:checked').map(c=>c.value);
+  if(!ticketIds.length){ toast('请至少勾选一条工单','warning'); return; }
   const scheduleDate=($('#arSchedule')?.value||'').trim();   // <input type=date> 原生值即 yyyy-MM-dd（或空）
   $('#btnArrangeOk').disabled=true;
   try{
-    const r=await (await fetch('/api/batch-arrange',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({product:pid,scheduleDate})})).json();
+    const r=await (await fetch('/api/batch-arrange',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({product:pid,scheduleDate,ticketIds})})).json();
     if(!r.ok){ toast(r.error||'建批失败','warning'); return; }
     toast('已建批 '+r.item.id+'（'+(r.item.ticketCount||0)+' 单）','success');
     closeModal('arrangeModal');
@@ -511,8 +602,14 @@ async function loadBatches(){
 }
 
 /* ---------- 事件绑定 ---------- */
-$('#btnArrange').addEventListener('click',()=>{ $('#arProduct').value=''; $('#arProduct').dispatchEvent(new Event('change',{bubbles:true})); if($('#arSchedule')) $('#arSchedule').value=''; openModal('arrangeModal'); });
+$('#btnArrange').addEventListener('click',()=>{ $('#arProduct').value=''; $('#arProduct').dispatchEvent(new Event('change',{bubbles:true})); if($('#arSchedule')) $('#arSchedule').value=''; AR_CANDS=[]; $('#arCandBox').innerHTML='<div class="text-tertiary" style="padding:12px;font-size:12.5px">请先选择产品。</div>'; openModal('arrangeModal'); });
+$('#arProduct').addEventListener('change',()=>loadArrangeCandidates($('#arProduct').value));
+$('#arSelAll').addEventListener('click',()=>$$('#arCandBox .arCk').forEach(c=>c.checked=true));
+$('#arSelNone').addEventListener('click',()=>$$('#arCandBox .arCk').forEach(c=>c.checked=false));
 $('#btnArrangeOk').addEventListener('click',doArrange);
+$('#addSelAll').addEventListener('click',()=>$$('#addTkBox .arCk').forEach(c=>c.checked=true));
+$('#addSelNone').addEventListener('click',()=>$$('#addTkBox .arCk').forEach(c=>c.checked=false));
+$('#btnAddTkOk').addEventListener('click',doAddTickets);
 $('#blist').addEventListener('click',e=>{ const c=e.target.closest('[data-id]'); if(c) openDetail(c.dataset.id); });
 $('#detailBody').addEventListener('click',e=>{ const p=e.target.closest('#btnChecklistPreview'); if(p) previewChecklist(p.getAttribute('data-bid')); });
 /* 选择型即选即查 */
