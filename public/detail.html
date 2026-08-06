@@ -60,6 +60,22 @@
   .fld .k{font-size:12.5px;font-weight:600;color:var(--t3);margin-bottom:4px}
   .fld .v{font-size:14px;color:var(--t);white-space:pre-wrap;word-break:break-word}
   .fld .v.empty{color:var(--t3)}
+  /* markdown 长内容渲染排版（描述/AI处理意见等含 ###/**/`code`/列表 的字段）——套 .md-body，别 pre-wrap（已成块级元素） */
+  .md-body{font-size:14px;color:var(--t);line-height:1.7;word-break:break-word}
+  .md-body>*:first-child{margin-top:0}.md-body>*:last-child{margin-bottom:0}
+  .md-body h1,.md-body h2,.md-body h3,.md-body h4{margin:14px 0 7px;font-weight:700;line-height:1.4;color:var(--t)}
+  .md-body h1{font-size:16px}.md-body h2{font-size:15px}.md-body h3{font-size:14px}.md-body h4{font-size:13px;color:var(--sub)}
+  .md-body p{margin:0 0 8px}
+  .md-body ul,.md-body ol{margin:6px 0 8px;padding-left:22px}
+  .md-body li{margin:2px 0}
+  .md-body strong{font-weight:700;color:var(--t)}
+  .md-body code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;background:var(--pri-light);color:var(--pri);padding:1px 5px;border-radius:4px}
+  .md-body pre{background:var(--alt);border:1px solid var(--line);border-radius:var(--r);padding:11px 13px;overflow-x:auto;margin:8px 0}
+  .md-body pre code{background:none;color:var(--t);padding:0;font-size:12.5px;line-height:1.6}
+  .md-body blockquote{margin:8px 0;padding:2px 14px;border-left:3px solid var(--pri-border);color:var(--sub)}
+  .md-body a{color:var(--pri);text-decoration:none}.md-body a:hover{text-decoration:underline}
+  .md-body hr{border:none;border-top:1px solid var(--line);margin:12px 0}
+  .md-body img{max-width:100%;height:auto;border-radius:var(--r)}
   /* 截图 */
   .shots{display:flex;flex-wrap:wrap;gap:12px}
   .shot{width:120px;height:120px;border-radius:var(--r);overflow:hidden;border:1px solid var(--line);background:var(--alt);display:block;transition:.12s}
@@ -139,6 +155,8 @@ function lifeCls(lc){ if(lc==='待处理')return 'g'; if(lc==='已关闭')return
 const STEWARD_STATES = new Set(['开发中','已出包','待验证']);
 function nextStates(cur){ const arr=(TRANS[cur]||[]).filter(x=>x!=='分析中' && !STEWARD_STATES.has(x)); if(cur!=='已关闭') arr.push('已关闭'); return arr; }
 function fld(k, v){ const has = v!=null && String(v).trim()!==''; return `<div class="fld"><div class="k">${esc(k)}</div><div class="v${has?'':' empty'}">${has?esc(v):'—'}</div></div>`; }
+// 长文本 / markdown 内容字段：用共享安全渲染器 window.mdToHtml（先转义再解析 ###/**/`code`/列表）；无值回退占位。短字段/标签仍走 fld（纯 esc）。
+function fldMd(k, v){ const has = v!=null && String(v).trim()!==''; const md=(window.mdToHtml?window.mdToHtml(String(v)):esc(v)); return `<div class="fld"><div class="k">${esc(k)}</div>${has?`<div class="md-body">${md}</div>`:`<div class="v empty">—</div>`}</div>`; }
 function renderEmpty(icon, title, desc){ document.getElementById('content').innerHTML=`<div class="card"><div class="empty-state"><div class="bigic"><i class="ti ti-${icon}"></i></div><h2>${esc(title)}</h2><p>${esc(desc)}</p><a href="/inbox.html"><i class="ti ti-arrow-left"></i> 返回收件箱</a></div></div>`; }
 
 let PROJECT='', ID='', ME=null, CUR=null;
@@ -179,8 +197,8 @@ function render(e){
   }
 
   html+=`<div class="card">`;
-  if(isBug){ html+=`<div class="sec-title"><i class="ti ti-bug"></i>BUG 内容</div>`+fld('问题现象',e.desc)+fld('报错信息',e.errorInfo)+fld('复现步骤',e.steps)+fld('期望结果',e.expectResult)+((e.opinion&&String(e.opinion).trim())?fld('AI 处理意见',e.opinion):''); }
-  else { html+=`<div class="sec-title"><i class="ti ti-bulb"></i>需求内容</div>`+fld('需求背景 / 为什么',e.bg)+fld('期望效果 / 具体描述',e.reqDesc)+fld('使用场景 / 涉及角色',e.scene)+fld('验收标准',e.accept)+fld('关联现有页面 / 功能',e.relate); }
+  if(isBug){ html+=`<div class="sec-title"><i class="ti ti-bug"></i>BUG 内容</div>`+fldMd('问题现象',e.desc)+fldMd('报错信息',e.errorInfo)+fldMd('复现步骤',e.steps)+fldMd('期望结果',e.expectResult)+((e.opinion&&String(e.opinion).trim())?fldMd('AI 处理意见',e.opinion):''); }
+  else { html+=`<div class="sec-title"><i class="ti ti-bulb"></i>需求内容</div>`+fldMd('需求背景 / 为什么',e.bg)+fldMd('期望效果 / 具体描述',e.reqDesc)+fldMd('使用场景 / 涉及角色',e.scene)+fldMd('验收标准',e.accept)+fldMd('关联现有页面 / 功能',e.relate); }
   html+=`</div>`;
 
   const rz=e.resolution||{};
