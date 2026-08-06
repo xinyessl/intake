@@ -1909,9 +1909,10 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     api('/api/intake-detail?project=' + encodeURIComponent(it.project) + '&id=' + encodeURIComponent(it.id), { method: 'GET' }).then(function (r) {
       var item = (r.body && r.body.item) || null;
       if (!item) return;
-      // 恢复会话：消息流 + convId + project + kind=consult
-      var msgs = Array.isArray(item.chat) ? item.chat.map(function (m) { return { role: (m.role === 'assistant' ? 'assistant' : 'user'), content: m.text || '' }; }).filter(function (m) { return m.content; }) : [];
-      chat.messages = msgs;
+      // 恢复会话：消息流 + convId + project + kind=consult。Part B：保留每条消息的 media（per-message），渲染时随该轮就位（旧记录消息无 media → 末尾兜底显图，见下）。
+      var rawChat = Array.isArray(item.chat) ? item.chat : [];
+      var msgs = rawChat.map(function (m) { return { role: (m.role === 'assistant' ? 'assistant' : 'user'), content: m.text || '', media: (Array.isArray(m.media) ? m.media : null) }; }).filter(function (m) { return m.content || (m.media && m.media.length); });
+      chat.messages = msgs.map(function (m) { return { role: m.role, content: m.content }; });   // 发给后端的历史只带 role/content（媒体不回传，per-message media 由后端 chat 存储持有）
       chat.convId = item.convId || item.id || '';        // consult 的 convId = 记录 id
       chat.reopenProject = item.project || it.project;    // 续问归属锁定
       chat.reopenSubsystem = item.subsystem || '';        // 续问保留原子系统（append 时 subsystem 不被清空 + 续聊不触发咨询必选拦截）
@@ -1921,9 +1922,15 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       for (var i = msgs.length - 1; i >= 0; i--) { if (!chat.lastA && msgs[i].role === 'assistant') chat.lastA = msgs[i].content; if (!chat.lastQ && msgs[i].role === 'user') chat.lastQ = msgs[i].content; }
       setSubmitKind('consult');                           // 切到咨询答疑模式
       // 清空对话流后逐条渲染进气泡（assistant 用 md()，user 纯文本转义——appendBubble 已按 who 区分：ai 走 md、me 走 md 但内容纯文本无 markdown）
+      // Part B：每条消息带 media 就在该气泡内显图（随该轮就位、和文字按时间穿插），不再统一贴末尾。
       var box = chatBox(); if (box) box.innerHTML = '';
-      msgs.forEach(function (m) { appendBubble(m.role === 'user' ? 'me' : 'ai', m.content); });
-      appendMediaBubble(item.project || it.project, item.media);   // Bug A：恢复该咨询附的截图（记录级 media → /api/intake-media 取图）
+      var proj0 = item.project || it.project, anyMsgMedia = false;
+      msgs.forEach(function (m) {
+        var urls = (m.media && m.media.length) ? mediaUrls(proj0, m.media) : [];
+        if (urls.length) anyMsgMedia = true;
+        appendBubble(m.role === 'user' ? 'me' : 'ai', m.content, false, urls);   // urls 非空 → 气泡内附该轮截图缩略图
+      });
+      if (!anyMsgMedia) appendMediaBubble(proj0, item.media);   // 旧记录兜底：消息级无 media（老 consult 只有记录级 e.media）→ 仍把图贴末尾，别让老记录图丢失
       markLeftActive('consult', chat.convId);                       // Bug B：左侧对应条标为选中
       clearPendingImages();   // reopen 续聊 → 重置待附截图（输入态）
       scrollChatBottom();
@@ -1939,8 +1946,10 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       var item = (r.body && r.body.item) || null;
       if (!item) return;
       // 恢复会话：把工单 chat（含 user/assistant/dev 多角色）转成气泡流。dev（开发回复）并入 assistant 侧展示。
-      var msgs = Array.isArray(item.chat) ? item.chat.map(function (m) { return { role: (m.role === 'user' ? 'user' : 'assistant'), content: m.text || '' }; }).filter(function (m) { return m.content; }) : [];
-      chat.messages = msgs;
+      // Part B：保留每条消息的 media（per-message），渲染时随该轮就位（旧记录消息无 media → 末尾兜底显图，见下）。
+      var rawChat = Array.isArray(item.chat) ? item.chat : [];
+      var msgs = rawChat.map(function (m) { return { role: (m.role === 'user' ? 'user' : 'assistant'), content: m.text || '', media: (Array.isArray(m.media) ? m.media : null) }; }).filter(function (m) { return m.content || (m.media && m.media.length); });
+      chat.messages = msgs.map(function (m) { return { role: m.role, content: m.content }; });   // 发给后端的历史只带 role/content
       chat.convId = '';                                   // intake 不用 convId（intake-reply 靠 project+id 定位）
       chat.savedId = item.id || it.id;                    // ★ 标记为已建单（工单 id）：续聊走 intake-reply、不再建新单
       chat.reopenIntakeProject = item.project || it.project; // ★ 锁定工单 project（intake-reply 据此 append 到同一张单）
@@ -1949,8 +1958,14 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       for (var i = msgs.length - 1; i >= 0; i--) { if (!chat.lastA && msgs[i].role === 'assistant') chat.lastA = msgs[i].content; if (!chat.lastQ && msgs[i].role === 'user') chat.lastQ = msgs[i].content; }
       setSubmitKind('intake');                            // 切到提需求/报BUG 模式（intake）
       var box = chatBox(); if (box) box.innerHTML = '';
-      msgs.forEach(function (m) { appendBubble(m.role === 'user' ? 'me' : 'ai', m.content); });
-      appendMediaBubble(item.project || it.project, item.media);   // Bug A：恢复该工单附的截图（记录级 media → /api/intake-media 取图）
+      // Part B：每条消息带 media 就在该气泡内显图（随该轮就位），旧记录消息无 media → 末尾兜底。
+      var proj0 = item.project || it.project, anyMsgMedia = false;
+      msgs.forEach(function (m) {
+        var urls = (m.media && m.media.length) ? mediaUrls(proj0, m.media) : [];
+        if (urls.length) anyMsgMedia = true;
+        appendBubble(m.role === 'user' ? 'me' : 'ai', m.content, false, urls);
+      });
+      if (!anyMsgMedia) appendMediaBubble(proj0, item.media);   // 旧记录兜底：消息级无 media → 记录级 e.media 贴末尾，别让老记录图丢失
       appendArchiveCard({ id: chat.savedId, type: item.type || it.type, site: item.site || '', subsystem: item.subsystem || '', version: item.version || '', priority: item.priority, project: item.project || it.project });   // 显「已建单 <id>（<类型>）」归档卡片 + per-ticket 紧急程度（AC-32，回显工单已有档）
       markLeftActive('intake', chat.savedId);                       // Bug B：左侧对应条标为选中
       clearPendingImages();
@@ -2695,9 +2710,13 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   }
 
   // AI 版本感知初判（intake-analyze，建单后即时展示 · NH-3）。未配模型/越权/失败 → 静默不展示（不阻断）。
+  // Part A（多单）：一次对话可建多张单 → 每张单各 analyze 一次，改用 per-id 去重（chat.analyzedIds），不再用单布尔 chat.analyzed（后者会挡住第 2 张起）。chat.analyzed 仍保留作快照/恢复的整体标记。
   function showAnalyze(archive, savedId) {
-    if (!savedId || chat.analyzed) return;
-    chat.analyzed = true;
+    if (!savedId) return;
+    if (!chat.analyzedIds) chat.analyzedIds = {};
+    if (chat.analyzedIds[savedId]) return;   // 该单已初判过 → 不重复
+    chat.analyzedIds[savedId] = true;
+    chat.analyzed = true;   // 保留整体标记（快照 snapshot/restore 用）
     api('/api/intake-analyze', { method: 'POST', body: JSON.stringify({ project: archive.project, id: savedId }) })
       .then(function (r) {
         var b = r.body || {};
@@ -2741,7 +2760,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     setSending(true);
     if (chat.submitKind === 'consult') sendConsult(imgs);
     // 安全续聊（杜绝重单）：reopen 的已建单（intake 模式 + savedId + 锁定的工单 project）→ 走 intake-reply append 同一张单，绝不走 intake-chat 再建新单。
-    else if (chat.savedId && chat.reopenIntakeProject) sendIntakeReply(text);
+    else if (chat.savedId && chat.reopenIntakeProject) sendIntakeReply(text, imgs);
     else sendIntake(imgs);
   }
 
@@ -2770,14 +2789,18 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       if (thinking) { setThinking(thinking, false); thinking.classList.remove('streaming'); thinking.innerHTML = md(reply); }
       chat.messages.push({ role: 'assistant', content: reply });
       chat.lastA = reply;
-      // AC-11/12/22：AI 产出 record 且服务端建单 → savedId 非空；同会话已建单则不重复建
-      if (b.savedId && !chat.savedId) {
-        chat.savedId = b.savedId;
-        var info = { id: b.savedId, type: (archive._recType || ''), site: archive.site, subsystem: archive.subsystem, version: archive.version };
-        // 建单后回读类型：从 intake-list 拿不划算，直接据 chip 展示；type 由 analyze 卡补充。默认按当前视图无法判 req/bug → 用中性展示
-        appendArchiveCard({ id: b.savedId, type: info.type, site: archive.site, subsystem: archive.subsystem, version: archive.version, priority: b.priority, project: archive.project });   // AC-32：卡片带该单 AI 判的紧急程度（响应 b.priority）+ project → 现场可逐条改
-        showAnalyze(archive, b.savedId);   // NH-3：建单后即时 AI 初判
-        refreshLeftList();                 // 建单后刷新左侧提交清单（可回链）
+      // Part A（多单）：AI 一次可产出多个 intake-record → 服务端建多张单，回带 savedIds:[{id,type,priority}]；老结构只回 savedId → 兼容归一成单元素数组。
+      // AC-11/12/22 幂等：同会话已建单（chat.savedId 非空）则本轮不再建卡（intake-chat 服务端仅在 AI 再出新 record 时建单）。
+      var tickets = Array.isArray(b.savedIds) && b.savedIds.length
+        ? b.savedIds
+        : (b.savedId ? [{ id: b.savedId, type: (archive._recType || ''), priority: b.priority }] : []);
+      if (tickets.length && !chat.savedId) {
+        chat.savedId = tickets[0].id;   // 幂等锚点：本会话已建单（首张）；同会话续聊不再建新单/新卡
+        tickets.forEach(function (t) {
+          appendArchiveCard({ id: t.id, type: t.type || '', site: archive.site, subsystem: archive.subsystem, version: archive.version, priority: t.priority, project: archive.project });   // AC-32：每张单各带自己 AI 判的紧急程度 + project → 现场逐条改
+          showAnalyze(archive, t.id);   // NH-3：每张单建单后即时 AI 初判
+        });
+        refreshLeftList();              // 建单后刷新左侧提交清单（可回链，多张单都在）
       }
       scrollChatBottom();
       saveDraft();
@@ -2791,12 +2814,12 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
 
   // 安全续聊：reopen 的已建工单再发言 → intake-reply（把补充 append 到同一张单 + AI 继续答），绝不建重单（区别于 sendIntake 的 intake-chat 会再建单）。
   //   入参锁定：project=chat.reopenIntakeProject（reopen 时锁的工单 project）、id=chat.savedId（工单 id）、message=本轮文本。
-  function sendIntakeReply(text) {
+  function sendIntakeReply(text, imgs) {
     var thinking = appendBubble('ai', '', true);
     setThinking(thinking, true);
     api('/api/intake-reply', {
       method: 'POST',
-      body: JSON.stringify({ project: chat.reopenIntakeProject, id: chat.savedId, message: text })
+      body: JSON.stringify({ project: chat.reopenIntakeProject, id: chat.savedId, message: text, images: (Array.isArray(imgs) && imgs.length) ? imgs : undefined })   // Part B：续聊带图 → 后端存图 + 挂本轮消息（reopen 按轮显图）；无图不带 images 向后兼容
     }).then(function (r) {
       setSending(false);
       var b = r.body || {};

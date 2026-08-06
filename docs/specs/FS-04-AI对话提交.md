@@ -64,8 +64,8 @@ depends_on: [FS-01]
 ### C. 对话四步 —— 输入 / 判类 / 追问补要素（提需求·报BUG 模式，复用 intake-chat）
 - **AC-9** Given「提需求 / 报BUG」模式、对话流 When 在输入框输入自然语言并**回车**（或点发送）Then 追加一条我方气泡（`.f-msg.me`），并以当前会话历史 `messages[]` 调 `POST /api/intake-chat`（`type='intake'` 合并模式让 AI 判需求/BUG；带 `project`/`version`/`site`/`subsystem` 归档上下文），AI 回复追加为 `.f-msg.ai` 气泡。
 - **AC-10** Given AI 判为需求或 BUG 但要素不全 When AI 回复 Then 回复为**追问**（补齐 现象 / 复现 / 影响 等要素），会话继续、**尚未建单**（`savedId` 为空），现场可继续补充。
-- **AC-11** Given 要素补齐、AI 在回复里给出 ```` ```intake-record``` ```` 结构块（含 `title` 等）When `/api/intake-chat` 返回 Then 服务端**自动建单**（`intakes` 表新增一条，`type` = AI 判定的 `requirement|bug`、`status/lifecycle='待处理'`），返回 `savedId`（非空）；前端据 `savedId` 展示「已归档为工单 <id>」并进入运营端工单流（可回链左侧清单，本条只需给出建单成功反馈）。
-- **AC-12** Given 已通过 `savedId` 建单 When 同一会话继续对话且 AI 未再产出新 record Then **不重复建单**（同一会话至多一张工单，除非「新对话」；幂等见 AC-22）。
+- **AC-11** Given 要素补齐、AI 在回复里给出 ```` ```intake-record``` ```` 结构块（含 `title` 等）When `/api/intake-chat` 返回 Then 服务端**自动建单**（`intakes` 表新增一条，`type` = AI 判定的 `requirement|bug`、`status/lifecycle='待处理'`），返回 `savedId`（首张，非空）；**一次回复可含多个** ```` ```intake-record``` ```` **块**（AI 判定为多条独立需求/BUG 时，一条问题一块）→ 服务端 `matchAll` **每块各建一张单**、返回 `savedIds:[{id,type,priority}]`（逐张），坏块（无法解析/无 `title`）跳过不建脏单。**AI 提示词强化**：`intakeChatSystem` 明确「你就是进件系统本身，够了直接输出归档块建单」，**绝不**退化成"已整理为 N 条可复制提交/复制到你们的需求管理系统"这类让用户手工搬运的 prose。
+- **AC-12** Given 服务端返回 `savedIds` When 前端处理 Then 据 `savedIds` 建**多张已建单卡**（各自 `id`/`type`/`priority`，配合 per-ticket 紧急程度 AC-32），`showAnalyze` 按 `chat.analyzedIds` per-id 去重（每张单各初判一次）；`chat.savedId`=首张作幂等锚点，同会话继续对话且 AI 未再产出**新** record 则**不重复建单**（幂等见 AC-22）。**单条需求仍恰建一张**（不回归）。
 
 ### D. 归档建议确认 + 直接表单提交（intake-submit 兜底路径）
 - **AC-13** Given AI 给出归档建议（产品 · 子系统 · 版本 · 客户医院）When 现场确认 Then 建单以该归档上下文落库（`project`=产品、`subsystem`=子系统、`version`=版本、`site`=医院），字段来自 chip 上下文 + 会话，不需现场手填全表单。
@@ -97,11 +97,12 @@ depends_on: [FS-01]
 - **AC-29【图片输入态 · 不进草稿/快照】** Given 待发送截图 When 页面刷新 / 切系统上下文 / 新对话 / reopen Then 截图是**纯输入态**：**不**进 `chat.bySystem` 会话快照、**不**进草稿端存储（`saveDraft`/`snapshotConversation` 均**不含** images），刷新即弃、切系统/新对话/reopen 时 `clearPendingImages()` 重置（避免大 base64 对象进 sessionStorage 膨胀 + FS-01 A5 长效存储禁令）。
 - **AC-30【AI 多模态看图】** Given 本轮提交附了截图 When 服务端调模型（`intake-chat` 走 `callModel`、`consult` 走 `callModelStream`）Then 图片经 `withImages(messages, images, isAnthropic)` **并进最后一条 user 消息的 content**（多模态块）——anthropic 格式 `{type:'image',source:{type:'base64',media_type,data}}`、openai 兼容格式 `{type:'image_url',image_url:{url:<data URL>}}`（从 data URL 正则解析 `media_type`+base64）；**无图时 content 保持字符串**（`if(!imgs.length) return messages`，纯文本调用一字不变、向后兼容）；只并进末条 user、历史消息不改、≤6 张封顶、非法 data URL 过滤；系统提示在有图时追加一句「用户本轮可能附了截图，请结合图片理解问题」，`maxTokens` 不因图无脑加大（≤6 张、单张已压缩）。
 - **AC-31【建单存图】** Given `intake-chat` 附图并 AI 产出 `intake-record` 建单 When 落库 Then 截图 data URL（≤6）落 `intake-store/<proj>/media/<id>/img-N.png`、记 `e.media=['media/<id>/img-N.png']`（存 `data` JSON 内、无新列），运营端 `detail.html` 按 `e.media` 展示「截图（N）」、`/api/intake-media`（防穿越）只读取回——此为**现有能力**（`intake-submit`/`intake-chat` 已实现），本条补齐前端 UI 让其可用。
+- **AC-33【附图按轮落位 · per-message media】** Given 某轮带图提交 When 落库 Then 除记录级 `e.media` 外，把本轮图挂到该轮 `chat` 的**末条 user 消息**（`msg.media`）；`intake-chat`/`intake-reply` 挂当前单、`consult` 每轮重建 chat 时**从 `prev.chat` 按第 K 条 user 回贴历史轮 media** 再挂本轮末条（防历史轮图丢失）。And reopen（`reopenConsult`/`reopenIntake`）遍历消息**按轮在该气泡内显图**（随文字时间穿插）；**旧记录**（消息无 `media`、仅记录级 `e.media`）兜底贴末尾不丢图。`detail.html` 仍按 `e.media` 显图不变。
 
 ### H. 紧急程度（每张已建单卡片各设各的 · per-ticket · AC-32 重做 2026-08-06）
 - **AC-32【每张已建单卡片各设紧急程度 · per-ticket】** Given 现场「提需求/报BUG」对话一次可建**多张单**（AI 每产出一个 `intake-record` 建一张）When 某张单建成 Then 该「已建单」卡片上带自己的「紧急程度」选择器（`.f-arch-pri` 四档 紧急/高/中/低，顺序/配色与 `inbox.html` 一致），**默认选中该单当前 `priority`**（=AI 按严重度/影响面判、`intakeChatSystem` 提示 record.priority∈四档、缺省中）；**顶部工具条无全局选择器**（删 `#fPriSel`/`chat.priority`——全局一个无法表达"一对话多单各不同"）。And 现场在某卡片选某档 → `POST /api/intake-set-priority {project,id,priority}`：仅 `requirement|bug` 可设（consult 恒空、拒），现场按 `user.sites` 收敛（`e.site∈sites`，管理员不限，越权 403），`normPriority(b.priority, e.priority||'中')`（合法即用、非法回落**原值**），`e.history.push(note:'调整紧急程度→X')` 留痕，`saveIntake` 落 `intakes.priority`（VARCHAR(10)，无新列）——**只改这一张、别张不动**。And `/api/intake-chat` 响应体带 `priority`（=建单最终档，供卡片默认选中）；`reopenIntake`/草稿·系统恢复重建卡片同样回显该单档（后者用 `/api/intake-detail` 懒加载）。And 后台 `inbox.html`/`detail.html` 按该 priority 四档配色，改「紧急」→ detail 显红「紧急」。（`intake-submit` 表单直提是单工单路径，`priority` 天然 per-ticket，保留 `normPriority(b.priority,'中')`。）
 
-> **AC 计数**：共 **32** 条（AC-1..32，其中 AC-19-KB 计为第 19 条）。AC-1..26 全 P1；AC-27..31（附图+多模态，2026-07-24）P1；AC-32（现场手选紧急程度，2026-08-06）P1。
+> **AC 计数**：共 **33** 条（AC-1..33，其中 AC-19-KB 计为第 19 条）。AC-1..26 全 P1；AC-27..31（附图+多模态，2026-07-24）P1；AC-32（现场手选紧急程度，2026-08-06）P1；AC-33（附图按轮落位，2026-08-06）P1。
 
 ## 4. 接口契约
 > 统一前缀 `/api`；除 `consult`（SSE）外返回 `{...}` JSON。**本条 100% 复用现有端点，不新增端点**；提交人 `reporter`、归档医院 `site` 服务端按当前登录用户收敛（忽略越权传参）。契约锚点见 `docs/specs/00-实施端-spec清单.md §4` 对照表。

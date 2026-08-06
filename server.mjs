@@ -785,10 +785,13 @@ function intakeChatSystem(proj, type, ver, subKey) {
 按提交标准核对信息是否齐（缺什么问什么，已说清的别重复问）：
 ${std}
 
-当信息按标准基本齐、且子系统/模块已确认（或标待定）后：先用一两句确认你的理解(若是 BUG 顺带给处理意见)，然后在回复的最末尾附一个归档块（用户看不到里面内容，别在正文里提"归档块"三个字），严格 JSON、字段名照抄：
+【你就是进件系统本身 · 直接建单，绝不让用户去别处复制粘贴】——你不是"帮用户整理文字再让 TA 拿去别的需求/工单系统提交"的助手；你输出的归档块**就是这套系统直接据以建单**的指令。信息齐了就**直接输出归档块建单**，绝不把单子写成"已整理为N条，可复制提交""请复制到你们的需求管理系统"这类给用户手工搬运的文字（那是错的、之前就踩过这个坑）。
+
+当信息按标准基本齐、且子系统/模块已确认（或标待定）后：先用一两句确认你的理解(若是 BUG 顺带给处理意见)，然后在回复的最末尾附归档块（用户看不到里面内容，别在正文里提"归档块"三个字），严格 JSON、字段名照抄：
 \`\`\`intake-record
 {"type":"","subsystem":"","module":"","title":"","priority":"中","desc":"","errorInfo":"","steps":"","expectResult":"","severity":"","scope":"","env":"","freq":"","bg":"","reqDesc":"","accept":"","relate":"","opinion":""}
 \`\`\`
+【一条问题一个块 · 多条就输出多个块】TA 一次可能说了**多条**需求/BUG——每条独立问题各自输出**一个 intake-record 块**（系统会据此各建一张单）；有几条齐了就在回复末尾接连附几个 intake-record 块（块与块之间可空行），**绝不**把多条塞进一个块、也绝不因"有多条"就退化成纯文字让用户自己复制。哪几条还没问清就先别为那几条出块，继续追问补齐即可（已齐的照常出块）。
 ${merged ? 'type 必填："bug"(问题/缺陷) 或 "requirement"(需求/改进)，按你判断的类别填；' : `type 填 "${type}"；`}priority 必填，按问题严重度/影响面判定，取值仅限【紧急/高/中/低】：紧急=线上阻断/资损/大面积无法使用；高=核心流程受阻但有临时办法或影响部分人；中=一般问题/改进(默认)；低=轻微/优化建议。拿不准填「中」。只有信息按标准基本齐才输出 record；还在澄清阶段就别输出。`;
 }
 async function intakeAI(proj, e) {   // 组装对话喂模型，返回 AI 文本
@@ -2095,7 +2098,17 @@ const server = http.createServer((req, res) => {
       const proj = projById(b.project); if (!proj) return send(res, 400, JSON.stringify({ ok: false, error: '项目不存在' }));
       const e = loadIntake(proj, b.id); if (!e) return send(res, 404, JSON.stringify({ ok: false, error: 'not found' }));
       const msg = (b.message || '').trim(); if (!msg) return send(res, 400, JSON.stringify({ ok: false, error: 'empty' }));
-      e.chat = e.chat || []; e.chat.push({ role: 'user', text: msg, ts: Date.now() }); await saveIntake(proj, e);
+      // Part B（per-message media · intake-reply）：续聊某轮带图 → 存到该单 media 目录（从已有 media 数累加、封顶 6），并把本轮图挂到本条 user 消息（reopen 时随该轮就位）。
+      const rImgs = (Array.isArray(b.images) ? b.images : []).slice(0, 6);
+      const rPrevMedia = Array.isArray(e.media) ? e.media.slice() : [];
+      const rRoundMedia = [];
+      try {
+        const room = Math.max(0, 6 - rPrevMedia.length); const add = rImgs.slice(0, room);
+        if (add.length) { const mdir = path.join(intakeDir(proj), 'media', e.id); fs.mkdirSync(mdir, { recursive: true }); add.forEach((du, i) => { const mm = /^data:image\/\w+;base64,(.+)$/.exec(du || ''); if (mm) { const n = rPrevMedia.length + i + 1; fs.writeFileSync(path.join(mdir, `img-${n}.png`), Buffer.from(mm[1], 'base64')); const p = `media/${e.id}/img-${n}.png`; rRoundMedia.push(p); } }); }
+      } catch {}
+      if (rRoundMedia.length) e.media = rPrevMedia.concat(rRoundMedia);   // 记录级 media 累加（detail.html 兼容）
+      const userMsg = { role: 'user', text: msg, ts: Date.now() }; if (rRoundMedia.length) userMsg.media = rRoundMedia.slice();
+      e.chat = e.chat || []; e.chat.push(userMsg); await saveIntake(proj, e);
       const ai = await intakeAI(proj, e); e.chat.push({ role: 'assistant', text: ai.reply, ts: Date.now() }); saveIntake(proj, e);
       send(res, 200, JSON.stringify({ ok: true, reply: ai.reply }));
     });
@@ -2115,20 +2128,30 @@ const server = http.createServer((req, res) => {
       const imgs = (Array.isArray(b.images) ? b.images : []).slice(0, 6);   // 本轮附的截图（data URL，≤6）→ 多模态并进末条 user，让 AI 结合图判类/建单
       let reply; try { reply = await callModel(cfg, { system: intakeChatSystem(proj, type, version, sub) + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题/复现场景。' : ''), messages: msgs, images: imgs, maxTokens: 800 }); }
       catch (e) { return send(res, 200, JSON.stringify({ ok: true, reply: '（AI 暂时连不上：' + String((e && e.message) || e) + '，稍后再试。）' })); }
-      let savedId = '', savedPriority = '';   // savedPriority：建单后回带该单 priority（AC-32 per-ticket，现场卡片默认档）
-      const m = /```intake-record\s*([\s\S]*?)```/.exec(reply || '');
-      if (m) { let rec = null; try { rec = JSON.parse(m[1].trim()); } catch {}
-        if (rec && (rec.title || '').trim()) {
-          const recType = type === 'intake' ? (String(rec.type || '').toLowerCase() === 'bug' ? 'bug' : 'requirement') : type;   // 合并模式取 AI 判定的类型
-          const id = intakeGenId(proj, recType), stamp = nowStamp(), reporter = user ? (user.name || user.username) : (link ? link.name : ''), media = [];
-          try { const mdir = path.join(intakeDir(proj), 'media', id); const imgs = (b.images || []).slice(0, 6); if (imgs.length) fs.mkdirSync(mdir, { recursive: true }); imgs.forEach((du, i) => { const mm = /^data:image\/\w+;base64,(.+)$/.exec(du || ''); if (mm) { fs.writeFileSync(path.join(mdir, `img-${i + 1}.png`), Buffer.from(mm[1], 'base64')); media.push(`media/${id}/img-${i + 1}.png`); } }); } catch {}
-          // AC-32（2026-08-06 改）：紧急程度改「per-ticket」——不再被全局 b.priority 覆盖；按 AI 每条 record 判定的 rec.priority 规范到四档（非法/空→中）。现场逐条改档走 /api/intake-set-priority（本次响应回带 priority 作现场卡片默认档）。
-          const e = { id, type: recType, project: proj.id, version, site, subsystem: sub || rec.subsystem || '', module: rec.module || '', title: (rec.title || '').trim(), priority: normPriority(rec.priority, '中'), severity: rec.severity || '', scope: rec.scope || '', env: rec.env || '', freq: rec.freq || '', reporter, role: '', contact: '', bg: rec.bg || '', reqDesc: rec.reqDesc || '', scene: '', accept: rec.accept || '', relate: rec.relate || '', desc: rec.desc || '', errorInfo: rec.errorInfo || '', steps: rec.steps || '', expectResult: rec.expectResult || '', opinion: rec.opinion || '', media, status: '待处理', lifecycle: '待处理', assignee: '', history: [{ from: '', to: '待处理', by: reporter, byRole: (user ? user.role : 'field'), at: stamp, note: '对话提交' }], analysis: null, resolution: {}, submittedAt: stamp, chat: msgs.map(x => ({ role: x.role, text: x.content, ts: Date.now() })) };
-          await saveIntake(proj, e); savedId = id; savedPriority = e.priority;   // 回带该单最终 priority → 现场卡片显默认档、可逐条改
-        }
-        reply = reply.replace(m[0], '').trim();
+      let savedId = '', savedPriority = '';   // 单条兼容：老前端只读 savedId/priority（首张单），保持不变
+      const savedIds = [];                     // Part A：多条需求 → 多个 intake-record 块 → 多张单，逐张回带 {id,type,priority} 供前端建多张卡
+      // Part A：AI 一次可产出多个 intake-record 块（一条需求/BUG 一个块）→ 全量解析、每块各建一张单（不再只取第一个块）。
+      const blockRe = /```intake-record\s*([\s\S]*?)```/g;
+      const blocks = [...(reply || '').matchAll(blockRe)];
+      for (const m of blocks) {
+        let rec = null; try { rec = JSON.parse(m[1].trim()); } catch {}
+        if (!rec || !(rec.title || '').trim()) continue;   // 无法解析/无标题的块跳过（不建脏单），其余块照常
+        const recType = type === 'intake' ? (String(rec.type || '').toLowerCase() === 'bug' ? 'bug' : 'requirement') : type;   // 合并模式取 AI 判定的类型
+        const id = intakeGenId(proj, recType), stamp = nowStamp(), reporter = user ? (user.name || user.username) : (link ? link.name : ''), media = [];
+        // Part B：本轮附图存到「该单」media 目录（多张单各存一份，保持每张单自包含、便于单独清理），路径记 e.media（detail.html 用）+ 挂到该单 chat 末条 user 消息（reopen 按轮显图）。
+        try { const mdir = path.join(intakeDir(proj), 'media', id); if (imgs.length) fs.mkdirSync(mdir, { recursive: true }); imgs.forEach((du, i) => { const mm = /^data:image\/\w+;base64,(.+)$/.exec(du || ''); if (mm) { fs.writeFileSync(path.join(mdir, `img-${i + 1}.png`), Buffer.from(mm[1], 'base64')); media.push(`media/${id}/img-${i + 1}.png`); } }); } catch {}
+        // Part B（per-message media）：把本轮图挂到该单 chat 的「最后一条 user」消息上（=本轮发言）；旧记录无 msg.media 时前端兜底走记录级 e.media。
+        const chatMsgs = msgs.map(x => ({ role: x.role, text: x.content, ts: Date.now() }));
+        if (media.length) { for (let i = chatMsgs.length - 1; i >= 0; i--) { if (chatMsgs[i].role === 'user') { chatMsgs[i].media = media.slice(); break; } } }
+        // AC-32（2026-08-06 改）：紧急程度改「per-ticket」——不再被全局 b.priority 覆盖；按 AI 每条 record 判定的 rec.priority 规范到四档（非法/空→中）。现场逐条改档走 /api/intake-set-priority（本次响应回带 priority 作现场卡片默认档）。
+        const e = { id, type: recType, project: proj.id, version, site, subsystem: sub || rec.subsystem || '', module: rec.module || '', title: (rec.title || '').trim(), priority: normPriority(rec.priority, '中'), severity: rec.severity || '', scope: rec.scope || '', env: rec.env || '', freq: rec.freq || '', reporter, role: '', contact: '', bg: rec.bg || '', reqDesc: rec.reqDesc || '', scene: '', accept: rec.accept || '', relate: rec.relate || '', desc: rec.desc || '', errorInfo: rec.errorInfo || '', steps: rec.steps || '', expectResult: rec.expectResult || '', opinion: rec.opinion || '', media, status: '待处理', lifecycle: '待处理', assignee: '', history: [{ from: '', to: '待处理', by: reporter, byRole: (user ? user.role : 'field'), at: stamp, note: '对话提交' }], analysis: null, resolution: {}, submittedAt: stamp, chat: chatMsgs };
+        await saveIntake(proj, e);
+        savedIds.push({ id, type: recType, priority: e.priority });   // 逐张单：id + AI 判定类型 + 最终紧急档
+        if (!savedId) { savedId = id; savedPriority = e.priority; }   // 首张单回填单条字段（老前端兼容）
       }
-      send(res, 200, JSON.stringify({ ok: true, reply, savedId, priority: savedPriority }));
+      // 把所有归档块从可见正文里剔除（用户不该看到结构块）
+      reply = (reply || '').replace(blockRe, '').trim();
+      send(res, 200, JSON.stringify({ ok: true, reply, savedId, priority: savedPriority, savedIds }));
     });
   }
   if (url.pathname === '/api/consult' && req.method === 'POST') {   // 答疑：直连 spec + 经验库直接回答 + 给解决思路
@@ -2171,15 +2194,24 @@ const server = http.createServer((req, res) => {
         //   续聊同 convId：从已有 media 数量起序号累加（不覆盖前几轮截图），累计封顶 6 张；base 目录用 convId（此处 id===convId）。
         const prevMedia = (prev && Array.isArray(prev.media)) ? prev.media.slice() : [];
         const media = prevMedia.slice();
+        const roundMedia = [];   // Part B：仅本轮新增图的路径 → 挂到本轮 user 消息上（per-message media）
         try {
           const room = Math.max(0, 6 - prevMedia.length); const add = imgs.slice(0, room);   // 累计不超过 6 张
-          if (add.length) { const mdir = path.join(intakeDir(proj), 'media', convId); fs.mkdirSync(mdir, { recursive: true }); add.forEach((du, i) => { const mm = /^data:image\/\w+;base64,(.+)$/.exec(du || ''); if (mm) { const n = prevMedia.length + i + 1; fs.writeFileSync(path.join(mdir, `img-${n}.png`), Buffer.from(mm[1], 'base64')); media.push(`media/${convId}/img-${n}.png`); } }); }
+          if (add.length) { const mdir = path.join(intakeDir(proj), 'media', convId); fs.mkdirSync(mdir, { recursive: true }); add.forEach((du, i) => { const mm = /^data:image\/\w+;base64,(.+)$/.exec(du || ''); if (mm) { const n = prevMedia.length + i + 1; fs.writeFileSync(path.join(mdir, `img-${n}.png`), Buffer.from(mm[1], 'base64')); const p = `media/${convId}/img-${n}.png`; media.push(p); roundMedia.push(p); } }); }
         } catch {}
         const reporter = user ? (user.name || user.username) : (link ? link.name : '现场');
         // 标题取「第一句问话」（会话原始问题），续聊保留原标题 —— 避免被后续消息（如手打「转工单」）覆盖成无意义标题。
         const firstUser = msgs.find(m => m.role === 'user');
         const title = (prev && String(prev.title || '').trim()) ? prev.title : (((firstUser && firstUser.content) || (msgs[0] && msgs[0].content) || '系统咨询').replace(/\s+/g, ' ').trim().slice(0, 60));
         const chat = [...msgs.map(x => ({ role: x.role, text: x.content })), { role: 'assistant', text: reply, ts: Date.now() }];
+        // Part B（per-message media · consult）：consult 每轮用整段 msgs 重建 chat（会丢前几轮消息级 media）——
+        //   ① 先把上一版 prev.chat 里 user 消息带的 media 按「第 K 条 user」顺序回贴到重建后的 chat；② 再把本轮新增图挂到「最后一条 user」（=本轮发言）。
+        //   前端 msgs 只有 {role,content} 无 media，故必须从 prev.chat 补齐历史轮，避免 reopen 时旧轮图丢失。
+        try {
+          const prevUserMedia = (prev && Array.isArray(prev.chat) ? prev.chat : []).filter(m => m && m.role === 'user').map(m => (Array.isArray(m.media) ? m.media.slice() : null));
+          let ui = 0; for (const m of chat) { if (m.role === 'user') { const pm = prevUserMedia[ui]; if (pm && pm.length) m.media = pm; ui++; } }
+          if (roundMedia.length) { for (let i = chat.length - 1; i >= 0; i--) { if (chat[i].role === 'user') { chat[i].media = ((chat[i].media || []).concat(roundMedia)); break; } } }
+        } catch {}
         const rec = { id: convId, type: 'consult', project: proj.id, version: String(b.version || '').trim() || (link ? link.ver : ''), site: String(b.site || '').trim() || (link ? link.site : ''), subsystem: sub, module: '', title, priority: '', reporter, role: user ? user.role : 'field', contact: '', media, status: '沟通中', lifecycle: '已答复', assignee: '', analysis: null, resolution: {}, chat, submittedAt: (prev && prev.submittedAt) || nowStamp(), updatedAt: nowStamp() };
         await saveIntake(proj, rec);
       } catch (e) { convId = ''; }
