@@ -487,6 +487,9 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
 .f-chat-f .send { border: none; border-radius: 10px; background: var(--color-primary); color: #fff; font-weight: 700; padding: 0 20px; height: 44px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .f-chat-f .send:hover { background: var(--sidebar-bg); }
 .f-chat-f .send:disabled { opacity: .55; cursor: not-allowed; }
+/* 发送中「停止」态：红色，可点=中断本轮 AI 生成 */
+.f-chat-f .send.stop { background: #e5484d; }
+.f-chat-f .send.stop:hover { background: #c0393e; }
 /* 待发送截图缩略图预览条（输入框上方；每张带删除 ×，发送后清空） */
 .f-img-preview { display: none; flex-wrap: wrap; gap: 8px; }
 .f-img-preview.on { display: flex; }
@@ -2452,6 +2455,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     reopenSessionId: '',    // reopen 某条 intake 对话记录时锁定的 sessionId（恢复整段对话 + 该会话建的多张已建单卡；续聊仍走 intake-reply 到代表单）
     analyzed: false,        // 是否已展示过 AI 初判（避免重复 analyze）
     sending: false,         // 发送中（防并发/防重复）
+    abortCtrl: null,        // 「停止」功能：本轮发送的 AbortController——发送中点「停止」→ abort()，三条发送路径（consult SSE / intake-chat / intake-reply）都带 signal 中断；收尾复位为 null
     lastQ: '', lastA: '',   // 最近一轮问答（供咨询「沉淀经验库」kb-from-consult）
     reopenProject: '',      // 点击咨询记录续聊时锁定该 consult 的 project（保证续问 append 到同一条 consult：同 convId + 同 project）
     reopenSubsystem: '',     // 续聊时锁定该 consult 的原子系统（续问 append 时不清空 subsystem；且续聊不触发咨询必选拦截）
@@ -2511,6 +2515,9 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     chat.reopenSubsystem = snap.reopenSubsystem || '';
     chat.reopenIntakeProject = snap.reopenIntakeProject || '';   // 恢复 reopen 的工单锁定 project（切回续聊仍走 intake-reply）
     chat.deep = !!snap.deep;   // 恢复该系统会话的「深入思考」设置
+    // 「停止」：切系统恢复会话时若上一段还在发送中 → abort 旧请求（避免旧流式串进恢复出的会话）
+    if (chat.sending && chat.abortCtrl) { try { chat.abortCtrl.abort(); } catch (e) {} }
+    chat.abortCtrl = null;
     chat.sending = false;
     setSubmitKind(chat.submitKind);   // 同步类型切换器按钮态 + 输入框 placeholder + 深入思考显隐（内部会 syncDeep + saveDraft）
     var box = chatBox();
@@ -2805,6 +2812,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     appendBubble('me', text || '（截图）', false, imgs);   // 我方气泡显文本 + 所附截图缩略图
     chat.messages.push({ role: 'user', content: text || '（截图）' });
     chat.lastQ = text;
+    chat.abortCtrl = new AbortController();   // 「停止」：本轮发送的中断控制器，signal 传进三条发送路径的 fetch/api；点「停止」→ abort()
     setSending(true);
     if (chat.submitKind === 'consult') sendConsult(imgs);
     // 安全续聊（杜绝重单）：reopen 的已建单（intake 模式 + savedId + 锁定的工单 project）→ 走 intake-reply append 同一张单，绝不走 intake-chat 再建新单。
@@ -2812,10 +2820,31 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     else sendIntake(imgs);
   }
 
+  // 发送态切换：发送中把「发送」按钮切成「停止」态（不置灰死，仍可点=中断本轮 AI 生成）；结束切回「发送」。
+  //   停止态：换文案「停止」+ 图标 ti-player-stop + 加 .stop 类（红色）；点它 → stopSending() abort 本轮请求。
   function setSending(on) {
     chat.sending = on;
-    var btn = $('fChatSend'); if (btn) btn.disabled = on;
+    var btn = $('fChatSend'); if (!btn) return;
+    if (on) {
+      btn.disabled = false;   // 停止态可点（原来发送中置灰，现改成能点=停止）
+      btn.classList.add('stop');
+      btn.innerHTML = '<i class="ti ti-player-stop"></i> 停止';
+    } else {
+      btn.disabled = false;
+      btn.classList.remove('stop');
+      btn.innerHTML = '<i class="ti ti-send"></i> 发送';
+    }
   }
+
+  // 「停止」：发送中点发送按钮（此时是停止态）→ abort 本轮请求。三条路径的 fetch/api 都带了 signal，abort 即中断：
+  //   consult（流式）→ reader 循环 catch → finishConsult 保留已生成部分；intake-chat/reply → api catch AbortError → 清动效不弹错误 toast。
+  //   实际收尾（sending 复位、按钮切回、abortCtrl=null）由各路径统一在收尾处做，这里只触发 abort。
+  function stopSending() {
+    if (!chat.sending) return;
+    if (chat.abortCtrl) { try { chat.abortCtrl.abort(); } catch (e) {} }
+  }
+  // 判断一个 error 是否「用户主动停止」（AbortError），以区分真网络错误：不弹错误 toast、不走人工兜底。
+  function isAbort(e) { return !!(e && (e.name === 'AbortError' || (chat.abortCtrl && chat.abortCtrl.signal && chat.abortCtrl.signal.aborted))); }
 
   // 提需求 / 报BUG → intake-chat（合并模式，AI 判需求/BUG + 边聊边补，够了输出 record 自动建单）。imgs=本轮附的截图（多模态 + 建单存图）。
   function sendIntake(imgs) {
@@ -2824,6 +2853,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     setThinking(thinking, true);   // intake 也是「等待期空气泡」（非流式，等整体回复）→ 同款思考动效，回复到达即清（下方 finish 分支 setThinking(...,false)）
     api('/api/intake-chat', {
       method: 'POST',
+      signal: chat.abortCtrl && chat.abortCtrl.signal,   // 「停止」：带上中断信号，点停止 → api 的 fetch 抛 AbortError（下方 catch 按主动停止处理）
       body: JSON.stringify({
         project: archive.project, type: 'intake', version: archive.version,
         site: archive.site, subsystem: archive.subsystem, messages: chat.messages,
@@ -2832,6 +2862,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
         images: (Array.isArray(imgs) && imgs.length) ? imgs : undefined   // 附图 → 后端多模态看图 + 建 record 时落 media
       })
     }).then(function (r) {
+      chat.abortCtrl = null;
       setSending(false);
       var b = r.body || {};
       var reply = b.reply || '（未收到回复）';
@@ -2853,8 +2884,15 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       }
       scrollChatBottom();
       saveDraft();
-    }).catch(function () {
+    }).catch(function (e) {
+      var aborted = isAbort(e);
+      chat.abortCtrl = null;
       setSending(false);
+      if (aborted) {
+        // 用户主动停止：清动效、气泡显「（已停止）」，不弹网络错误 toast、不走人工兜底
+        if (thinking) { setThinking(thinking, false); thinking.classList.remove('streaming'); thinking.innerHTML = md('（已停止）'); }
+        return;
+      }
       if (thinking) { setThinking(thinking, false); thinking.classList.remove('streaming'); thinking.innerHTML = md('（网络异常，请稍后重试）'); }
       // AI/网络不可用 → 展示人工兜底面板（AC-14），不阻断
       offerFallback();
@@ -2868,8 +2906,10 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     setThinking(thinking, true);
     api('/api/intake-reply', {
       method: 'POST',
+      signal: chat.abortCtrl && chat.abortCtrl.signal,   // 「停止」：带上中断信号，点停止 → api 的 fetch 抛 AbortError（下方 catch 按主动停止处理）
       body: JSON.stringify({ project: chat.reopenIntakeProject, id: chat.savedId, message: text, images: (Array.isArray(imgs) && imgs.length) ? imgs : undefined })   // Part B：续聊带图 → 后端存图 + 挂本轮消息（reopen 按轮显图）；无图不带 images 向后兼容
     }).then(function (r) {
+      chat.abortCtrl = null;
       setSending(false);
       var b = r.body || {};
       var reply = b.reply || '（未收到回复）';
@@ -2878,8 +2918,15 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       chat.lastA = reply;
       scrollChatBottom();
       saveDraft();
-    }).catch(function () {
+    }).catch(function (e) {
+      var aborted = isAbort(e);
+      chat.abortCtrl = null;
       setSending(false);
+      if (aborted) {
+        // 用户主动停止：清动效、气泡显「（已停止）」，不弹网络错误 toast
+        if (thinking) { setThinking(thinking, false); thinking.classList.remove('streaming'); thinking.innerHTML = md('（已停止）'); }
+        return;
+      }
       if (thinking) { setThinking(thinking, false); thinking.classList.remove('streaming'); thinking.innerHTML = md('（网络异常，请稍后重试）'); }
     });
   }
@@ -2914,7 +2961,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       deep: !!chat.deep,   // FS-06：「深入思考」开启 → 后端检索源码更深入分析（默认关走 spec+经验库）
       images: (Array.isArray(imgs) && imgs.length) ? imgs : undefined   // 附图 → 后端多模态看图 + 咨询落 media
     };
-    fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+    fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: chat.abortCtrl && chat.abortCtrl.signal })
       .then(function (resp) {
         if (!resp.body || !resp.body.getReader) {   // 无流式支持 → 退化为整体读取
           return resp.text().then(function (t) { parseSSEChunk(t, function (o) { if (o.kb) renderKbCite(bub, o.kb); onConsultEvent(o, bub, function (v) { acc += v; }); }); finishConsult(bub, acc); });
@@ -2940,7 +2987,12 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
         }
         return pump();
       })
-      .catch(function () { finishConsult(bub, acc || '（AI 暂时连不上，请稍后重试）'); });
+      .catch(function (e) {
+        // 用户主动停止（abort）：保留已流式生成的部分 acc，尾部加「（已停止）」轻提示；不显「连不上」错误文案。
+        // 真错误（网络/服务端）：acc 为空时才显连不上兜底文案。
+        if (isAbort(e)) finishConsult(bub, acc ? (acc + '\n\n（已停止）') : '（已停止）', true);
+        else finishConsult(bub, acc || '（AI 暂时连不上，请稍后重试）');
+      });
   }
 
   // 解析一段 SSE 文本（可能含多条 data: 行）
@@ -2980,11 +3032,14 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     scrollChatBottom();
   }
 
-  function finishConsult(bub, acc) {
+  // aborted=true 表示用户主动「停止」：保留已流式生成的部分文本，但不追加「沉淀经验库 / 转工单」入口（答复不完整，无价值沉淀）。
+  function finishConsult(bub, acc, aborted) {
+    chat.abortCtrl = null;   // 「停止」：本轮收尾统一复位中断控制器（done/停止/错误都经这里）
     setSending(false);
     if (bub) { setThinking(bub, false); bub.classList.remove('streaming'); if (acc) bub.innerHTML = md(acc); }   // done/停止/错误兜底清思考动效（首个 token 未到就结束时也清）
     var replyText = acc || (bub && bub.textContent) || '';
     if (replyText) { chat.messages.push({ role: 'assistant', content: replyText }); chat.lastA = replyText; }
+    if (aborted) { scrollChatBottom(); saveDraft(); return; }   // 主动停止：不追加 KB/转工单入口，仅保留已生成内容 + 存草稿
     // 咨询「已解决 → 沉淀经验库」入口（AC-19-KB）：结束后在气泡下追加一枚小按钮
     if (replyText && chat.lastQ) appendKbSink();
     // 咨询「转工单」入口（CT-3）：AI 答复结束且已有咨询会话（chat.convId）→ 追加一枚转工单按钮，实施判断该升级时点它 → 弹确认弹窗 → 直接建单（不再靠 AI 生成工单模板续聊）。
@@ -3234,6 +3289,9 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
 
   // AC-20：新对话 → 清空对话流/输入、开新会话（新 convId/新 sessionId/无 savedId），不影响已提交工单
   function newConversation() {
+    // 「停止」：切新对话/切系统时若上一轮还在发送中 → 先 abort 旧请求（signal 传进三条路径），避免旧响应/流式串进新对话
+    if (chat.sending && chat.abortCtrl) { try { chat.abortCtrl.abort(); } catch (e) {} }
+    chat.abortCtrl = null;
     chat.messages = []; chat.savedId = ''; chat.convId = ''; chat.sessionId = newSessionId(); chat.reopenSessionId = ''; chat.analyzed = false; chat.sending = false; chat.lastQ = ''; chat.lastA = ''; chat.reopenProject = ''; chat.reopenSubsystem = ''; chat.reopenIntakeProject = ''; chat.deep = false;   // 新对话重置深入思考为关（合理默认：新会话不默认耗时的源码检索）；清 reopenIntakeProject（不再锁旧工单）；新 sessionId（这次聊天建的单归新的一条对话记录）。AC-32：紧急程度已移到 per-ticket 卡片，无全局态可重置
     var box = chatBox();
     if (box) {
@@ -3626,7 +3684,9 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     // 新对话
     $('fNewC').addEventListener('click', function () { newConversation(); });
     // 发送：点按钮 + 回车（AC-9/17：自然语言输入回车发送）
-    $('fChatSend').addEventListener('click', sendChat);
+    // 发送按钮：非发送态=发送；发送态（AI 生成中，按钮显「停止」）=停止本轮
+    $('fChatSend').addEventListener('click', function () { if (chat.sending) stopSending(); else sendChat(); });
+    // 回车只发送（发送中 sendChat 内 if(chat.sending) return 自动挡住，不会误发/误停）
     $('fChatInput').addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendChat(); } });
     // 未发送内容随输入暂存（AC-23：刷新恢复当前输入）
     $('fChatInput').addEventListener('input', saveDraft);
@@ -3664,7 +3724,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   })();
 
   // 暴露给测试/调试（不含敏感数据）
-  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, openConvRec: openConvRec, closeConvRec: closeConvRec, loadConversations: loadConversations, mkConvItem: mkConvItem, reopenConversation: reopenConversation, newSessionId: newSessionId, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, setTicketPriority: setTicketPriority, newConversation: newConversation, sendChat: sendChat, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast, openMaintainEdit: openMaintainEdit, doMaintainSave: doMaintainSave, maintainChipHtml: maintainChipHtml, maintainDaysLeft: maintainDaysLeft, renderTodoBody: renderTodoBody, mkUpdatePlanBlock: mkUpdatePlanBlock, loadUpdatePlan: loadUpdatePlan, renderUpdatePlan: renderUpdatePlan, mkPlanTaskItem: mkPlanTaskItem, mkSqlBundleItem: mkSqlBundleItem, doTaskToggle: doTaskToggle, doSqlBundleToggle: doSqlBundleToggle, appendConsultToIntake: appendConsultToIntake, openConsultToIntake: openConsultToIntake, doConsultToIntake: doConsultToIntake, appendMediaBubble: appendMediaBubble, mediaUrls: mediaUrls, markLeftActive: markLeftActive, reapplyLeftActive: reapplyLeftActive, bindReopen: bindReopen, fConfirm: fConfirm, doDeleteItem: doDeleteItem, bindDelete: bindDelete };
+  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, openConvRec: openConvRec, closeConvRec: closeConvRec, loadConversations: loadConversations, mkConvItem: mkConvItem, reopenConversation: reopenConversation, newSessionId: newSessionId, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, setTicketPriority: setTicketPriority, newConversation: newConversation, sendChat: sendChat, stopSending: stopSending, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast, openMaintainEdit: openMaintainEdit, doMaintainSave: doMaintainSave, maintainChipHtml: maintainChipHtml, maintainDaysLeft: maintainDaysLeft, renderTodoBody: renderTodoBody, mkUpdatePlanBlock: mkUpdatePlanBlock, loadUpdatePlan: loadUpdatePlan, renderUpdatePlan: renderUpdatePlan, mkPlanTaskItem: mkPlanTaskItem, mkSqlBundleItem: mkSqlBundleItem, doTaskToggle: doTaskToggle, doSqlBundleToggle: doSqlBundleToggle, appendConsultToIntake: appendConsultToIntake, openConsultToIntake: openConsultToIntake, doConsultToIntake: doConsultToIntake, appendMediaBubble: appendMediaBubble, mediaUrls: mediaUrls, markLeftActive: markLeftActive, reapplyLeftActive: reapplyLeftActive, bindReopen: bindReopen, fConfirm: fConfirm, doDeleteItem: doDeleteItem, bindDelete: bindDelete };
 })();
 </script>
 </body>

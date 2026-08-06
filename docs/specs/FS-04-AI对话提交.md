@@ -105,7 +105,10 @@ depends_on: [FS-01]
 ### I. 对话记录与工单拆开（左=工单 / 右上=对话记录 · sessionId 会话分组 · 2026-08-06）
 - **AC-34【对话记录与工单分离 · 会话按 sessionId 归组】** Given 现场「提需求/报BUG」一次聊天可建**多张单** When 渲染现场端 Then **左侧「提交清单」只列需求/BUG 工单**（`renderTypeView` order=`['requirement','bug']`，去掉 consult 组）；**右上角（新对话旁）「对话记录」入口** → `GET /api/field/conversations`（现场按 `user.projects`+`sites` 收敛、与 submissions 同源）列**对话会话**：① 咨询每条一项（reopen 走 `reopenConsult`）；② 提需求/报BUG 按 `sessionId` 归组——`intake-chat` 建单存 `e.sessionId`（读 `b.sessionId`，同一次聊天多张单同值，随 data JSON、无库列；`newConversation` 生成新 id、随草稿/快照带、新对话重置），**一次聊天建的多张单 = 一条对话记录**（代表工单=组内最早提交·含整段 chat，显 `ticketCount/reqCount/bugCount` + 首条 user 概要），点开 `reopenConversation` 恢复整段对话 + 逐张补「已建单」卡续聊。And **旧单无 `sessionId`** → 每张自成一条对话记录（兜底不丢）。`/api/field/conversations` 在 `FIELD_OK`+`FS08_FIELD_API` 双白名单；`/api/field/submissions` API 桶集不变（左侧只列工单由前端过滤，不动 FS-02 契约）。
 
-> **AC 计数**：共 **34** 条（AC-1..34，其中 AC-19-KB 计为第 19 条）。AC-1..26 全 P1；AC-27..31（附图+多模态，2026-07-24）P1；AC-32（现场手选紧急程度，2026-08-06）P1；AC-33（附图按轮落位，2026-08-06）P1；AC-34（对话记录与工单分离，2026-08-06）P1。
+### J. AI 生成中可「停止」中断（2026-08-06）
+- **AC-35【AI 生成中可点「停止」中断 · 区分主动停止与真错误】** Given 现场发送了一条（提需求/报BUG 或咨询），AI 处于「正在思考中…」或流式生成中 When 用户点发送位置的「停止」（`chat.sending` 时「发送」按钮切「停止」态：`ti-player-stop` + 文案「停止」+ `.stop` 红、**不置灰**、可点；分派 `stopSending()`）Then 前端 `chat.abortCtrl.abort()` 中断本轮——三条路径（`sendConsult` 原生 fetch SSE / `sendIntake` intake-chat / `sendIntakeReply` intake-reply）均带 `signal`（`api()` 经 `Object.assign` 透传 `opts.signal`）；consult 断连触发服务端 `res.on('close')` 中止上游模型。And 按「主动停止」收尾（`isAbort(e)`：`e.name==='AbortError'` 或 `signal.aborted`）：**consult 保留已生成部分**（尾部「（已停止）」、不追加沉淀经验库/转工单入口）；**intake-chat/reply 显「（已停止）」、清动效、不弹网络错误 toast、不走 `offerFallback`**（与真错误区分）。And 三路径统一复位 `chat.sending=false`、按钮切回「发送」、`chat.abortCtrl=null`，可重发。And 切「新对话」/切系统上下文若仍在发送中 → 先 `abort()` 旧请求。**不破坏** `sending` 防重、`setThinking`、附图、多单建单、消息不丢等既有逻辑。
+
+> **AC 计数**：共 **35** 条（AC-1..35，其中 AC-19-KB 计为第 19 条）。AC-1..26 全 P1；AC-27..31（附图+多模态，2026-07-24）P1；AC-32（现场手选紧急程度，2026-08-06）P1；AC-33（附图按轮落位，2026-08-06）P1；AC-34（对话记录与工单分离，2026-08-06）P1；AC-35（发送中可中断「停止」，2026-08-06）P1。
 
 ## 4. 接口契约
 > 统一前缀 `/api`；除 `consult`（SSE）外返回 `{...}` JSON。**本条 100% 复用现有端点，不新增端点**；提交人 `reporter`、归档医院 `site` 服务端按当前登录用户收敛（忽略越权传参）。契约锚点见 `docs/specs/00-实施端-spec清单.md §4` 对照表。
