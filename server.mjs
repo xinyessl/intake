@@ -718,6 +718,30 @@ async function saveIntake(proj, e) {   // 缓存 + MySQL(为准) + 导出 .md/.j
   try { const dir = intakeDir(proj); fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, e.id + '.json'), JSON.stringify(e, null, 2)); fs.writeFileSync(path.join(dir, e.id + '.md'), renderIntakeMd(e)); } catch {}
 }
 function loadIntake(proj, id) { const e = CACHE.intakes[proj.id] && CACHE.intakes[proj.id][id]; return e ? ensureLifecycle(structuredClone(e)) : null; }
+// 【reopen 时序 bug 修·2026-08-07】会话记录 chat 保留「每条消息各自的 ts」：本轮整段 chat 按下标与 prev.chat 对齐，
+//   老消息沿用已有 ts、新消息按单调递增补（锚在上一条已知 ts 之后）——避免整段盖同一 Date.now() 导致 reopen 无法按时序排。
+//   纯函数（无副作用），供 saveConvRecord 用；对齐容错：老消息 text 可能被后端重建（media 回贴等）略变，故只按「下标 + role 一致」认作同一条沿用 ts；role 变了或超出 prev 长度即视为新消息补 ts。
+function reconcileChatTs(chatArr, prevChat) {
+  const out = [];
+  let lastTs = 0;   // 已确定的上一条 ts（单调递增基准）
+  for (let i = 0; i < chatArr.length; i++) {
+    const m = chatArr[i] || {};
+    const p = prevChat[i];
+    let ts;
+    const pTs = (p && typeof p.ts === 'number' && isFinite(p.ts)) ? p.ts : null;
+    if (pTs != null && p && p.role === m.role) {
+      // 下标+role 对齐 → 沿用老 ts（老消息时序不被覆盖）
+      ts = pTs > lastTs ? pTs : lastTs + 1;   // 防 prev 里已有乱序：仍保证单调不减
+    } else {
+      // 新消息（或 prev 无此条/role 变）→ 补一个「比上一条大」的 ts；有自带 ts 且更大就用自带，否则 max(now, lastTs+1)
+      const own = (typeof m.ts === 'number' && isFinite(m.ts) && m.ts > lastTs) ? m.ts : 0;
+      ts = own || Math.max(Date.now(), lastTs + 1);
+    }
+    lastTs = ts;
+    out.push({ ...m, ts });
+  }
+  return out;
+}
 // FS-04 AC-36：会话记录（type='intake-conv'）持久化——「提需求/报BUG」聊天**沟通过就存**（不必建单）。
 //   id 由 sessionId 派生（CONV-<sessionId>）→ 同一次聊天每轮 upsert 同一条（幂等）；随 intakes 表 + data JSON（无新库列，type=VARCHAR(20) 容得下 'intake-conv'）。
 //   会话记录 ≠ 工单：不进左侧提交清单（listIntake 已排除 intake-conv）、不进批次、不建重单；工单与它靠 sessionId 关联。
@@ -734,12 +758,15 @@ async function saveConvRecord(proj, { sessionId, site, subsystem, version, repor
   if (prev && prev.deleted) return '';   // 该会话记录已被软删 → 不复活（与 consult 软删不复活续聊一致）
   const firstUser = chatArr.find(m => m && m.role === 'user' && String(m.text || '').trim());
   const title = ((prev && String(prev.title || '').trim()) || (firstUser ? String(firstUser.text).replace(/\s+/g, ' ').trim() : '') || '对话提交').slice(0, 60);
+  // 【reopen 时序 bug 修·2026-08-07】每条消息保留「各自的 ts」，别整段盖同一个 Date.now()——否则同一会话所有消息 ts 相同、reopen 无法按时序穿插已建单卡。
+  //   做法：本轮传入的 chat 是「整段对话」，前 N 条一般与 prev.chat 前 N 条一一对应（append-only）——按下标对齐，老消息沿用 prev 里已有的 ts，只给「新增/无 ts」的消息按单调递增补 ts（锚在上一条已知 ts 之后 1ms）。
+  const timed = reconcileChatTs(chatArr, (prev && Array.isArray(prev.chat)) ? prev.chat : []);
   const rec = {
     id, type: 'intake-conv', project: proj.id, version: String(version || '').trim(),
     site: String(site || '').trim(), subsystem: String(subsystem || '').trim(), module: '',
     title, priority: '', reporter: reporter || '', role: role || 'field', contact: '',
     sessionId: sid, media: [], status: '沟通中', lifecycle: '沟通中', assignee: '',
-    analysis: null, resolution: {}, chat: chatArr,
+    analysis: null, resolution: {}, chat: timed,
     submittedAt: (prev && prev.submittedAt) || nowStamp(), updatedAt: nowStamp(),
   };
   await saveIntake(proj, rec);
@@ -2333,8 +2360,9 @@ const server = http.createServer((req, res) => {
       //   按 sessionId upsert 一条 type='intake-conv'（幂等，同会话每轮命中同一条）；建单逻辑挪到 commit-plan、这里不建单。
       try {
         const reporter = user ? (user.name || user.username) : (link ? link.name : '现场');
-        const convChat = allMsgs.map(x => ({ role: x.role, text: x.content, ts: Date.now() }));   // 真实完整对话（非水位线折叠的 msgs）
-        if (reply) convChat.push({ role: 'assistant', text: reply, ts: Date.now() });   // 只在有可见回复时并入（纯计划块无可见文本则不并、避免空 AI 气泡）
+        // 【时序 bug 修】不再整段盖同一 Date.now()——ts 交给 saveConvRecord→reconcileChatTs 按 prev 对齐补（老消息保留各自 ts、只新消息补递增 ts）。
+        const convChat = allMsgs.map(x => ({ role: x.role, text: x.content }));   // 真实完整对话（非水位线折叠的 msgs）；ts 由 saveConvRecord 逐条对齐
+        if (reply) convChat.push({ role: 'assistant', text: reply });   // 只在有可见回复时并入（纯计划块无可见文本则不并、避免空 AI 气泡）
         await saveConvRecord(proj, { sessionId, site, subsystem: sub, version, reporter, role: user ? user.role : 'field', chat: convChat });
       } catch {}
       // 回带 plan（含 project/site/version/subsystem 兜底，供前端建单端点直接用）。savedId/savedIds 恒空（不再自动建单）——老前端字段保留但为空，避免它据此误建卡。

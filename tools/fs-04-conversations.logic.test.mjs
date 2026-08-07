@@ -238,9 +238,12 @@ test('C6 reopen 分派：consult→reopenConsult，intake 会话→reopenConvers
   const seg2 = FIELD_HTML.slice(FIELD_HTML.indexOf('function reopenConversation'), FIELD_HTML.indexOf('function reopenIntakeConv'));
   assert.ok(/if \(it\.fromConv\) \{ reopenIntakeConv/.test(seg2), 'fromConv → 从会话记录 reopenIntakeConv');
   // reopenIntakeConv：拉会话记录 detail 恢复 chat + 已建单补卡 / 未建单锁 sessionId
-  const seg3 = FIELD_HTML.slice(FIELD_HTML.indexOf('function reopenIntakeConv'), FIELD_HTML.indexOf('function reopenIntakeConv') + 2800);   // 窗口放宽：filedUpTo 注释行推后了 reopenConvProject 位置
+  const seg3 = FIELD_HTML.slice(FIELD_HTML.indexOf('function reopenIntakeConv'), FIELD_HTML.indexOf('function tsToMs'));
   assert.ok(/api\('\/api\/intake-detail\?project=/.test(seg3), 'reopenIntakeConv 拉会话记录 detail 取整段 chat');
-  assert.ok(/appendArchiveCard\(/.test(seg3), '已建单会话补「已建单」卡');
+  // 【2026-08-07 时序修】已建单卡不再一股脑贴末尾——改由 renderConvTimeline 按时序穿插渲染（内含 appendArchiveCard）
+  assert.ok(/renderConvTimeline\(msgs, built, it, item\)/.test(seg3), 'reopenIntakeConv 走 renderConvTimeline 合并时序渲染');
+  const segRender = FIELD_HTML.slice(FIELD_HTML.indexOf('function renderConvTimeline'), FIELD_HTML.indexOf('function renderConvTimeline') + 600);
+  assert.ok(/appendArchiveCard\(/.test(segRender), 'renderConvTimeline 内补「已建单」卡（按 mergeConvTimeline 时序位置）');
   assert.ok(/chat\.reopenConvProject = it\.project/.test(seg3), '未建单会话锁归档上下文（续聊走 intake-chat 同 sessionId）');
 });
 test('C7 对话记录删除入口（软删）：仅会话记录/咨询、调 intake-delete、不连带删工单', () => {
