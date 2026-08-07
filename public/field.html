@@ -3955,7 +3955,8 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       if (!item) return;
       var rawChat = Array.isArray(item.chat) ? item.chat : [];
       // 【reopen 时序 bug 修·2026-08-07】保留每条消息的 ts（毫秒），供与已建单卡按真实先后穿插排序。
-      var msgs = rawChat.map(function (m) { return { role: (m.role === 'user' ? 'user' : 'assistant'), content: m.text || '', ts: (typeof m.ts === 'number' && isFinite(m.ts)) ? m.ts : null }; }).filter(function (m) { return m.content; });
+      // 【per-message media·2026-08-07】保留每条消息的 media（相对路径数组）——reopen 对话流时该图随该轮气泡就位（不再只在建单后的工单里/贴末尾）。
+      var msgs = rawChat.map(function (m) { return { role: (m.role === 'user' ? 'user' : 'assistant'), content: m.text || '', ts: (typeof m.ts === 'number' && isFinite(m.ts)) ? m.ts : null, media: (Array.isArray(m.media) ? m.media : null) }; }).filter(function (m) { return m.content || (m.media && m.media.length); });
       chat.messages = msgs.map(function (m) { return { role: m.role, content: m.content }; });   // chat.messages 仍用 {role,content}（下游续聊/水位线不看 ts）
       chat.convId = '';
       chat.reopenProject = ''; chat.reopenSubsystem = '';
@@ -4061,16 +4062,23 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   }
 
   // 【reopen 时序 bug 修】按合并后的时序序列依次渲染：消息→appendBubble、卡→appendArchiveCard。
+  // 【per-message media·2026-08-07】消息带 media → mediaUrls 转可访问 URL 传给 appendBubble 第4参，让该轮气泡内显所附截图缩略图（点开原图），和实时发送一致。
+  //   旧记录兜底：整段无任何 per-message media（修复前建的老会话，消息无 media）→ 若记录级 item.media 有图则末尾兜底贴一条图气泡，别让老记录图丢失；无则自然无图（不崩）。
   function renderConvTimeline(msgs, built, it, item) {
+    var proj0 = (it && it.project) || (item && item.project) || '';
     var seqList = mergeConvTimeline(msgs, built);
+    var anyMsgMedia = false;
     seqList.forEach(function (x) {
       if (x.kind === 'msg') {
-        appendBubble(x.data.role === 'user' ? 'me' : 'ai', x.data.content, false, []);
+        var urls = (x.data.media && x.data.media.length) ? mediaUrls(proj0, x.data.media) : [];
+        if (urls.length) anyMsgMedia = true;
+        appendBubble(x.data.role === 'user' ? 'me' : 'ai', x.data.content, false, urls);
       } else {
         var t = x.data;
         appendArchiveCard({ id: t.id, type: t.type || '', site: (it && it.site) || '', subsystem: t.subsystem || (it && it.subsystem) || '', version: t.version || '', priority: t.priority, project: it && it.project });
       }
     });
+    if (!anyMsgMedia && item && Array.isArray(item.media) && item.media.length) appendMediaBubble(proj0, item.media);   // 老记录消息无 media → 记录级 media 末尾兜底（会话记录 media 一般为空，仅极老数据兜底）
   }
 
   // AC-2：回车或点按钮触发（自由文本框不即输即查，对齐全局规范 #11）；不传 project = 全库所有产品

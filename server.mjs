@@ -729,8 +729,9 @@ function reconcileChatTs(chatArr, prevChat) {
     const p = prevChat[i];
     let ts;
     const pTs = (p && typeof p.ts === 'number' && isFinite(p.ts)) ? p.ts : null;
-    if (pTs != null && p && p.role === m.role) {
-      // 下标+role 对齐 → 沿用老 ts（老消息时序不被覆盖）
+    const aligned = pTs != null && p && p.role === m.role;   // 下标+role 对齐 = 认作 prev 里的同一条
+    if (aligned) {
+      // 沿用老 ts（老消息时序不被覆盖）
       ts = pTs > lastTs ? pTs : lastTs + 1;   // 防 prev 里已有乱序：仍保证单调不减
     } else {
       // 新消息（或 prev 无此条/role 变）→ 补一个「比上一条大」的 ts；有自带 ts 且更大就用自带，否则 max(now, lastTs+1)
@@ -738,7 +739,12 @@ function reconcileChatTs(chatArr, prevChat) {
       ts = own || Math.max(Date.now(), lastTs + 1);
     }
     lastTs = ts;
-    out.push({ ...m, ts });
+    // 【per-message media·2026-08-07】保留每条消息的 media：本轮传入 m 带 media（intake-chat 把本轮图挂到末条 user）就用它；
+    //   否则若对齐到 prev 同一条且 prev 有 media（本轮传入的整段 chat 不重传老 media）→ 沿用 prev.media，别把历史某轮附的图弄丢。
+    const rec = { ...m, ts };
+    if (!(Array.isArray(rec.media) && rec.media.length) && aligned && Array.isArray(p.media) && p.media.length) rec.media = p.media.slice();
+    if (!(Array.isArray(rec.media) && rec.media.length)) delete rec.media;   // 无图不落空 media 键，保持记录干净
+    out.push(rec);
   }
   return out;
 }
@@ -2318,7 +2324,7 @@ const server = http.createServer((req, res) => {
       const ai = await intakeAI(proj, e); e.chat.push({ role: 'assistant', text: ai.reply, ts: Date.now() }); await saveIntake(proj, e);
       // FS-04 AC-36：续聊已建单的会话 → 同步刷新它的会话记录（intake-conv）chat/updatedAt，让「对话记录」显最新对话（工单沿 sessionId 关联，不建重单）。
       //   chat 用工单最新 e.chat（含本轮问答）；media 简化不带（会话记录只回显对话，媒体在工单 detail 里）。
-      try { if (String(e.sessionId || '').trim()) { const convChat = (Array.isArray(e.chat) ? e.chat : []).map(m => ({ role: m.role, text: m.text || '', ts: m.ts })); await saveConvRecord(proj, { sessionId: e.sessionId, site: e.site, subsystem: e.subsystem, version: e.version, reporter: e.reporter, role: e.role || 'field', chat: convChat }); } } catch {}
+      try { if (String(e.sessionId || '').trim()) { const convChat = (Array.isArray(e.chat) ? e.chat : []).map(m => { const c = { role: m.role, text: m.text || '', ts: m.ts }; if (Array.isArray(m.media) && m.media.length) c.media = m.media.slice(); return c; }); await saveConvRecord(proj, { sessionId: e.sessionId, site: e.site, subsystem: e.subsystem, version: e.version, reporter: e.reporter, role: e.role || 'field', chat: convChat }); } } catch {}
       send(res, 200, JSON.stringify({ ok: true, reply: ai.reply }));
     });
   }
@@ -2362,6 +2368,21 @@ const server = http.createServer((req, res) => {
         const reporter = user ? (user.name || user.username) : (link ? link.name : '现场');
         // 【时序 bug 修】不再整段盖同一 Date.now()——ts 交给 saveConvRecord→reconcileChatTs 按 prev 对齐补（老消息保留各自 ts、只新消息补递增 ts）。
         const convChat = allMsgs.map(x => ({ role: x.role, text: x.content }));   // 真实完整对话（非水位线折叠的 msgs）；ts 由 saveConvRecord 逐条对齐
+        // 【per-message media·2026-08-07】本轮若附了图 → 存到会话级目录（media/<sessionId>/t<turnIndex>/img-N.png，turnIndex=本轮 user 消息下标，避免多轮/工单 media 目录撞）
+        //   并把相对路径挂到会话记录「本轮 user 消息」的 msg.media——reopen 对话流时该图随该轮气泡就位（不再只在建单后的工单里）。
+        //   会话级 media 走现有 /api/intake-media（project+file）可取；建单时图仍复制到各工单（见 commit-plan，工单详情要显图）。
+        if (imgs.length && sessionId) {
+          let lastUserIdx = -1; for (let i = convChat.length - 1; i >= 0; i--) { if (convChat[i].role === 'user') { lastUserIdx = i; break; } }
+          if (lastUserIdx >= 0) {
+            const roundMedia = [];
+            try {
+              const mdir = path.join(intakeDir(proj), 'media', sessionId, 't' + lastUserIdx);
+              fs.mkdirSync(mdir, { recursive: true });
+              imgs.forEach((du, i) => { const mm = /^data:image\/\w+;base64,(.+)$/.exec(du || ''); if (mm) { fs.writeFileSync(path.join(mdir, `img-${i + 1}.png`), Buffer.from(mm[1], 'base64')); roundMedia.push(`media/${sessionId}/t${lastUserIdx}/img-${i + 1}.png`); } });
+            } catch {}
+            if (roundMedia.length) convChat[lastUserIdx].media = roundMedia;
+          }
+        }
         if (reply) convChat.push({ role: 'assistant', text: reply });   // 只在有可见回复时并入（纯计划块无可见文本则不并、避免空 AI 气泡）
         await saveConvRecord(proj, { sessionId, site, subsystem: sub, version, reporter, role: user ? user.role : 'field', chat: convChat });
       } catch {}
