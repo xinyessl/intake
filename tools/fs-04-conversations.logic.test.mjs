@@ -259,3 +259,66 @@ test('C8 会话续聊：currentArchive 锁 reopenConvProject（intake · FS-04 v
   assert.ok(/chat\.reopenConvProject = ''; chat\.reopenConvSite = ''/.test(FIELD_HTML), 'newConversation 重置 reopenConv*');
   assert.ok(/chat\.reopenConvProject = d\.reopenConvProject/.test(FIELD_HTML), 'restoreDraft 恢复 reopenConv*');
 });
+
+/* ================= D. 左侧工单点击 → 只读「工单详情抽屉」（2026-08-07 · 不再 reopenIntake 恢复对话续聊） ================= */
+test('D1 存在 openTicketDrawer / closeTicketDrawer / renderTicketDrawer 三函数 + 抽屉容器', () => {
+  assert.ok(/function openTicketDrawer\(it\)/.test(FIELD_HTML), '有 openTicketDrawer(it)');
+  assert.ok(/function closeTicketDrawer\(\)/.test(FIELD_HTML), '有 closeTicketDrawer()');
+  assert.ok(/function renderTicketDrawer\(item, listItem\)/.test(FIELD_HTML), '有 renderTicketDrawer(item, listItem)');
+  assert.ok(/id="fTkDrawer"/.test(FIELD_HTML) && /id="fTkContent"/.test(FIELD_HTML) && /id="fTkMask"/.test(FIELD_HTML), '有工单详情抽屉 DOM 容器（遮罩/抽屉/内容）');
+});
+test('D2 点击分派：bindReopen 里 requirement/bug → openTicketDrawer（不再 reopenIntake）；consult → reopenConsult', () => {
+  const seg = FIELD_HTML.slice(FIELD_HTML.indexOf('function bindReopen'), FIELD_HTML.indexOf('function bindReopen') + 900);
+  assert.ok(/if \(it\.type === 'consult'\) reopenConsult\(it\); else openTicketDrawer\(it\)/.test(seg), 'bindReopen：consult→reopenConsult、req/bug→openTicketDrawer');
+  assert.ok(!/else reopenIntake\(it\)/.test(seg), 'bindReopen 里不再把 req/bug 分派到 reopenIntake');
+  // mkItem/mkSysItem 两处共用 bindReopen（不各自绑），故只需断言 bindReopen 分派
+  const mkItemSeg = FIELD_HTML.slice(FIELD_HTML.indexOf('function mkItem'), FIELD_HTML.indexOf('function goToBatchDownload'));
+  const mkSysSeg = FIELD_HTML.slice(FIELD_HTML.indexOf('function mkSysItem'), FIELD_HTML.indexOf('// ---------- 归档版本模型'));
+  assert.ok(/bindReopen\(el, it\);/.test(mkItemSeg), 'mkItem 走 bindReopen');
+  assert.ok(/bindReopen\(el, it\);/.test(mkSysSeg), 'mkSysItem 走 bindReopen');
+});
+test('D3 openTicketDrawer：仅 req/bug、拉 intake-detail、只读展示、不动右侧对话区（不 setSubmitKind/不写 chat.messages）', () => {
+  const seg = FIELD_HTML.slice(FIELD_HTML.indexOf('function openTicketDrawer'), FIELD_HTML.indexOf('function closeTicketDrawer'));
+  assert.ok(/it\.type !== 'requirement' && it\.type !== 'bug'/.test(seg), '守卫仅 requirement/bug');
+  assert.ok(/api\('\/api\/intake-detail\?project=/.test(seg), '拉 /api/intake-detail 取完整 item');
+  assert.ok(/renderTicketDrawer\(item, it\)/.test(seg), '拉到详情后渲染抽屉');
+  // 只读：不改右侧对话状态
+  assert.ok(!/setSubmitKind\(/.test(seg), 'openTicketDrawer 不切提交模式（不动右侧对话区）');
+  assert.ok(!/chat\.messages =/.test(seg) && !/chat\.savedId =/.test(seg), 'openTicketDrawer 不写 chat.messages/savedId（不恢复对话）');
+  // 竞态守卫：快速点两条时旧请求不覆盖
+  assert.ok(/data-tkid/.test(seg), '带 data-tkid 竞态守卫');
+});
+test('D4 renderTicketDrawer：BUG / 需求 各自字段 + AI 意见 + 截图 + 元信息，长文本走 md()', () => {
+  const seg = FIELD_HTML.slice(FIELD_HTML.indexOf('function renderTicketDrawer'), FIELD_HTML.indexOf('function renderTicketDrawer') + 4200);
+  // BUG 字段
+  assert.ok(/item\.desc/.test(seg) && /item\.errorInfo/.test(seg) && /item\.steps/.test(seg) && /item\.expectResult/.test(seg), 'BUG：现象/报错/复现/期望');
+  assert.ok(/item\.severity/.test(seg) && /item\.scope/.test(seg) && /item\.env/.test(seg) && /item\.freq/.test(seg), 'BUG：严重/影响/环境/频率');
+  // 需求字段
+  assert.ok(/item\.bg/.test(seg) && /item\.reqDesc/.test(seg) && /item\.scene/.test(seg) && /item\.accept/.test(seg) && /item\.relate/.test(seg), '需求：背景/期望效果/场景/验收/关联');
+  // AI 意见 / 初判
+  assert.ok(/item\.opinion/.test(seg) && /item\.analysis/.test(seg), 'AI 处理意见（opinion）+ 分析初判（analysis）');
+  // 截图复用 mediaUrls
+  assert.ok(/mediaUrls\(item\.project/.test(seg), '截图走 mediaUrls（缩略图点开原图）');
+  // 元信息：现场/子系统/版本/紧急/提交人/提交时间，时间过 fmtTime
+  assert.ok(/pushMeta\('现场'/.test(seg) && /pushMeta\('子系统'/.test(seg) && /pushMeta\('版本'/.test(seg) && /pushMeta\('紧急程度'/.test(seg) && /pushMeta\('提交人'/.test(seg) && /pushMeta\('提交时间'/.test(seg), '元信息六项齐全');
+  assert.ok(/fmtTime\(item\.submittedAt\)/.test(seg), '提交时间过 fmtTime（yyyy-MM-dd HH:mm）');
+  // 长文本走 md()（rich），短字段纯文本 esc
+  assert.ok(/opts\.rich \? md\(val\)/.test(seg), '长文本字段走 md() 渲染');
+});
+test('D5 关闭入口：× / 遮罩 / Esc 三路 + markLeftActive 高亮选中态', () => {
+  assert.ok(/tkMask.*addEventListener\('click', closeTicketDrawer\)/.test(FIELD_HTML), '遮罩点击关闭');
+  assert.ok(/tkClose.*addEventListener\('click', closeTicketDrawer\)/.test(FIELD_HTML), '× 按钮关闭');
+  assert.ok(/tkd && tkd\.classList\.contains\('open'\)\) \{ closeTicketDrawer\(\)/.test(FIELD_HTML), 'Esc 关闭工单抽屉');
+  const seg = FIELD_HTML.slice(FIELD_HTML.indexOf('function openTicketDrawer'), FIELD_HTML.indexOf('function closeTicketDrawer'));
+  assert.ok(/markLeftActive\('intake', it\.id\)/.test(seg), '打开抽屉时高亮左侧该条（选中态保留）');
+});
+test('D6 抽屉是只读查看：不提供续聊入口，底部弱提示引导到「对话记录」续聊', () => {
+  const seg = FIELD_HTML.slice(FIELD_HTML.indexOf('function renderTicketDrawer'), FIELD_HTML.indexOf('// ========== FS-03', FIELD_HTML.indexOf('function renderTicketDrawer')));
+  assert.ok(/f-tk-hint/.test(seg) && /对话记录/.test(seg) && /续聊/.test(seg), '底部弱提示引导去「对话记录」续聊');
+});
+test('D7 左侧删除入口不受影响（bindDelete 仍在 mkItem/mkSysItem）', () => {
+  const mkItemSeg = FIELD_HTML.slice(FIELD_HTML.indexOf('function mkItem'), FIELD_HTML.indexOf('function goToBatchDownload'));
+  const mkSysSeg = FIELD_HTML.slice(FIELD_HTML.indexOf('function mkSysItem'), FIELD_HTML.indexOf('// ---------- 归档版本模型'));
+  assert.ok(/bindDelete\(el, it\);/.test(mkItemSeg), 'mkItem 仍挂 bindDelete（软删入口保留）');
+  assert.ok(/bindDelete\(el, it\);/.test(mkSysSeg), 'mkSysItem 仍挂 bindDelete');
+});

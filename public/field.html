@@ -167,6 +167,44 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
 .f-conv-del:hover { background: var(--color-danger-light, #FDECEC); color: var(--color-danger, #D14343); border-color: var(--color-danger-border, #F0C0C0); }
 .f-conv-del .ti { font-size: 14px; }
 
+/* ---------- 工单详情抽屉（FS-04 · 2026-08-07 · 左侧工单点击 → 只读展示） ---------- */
+.f-tk-drawer { width: 560px; max-width: calc(100vw - 60px); }
+.f-tk-hollow { text-align: center; padding: 46px 20px; color: var(--color-text-tertiary); font-size: 13px; }
+.f-tk-content { display: none; }
+.f-tk-content.show { display: block; }
+/* 顶部：类型标签 + 状态 + 编号 + 标题 */
+.f-tk-head { margin-bottom: 14px; }
+.f-tk-tags { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-bottom: 9px; }
+.f-tk-id { font-size: 11.5px; color: var(--color-text-tertiary); font-family: var(--font-num), monospace; }
+.f-tk-title { font-size: 16px; font-weight: 700; color: var(--color-text); line-height: 1.45; word-break: break-word; }
+/* 元信息网格（现场/子系统/版本/紧急/提交人/提交时间） */
+.f-tk-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; padding: 12px 14px; margin-bottom: 16px; background: var(--color-surface-alt); border: 1px solid var(--color-border); border-radius: var(--radius); }
+.f-tk-meta .m { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.f-tk-meta .mk { font-size: 11px; color: var(--color-text-tertiary); }
+.f-tk-meta .mv { font-size: 12.5px; color: var(--color-text); font-weight: 600; word-break: break-word; }
+/* 字段块：小标题 + 内容 */
+.f-tk-field { margin-bottom: 15px; }
+.f-tk-field .fk { font-size: 12px; font-weight: 700; color: var(--color-text-secondary); margin-bottom: 6px; display: flex; align-items: center; gap: 5px; }
+.f-tk-field .fk .ti { font-size: 13px; color: var(--color-primary); }
+.f-tk-field .fv { font-size: 13.5px; line-height: 1.7; color: var(--color-text); word-break: break-word; }
+.f-tk-field .fv.plain { white-space: pre-wrap; }
+/* md 渲染的段落/列表在抽屉里的间距（复用对话气泡 md-* 语义，收紧首尾） */
+.f-tk-field .fv .md-p { margin: 0 0 6px; }
+.f-tk-field .fv .md-p:last-child { margin-bottom: 0; }
+.f-tk-field .fv .md-ul, .f-tk-field .fv .md-ol { margin: 4px 0 6px; padding-left: 20px; }
+.f-tk-field .fv .md-li { margin: 2px 0; }
+.f-tk-field .fv .md-h { font-weight: 700; margin: 8px 0 4px; }
+.f-tk-field .fv code { background: var(--color-bg); padding: 1px 5px; border-radius: 4px; font-family: var(--font-num), monospace; font-size: 12px; }
+/* AI 处理意见/初判：主色左边框强调（对齐经验库 .f-kb-answer） */
+.f-tk-field.ai .fv { border-left: 3px solid var(--color-primary); background: var(--color-primary-light); padding: 10px 12px; border-radius: 0 6px 6px 0; }
+/* 截图缩略图（复用对话气泡 .f-bub-imgs 同款：点开原图） */
+.f-tk-media { display: flex; flex-wrap: wrap; gap: 8px; }
+.f-tk-media a { display: inline-block; width: 92px; height: 92px; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--color-border); }
+.f-tk-media img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* 底部弱提示：到对话记录续聊 */
+.f-tk-hint { margin-top: 8px; padding: 11px 13px; background: var(--color-surface-alt); border: 1px dashed var(--color-border); border-radius: var(--radius); font-size: 12px; color: var(--color-text-tertiary); line-height: 1.6; }
+.f-tk-hint b { color: var(--color-text-secondary); font-weight: 600; }
+
 /* ---------- 工作空间容器（FS-02 提交清单 · 左；FS-04 AI 对话 · 右留占位） ---------- */
 .f-workspace { flex: 1 1 auto; min-height: 0; overflow: hidden; display: flex; }
 .f-ws-placeholder { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: var(--color-text-tertiary); gap: 8px; padding: 40px; }
@@ -799,6 +837,23 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     <div class="f-conv-hint">左侧「提交清单」只列需求/BUG 工单；这里是你和 AI 的对话会话——一次聊天里提的多张单会归成一条对话记录。</div>
     <div class="f-conv-results" id="fConvResults"></div>
     <div class="f-conv-hollow" id="fConvHollow">加载中…</div>
+  </div>
+</aside>
+
+<!-- ================= 工单详情抽屉（FS-04 · 2026-08-07 · 左侧提交清单工单点击 → 只读展示，不再进对话续聊） ================= -->
+<!-- 只读查看这条需求/BUG 工单的内容（元信息 + 各字段 + AI 初判 + 截图）；续聊走右上「对话记录」，此处不提供续聊入口。复用 theme.css .drawer/.drawer-mask（右滑）。 -->
+<div class="drawer-mask" id="fTkMask"></div>
+<aside class="drawer f-tk-drawer" id="fTkDrawer" aria-hidden="true">
+  <div class="drawer-header">
+    <div>
+      <div class="drawer-title"><i class="ti ti-file-description"></i> 工单详情</div>
+      <div class="drawer-subtitle">只读查看 · 续聊请到右上「对话记录」</div>
+    </div>
+    <button class="btn btn-icon btn-sm btn-ghost" id="fTkClose" type="button" title="关闭"><i class="ti ti-x"></i></button>
+  </div>
+  <div class="drawer-body" id="fTkBody">
+    <div class="f-tk-hollow" id="fTkHollow">加载中…</div>
+    <div class="f-tk-content" id="fTkContent"></div>
   </div>
 </aside>
 
@@ -1962,14 +2017,18 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
 
   // 点击某条提交记录能否恢复对话续聊：咨询（consult）恢复 consult 会话；需求/BUG（requirement/bug）恢复 intake 会话、续聊走 intake-reply（append 同单，不建重单）。
   function isReopenable(it) { return it && (it.type === 'consult' || it.type === 'requirement' || it.type === 'bug') && it.project && it.id; }
-  // 给记录卡片绑定点击 → 按类型分派：consult→reopenConsult；requirement/bug→reopenIntake。mkItem/mkSysItem 两处共用（避免漏系统视图，见 lessons L-026）。
+  // 给记录卡片绑定点击 → 按类型分派（2026-08-07 改）：
+  //   · consult（咨询，仅系统视图可能有）→ reopenConsult（仍是对话、恢复进右侧对话区续聊）；
+  //   · requirement/bug（左侧「提交清单」工单）→ openTicketDrawer（弹只读「工单详情抽屉」，不再 reopenIntake 恢复对话续聊）。
+  //     续聊改由右上「对话记录」(reopenConversation) 承担；左侧工单只看内容。
+  //   mkItem/mkSysItem 两处共用（避免漏系统视图，见 lessons L-026）。
   function bindReopen(el, it) {
     if (!isReopenable(it)) return;
     el.style.cursor = 'pointer';
-    // Bug B：把该条的 reopen 归属藏进 DOM（consult 用 convId=id；intake 用工单 id），供选中态标记/refreshLeftList 重渲后重新命中 active。
+    // Bug B：把该条的归属藏进 DOM（consult 用 convId=id；intake 用工单 id），供选中态标记/refreshLeftList 重渲后重新命中 active。
     el.setAttribute('data-rid', it.id);
     el.setAttribute('data-rkind', it.type === 'consult' ? 'consult' : 'intake');
-    el.addEventListener('click', function () { if (it.type === 'consult') reopenConsult(it); else reopenIntake(it); });
+    el.addEventListener('click', function () { if (it.type === 'consult') reopenConsult(it); else openTicketDrawer(it); });
   }
   // Bug B：把左侧对应条标为选中（清其它条的 active）。kind='consult'→按 convId；'intake'→按工单 savedId。id 空则只清空。
   function markLeftActive(kind, id) {
@@ -2055,6 +2114,117 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       scrollChatBottom();
       saveDraft();
     }).catch(function () {});
+  }
+
+  // ========== 工单详情抽屉（FS-04 · 2026-08-07）：左侧「提交清单」需求/BUG 工单点击 → 只读展示这条工单内容 ==========
+  //   不再 reopenIntake 恢复对话续聊（续聊走右上「对话记录」reopenConversation）、不动右侧对话区。
+  //   拉 /api/intake-detail?project=&id=（已在 FIELD_OK，返回完整 item）→ 在右滑抽屉里只读渲染（元信息 + 类型字段 + AI 初判 + 截图）。
+  function openTicketDrawer(it) {
+    if (!it || (it.type !== 'requirement' && it.type !== 'bug') || !it.project || !it.id) return;
+    // 打开抽屉 + 高亮左侧该条（选中态可保留，见要求③）
+    $('fTkMask').classList.add('open');
+    $('fTkDrawer').classList.add('open');
+    $('fTkDrawer').setAttribute('aria-hidden', 'false');
+    markLeftActive('intake', it.id);
+    var hollow = $('fTkHollow'), content = $('fTkContent');
+    hollow.style.display = 'block'; hollow.textContent = '加载中…';
+    content.classList.remove('show'); content.innerHTML = '';
+    // 记住本次请求 id，避免快速点两条时旧请求覆盖新内容（竞态）
+    var reqId = it.id; $('fTkDrawer').setAttribute('data-tkid', reqId);
+    api('/api/intake-detail?project=' + encodeURIComponent(it.project) + '&id=' + encodeURIComponent(it.id), { method: 'GET' }).then(function (r) {
+      if ($('fTkDrawer').getAttribute('data-tkid') !== reqId) return;   // 竞态：已切到别条，丢弃本次结果
+      var item = (r.body && r.body.item) || null;
+      if (!item) { hollow.textContent = (r.body && r.body.error) || '工单不存在或已删除'; return; }
+      renderTicketDrawer(item, it);
+      hollow.style.display = 'none';
+      content.classList.add('show');
+    }).catch(function () {
+      if ($('fTkDrawer').getAttribute('data-tkid') !== reqId) return;
+      hollow.textContent = '加载失败，请重试';
+    });
+  }
+  function closeTicketDrawer() {
+    $('fTkMask').classList.remove('open');
+    $('fTkDrawer').classList.remove('open');
+    $('fTkDrawer').setAttribute('aria-hidden', 'true');
+  }
+  // 只读渲染工单详情。item=完整工单（/api/intake-detail 返回原始存储对象，字段名=库字段：desc/errorInfo/steps/expectResult/severity/scope/env/freq / bg/reqDesc/scene/accept/relate / opinion/analysis / media / priority）。
+  //   listItem=左侧卡片项（带 statusLabel/statusTag，detail 无这些派生字段 → 从卡片带过来兜底）。
+  function renderTicketDrawer(item, listItem) {
+    var type = item.type || (listItem && listItem.type) || 'requirement';
+    var tag = TYPE_META[type] || { cls: 'req', label: type };
+    var stTag = (listItem && listItem.statusTag) || 'tag-gray';
+    var stLabel = (listItem && listItem.statusLabel) || item.lifecycle || item.status || '';
+    var esc = escapeHtml;
+    // 顶部：类型标签 + 状态 + 编号 + 标题
+    var head = '<div class="f-tk-head">' +
+      '<div class="f-tk-tags">' +
+        '<span class="f-tk ' + tag.cls + '">' + esc(tag.label) + '</span>' +
+        (stLabel ? '<span class="tag ' + esc(stTag) + '">' + esc(stLabel) + '</span>' : '') +
+        (item.id ? '<span class="f-tk-id">' + esc(item.id) + '</span>' : '') +
+      '</div>' +
+      '<div class="f-tk-title">' + esc(item.title || '（无标题）') + '</div>' +
+    '</div>';
+    // 元信息（有才显）：现场 / 子系统 / 版本 / 紧急程度 / 提交人 / 提交时间
+    var metaRows = [];
+    var pushMeta = function (k, v) { v = (v == null ? '' : String(v)).trim(); if (v) metaRows.push('<div class="m"><span class="mk">' + esc(k) + '</span><span class="mv">' + esc(v) + '</span></div>'); };
+    pushMeta('现场', item.site);
+    pushMeta('子系统', item.subsystem ? (subLabel(item.subsystem) || item.subsystem) : '');
+    pushMeta('版本', item.version);
+    pushMeta('紧急程度', item.priority);
+    pushMeta('提交人', item.reporter);
+    pushMeta('提交时间', item.submittedAt ? fmtTime(item.submittedAt) : '');
+    var meta = metaRows.length ? '<div class="f-tk-meta">' + metaRows.join('') + '</div>' : '';
+    // 字段块：长文本用 md()，短字段纯文本（.plain 保留换行）。均「有才显、空的略过」。
+    var fields = [];
+    var pushField = function (label, val, opts) {
+      val = (val == null ? '' : String(val)).trim(); if (!val) return;
+      opts = opts || {};
+      var icon = opts.icon ? '<i class="ti ' + opts.icon + '"></i>' : '';
+      var body = opts.rich ? md(val) : '<div class="plain">' + esc(val) + '</div>';   // rich=markdown 渲染；否则纯文本转义
+      fields.push('<div class="f-tk-field' + (opts.ai ? ' ai' : '') + '">' +
+        '<div class="fk">' + icon + esc(label) + '</div>' +
+        '<div class="fv' + (opts.rich ? '' : ' plain') + '">' + body + '</div>' +
+      '</div>');
+    };
+    if (type === 'bug') {
+      pushField('问题现象', item.desc, { rich: true, icon: 'ti-bug' });
+      pushField('报错信息', item.errorInfo, { rich: true, icon: 'ti-alert-triangle' });
+      pushField('复现步骤', item.steps, { rich: true, icon: 'ti-list-numbers' });
+      pushField('期望结果', item.expectResult, { rich: true, icon: 'ti-target' });
+      pushField('严重程度', item.severity, {});
+      pushField('影响范围', item.scope, {});
+      pushField('环境', item.env, {});
+      pushField('频率', item.freq, {});
+    } else {
+      pushField('需求背景', item.bg, { rich: true, icon: 'ti-bulb' });
+      pushField('期望效果 / 具体描述', item.reqDesc, { rich: true, icon: 'ti-target' });
+      pushField('使用场景', item.scene, { rich: true, icon: 'ti-users' });
+      pushField('验收标准', item.accept, { rich: true, icon: 'ti-checklist' });
+      pushField('关联页面 / 功能', item.relate, { rich: true, icon: 'ti-link' });
+    }
+    // AI 处理意见 / 初判（opinion 优先；analysis 摘要兜底）
+    var opinion = String(item.opinion || '').trim();
+    if (opinion) { pushField('AI 处理意见', opinion, { rich: true, ai: true, icon: 'ti-sparkles' }); }
+    var a = item.analysis;
+    if (a && typeof a === 'object' && (a.verdict || a.detail)) {
+      var aLines = [];
+      if (a.verdict) aLines.push('**' + a.verdict + '**');
+      if (a.category || a.suggestion) aLines.push('类别：' + (a.category || '—') + '｜建议：' + (a.suggestion === 'reply' ? '直接回复' : (a.suggestion === 'dev' ? '立项开发' : (a.suggestion || '—'))));
+      if (a.detail) aLines.push(a.detail);
+      pushField('AI 分析初判', aLines.join('\n\n'), { rich: true, ai: true, icon: 'ti-robot' });
+    }
+    var body = fields.join('');
+    // 截图（记录级 media → 缩略图，点开原图；复用 mediaUrls）
+    var media = '';
+    var urls = mediaUrls(item.project || (listItem && listItem.project), item.media);
+    if (urls.length) {
+      var imgs = urls.map(function (u) { return '<a href="' + esc(u) + '" target="_blank" rel="noopener"><img src="' + esc(u) + '" loading="lazy"></a>'; }).join('');
+      media = '<div class="f-tk-field"><div class="fk"><i class="ti ti-photo"></i>截图</div><div class="fv"><div class="f-tk-media">' + imgs + '</div></div></div>';
+    }
+    // 底部弱提示：续聊去对话记录（只读抽屉不提供续聊入口）
+    var hint = '<div class="f-tk-hint">这里只看工单内容。要就这条继续和 AI 沟通，请到右上 <b>「对话记录」</b> 打开对应会话续聊。</div>';
+    $('fTkContent').innerHTML = head + meta + body + media + hint;
   }
 
   // ========== FS-03 · 系统视图（跨医院聚合清单 + 归档版本模型） ==========
@@ -3971,6 +4141,8 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     // Esc 关闭面板
     document.addEventListener('keydown', function (ev) {
       if (ev.key !== 'Escape') return;
+      var tkd = $('fTkDrawer'); if (tkd && tkd.classList.contains('open')) { closeTicketDrawer(); return; }   // 工单详情抽屉：Esc 关闭
+      var cvd = $('fConvDrawer'); if (cvd && cvd.classList.contains('open')) { closeConvRec(); return; }      // 对话记录抽屉：Esc 关闭
       if ($('fKbDrawer').classList.contains('open')) { closeKb(); return; }
       var vd = $('fVerDetail');   // 版本明细面板：Esc 关闭
       if (vd && (state.verDetailOpen || vd.classList.contains('open'))) { closeAllMenus(); return; }
@@ -3999,6 +4171,9 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     var convBtn = $('fConvRecBtn'); if (convBtn) convBtn.addEventListener('click', openConvRec);
     var convMask = $('fConvMask'); if (convMask) convMask.addEventListener('click', closeConvRec);
     var convClose = $('fConvClose'); if (convClose) convClose.addEventListener('click', closeConvRec);
+    // 工单详情抽屉（FS-04 2026-08-07）：× / 遮罩关闭
+    var tkMask = $('fTkMask'); if (tkMask) tkMask.addEventListener('click', closeTicketDrawer);
+    var tkClose = $('fTkClose'); if (tkClose) tkClose.addEventListener('click', closeTicketDrawer);
     // 新对话
     $('fNewC').addEventListener('click', function () { newConversation(); });
     // 发送：点按钮 + 回车（AC-9/17：自然语言输入回车发送）
@@ -4042,7 +4217,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   })();
 
   // 暴露给测试/调试（不含敏感数据）
-  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, openConvRec: openConvRec, closeConvRec: closeConvRec, loadConversations: loadConversations, mkConvItem: mkConvItem, reopenConversation: reopenConversation, reopenIntakeConv: reopenIntakeConv, bindConvDelete: bindConvDelete, doDeleteConversation: doDeleteConversation, newSessionId: newSessionId, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, setTicketPriority: setTicketPriority, newConversation: newConversation, sendChat: sendChat, stopSending: stopSending, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast, openMaintainEdit: openMaintainEdit, doMaintainSave: doMaintainSave, maintainChipHtml: maintainChipHtml, maintainDaysLeft: maintainDaysLeft, renderTodoBody: renderTodoBody, mkUpdatePlanBlock: mkUpdatePlanBlock, loadUpdatePlan: loadUpdatePlan, renderUpdatePlan: renderUpdatePlan, mkPlanTaskItem: mkPlanTaskItem, mkSqlBundleItem: mkSqlBundleItem, doTaskToggle: doTaskToggle, doSqlBundleToggle: doSqlBundleToggle, appendConsultToIntake: appendConsultToIntake, openConsultToIntake: openConsultToIntake, doConsultToIntake: doConsultToIntake, appendMediaBubble: appendMediaBubble, mediaUrls: mediaUrls, markLeftActive: markLeftActive, reapplyLeftActive: reapplyLeftActive, bindReopen: bindReopen, fConfirm: fConfirm, doDeleteItem: doDeleteItem, bindDelete: bindDelete };
+  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, openConvRec: openConvRec, closeConvRec: closeConvRec, loadConversations: loadConversations, mkConvItem: mkConvItem, reopenConversation: reopenConversation, reopenIntakeConv: reopenIntakeConv, bindConvDelete: bindConvDelete, doDeleteConversation: doDeleteConversation, newSessionId: newSessionId, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, openTicketDrawer: openTicketDrawer, closeTicketDrawer: closeTicketDrawer, renderTicketDrawer: renderTicketDrawer, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, setTicketPriority: setTicketPriority, newConversation: newConversation, sendChat: sendChat, stopSending: stopSending, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast, openMaintainEdit: openMaintainEdit, doMaintainSave: doMaintainSave, maintainChipHtml: maintainChipHtml, maintainDaysLeft: maintainDaysLeft, renderTodoBody: renderTodoBody, mkUpdatePlanBlock: mkUpdatePlanBlock, loadUpdatePlan: loadUpdatePlan, renderUpdatePlan: renderUpdatePlan, mkPlanTaskItem: mkPlanTaskItem, mkSqlBundleItem: mkSqlBundleItem, doTaskToggle: doTaskToggle, doSqlBundleToggle: doSqlBundleToggle, appendConsultToIntake: appendConsultToIntake, openConsultToIntake: openConsultToIntake, doConsultToIntake: doConsultToIntake, appendMediaBubble: appendMediaBubble, mediaUrls: mediaUrls, markLeftActive: markLeftActive, reapplyLeftActive: reapplyLeftActive, bindReopen: bindReopen, fConfirm: fConfirm, doDeleteItem: doDeleteItem, bindDelete: bindDelete };
 })();
 </script>
 </body>

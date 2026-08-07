@@ -2349,6 +2349,15 @@ const server = http.createServer((req, res) => {
       const version = String(b.version || '').trim() || (link ? link.ver : '');
       const site = user ? convergeSite(user, b.site) : (String(b.site || '').trim() || (link ? link.site : ''));   // AC-21：登录现场账号 site 服务端收敛到 user.sites（越权→取合法首家）
       const sub = String(b.subsystem || '').trim();
+      // 版本服务端派生（修 bug：现场停在「未选具体版本」时 b.version 为空 → 工单版本列显 —）：按提交医院(site)在客户台账里登记的「该产品·该工单子系统」现场版本取。
+      //   e.subsystem(itSub) 存英文 key（如 pkb，见 subsystemNames→customer.products[].subsystems[].name 均为英文 name），custSubVersion 按 s.name===sub 命中；
+      //   命中不了（子系统待定/中文名/未登记）→ 回退产品级一致版本(custProductVersion) → 回退前端传的 b.version(version) → ''。
+      const custForVer = loadCustomers().find(c => (c.name || '').trim() === String(site || '').trim()) || null;
+      const prodVer = custForVer ? custProductVersion(custForVer, proj.id) : '';   // 该医院该产品「一致版本」（子系统未命中时的回退）
+      const deriveVersion = (itSub) => {
+        const bySub = custForVer ? custSubVersion(custForVer, proj.id, itSub) : '';   // 优先：该医院·该产品·该子系统现场版本
+        return String(bySub || prodVer || version || '').trim();                      // 兜底链：子系统命中 → 产品级一致 → 前端传值 → 空
+      };
       const sessionId = String(b.sessionId || '').trim().slice(0, 40);   // 同会话建的多张单同 sessionId → 右上「对话记录」归一条
       const reporter = user ? (user.name || user.username) : (link ? link.name : '');
       const byRole = user ? user.role : 'field';
@@ -2377,7 +2386,7 @@ const server = http.createServer((req, res) => {
           // 新建工单（复用 intake-chat 建单落库范式：type/title/subsystem/priority/sessionId/site/version/reporter/media/history/analysis）。
           const id = intakeGenId(proj, itType), stamp = nowStamp(), media = [];
           try { const mdir = path.join(intakeDir(proj), 'media', id); if (imgs.length) fs.mkdirSync(mdir, { recursive: true }); imgs.forEach((du, i) => { const mm = /^data:image\/\w+;base64,(.+)$/.exec(du || ''); if (mm) { fs.writeFileSync(path.join(mdir, `img-${i + 1}.png`), Buffer.from(mm[1], 'base64')); media.push(`media/${id}/img-${i + 1}.png`); } }); } catch {}
-          const e = { id, type: itType, project: proj.id, version, site, subsystem: itSub, module: String(rawIt.module || '').trim(), title, priority: normPriority(rawIt.priority, '中'), severity: String(rawIt.severity || ''), scope: String(rawIt.scope || ''), env: String(rawIt.env || ''), freq: String(rawIt.freq || ''), reporter, role: '', contact: '', bg: String(rawIt.bg || ''), reqDesc: String(rawIt.reqDesc || summary || ''), scene: '', accept: String(rawIt.accept || ''), relate: String(rawIt.relate || ''), desc: String(rawIt.desc || ''), errorInfo: String(rawIt.errorInfo || ''), steps: String(rawIt.steps || ''), expectResult: String(rawIt.expectResult || ''), opinion: String(rawIt.opinion || ''), media, sessionId, status: '待处理', lifecycle: '待处理', assignee: '', history: [{ from: '', to: '待处理', by: reporter, byRole, at: stamp, note: '对话提交（确认清单）' }], analysis: null, resolution: {}, submittedAt: stamp, chat: [] };
+          const e = { id, type: itType, project: proj.id, version: deriveVersion(itSub), site, subsystem: itSub, module: String(rawIt.module || '').trim(), title, priority: normPriority(rawIt.priority, '中'), severity: String(rawIt.severity || ''), scope: String(rawIt.scope || ''), env: String(rawIt.env || ''), freq: String(rawIt.freq || ''), reporter, role: '', contact: '', bg: String(rawIt.bg || ''), reqDesc: String(rawIt.reqDesc || summary || ''), scene: '', accept: String(rawIt.accept || ''), relate: String(rawIt.relate || ''), desc: String(rawIt.desc || ''), errorInfo: String(rawIt.errorInfo || ''), steps: String(rawIt.steps || ''), expectResult: String(rawIt.expectResult || ''), opinion: String(rawIt.opinion || ''), media, sessionId, status: '待处理', lifecycle: '待处理', assignee: '', history: [{ from: '', to: '待处理', by: reporter, byRole, at: stamp, note: '对话提交（确认清单）' }], analysis: null, resolution: {}, submittedAt: stamp, chat: [] };
           await saveIntake(proj, e);
           created.push({ id, type: itType, title, priority: e.priority });
         }

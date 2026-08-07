@@ -111,7 +111,10 @@ depends_on: [FS-01]
 ### K. 对话全量持久化 + 会话记录 + 对话记录软删（2026-08-06）
 - **AC-36【对话全量持久化 + 会话记录 + 软删】** Given 现场「提需求/报BUG」在对话区聊天 When 本轮**沟通过**（用户发了内容 + AI 回了内容）Then 服务端**不论是否建单**都 upsert 一条**会话记录**（`type='intake-conv'`，id=`CONV-<sessionId>` 确定性派生·同会话每轮命中同一条；随 `intakes` 表 + `data` JSON、**无新库列**；`sessionId` 空不存）——`intake-chat` 每轮存、`intake-reply` 同步刷新；**会话记录 ≠ 工单**：`listIntake` 排除 `intake-conv`（不进左侧提交清单/批次/统计/导出/待办），建单逻辑不变、不建重单，工单与会话记录靠 `sessionId` 关联。And `GET /api/field/conversations` 改列**会话记录**：咨询每条一项；提需求/报BUG 每个 `intake-conv` 一项（`fromConv:true`，**含未建单** `ticketCount:0`，按 sessionId 关联工单统计 `reqCount/bugCount/tickets`）；**旧数据兜底**（有工单无会话记录的历史 session → `fromConv:false` 按 sessionId 归组，不丢）；软删会话记录不复现（`deletedConvKeys` 让兜底跳过）；过滤 `deleted`、收敛不变、updatedAt 倒序。And **未建单会话记录可续聊**（`reopenIntakeConv` 从会话记录恢复整段 chat + 锁 `reopenConv*` 上下文，续聊走 intake-chat 同 sessionId，AI 够了再建单落该 session）；已建单会话续聊走 intake-reply、显多张已建单卡。And **对话记录每条支持软删**（复用 `POST /api/intake-delete`，置 `deleted=true`）：仅对真会话记录（consult / `fromConv` intake-conv）开放删除入口，**旧数据兜底项（代表工单）不给删**（工单到左侧提交清单删）；**删对话记录 ≠ 删其建的工单**。
 
-> **AC 计数**：共 **36** 条（AC-1..36，其中 AC-19-KB 计为第 19 条）。AC-1..26 全 P1；AC-27..31（附图+多模态，2026-07-24）P1；AC-32（现场手选紧急程度，2026-08-06）P1；AC-33（附图按轮落位，2026-08-06）P1；AC-34（对话记录与工单分离，2026-08-06）P1；AC-35（发送中可中断「停止」，2026-08-06）P1；AC-36（对话全量持久化+软删，2026-08-06）P1。
+### L. 左侧「提交清单」工单点击 = 只读详情抽屉（2026-08-07）
+- **AC-37【工单点击开只读抽屉，不进对话续聊】** Given 现场左侧「提交清单」的需求/BUG 工单卡 When 点击 Then 打开**右侧只读详情抽屉**（`openTicketDrawer` → `/api/intake-detail` 取完整 item → 渲染）——**不再** `reopenIntake` 恢复整段对话到右侧对话区（续聊改由右上「对话记录」承担）。抽屉展示（有才显）：类型标签+状态+编号+标题；元信息 现场/子系统/版本/紧急程度/提交人/提交时间；需求 bg/reqDesc/scene/accept/relate、BUG desc/errorInfo/steps/expectResult/severity/scope/env/freq、AI opinion+analysis、截图 media（`/api/intake-media` 缩略图点开原图）；长文本 `md()` 渲染。可 ×/遮罩/Esc 关闭（Esc 逐层关最上层）。consult（系统视图若有）点击仍 `reopenConsult`（咨询是对话、进对话区续聊）。左侧工单卡软删入口/选中态不变。
+
+> **AC 计数**：共 **37** 条（AC-1..37，其中 AC-19-KB 计为第 19 条）。AC-1..26 全 P1；AC-27..31（附图+多模态，2026-07-24）P1；AC-32（现场手选紧急程度，2026-08-06）P1；AC-33（附图按轮落位，2026-08-06）P1；AC-34（对话记录与工单分离，2026-08-06）P1；AC-35（发送中可中断「停止」，2026-08-06）P1；AC-36（对话全量持久化+软删，2026-08-06）P1；AC-37（工单点击=只读抽屉，2026-08-07）P1。
 
 ## 4. 接口契约
 > 统一前缀 `/api`；除 `consult`（SSE）外返回 `{...}` JSON。**本条 100% 复用现有端点，不新增端点**；提交人 `reporter`、归档医院 `site` 服务端按当前登录用户收敛（忽略越权传参）。契约锚点见 `docs/specs/00-实施端-spec清单.md §4` 对照表。
