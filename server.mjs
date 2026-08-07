@@ -223,6 +223,36 @@ function custProductVersion(cust, productId) {
     }
     return String(pr.version || '').trim();                           // 旧形状：产品级 version
 }
+// 把某客户(cust)某产品(productId)某子系统(subsystem)现场版本原地写成 newVer（发布闭环·验证通过后系统回写）。
+//   两形状（与 custSubVersion/customer-version 一致）：
+//     · 新形状 products[].subsystems[name==subsystem].version：写对应子系统；subsystem 不存在则**不新增、跳过**（避免臆造台账没登记的子系统）。
+//     · 旧形状 products[].version（无 subsystems）：写产品级 version（subsystem 忽略）。
+//   subsystem 为空 = **整包升级**：新形状把该产品**所有已登记子系统**都更到 newVer；旧形状写 pr.version。
+//   幂等：目标值已等于 newVer 的项不重复写。找不到产品/子系统 → 跳过该项，不报错。
+//   返回 { changed:boolean, bumped:[{subsystem, fromVer, toVer}] }（bumped=本次真的改了的项，供留痕；未改则空）。
+//   ⚠️ 纯函数：只改传入的 cust 对象，不落盘（调用方负责 saveCustomers），无副作用于其它客户。
+function bumpCustomerVersion(cust, productId, subsystem, newVer) {
+    const out = { changed: false, bumped: [] };
+    const ver = String(newVer == null ? '' : newVer).trim();
+    if (!cust || !Array.isArray(cust.products) || !ver) return out;
+    const pr = cust.products.find(p => p && p.project === productId);
+    if (!pr) return out;                                              // 产品不属该客户 → 跳过
+    const vNew = ver.slice(0, 30);                                    // 对齐 customer-version 的 30 位截断
+    const sub = String(subsystem == null ? '' : subsystem).trim();
+    if (Array.isArray(pr.subsystems)) {
+        // 新形状：subsystem 指定 → 只更该子系统（不存在则跳过）；空 → 整包（所有已登记子系统）
+        const targets = sub ? pr.subsystems.filter(s => s && s.name === sub) : pr.subsystems.filter(Boolean);
+        for (const ms of targets) {
+            const fromVer = String(ms.version || '');
+            if (fromVer !== vNew) { ms.version = vNew; out.changed = true; out.bumped.push({ subsystem: ms.name || '', fromVer, toVer: vNew }); }
+        }
+    } else {
+        // 旧形状：产品级 version（subsystem 忽略，整产品一个版本）
+        const fromVer = String(pr.version || '');
+        if (fromVer !== vNew) { pr.version = vNew; out.changed = true; out.bumped.push({ subsystem: '', fromVer, toVer: vNew }); }
+    }
+    return out;
+}
 
 // ===== 批次（BP-01 第 1 期）：文件存 data/batches.json，与 customers 同范式（NH-4 已裁决 A=文件存不改库） =====
 //   批次 = 一条产品线的一批（跨全部医院合并该产品「已立项(已落实)且未归批」工单，内部按 subsystem 分组）。
@@ -231,6 +261,43 @@ function custProductVersion(cust, productId) {
 const BATCHES_FILE = path.join(DATA_DIR, 'batches.json');
 function loadBatches() { try { return JSON.parse(fs.readFileSync(BATCHES_FILE, 'utf8')).batches || []; } catch { return []; } }
 function saveBatches(list) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(BATCHES_FILE, JSON.stringify({ batches: list }, null, 2)); } catch {} }
+// 发布闭环·版本回写：某批次(bt)在某医院(site)的全部覆盖工单都「已关闭」时，把该医院该产品(bt.product)版本更到 bt.pkgVersion。
+//   触发口径（现场逐单验证 pass 后 / 批次转已交付兜底）——只更**这批次实际覆盖到该 site 的子系统集合**（bt.ticketIds 里属该 site 的工单 subsystem），覆盖不到的子系统不动（宁少勿错）。
+//   护栏：无 pkgVersion（没出包）→ 跳过；该 site 在该批次里非「全单已关闭」→ 跳过（还没验完不更）；医院/产品/子系统台账里找不到 → bumpCustomerVersion 内部跳过不报错；幂等（已是目标版本不重复写）。
+//   数据：读 loadCustomers()，原地 bumpCustomerVersion，changed 才 saveCustomers；返回 { changed, bumped:[{subsystem,fromVer,toVer}] } 供批次 history 留痕。⚠️ 只回写该 site 对应医院，不碰别家。
+function bumpSiteVersionForBatch(bt, proj, site) {
+    const empty = { changed: false, bumped: [] };
+    const pkg = String((bt && bt.pkgVersion) || '').trim();
+    if (!pkg || pkg === '-') return empty;                                     // 未出包 → 不更
+    if (!bt || !proj || !site) return empty;
+    // 该 site 在该批次里的覆盖工单 + 是否全部已关闭
+    const siteTickets = [];
+    for (const tid of (bt.ticketIds || [])) {
+        const e = loadIntake(proj, tid); if (!e) continue;
+        if (String(e.site || '') !== String(site)) continue;
+        siteTickets.push(e);
+    }
+    if (!siteTickets.length) return empty;                                     // 该医院不在本批覆盖内
+    const allClosed = siteTickets.every(e => (e.lifecycle || deriveLifecycle(e)) === '已关闭');
+    if (!allClosed) return empty;                                              // 该院这批单还没全过 → 不更
+    // 本批次该 site 实际覆盖到的子系统集合（去重、去空）
+    const subs = [...new Set(siteTickets.map(e => String(e.subsystem || '').trim()).filter(Boolean))];
+    const list = loadCustomers();
+    const c = list.find(x => (x.name || '').trim() === String(site).trim());
+    if (!c) return empty;                                                      // 台账无该医院 → 跳过
+    const bumped = [];
+    if (subs.length) { for (const s of subs) { const r = bumpCustomerVersion(c, bt.product, s, pkg); if (r.changed) bumped.push(...r.bumped); } }
+    else { const r = bumpCustomerVersion(c, bt.product, '', pkg); if (r.changed) bumped.push(...r.bumped); }   // 覆盖工单无子系统标注 → 整产品
+    if (bumped.length) {
+        c.versionLog = Array.isArray(c.versionLog) ? c.versionLog : [];
+        const at = nowStamp();
+        for (const b of bumped) { c.versionLog.push({ productId: bt.product, subsystem: b.subsystem || '', fromVer: b.fromVer, toVer: b.toVer, by: '系统·发布闭环', at, batch: bt.id }); }
+        if (c.versionLog.length > 200) c.versionLog = c.versionLog.slice(-200);
+        c.updatedAt = at;
+        saveCustomers(list);
+    }
+    return { changed: bumped.length > 0, bumped };
+}
 // 批次编号 B-<seq>：读现存最大 seq +1（文件存无并发写压力）。解析 B- 后的数字段，取 max，无则从 1 起，两位补零。
 function batchGenId(list) {
   let max = 0;
@@ -1742,13 +1809,26 @@ const server = http.createServer((req, res) => {
         if (!e || (e.lifecycle || deriveLifecycle(e)) !== '已关闭') pending.push(tid);
       }
       if (pending.length) return send(res, 200, JSON.stringify({ ok: false, error: '尚有工单未现场验证', pending, delivered: false, item: batchOut(bt) }));
+      const versionBumped = [];
+      // 发布闭环·版本回写（兜底）：批次转已交付时（全医院全单验过），对该批次覆盖的每个医院按 pkgVersion 更版本
+      //   幂等：per-hospital 已在 intake-verify 触发过的，bumpCustomerVersion 内部同值不重复写（这里只补没触发到的）
+      try {
+        const sites = [...new Set((bt.ticketIds || []).map(tid => { const e = proj ? loadIntake(proj, tid) : null; return e ? String(e.site || '') : ''; }).filter(Boolean))];
+        for (const site of sites) { const vr = bumpSiteVersionForBatch(bt, proj, site); if (vr.changed) versionBumped.push({ site, bumped: vr.bumped }); }
+      } catch {}
       if (bt.status !== '已交付') {
         const at = nowStamp(); const by = user ? (user.name || user.username) : 'admin';
         bt.status = '已交付'; bt.deliveredAt = at;
         bt.history = bt.history || []; bt.history.push({ action: 'deliver', by, at, note: '全 ' + (bt.ticketIds || []).length + ' 单验证过·闭环已交付' });
+        for (const v of versionBumped) { const summary = v.bumped.map(b => (b.subsystem ? b.subsystem + ' ' : '') + (b.fromVer || '无') + '→' + b.toVer).join('，'); bt.history.push({ action: 'site-version', by: '系统·发布闭环', at, note: '医院' + v.site + '版本→' + (bt.pkgVersion || '') + '（' + summary + '）' }); }
+        saveBatches(list);
+      } else if (versionBumped.length) {
+        // 批次已是已交付但版本此前漏更（补更）：仍记 history
+        const at = nowStamp();
+        bt.history = bt.history || []; for (const v of versionBumped) { const summary = v.bumped.map(b => (b.subsystem ? b.subsystem + ' ' : '') + (b.fromVer || '无') + '→' + b.toVer).join('，'); bt.history.push({ action: 'site-version', by: '系统·发布闭环', at, note: '医院' + v.site + '版本→' + (bt.pkgVersion || '') + '（' + summary + '）（补更）' }); }
         saveBatches(list);
       }
-      return send(res, 200, JSON.stringify({ ok: true, item: batchOut(bt), delivered: true }));
+      return send(res, 200, JSON.stringify({ ok: true, item: batchOut(bt), delivered: true, versionBumped }));
     });
   }
 
@@ -2078,11 +2158,13 @@ const server = http.createServer((req, res) => {
       await saveIntake(proj, e);
       if (to === '已关闭') { try { await kbAddFromIntake(proj, e); } catch {} }   // 关闭即自动沉淀经验库（与 intake-transition 一致）
       // 闭环联动：pass 后若该单所属批次全部覆盖工单已关闭 → 触发批次「已交付」
-      let batchDelivered = false;
+      let batchDelivered = false, versionBumped = null;
       if (result === 'pass' && e.batch) {
         const list = loadBatches();
         const bt = list.find(x => x.id === e.batch);
         if (bt) {
+          // 发布闭环·版本回写（per-hospital·主触发）：该单医院在该批次里的覆盖工单全部已关闭 → 该医院该产品版本更到 bt.pkgVersion（幂等·只这批覆盖的子系统）
+          try { const vr = bumpSiteVersionForBatch(bt, proj, e.site || ''); if (vr.changed) versionBumped = vr.bumped; } catch {}
           let allClosed = true;
           for (const tid of (bt.ticketIds || [])) { const t = loadIntake(proj, tid); if (!t || (t.lifecycle || deriveLifecycle(t)) !== '已关闭') { allClosed = false; break; } }
           if (allClosed && bt.status !== '已交付') {
@@ -2090,10 +2172,16 @@ const server = http.createServer((req, res) => {
             bt.history = bt.history || []; bt.history.push({ action: 'deliver', by: '系统·现场验证闭环', at, note: '全 ' + (bt.ticketIds || []).length + ' 单现场验证过·闭环已交付' });
             saveBatches(list);
           }
+          // 版本回写留痕记进批次 history（在 saveBatches 之后确保写盘；单独 save 一次，changed 才写）
+          if (versionBumped && versionBumped.length) {
+            const summary = versionBumped.map(b => (b.subsystem ? b.subsystem + ' ' : '') + (b.fromVer || '无') + '→' + b.toVer).join('，');
+            bt.history = bt.history || []; bt.history.push({ action: 'site-version', by: '系统·发布闭环', at, note: '医院' + (e.site || '') + '版本→' + (bt.pkgVersion || '') + '（' + summary + '）' });
+            saveBatches(list);
+          }
           batchDelivered = (bt.status === '已交付');
         }
       }
-      return send(res, 200, JSON.stringify({ ok: true, lifecycle: e.lifecycle, batchDelivered }));
+      return send(res, 200, JSON.stringify({ ok: true, lifecycle: e.lifecycle, batchDelivered, versionBumped }));
     });
   }
 
