@@ -775,6 +775,37 @@ function nowStamp() { const d = new Date(); return `${d.getFullYear()}-${String(
 const PRIORITY_SET = new Set(['紧急', '高', '中', '低']);   // 紧急程度四档（与后台 inbox.html/detail.html 配色一致）
 // 现场手选优先级规范化：合法四档→原值；非法/空→回落 fallback（AI 猜的 rec.priority 或默认「中」）。防脏值入 intakes.priority(VARCHAR(10))。
 function normPriority(v, fallback = '中') { const s = String(v == null ? '' : v).trim(); return PRIORITY_SET.has(s) ? s : (fallback || '中'); }
+// FS-04 v2（2026-08-07）「建单前确认清单」：AI 出 intake-plan 块（不再直接建单）。解析回复里的 plan 块 → 归一化的 items 数组 + 剔块后的可见正文。
+//   一次回复最多解析第一个 intake-plan 块（提示词只让出一个）。每个 item 归一：action∈{new,append}、type∈{bug,requirement}（合并模式取 AI 判、否则用 forceType）、priority 规范四档、字段全带。
+//   坏块/无 items/空 → items=[]（不建脏单），visible=剔块后正文。前端据 items 渲染确认卡；用户拍板后走 /api/intake-commit-plan 确定性建单。
+const PLAN_BLOCK_RE = /```intake-plan\s*([\s\S]*?)```/g;
+function parseIntakePlan(reply, forceType) {
+  const raw = String(reply || '');
+  const m = [...raw.matchAll(PLAN_BLOCK_RE)];
+  const visible = raw.replace(PLAN_BLOCK_RE, '').trim();
+  let items = [];
+  for (const b of m) {
+    let obj = null; try { obj = JSON.parse((b[1] || '').trim()); } catch {}
+    const arr = obj && Array.isArray(obj.items) ? obj.items : [];
+    for (const it of arr) {
+      if (!it || typeof it !== 'object') continue;
+      const title = String(it.title || '').trim();
+      if (!title) continue;   // 无标题的 item 丢弃（不建脏单）
+      const action = String(it.action || '').trim().toLowerCase() === 'append' ? 'append' : 'new';
+      const ticketId = action === 'append' ? String(it.ticketId || '').trim() : '';
+      const itType = (forceType === 'bug' || forceType === 'requirement') ? forceType : (String(it.type || '').toLowerCase() === 'bug' ? 'bug' : 'requirement');
+      items.push({
+        action, ticketId, type: itType, subsystem: String(it.subsystem || '').trim(), module: String(it.module || '').trim(),
+        title, priority: normPriority(it.priority, '中'), summary: String(it.summary || '').trim(),
+        desc: String(it.desc || ''), errorInfo: String(it.errorInfo || ''), steps: String(it.steps || ''), expectResult: String(it.expectResult || ''),
+        severity: String(it.severity || ''), scope: String(it.scope || ''), env: String(it.env || ''), freq: String(it.freq || ''),
+        bg: String(it.bg || ''), reqDesc: String(it.reqDesc || ''), accept: String(it.accept || ''), relate: String(it.relate || ''), opinion: String(it.opinion || ''),
+      });
+    }
+    if (arr.length) break;   // 只认第一个含 items 的 plan 块
+  }
+  return { items, visible };
+}
 function intakeHead(e) {   // 把一条工单压成给模型看的正文（AI 沟通 + 分析共用）
   return `【${e.type === 'bug' ? 'BUG' : '需求'}】${e.title}\n版本：${e.version || '未指定'}｜现场：${e.site || '未指定'}｜模块：${e.module}｜优先级：${e.priority}` + (e.type === 'bug' ? `｜严重：${e.severity}｜环境：${e.env}｜频率：${e.freq}\n现象：${e.desc}\n报错：${e.errorInfo || '无'}\n复现：${e.steps}\n期望：${e.expectResult || '无'}` : `\n背景：${e.bg}\n期望效果：${e.reqDesc}\n场景：${e.scene || '无'}\n验收：${e.accept || '无'}\n关联：${e.relate || '无'}`);
 }
@@ -789,11 +820,13 @@ function intakeSystem(type, proj, ver) {
   return `你是「需求/BUG 进件助手」。对面是产品经理/实施工程师(不懂技术、不看代码)。项目「${proj.name}」${ver ? `（版本 ${ver}）` : ''}的系统模块清单（供你把进件对到正确模块）：\n${idx || '（暂无 spec 索引）'}\n\n你的任务：\n- 若是【需求】：判断是否讲清楚了。没讲清就用大白话问 1~2 个最关键的澄清问题（每次别超过2个）；讲清了就一句话确认你的理解 + 指出它大概落在哪个模块。\n- 若是【BUG】：根据现象/报错，给一个初步「处理意见 / 可能原因 / 建议先排查什么」，供开发参考；信息不足就问关键的1个点（如具体报错、哪条数据）。\n- 【绝不写代码、不臆造功能】。回复要简短、口语化、条理清楚，中文。`;
 }
 function subsystemNames(proj) { return ((proj && proj.subsystems) || []).map(s => (typeof s === 'string' ? s : (s && s.name) || '')).filter(Boolean); }
-// 对话式进件：AI 主导按「提交标准」逐条问齐 + 推断子系统/模块，够了就输出 intake-record 归档块
+// 对话式进件：AI 主导按「提交标准」逐条问齐 + 推断子系统/模块，够了就输出 intake-plan「建单计划」块（不再直接建单）。
 // hasArchivedBg：本轮 messages 前面切了「已归档建单·只读背景」段（filedUpTo>0）——提示词里点明只对「当前待处理」段判建单。
-//   顺序流坑（2026-08-06）：AI 回复里的 record 块建单后被服务端剥掉再回前端，历史里看不到"已归档"，
-//   导致隔几轮再提新需求时 AI 把已建单的旧需求当"还在讨论"、跟新需求合并/重复。主修=前后端「已建单水位线」代码切上下文（见 /api/intake-chat）；本参数让提示词与之呼应。
-function intakeChatSystem(proj, type, ver, subKey, hasArchivedBg) {
+// builtTickets：本会话已建单清单 [{ticketId,title}]（续聊场景 · reopen 已建单会话时传入）——让 AI 在计划里对「明显是对某已建单的补充」用 action='append'、否则 action='new'（默认倾向 new）。
+//   顺序流坑（2026-08-06 v1）：AI 回复里的 record 块建单后被服务端剥掉再回前端，历史里看不到"已归档"，
+//   导致隔几轮再提新需求时 AI 把已建单的旧需求当"还在讨论"、跟新需求合并/重复。v1 主修=「已建单水位线」代码切上下文（见 /api/intake-chat）。
+//   治本（2026-08-07 v2）：AI 不再直接建单，改出「建单计划」intake-plan（一条独立需求=一个 item，绝不合并）→ 前端确认卡让用户拍板/编辑 → /api/intake-commit-plan 按清单确定性建单。本参数让提示词与之呼应。
+function intakeChatSystem(proj, type, ver, subKey, hasArchivedBg, builtTickets) {
   const idx = specIndex(proj, ver), subs = subsystemNames(proj);
   const merged = type !== 'bug' && type !== 'requirement';   // 合并模式：AI 自己判是需求还是 BUG
   const typ = merged ? '需求 / BUG' : (type === 'bug' ? 'BUG' : '需求');
@@ -815,17 +848,18 @@ function intakeChatSystem(proj, type, ver, subKey, hasArchivedBg) {
 按提交标准核对信息是否齐（缺什么问什么，已说清的别重复问）：
 ${std}
 
-【你就是进件系统本身 · 直接建单，绝不让用户去别处复制粘贴】——你不是"帮用户整理文字再让 TA 拿去别的需求/工单系统提交"的助手；你输出的归档块**就是这套系统直接据以建单**的指令。信息齐了就**直接输出归档块建单**，绝不把单子写成"已整理为N条，可复制提交""请复制到你们的需求管理系统"这类给用户手工搬运的文字（那是错的、之前就踩过这个坑）。
+【你就是进件系统本身 · 你出「建单计划」，系统按计划建单，绝不让用户去别处复制粘贴】——你不是"帮用户整理文字再让 TA 拿去别的需求/工单系统提交"的助手。信息齐了，你就在回复末尾输出一个**建单计划块**（intake-plan），列出你识别到的**每一条独立**需求/BUG——用户会在页面上确认/编辑这份计划，系统据此建单。绝不把单子写成"已整理为N条，可复制提交""请复制到你们的需求管理系统"这类给用户手工搬运的文字（那是错的、之前就踩过这个坑）。
 
-当信息按标准基本齐、且子系统/模块已确认（或标待定）后：先用一两句确认你的理解(若是 BUG 顺带给处理意见)，然后在回复的最末尾附归档块（用户看不到里面内容，别在正文里提"归档块"三个字），严格 JSON、字段名照抄：
-\`\`\`intake-record
-{"type":"","subsystem":"","module":"","title":"","priority":"中","desc":"","errorInfo":"","steps":"","expectResult":"","severity":"","scope":"","env":"","freq":"","bg":"","reqDesc":"","accept":"","relate":"","opinion":""}
+当信息按标准基本齐、且子系统/模块已确认（或标待定）后：先用一两句确认你的理解(若是 BUG 顺带给处理意见)，然后在回复的最末尾附**一个** intake-plan 块（用户看不到块里内容，别在正文里提"计划块""intake-plan"这些字），严格 JSON，\`items\` 是数组、**每条独立需求/BUG 一个 item**：
+\`\`\`intake-plan
+{"items":[{"action":"new","type":"","subsystem":"","module":"","title":"","priority":"中","summary":"","desc":"","errorInfo":"","steps":"","expectResult":"","severity":"","scope":"","env":"","freq":"","bg":"","reqDesc":"","accept":"","relate":"","opinion":""}]}
 \`\`\`
-【一条问题一个块 · 多条就输出多个块】TA 一次可能说了**多条**需求/BUG——每条独立问题各自输出**一个 intake-record 块**（系统会据此各建一张单）；有几条齐了就在回复末尾接连附几个 intake-record 块（块与块之间可空行），**绝不**把多条塞进一个块、也绝不因"有多条"就退化成纯文字让用户自己复制。哪几条还没问清就先别为那几条出块，继续追问补齐即可（已齐的照常出块）。
-【N 条 = N 个块 · 一个都不能少 · 硬性】只要你已经识别/确认/拆分出 **N 条独立**的需求或 BUG（哪怕你嘴上说了"拆成两条""一起打包转开发""都已登记"），你就**必须**在这条回复的末尾**为每一条各输出一个 intake-record 块**——N 条就 **N 个块**，一个都不能少、绝不合并成一个块、也**绝不**用"打包转开发/一起排期/已登记/已闭环"这类**文字**代替出块。**少出一个块 = 漏建单 = 错。**"打包转开发排期"只是**话术**，不改变"一条需求 = 一个块 = 一张单"：你说了几条、就得出几个块。若其中某条还差澄清、另一条已齐 → **已齐的那条现在就出块建单**，没齐的继续追问补齐（别为了"一起提交"而都不出块）。
-【建单逐条独立 · 顺序流别重复别合并】建单是**逐条独立**的：**一旦你为某条需求/BUG 出过归档块（intake-record），那条就算已归档建单、已闭环**——之后用户再说的东西，默认是**另一条新的、和它无关的**需求/BUG，要**单独澄清、单独出块建新单**，**绝不**把新说的内容揉进（合并到）那条已建单里、也**绝不**为已建单再出一次块。只有当用户**明确针对某条已建单做补充/追问**（如"刚才那个导出再加个筛选"）时，那才是对该单的补充；否则一律当独立新条处理。${hasArchivedBg ? `
-【已建单归档背景 · 只读 · 禁止再建/合并】本轮对话开头有一段【已建单归档·只读背景】——那是本次会话里**此前已归档建单、已闭环**的需求/BUG，**只供你理解上下文**。你**只对「当前待处理」这段（背景之后的对话）判断有没有新需求/BUG 要建单**：绝不为「已归档背景」里的内容再出归档块、绝不把它们合并进「当前待处理」的新需求。若用户在「当前待处理」里明确针对某条已建单做补充/追问，用文字回应即可、别新建单。` : ''}
-${merged ? 'type 必填："bug"(问题/缺陷) 或 "requirement"(需求/改进)，按你判断的类别填；' : `type 填 "${type}"；`}priority 必填，按问题严重度/影响面判定，取值仅限【紧急/高/中/低】：紧急=线上阻断/资损/大面积无法使用；高=核心流程受阻但有临时办法或影响部分人；中=一般问题/改进(默认)；低=轻微/优化建议。拿不准填「中」。只有信息按标准基本齐才输出 record；还在澄清阶段就别输出。`;
+【一条独立需求 = 一个 item · 绝不合并 · 硬性】只要你识别/确认/拆分出 **N 条独立**的需求或 BUG（哪怕你嘴上说了"拆成两条""一起打包转开发""都已登记"），\`items\` 里就**必须**有 **N 个 item**，一个都不能少、**绝不**把多条揉进一个 item、也**绝不**用"打包转开发/一起排期/已登记"这类**文字**代替 item。**少一个 item = 漏建单 = 错。** 若其中某条还差澄清、另一条已齐 → 已齐的先放进 items（继续追问没齐的那条即可，别为了"一起提交"而都不放）。哪几条还没问清就先别放进 items，也可以先不出 plan 块、继续追问补齐。
+【summary 必填】每个 item 的 \`summary\` 用一两句大白话概括这条需求/BUG（给用户在确认卡上一眼看懂"这条是什么"），其余字段（desc/steps/bg/reqDesc 等）照你收集到的信息填。
+【action 判定 · 默认 new】${(Array.isArray(builtTickets) && builtTickets.length) ? `本会话此前已经建过这些单：\n${builtTickets.map(t => `· ${t.ticketId}：${t.title}`).join('\n')}\n对当前这段对话里用户新说的内容：\n- 若某条明显是对上面**某张已建单的补充/追问**（如"刚才那个导出再加个筛选""上面那个也要支持…"）→ 这个 item 用 \`{"action":"append","ticketId":"对应单号","title":"…","summary":"补充点…"}\`；\n- 若是**新的、和已建单不同**的需求/BUG → \`{"action":"new",…}\`。\n**默认倾向 new**：拿不准就填 new（宁可让用户在确认卡上改成 append，也别默认合并进旧单）。` : `所有 item 都用 \`"action":"new"\`（本会话还没建过任何单）。`}
+【只出计划、不催确认】你只负责把计划列清楚。别在正文里说"我已经建好单了""已提交"——**建单要等用户在确认卡上点确认**，此刻还没建。信息不齐就继续追问、别出 plan 块。${hasArchivedBg ? `
+【已建单归档背景 · 只读】本轮对话开头有一段【已建单归档·只读背景】——那是本次会话里**此前已确认建单、已闭环**的需求/BUG，**只供你理解上下文**。你**只对「当前待处理」这段（背景之后的对话）判断有没有新的需求/BUG 要放进 plan**：绝不为「已归档背景」里的内容再列 item。若用户在「当前待处理」里明确针对某条已建单做补充/追问，按上面的 action 规则处理。` : ''}
+${merged ? '每个 item 的 type 必填："bug"(问题/缺陷) 或 "requirement"(需求/改进)，按你判断的类别填；' : `每个 item 的 type 填 "${type}"；`}priority 必填，按问题严重度/影响面判定，取值仅限【紧急/高/中/低】：紧急=线上阻断/资损/大面积无法使用；高=核心流程受阻但有临时办法或影响部分人；中=一般问题/改进(默认)；低=轻微/优化建议。拿不准填「中」。只有信息按标准基本齐才输出 plan；还在澄清阶段就别输出。`;
 }
 async function intakeAI(proj, e) {   // 组装对话喂模型，返回 AI 文本
   const cfg = readModelCfg(); if (!cfg.apiKey) return { ok: false, reply: '（未配置模型 API，管理员配置后 AI 才会自动沟通。内容已收到并存档。）', configured: false };
@@ -1032,7 +1066,7 @@ function newSession(userId) { const t = crypto.randomBytes(24).toString('hex'); 
 function dropSession(t) { if (CACHE.sessions[t]) { delete CACHE.sessions[t]; db.delSession(t).catch(() => {}); } }
 function pruneSessions() { const now = Date.now(); for (const [t, s] of Object.entries(CACHE.sessions)) if (s.exp && s.exp < now) dropSession(t); }
 // 请求鉴权闸：返回 'allow' | 'login'（需登录）| 'forbidden'（越权）
-const LINK_OK = new Set(['/', '/submit.html', '/api/intake-submit', '/api/intake-chat', '/api/consult', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/model-config']);
+const LINK_OK = new Set(['/', '/submit.html', '/api/intake-submit', '/api/intake-chat', '/api/intake-commit-plan', '/api/consult', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/model-config']);   // FS-04 v2：/api/intake-commit-plan 进 LINK_OK——访客链接原可经 intake-chat 自动建单，现建单挪到确认清单 commit-plan，须放行否则访客建不了单
 function authGate(pathname, user, link) {
   if (pathname.startsWith('/assets/') || pathname.startsWith('/vendor/')) return 'allow';
   // /field.html = 实施端外壳页（FS-01）：页面本身不含数据、自带登录门遮罩，凭 /api/me 决定进不进工作空间；数据一律走下方受 gate 的 API。故页面外壳同 /login.html 一样对未登录/现场账号放行加载。
@@ -1042,12 +1076,12 @@ function authGate(pathname, user, link) {
   if (!user) return 'login';
   if (isAdmin(user)) return 'allow';                                    // 管理员：全放行
   // 现场侧（产品经理 / 实施工程师）：只允许 提交面 + 工单查看 + 验证
-  const FIELD_OK = new Set(['/', '/submit.html', '/detail.html', '/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/consult', '/api/consult-to-intake', '/api/intake-delete', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-media', '/api/intake-transition', '/api/field/submissions', '/api/field/conversations', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/intake-set-priority', '/api/field/update-plan', '/api/field/update-toggle', '/api/field/update-sql-merged']);   // FS-04：/api/field/conversations = 右上「对话记录」数据源（consult 每条 + intake 按 sessionId 分组），端点内按 user.sites 收敛   // FS-05：现场端新端点（按批次视图/下载/改版本/维保回写/逐单验证）+ 累积更新计划（读代码 docs/deploy.json/累积计划/勾选/合并SQL），均端点内按 user.sites 二次收敛。2026-08-05 架构重构删 deploy-template/customer-deploy-task/batch-task/version-releases（跟随产品代码，废弃手工登记与部署模板）
+  const FIELD_OK = new Set(['/', '/submit.html', '/detail.html', '/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/intake-commit-plan', '/api/consult', '/api/consult-to-intake', '/api/intake-delete', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-media', '/api/intake-transition', '/api/field/submissions', '/api/field/conversations', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/intake-set-priority', '/api/field/update-plan', '/api/field/update-toggle', '/api/field/update-sql-merged']);   // FS-04：/api/field/conversations = 右上「对话记录」数据源；/api/intake-commit-plan = 建单前确认清单确定性建单（v2 2026-08-07）（consult 每条 + intake 按 sessionId 分组），端点内按 user.sites 收敛   // FS-05：现场端新端点（按批次视图/下载/改版本/维保回写/逐单验证）+ 累积更新计划（读代码 docs/deploy.json/累积计划/勾选/合并SQL），均端点内按 user.sites 二次收敛。2026-08-05 架构重构删 deploy-template/customer-deploy-task/batch-task/version-releases（跟随产品代码，废弃手工登记与部署模板）
   return FIELD_OK.has(pathname) ? 'allow' : 'forbidden';
 }
 // FS-08 §4①：field 域接口允许集 = LINK_OK ∪ FIELD_OK（供访客链接 + 现场账号），与 authGate 内 FIELD_OK 同源，避免漂移。
 //   注意：这里是 authGate 里那份 FIELD_OK 的镜像常量——两者若改一处务必同步（authGate 用于登录态白名单，本集用于 field 域名层外层闸）。
-const FS08_FIELD_API = new Set(['/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/consult', '/api/consult-to-intake', '/api/intake-delete', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-media', '/api/intake-transition', '/api/field/submissions', '/api/field/conversations', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/intake-set-priority', '/api/field/update-plan', '/api/field/update-toggle', '/api/field/update-sql-merged', '/api/model-config']);   // FS-04：/api/field/conversations 须与 FIELD_OK 同步（否则实施域 originGate deny→forbidden，见 fs-08 防漂移断言）   // FS-05 端点须与 FIELD_OK 同步，否则实施域(field)整个流被 originGate deny→forbidden（实测坑，见 fs-08 防漂移断言）；update-plan/update-toggle/update-sql-merged 为累积更新计划现场端。2026-08-05 架构重构删 deploy-template/customer-deploy-task/batch-task/version-releases（跟随产品代码）
+const FS08_FIELD_API = new Set(['/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/intake-commit-plan', '/api/consult', '/api/consult-to-intake', '/api/intake-delete', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-media', '/api/intake-transition', '/api/field/submissions', '/api/field/conversations', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/intake-set-priority', '/api/field/update-plan', '/api/field/update-toggle', '/api/field/update-sql-merged', '/api/model-config']);   // FS-04：/api/field/conversations + /api/intake-commit-plan 须与 FIELD_OK 同步（否则实施域 originGate deny→forbidden）（否则实施域 originGate deny→forbidden，见 fs-08 防漂移断言）   // FS-05 端点须与 FIELD_OK 同步，否则实施域(field)整个流被 originGate deny→forbidden（实测坑，见 fs-08 防漂移断言）；update-plan/update-toggle/update-sql-merged 为累积更新计划现场端。2026-08-05 架构重构删 deploy-template/customer-deploy-task/batch-task/version-releases（跟随产品代码）
 // field 域可加载的静态页（现场提交面 + 实施端外壳 + 现场可看的详情 + 登录页）。console/inbox/customers/kb/model-config/accounts/projects 等后台页不在其中 → 越域拒。
 const FS08_FIELD_PAGES = new Set(['/', '/field.html', '/submit.html', '/detail.html', '/login.html']);
 // 鉴权/健康端点：两域都放（field 域现场登录/查身份/登出/健康探测需要）。
@@ -2286,41 +2320,69 @@ const server = http.createServer((req, res) => {
         ? [{ role: 'user', content: '【已建单归档·只读背景·禁止再为这些内容建单或合并进新需求】以下是本次会话此前已归档建单、已闭环的对话，仅供你理解上下文：\n' + archivedMsgs.map(m => (m.role === 'user' ? '用户：' : '助手：') + m.content).join('\n') + '\n【以上为已建单背景，结束】' }, ...activeMsgs]
         : activeMsgs;
       const imgs = (Array.isArray(b.images) ? b.images : []).slice(0, 6);   // 本轮附的截图（data URL，≤6）→ 多模态并进末条 user，让 AI 结合图判类/建单
-      let reply; try { reply = await callModel(cfg, { system: intakeChatSystem(proj, type, version, sub, archivedMsgs.length > 0) + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题/复现场景。' : ''), messages: msgs, images: imgs, maxTokens: 800 }); }
+      // FS-04 v2（2026-08-07）「建单前确认清单」：续聊已建单会话时前端传 builtTickets:[{ticketId,title}]，让 AI 在 plan 里对「补充某已建单」用 action=append、否则 new（默认倾向 new）。
+      const builtTickets = (Array.isArray(b.builtTickets) ? b.builtTickets : []).map(t => ({ ticketId: String((t && t.ticketId) || (t && t.id) || '').trim(), title: String((t && t.title) || '').trim() })).filter(t => t.ticketId).slice(0, 20);
+      let reply; try { reply = await callModel(cfg, { system: intakeChatSystem(proj, type, version, sub, archivedMsgs.length > 0, builtTickets) + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题/复现场景。' : ''), messages: msgs, images: imgs, maxTokens: 900 }); }
       catch (e) { return send(res, 200, JSON.stringify({ ok: true, reply: '（AI 暂时连不上：' + String((e && e.message) || e) + '，稍后再试。）' })); }
-      let savedId = '', savedPriority = '';   // 单条兼容：老前端只读 savedId/priority（首张单），保持不变
-      const savedIds = [];                     // Part A：多条需求 → 多个 intake-record 块 → 多张单，逐张回带 {id,type,priority} 供前端建多张卡
-      // Part A：AI 一次可产出多个 intake-record 块（一条需求/BUG 一个块）→ 全量解析、每块各建一张单（不再只取第一个块）。
-      const blockRe = /```intake-record\s*([\s\S]*?)```/g;
-      const blocks = [...(reply || '').matchAll(blockRe)];
-      for (const m of blocks) {
-        let rec = null; try { rec = JSON.parse(m[1].trim()); } catch {}
-        if (!rec || !(rec.title || '').trim()) continue;   // 无法解析/无标题的块跳过（不建脏单），其余块照常
-        const recType = type === 'intake' ? (String(rec.type || '').toLowerCase() === 'bug' ? 'bug' : 'requirement') : type;   // 合并模式取 AI 判定的类型
-        const id = intakeGenId(proj, recType), stamp = nowStamp(), reporter = user ? (user.name || user.username) : (link ? link.name : ''), media = [];
-        // Part B：本轮附图存到「该单」media 目录（多张单各存一份，保持每张单自包含、便于单独清理），路径记 e.media（detail.html 用）+ 挂到该单 chat 末条 user 消息（reopen 按轮显图）。
-        try { const mdir = path.join(intakeDir(proj), 'media', id); if (imgs.length) fs.mkdirSync(mdir, { recursive: true }); imgs.forEach((du, i) => { const mm = /^data:image\/\w+;base64,(.+)$/.exec(du || ''); if (mm) { fs.writeFileSync(path.join(mdir, `img-${i + 1}.png`), Buffer.from(mm[1], 'base64')); media.push(`media/${id}/img-${i + 1}.png`); } }); } catch {}
-        // Part B（per-message media）：把本轮图挂到该单 chat 的「最后一条 user」消息上（=本轮发言）；旧记录无 msg.media 时前端兜底走记录级 e.media。
-        // ⚠️ 存的是**真实完整对话** allMsgs（不是喂模型时按水位线折叠的 msgs——后者含合成的「已建单背景」说明，别落库/别 reopen 显示）。
-        const chatMsgs = allMsgs.map(x => ({ role: x.role, text: x.content, ts: Date.now() }));
-        if (media.length) { for (let i = chatMsgs.length - 1; i >= 0; i--) { if (chatMsgs[i].role === 'user') { chatMsgs[i].media = media.slice(); break; } } }
-        // AC-32（2026-08-06 改）：紧急程度改「per-ticket」——不再被全局 b.priority 覆盖；按 AI 每条 record 判定的 rec.priority 规范到四档（非法/空→中）。现场逐条改档走 /api/intake-set-priority（本次响应回带 priority 作现场卡片默认档）。
-        const e = { id, type: recType, project: proj.id, version, site, subsystem: sub || rec.subsystem || '', module: rec.module || '', title: (rec.title || '').trim(), priority: normPriority(rec.priority, '中'), severity: rec.severity || '', scope: rec.scope || '', env: rec.env || '', freq: rec.freq || '', reporter, role: '', contact: '', bg: rec.bg || '', reqDesc: rec.reqDesc || '', scene: '', accept: rec.accept || '', relate: rec.relate || '', desc: rec.desc || '', errorInfo: rec.errorInfo || '', steps: rec.steps || '', expectResult: rec.expectResult || '', opinion: rec.opinion || '', media, sessionId, status: '待处理', lifecycle: '待处理', assignee: '', history: [{ from: '', to: '待处理', by: reporter, byRole: (user ? user.role : 'field'), at: stamp, note: '对话提交' }], analysis: null, resolution: {}, submittedAt: stamp, chat: chatMsgs };   // sessionId：同一次聊天建的多张单同值 → 右上「对话记录」按它归一条
-        await saveIntake(proj, e);
-        savedIds.push({ id, type: recType, priority: e.priority });   // 逐张单：id + AI 判定类型 + 最终紧急档
-        if (!savedId) { savedId = id; savedPriority = e.priority; }   // 首张单回填单条字段（老前端兼容）
-      }
-      // 把所有归档块从可见正文里剔除（用户不该看到结构块）
-      reply = (reply || '').replace(blockRe, '').trim();
-      // FS-04 AC-36：会话记录持久化——**沟通过就存**（不必建单）。整段 chat = 本轮 messages（去空）+ 剔除结构块后的 AI 可见回复。
-      //   按 sessionId upsert 一条 type='intake-conv'（幂等，同会话每轮命中同一条）；建单逻辑不变、别重复建工单。
+      // FS-04 v2 治本：AI 不再直接建单——解析 intake-plan 块得 items（一条独立需求一个 item，绝不合并）+ 剔块后可见正文。
+      //   服务端不建单，把 items（补 project/site/version/subsystem 兜底）回给前端「确认卡」，用户拍板后走 /api/intake-commit-plan 确定性建单。
+      const parsed = parseIntakePlan(reply, type === 'intake' ? '' : type);   // 合并模式让 AI 判类型（forceType 空）；否则强制该类型
+      reply = parsed.visible;
+      const planItems = parsed.items.map(it => ({ ...it, subsystem: it.subsystem || sub || '' }));   // subsystem 兜底：AI 未填→用户指定的 sub
+      // FS-04 AC-36：会话记录持久化——**沟通过就存**（不必建单）。整段 chat = 本轮 messages（去空）+ 剔除计划块后的 AI 可见回复。
+      //   按 sessionId upsert 一条 type='intake-conv'（幂等，同会话每轮命中同一条）；建单逻辑挪到 commit-plan、这里不建单。
       try {
         const reporter = user ? (user.name || user.username) : (link ? link.name : '现场');
         const convChat = allMsgs.map(x => ({ role: x.role, text: x.content, ts: Date.now() }));   // 真实完整对话（非水位线折叠的 msgs）
-        if (reply) convChat.push({ role: 'assistant', text: reply, ts: Date.now() });   // 只在有可见回复时并入（纯结构块无可见文本则不并、避免空 AI 气泡）
+        if (reply) convChat.push({ role: 'assistant', text: reply, ts: Date.now() });   // 只在有可见回复时并入（纯计划块无可见文本则不并、避免空 AI 气泡）
         await saveConvRecord(proj, { sessionId, site, subsystem: sub, version, reporter, role: user ? user.role : 'field', chat: convChat });
       } catch {}
-      send(res, 200, JSON.stringify({ ok: true, reply, savedId, priority: savedPriority, savedIds }));
+      // 回带 plan（含 project/site/version/subsystem 兜底，供前端建单端点直接用）。savedId/savedIds 恒空（不再自动建单）——老前端字段保留但为空，避免它据此误建卡。
+      send(res, 200, JSON.stringify({ ok: true, reply, savedId: '', priority: '', savedIds: [], plan: { items: planItems, project: proj.id, site, version, subsystem: sub, sessionId } }));
+    });
+  }
+  if (url.pathname === '/api/intake-commit-plan' && req.method === 'POST') {   // FS-04 v2（2026-08-07）「建单前确认清单」：按用户在确认卡上拍板的清单确定性建单/补充（AI 不再自动建单）。现场+管理员可调（已进 FIELD_OK/FS08_FIELD_API）。
+    return readBody(req, async (b, err) => {
+      if (!b) return send(res, 400, JSON.stringify({ ok: false, error: err }));
+      const proj = projById(link ? link.project : b.project); if (!proj) return send(res, 400, JSON.stringify({ ok: false, error: '请先选择所属系统' }));
+      const items = Array.isArray(b.items) ? b.items : []; if (!items.length) return send(res, 400, JSON.stringify({ ok: false, error: '清单为空' }));
+      const version = String(b.version || '').trim() || (link ? link.ver : '');
+      const site = user ? convergeSite(user, b.site) : (String(b.site || '').trim() || (link ? link.site : ''));   // AC-21：登录现场账号 site 服务端收敛到 user.sites（越权→取合法首家）
+      const sub = String(b.subsystem || '').trim();
+      const sessionId = String(b.sessionId || '').trim().slice(0, 40);   // 同会话建的多张单同 sessionId → 右上「对话记录」归一条
+      const reporter = user ? (user.name || user.username) : (link ? link.name : '');
+      const byRole = user ? user.role : 'field';
+      const imgs = (Array.isArray(b.images) ? b.images : []).slice(0, 6);   // 确认时本轮可带图（多张单各存一份）
+      const created = [], appended = [];
+      for (const rawIt of items) {
+        if (!rawIt || typeof rawIt !== 'object') continue;
+        const title = String(rawIt.title || '').trim(); if (!title) continue;   // 无标题跳过（不建脏单）
+        const itType = String(rawIt.type || '').toLowerCase() === 'bug' ? 'bug' : 'requirement';
+        const itSub = String(rawIt.subsystem || '').trim() || sub || '';
+        const summary = String(rawIt.summary || '').trim();
+        if (String(rawIt.action || '').toLowerCase() === 'append') {
+          // 补充到已建单：校验单号存在 + 属本会话/本人 sites（现场 e.site∈sites，管理员不限）；把 summary 追加到工单 + 留痕。
+          const tid = String(rawIt.ticketId || '').trim();
+          const e = tid ? loadIntake(proj, tid) : null;
+          if (!e || e.deleted || e.type === 'intake-conv' || e.type === 'consult') continue;   // 找不到/软删/非工单 → 跳过该 item（不报错，其余照建）
+          if (user && !isAdmin(user)) { const ss = Array.isArray(user.sites) ? user.sites : []; if (e.site && !ss.includes(e.site)) continue; }   // 越权（补充非自己 sites 的单）→ 跳过
+          const stamp = nowStamp();
+          const addTxt = summary || title;
+          e.chat = Array.isArray(e.chat) ? e.chat : []; e.chat.push({ role: 'user', text: '【补充】' + addTxt, ts: Date.now() });   // 补充内容作为一条 user 消息进沟通记录
+          e.history = Array.isArray(e.history) ? e.history : []; e.history.push({ from: e.lifecycle || '', to: e.lifecycle || '待处理', by: reporter, byRole, at: stamp, note: '对话补充：' + addTxt.slice(0, 60) });
+          e.updatedAt = stamp;
+          await saveIntake(proj, e);
+          appended.push({ id: e.id });
+        } else {
+          // 新建工单（复用 intake-chat 建单落库范式：type/title/subsystem/priority/sessionId/site/version/reporter/media/history/analysis）。
+          const id = intakeGenId(proj, itType), stamp = nowStamp(), media = [];
+          try { const mdir = path.join(intakeDir(proj), 'media', id); if (imgs.length) fs.mkdirSync(mdir, { recursive: true }); imgs.forEach((du, i) => { const mm = /^data:image\/\w+;base64,(.+)$/.exec(du || ''); if (mm) { fs.writeFileSync(path.join(mdir, `img-${i + 1}.png`), Buffer.from(mm[1], 'base64')); media.push(`media/${id}/img-${i + 1}.png`); } }); } catch {}
+          const e = { id, type: itType, project: proj.id, version, site, subsystem: itSub, module: String(rawIt.module || '').trim(), title, priority: normPriority(rawIt.priority, '中'), severity: String(rawIt.severity || ''), scope: String(rawIt.scope || ''), env: String(rawIt.env || ''), freq: String(rawIt.freq || ''), reporter, role: '', contact: '', bg: String(rawIt.bg || ''), reqDesc: String(rawIt.reqDesc || summary || ''), scene: '', accept: String(rawIt.accept || ''), relate: String(rawIt.relate || ''), desc: String(rawIt.desc || ''), errorInfo: String(rawIt.errorInfo || ''), steps: String(rawIt.steps || ''), expectResult: String(rawIt.expectResult || ''), opinion: String(rawIt.opinion || ''), media, sessionId, status: '待处理', lifecycle: '待处理', assignee: '', history: [{ from: '', to: '待处理', by: reporter, byRole, at: stamp, note: '对话提交（确认清单）' }], analysis: null, resolution: {}, submittedAt: stamp, chat: [] };
+          await saveIntake(proj, e);
+          created.push({ id, type: itType, title, priority: e.priority });
+        }
+      }
+      send(res, 200, JSON.stringify({ ok: true, created, appended }));
     });
   }
   if (url.pathname === '/api/consult' && req.method === 'POST') {   // 答疑：直连 spec + 经验库直接回答 + 给解决思路

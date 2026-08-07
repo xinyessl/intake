@@ -47,15 +47,16 @@ test('A2 normPriority：非法/空 → 回落 fallback（默认中）', () => {
 });
 
 /* ================= B. 静态断言（改动落地：全局删净 / 白名单 / 响应 / AI 提示词 / 卡片选择器） ================= */
-test('B1 server：intake-chat 建单不再被全局 b.priority 覆盖 → 按 rec.priority 规范到四档', () => {
-  // 建单 record 的 priority 取 normPriority(rec.priority,'中')，且不出现 normPriority(b.priority,...) 那种全局覆盖
-  assert.match(SRC, /priority: normPriority\(rec\.priority, '中'\)/, 'intake-chat record priority = normPriority(rec.priority,中)');
-  assert.doesNotMatch(SRC, /normPriority\(b\.priority, rec\.priority/, '不再有 normPriority(b.priority, rec.priority…) 的全局覆盖');
+test('B1 server：commit-plan 建单 priority 按 item 规范到四档（FS-04 v2：建单从 intake-chat 挪到 commit-plan）', () => {
+  // FS-04 v2（2026-08-07）：AI 不再直接建单，建单挪到 /api/intake-commit-plan——每条 item 的 priority 经 normPriority(rawIt.priority,'中')，无全局覆盖。
+  const seg = SRC.slice(SRC.indexOf("url.pathname === '/api/intake-commit-plan'"), SRC.indexOf("url.pathname === '/api/consult'"));
+  assert.match(seg, /priority: normPriority\(rawIt\.priority, '中'\)/, 'commit-plan 每 item priority = normPriority(rawIt.priority,中)');
+  assert.doesNotMatch(SRC, /normPriority\(b\.priority, rec\.priority/, '无全局覆盖 normPriority(b.priority, rec.priority…)');
 });
-test('B2 server：intake-chat 响应体带 priority（现场卡片默认档）', () => {
-  assert.match(SRC, /let savedId = '', savedPriority = ''/, '声明 savedPriority');
-  assert.match(SRC, /savedPriority = e\.priority/, '建单后回带该单 priority');
-  assert.match(SRC, /ok: true, reply, savedId, priority: savedPriority/, '响应 {ok,reply,savedId,priority}');
+test('B2 server：commit-plan 回带 created[{id,type,title,priority}]（现场卡片默认档）', () => {
+  const seg = SRC.slice(SRC.indexOf("url.pathname === '/api/intake-commit-plan'"), SRC.indexOf("url.pathname === '/api/consult'"));
+  assert.match(seg, /created\.push\(\{ id, type: itType, title, priority: e\.priority \}\)/, '建单回带该单 priority');
+  assert.match(seg, /ok: true, created, appended/, '响应 {ok,created,appended}');
 });
 test('B3 server：/api/intake-submit 仍是单工单路径、priority=normPriority(b.priority,中)（保留正确）', () => {
   assert.match(SRC, /priority: normPriority\(b\.priority, '中'\)/, 'intake-submit 保留 normPriority(b.priority,中)');
@@ -102,9 +103,8 @@ test('B9 field：每张卡片有 per-ticket 选择器（buildTicketPriPicker + s
   assert.match(FIELD_HTML, /已设为/, '成功 toast「已设为…」');
   // appendArchiveCard 建卡时挂选择器，且四档配色 CSS 齐（紧急/高/中/低 data-pri）
   ['紧急', '高', '中', '低'].forEach(v => assert.match(FIELD_HTML, new RegExp('data-pri="' + v + '"'), '配色 CSS data-pri=' + v));
-  // 建单/reopen 建卡都把 priority + project 传进 appendArchiveCard
-  // 2026-08-06：多单直建后建卡改遍历 savedIds → appendArchiveCard({ id: t.id, ..., priority: t.priority, project: archive.project })（原 b.savedId 单卡形已被多卡逻辑替代，见 CHG-FS04-对话多单直建）。
-  assert.match(FIELD_HTML, /appendArchiveCard\(\{ id: t\.id,[\s\S]*?priority: t\.priority, project: archive\.project \}\)/, '新建单卡片（多单遍历 savedIds）带 t.priority + project');
+  // FS-04 v2（2026-08-07）：确认清单 commitPlan 建单后遍历 created → appendArchiveCard({ id: t.id, ..., priority: t.priority, project: model.project })（建卡从 sendIntake 挪到 commitPlan）。
+  assert.match(FIELD_HTML, /appendArchiveCard\(\{ id: t\.id,[\s\S]*?priority: t\.priority, project: model\.project \}\)/, '确认清单建单卡片（遍历 created）带 t.priority + project');
   assert.match(FIELD_HTML, /appendArchiveCard\(\{ id: chat\.savedId, type: item\.type[\s\S]*?priority: item\.priority, project:/, 'reopen 卡片带 item.priority + project');
 });
 

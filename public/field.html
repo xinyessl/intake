@@ -477,6 +477,36 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
 .f-arch .rowk b { color: var(--color-text); font-weight: 600; }
 .f-arch .anz { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--color-primary-border); font-size: 12.5px; color: var(--color-text-secondary); }
 .f-arch .anz .cat { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 700; background: var(--color-primary); color: #fff; margin-right: 5px; }
+/* FS-04 v2（2026-08-07）建单前「确认清单」卡：AI 出计划 → 用户确认/编辑 → 系统按清单建单 */
+.f-plan { margin-top: 4px; border: 1px solid var(--color-primary-border); background: var(--color-surface); border-radius: 10px; padding: 12px 14px; font-size: 13px; line-height: 1.55; }
+.f-plan .hd { display: flex; align-items: center; gap: 6px; font-weight: 700; color: var(--color-primary); margin-bottom: 4px; }
+.f-plan .hd .ti { font-size: 16px; }
+.f-plan .sub { font-size: 12px; color: var(--color-text-tertiary); margin-bottom: 10px; }
+.f-plan .items { display: flex; flex-direction: column; gap: 8px; }
+.f-plan .pit { border: 1px solid var(--color-border); border-radius: 8px; padding: 9px 10px; background: var(--color-bg); }
+.f-plan .pit-r1 { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+.f-plan .pit-r1 select { border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text); border-radius: 6px; padding: 3px 6px; font-size: 12px; font-weight: 600; cursor: pointer; outline: none; }
+.f-plan .pit-r1 .aptk { flex: 1; min-width: 120px; }
+.f-plan .pit-r1 .pit-del { margin-left: auto; border: none; background: transparent; color: var(--color-text-tertiary); cursor: pointer; font-size: 15px; padding: 2px 4px; border-radius: 5px; }
+.f-plan .pit-r1 .pit-del:hover { color: var(--color-danger); background: var(--color-danger-light); }
+.f-plan .pit .ptitle { width: 100%; border: 1px solid var(--color-border); border-radius: 6px; padding: 6px 8px; font-size: 13px; font-weight: 600; color: var(--color-text); background: var(--color-surface); outline: none; box-sizing: border-box; }
+.f-plan .pit .ptitle:focus { border-color: var(--color-primary); }
+.f-plan .pit .psum { width: 100%; border: 1px solid var(--color-border); border-radius: 6px; padding: 5px 8px; font-size: 12px; color: var(--color-text-secondary); background: var(--color-surface); outline: none; box-sizing: border-box; margin-top: 5px; resize: vertical; min-height: 30px; line-height: 1.45; }
+.f-plan .pit .psum:focus { border-color: var(--color-primary); }
+.f-plan .pit .prow2 { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.f-plan .pit .prow2 .split { border: none; background: transparent; color: var(--color-primary); cursor: pointer; font-size: 11.5px; padding: 2px 4px; border-radius: 5px; display: inline-flex; align-items: center; gap: 3px; }
+.f-plan .pit .prow2 .split:hover { background: var(--color-primary-light); }
+.f-plan .pit .prow2 .sysname { font-size: 11.5px; color: var(--color-text-tertiary); margin-left: auto; }
+.f-plan .foot { display: flex; align-items: center; gap: 10px; margin-top: 11px; }
+.f-plan .foot .addone { border: 1px dashed var(--color-border); background: transparent; color: var(--color-text-secondary); cursor: pointer; font-size: 12px; padding: 6px 10px; border-radius: 7px; display: inline-flex; align-items: center; gap: 4px; }
+.f-plan .foot .addone:hover { border-color: var(--color-primary); color: var(--color-primary); }
+.f-plan .foot .commit { margin-left: auto; border: none; border-radius: 8px; background: var(--color-primary); color: #fff; font-weight: 700; padding: 8px 18px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; font-size: 13px; white-space: nowrap; }
+.f-plan .foot .commit:hover { background: var(--sidebar-bg); }
+.f-plan .foot .commit:disabled { opacity: .55; cursor: not-allowed; }
+.f-plan.done { opacity: .72; }
+.f-plan.done .items, .f-plan.done .foot { display: none; }
+.f-plan .done-note { display: none; margin-top: 8px; font-size: 12.5px; color: var(--color-primary); font-weight: 600; }
+.f-plan.done .done-note { display: block; }
 /* 兜底：人工提交面板（AI 不可用时降级） */
 .f-fallback { margin-top: 6px; border: 1px solid var(--color-warning-border); background: var(--color-warning-light); border-radius: 10px; padding: 12px 14px; }
 .f-fallback .ft { font-size: 12.5px; color: var(--color-warning); font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
@@ -2458,6 +2488,8 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     submitKind: 'consult',   // 'intake'（提需求/报BUG，走 intake-chat/intake-submit + analyze）| 'consult'（咨询答疑，走 consult SSE）；2026-07-23 裁决默认咨询答疑
     messages: [],           // 会话历史 [{role:'user'|'assistant', content}]（传后端 + 恢复草稿）
     savedId: '',            // 幂等：本会话已建工单 id（非空=已建单，不重复建 · AC-12/22）
+    builtTickets: [],       // FS-04 v2（2026-08-07）本会话已建单清单 [{id,title,type}]——发 intake-chat 时上送，让 AI 在 plan 里对「补充某已建单」用 action=append（下拉可选、默认 new）。随草稿/快照 save/restore；newConversation 清空；reopen 已建单会话按 tickets 填
+    lastPlanCard: null,     // FS-04 v2：当前对话流里最近一张未提交的「确认清单」卡 DOM（新一轮 AI 出新计划时把旧卡标灰=已被新计划取代，避免用户对着过期计划点确认）
     filedUpTo: 0,           // FS-04（2026-08-06）「已建单水位线」：chat.messages 里已归档建单覆盖到第几条（前 filedUpTo 条=已闭环背景）。intake-chat 每次返回 savedIds 非空→上移到当轮 messages.length。发 intake-chat 带上；后端据它切「已归档背景 vs 当前待处理」，只对后段判建单，杜绝把已建单旧需求跟新需求合并/重复（顺序流上下文污染）。随草稿/快照 save/restore；newConversation 归 0；reopen 已建单会话设为 messages.length、未建单设 0
     convId: '',             // 咨询续问会话 id（同 convId 续存不新建 · AC-18/22）
     sessionId: '',          // FS-04（2026-08-06）：提需求/报BUG 聊天的「会话 id」——一次聊天建的多张单同此 id → 右上「对话记录」按它归成一条。newConversation 时重置生成新 id；随 intake-chat 发；随草稿/快照 save/restore
@@ -2498,6 +2530,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       submitKind: chat.submitKind,
       convId: chat.convId,
       savedId: chat.savedId,
+      builtTickets: (chat.builtTickets || []).slice(),   // FS-04 v2：本会话已建单清单随快照（切回续聊仍能出 append 下拉、AI 判 append/new）
       filedUpTo: chat.filedUpTo || 0,             // FS-04 已建单水位线随会话快照（切回续聊时后端仍从水位线切「已归档背景 vs 待处理」，不翻旧已建单）
       sessionId: chat.sessionId || '',            // FS-04：会话 id 随系统会话快照记（切回续聊建的新单仍归同一条对话记录）
       reopenSessionId: chat.reopenSessionId || '', // reopen 的 intake 会话 sessionId（切回仍指同一条对话记录）
@@ -2519,6 +2552,8 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     chat.submitKind = (snap.submitKind === 'intake') ? 'intake' : 'consult';
     chat.convId = snap.convId || '';
     chat.savedId = snap.savedId || '';
+    chat.builtTickets = Array.isArray(snap.builtTickets) ? snap.builtTickets.slice() : [];   // FS-04 v2：恢复本会话已建单清单
+    chat.lastPlanCard = null;   // 切系统重渲对话流 → 旧未提交计划卡的 DOM 引用作废（重渲后不再指向真节点）
     chat.filedUpTo = Math.min(Math.max(0, snap.filedUpTo | 0), chat.messages.length);   // FS-04 恢复已建单水位线（夹到 [0, messages.length] 防越界）
     chat.sessionId = snap.sessionId || newSessionId();       // FS-04：恢复会话 id（无则给新的，续聊建单仍归一条对话记录）
     chat.reopenSessionId = snap.reopenSessionId || '';
@@ -2581,8 +2616,9 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       out.version = state.ctxVer || '';
       return out;
     }
-    // AC-36：reopen 一条**未建单**的会话记录（intake-conv）续聊 → 锁其原上下文，续聊走 intake-chat 同 sessionId（AI 够了再建单落对该 project/site/subsystem）；不受当前视图切换影响。
-    if (chat.reopenConvProject && chat.submitKind === 'intake' && !chat.savedId) {
+    // AC-36：reopen 一条会话记录（intake-conv）续聊 → 锁其原上下文，续聊走 intake-chat 同 sessionId（AI 够了再建单落对该 project/site/subsystem）；不受当前视图切换影响。
+    //   FS-04 v2：已建单会话 reopen 同样走 plan 流（chat.savedId 已置），故不再要求 !chat.savedId——只要 reopenConvProject 有值就锁上下文。
+    if (chat.reopenConvProject && chat.submitKind === 'intake') {
       out.project = chat.reopenConvProject;
       out.subsystem = chat.reopenConvSubsystem || '';
       out.site = chat.reopenConvSite || state.curSite || (state.sites.length ? state.sites[0] : '');
@@ -2744,6 +2780,177 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   }
 
   // 归档结果卡片（建单成功 + 可选 AI 初判 analysis）
+  // FS-04 v2（2026-08-07）建单前「确认清单」：把 AI 出的 plan.items 渲染成一张可编辑确认卡。用户拍板前不建任何单。
+  //   plan = {items:[{action,ticketId?,type,title,subsystem,summary,...}], project, site, version, subsystem, sessionId}
+  //   archive = 当前归档上下文（建单端点用 project/site/version 兜底）；imgs = 本轮附图（确认建单时随首批新单落 media）。
+  function renderPlanCard(plan, archive, imgs) {
+    clearPlaceholder();
+    var box = chatBox(); if (!box) return;
+    // 新一轮出新计划 → 把上一张未提交的确认卡标灰（已被新计划取代），避免用户对着过期计划点确认建重单。
+    if (chat.lastPlanCard && chat.lastPlanCard.parentNode && !chat.lastPlanCard.classList.contains('done')) {
+      chat.lastPlanCard.classList.add('done');
+      var dn = chat.lastPlanCard.querySelector('.done-note'); if (dn) dn.textContent = '（此计划已被下方新计划取代）';
+    }
+    var msg = document.createElement('div'); msg.className = 'f-msg ai';
+    var av = document.createElement('div'); av.className = 'av'; av.innerHTML = '<i class="ti ti-list-check"></i>';
+    var card = document.createElement('div'); card.className = 'f-plan';
+    // 本卡的可编辑数据模型（用户改标题/摘要/action/删条/拆条/加条都改这里；确认时据它调 commit-plan）
+    var model = {
+      project: plan.project || archive.project || '',
+      site: plan.site || archive.site || '',
+      version: plan.version || archive.version || '',
+      subsystem: plan.subsystem || archive.subsystem || '',
+      sessionId: plan.sessionId || chat.sessionId || '',
+      imgs: (Array.isArray(imgs) && imgs.length) ? imgs.slice() : [],
+      items: plan.items.map(function (it) {
+        return {
+          action: it.action === 'append' ? 'append' : 'new',
+          ticketId: it.ticketId || '',
+          type: it.type === 'bug' ? 'bug' : 'requirement',
+          title: it.title || '', summary: it.summary || '', subsystem: it.subsystem || '',
+          module: it.module || '', priority: it.priority || '中',
+          desc: it.desc || '', errorInfo: it.errorInfo || '', steps: it.steps || '', expectResult: it.expectResult || '',
+          severity: it.severity || '', scope: it.scope || '', env: it.env || '', freq: it.freq || '',
+          bg: it.bg || '', reqDesc: it.reqDesc || '', accept: it.accept || '', relate: it.relate || '', opinion: it.opinion || ''
+        };
+      })
+    };
+    card._model = model;
+    var itemsWrap = document.createElement('div'); itemsWrap.className = 'items';
+    function renderItems() {
+      itemsWrap.innerHTML = '';
+      model.items.forEach(function (it, idx) { itemsWrap.appendChild(buildPlanItemRow(it, idx, model, renderItems)); });
+    }
+    renderItems();
+    var n = model.items.length;
+    card.innerHTML = '<div class="hd"><i class="ti ti-clipboard-list"></i> 我识别到这 <b style="margin:0 3px">' + n + '</b> 条，请确认后建单</div>' +
+      '<div class="sub">可改标题/摘要、切「新建/补充到已建单」、删条、拆成两条、再加一条；确认前不会建任何单。</div>';
+    card.appendChild(itemsWrap);
+    var foot = document.createElement('div'); foot.className = 'foot';
+    var addBtn = document.createElement('button'); addBtn.type = 'button'; addBtn.className = 'addone'; addBtn.innerHTML = '<i class="ti ti-plus"></i> 再加一条';
+    addBtn.addEventListener('click', function () { model.items.push({ action: 'new', ticketId: '', type: 'requirement', title: '', summary: '', subsystem: model.subsystem || '', module: '', priority: '中' }); renderItems(); });
+    var commitBtn = document.createElement('button'); commitBtn.type = 'button'; commitBtn.className = 'commit'; commitBtn.innerHTML = '<i class="ti ti-check"></i> 确认建单';
+    commitBtn.addEventListener('click', function () { commitPlan(card, model, archive); });
+    foot.appendChild(addBtn); foot.appendChild(commitBtn);
+    card.appendChild(foot);
+    var doneNote = document.createElement('div'); doneNote.className = 'done-note'; doneNote.textContent = '已按此清单建单';
+    card.appendChild(doneNote);
+    msg.appendChild(av); msg.appendChild(card);
+    box.appendChild(msg); scrollChatBottom();
+    chat.lastPlanCard = card;
+  }
+
+  // 确认卡里的一条 item 编辑行：action 切换（新建 / 补充到某已建单）+ 类型 + 删条 + 标题 + 摘要 + 拆条 + 子系统名。
+  function buildPlanItemRow(it, idx, model, rerender) {
+    var row = document.createElement('div'); row.className = 'pit';
+    // 第一行：action 下拉 + 类型下拉 + （append 时）已建单下拉 + 删条
+    var r1 = document.createElement('div'); r1.className = 'pit-r1';
+    var actSel = document.createElement('select');
+    [['new', '新建工单'], ['append', '补充到工单…']].forEach(function (o) { var op = document.createElement('option'); op.value = o[0]; op.textContent = o[1]; if (it.action === o[0]) op.selected = true; actSel.appendChild(op); });
+    r1.appendChild(actSel);
+    var typeSel = document.createElement('select');
+    [['requirement', '需求'], ['bug', 'BUG']].forEach(function (o) { var op = document.createElement('option'); op.value = o[0]; op.textContent = o[1]; if (it.type === o[0]) op.selected = true; typeSel.appendChild(op); });
+    typeSel.addEventListener('change', function () { it.type = this.value; });
+    r1.appendChild(typeSel);
+    // append 目标下拉（本会话已建单）——仅 action=append 时显示
+    var tkSel = document.createElement('select'); tkSel.className = 'aptk'; tkSel.style.display = (it.action === 'append') ? '' : 'none';
+    function fillTk() {
+      tkSel.innerHTML = '';
+      var built = chat.builtTickets || [];
+      if (!built.length) { var op = document.createElement('option'); op.value = ''; op.textContent = '（本会话暂无已建单）'; tkSel.appendChild(op); }
+      built.forEach(function (t) { var op = document.createElement('option'); op.value = t.id; op.textContent = t.id + '｜' + (t.title || ''); if (t.id === it.ticketId) op.selected = true; tkSel.appendChild(op); });
+      if (it.ticketId && !built.some(function (t) { return t.id === it.ticketId; })) { var op2 = document.createElement('option'); op2.value = it.ticketId; op2.textContent = it.ticketId; op2.selected = true; tkSel.appendChild(op2); }
+      if (!it.ticketId && built.length) it.ticketId = built[0].id;   // 默认选首张
+    }
+    fillTk();
+    tkSel.addEventListener('change', function () { it.ticketId = this.value; });
+    r1.appendChild(tkSel);
+    actSel.addEventListener('change', function () {
+      it.action = this.value;
+      if (it.action === 'append') { tkSel.style.display = ''; typeSel.style.display = 'none'; fillTk(); }
+      else { tkSel.style.display = 'none'; typeSel.style.display = ''; }
+    });
+    if (it.action === 'append') typeSel.style.display = 'none';
+    var delBtn = document.createElement('button'); delBtn.type = 'button'; delBtn.className = 'pit-del'; delBtn.title = '删除这条'; delBtn.innerHTML = '<i class="ti ti-trash"></i>';
+    delBtn.addEventListener('click', function () { model.items.splice(idx, 1); rerender(); });
+    r1.appendChild(delBtn);
+    row.appendChild(r1);
+    // 标题
+    var titleInp = document.createElement('input'); titleInp.className = 'ptitle'; titleInp.type = 'text'; titleInp.value = it.title || ''; titleInp.placeholder = '一句话标题';
+    titleInp.addEventListener('input', function () { it.title = this.value; });
+    row.appendChild(titleInp);
+    // 摘要
+    var sumInp = document.createElement('textarea'); sumInp.className = 'psum'; sumInp.value = it.summary || ''; sumInp.placeholder = it.action === 'append' ? '补充要点…' : '这条需求/BUG 是什么（一两句）';
+    sumInp.addEventListener('input', function () { it.summary = this.value; });
+    row.appendChild(sumInp);
+    // 第三行：拆成两条 + 子系统名
+    var r2 = document.createElement('div'); r2.className = 'prow2';
+    var splitBtn = document.createElement('button'); splitBtn.type = 'button'; splitBtn.className = 'split'; splitBtn.innerHTML = '<i class="ti ti-arrows-split"></i> 拆成两条';
+    splitBtn.addEventListener('click', function () {
+      var copy = { action: 'new', ticketId: '', type: it.type, title: it.title, summary: it.summary, subsystem: it.subsystem, module: it.module, priority: it.priority, desc: it.desc, errorInfo: it.errorInfo, steps: it.steps, expectResult: it.expectResult, severity: it.severity, scope: it.scope, env: it.env, freq: it.freq, bg: it.bg, reqDesc: it.reqDesc, accept: it.accept, relate: it.relate, opinion: it.opinion };
+      model.items.splice(idx + 1, 0, copy); rerender();
+    });
+    r2.appendChild(splitBtn);
+    if (it.subsystem) { var sn = document.createElement('span'); sn.className = 'sysname'; sn.textContent = '子系统：' + it.subsystem; r2.appendChild(sn); }
+    row.appendChild(r2);
+    return row;
+  }
+
+  // 确认建单：按当前清单调 /api/intake-commit-plan → 逐条补「已建单」卡（new）/ 提示（append）+ 刷新左侧 + 水位线上移 + 记入 builtTickets。
+  function commitPlan(card, model, archive) {
+    var items = (model.items || []).filter(function (it) { return String(it.title || '').trim() || (it.action === 'append' && it.ticketId); });
+    if (!items.length) { showToast('请至少保留一条，且填写标题', 'error'); return; }
+    // 校验：append 必须选到目标单
+    for (var i = 0; i < items.length; i++) { if (items[i].action === 'append' && !String(items[i].ticketId || '').trim()) { showToast('第 ' + (i + 1) + ' 条选了「补充到工单」但没选目标单', 'error'); return; } }
+    var commitBtn = card.querySelector('.foot .commit'); if (commitBtn) { commitBtn.disabled = true; commitBtn.innerHTML = '<i class="ti ti-loader"></i> 建单中…'; }
+    api('/api/intake-commit-plan', {
+      method: 'POST',
+      body: JSON.stringify({
+        project: model.project, site: model.site, version: model.version, subsystem: model.subsystem, sessionId: model.sessionId,
+        items: items.map(function (it) {
+          return { action: it.action, ticketId: it.ticketId, type: it.type, title: it.title, subsystem: it.subsystem, module: it.module, priority: it.priority, summary: it.summary, desc: it.desc, errorInfo: it.errorInfo, steps: it.steps, expectResult: it.expectResult, severity: it.severity, scope: it.scope, env: it.env, freq: it.freq, bg: it.bg, reqDesc: it.reqDesc, accept: it.accept, relate: it.relate, opinion: it.opinion };
+        }),
+        images: (Array.isArray(model.imgs) && model.imgs.length) ? model.imgs : undefined
+      })
+    }).then(function (r) {
+      var b = r.body || {};
+      if (!b.ok) { showToast(b.error || '建单失败，请重试', 'error'); if (commitBtn) { commitBtn.disabled = false; commitBtn.innerHTML = '<i class="ti ti-check"></i> 确认建单'; } return; }
+      var created = Array.isArray(b.created) ? b.created : [];
+      var appended = Array.isArray(b.appended) ? b.appended : [];
+      // 卡片置「已建单」态（隐藏编辑区、显 done-note）
+      card.classList.add('done');
+      var dn = card.querySelector('.done-note');
+      if (dn) dn.textContent = '已建单：' + (created.length ? '新建 ' + created.length + ' 张' : '') + (created.length && appended.length ? '，' : '') + (appended.length ? '补充 ' + appended.length + ' 张' : '');
+      if (chat.lastPlanCard === card) chat.lastPlanCard = null;
+      // 幂等锚点 + builtTickets 记账（用于后续续聊的 append 下拉 + 水位线）
+      if (!chat.builtTickets) chat.builtTickets = [];
+      if (created.length && !chat.savedId) chat.savedId = created[0].id;
+      // 已建单水位线上移：本次建单覆盖到当前 messages 末尾（含本轮 user + 计划回复）→ 下一轮 active 从新内容起
+      chat.filedUpTo = chat.messages.length;
+      created.forEach(function (t) {
+        chat.builtTickets.push({ id: t.id, title: t.title || '', type: t.type || '' });
+        appendArchiveCard({ id: t.id, type: t.type || '', site: model.site, subsystem: archive.subsystem, version: model.version, priority: t.priority, project: model.project });
+        showAnalyze({ project: model.project }, t.id);   // NH-3：每张单建单后即时 AI 初判
+      });
+      if (appended.length) {
+        appended.forEach(function (a) {
+          var m2 = document.createElement('div'); m2.className = 'f-msg ai';
+          var av2 = document.createElement('div'); av2.className = 'av'; av2.innerHTML = '<i class="ti ti-plus"></i>';
+          var b2 = document.createElement('div'); b2.className = 'bub';
+          b2.innerHTML = md('已把补充内容追加到工单 **' + a.id + '**。');
+          m2.appendChild(av2); m2.appendChild(b2);
+          var box = chatBox(); if (box) box.appendChild(m2);
+        });
+      }
+      refreshLeftList();
+      scrollChatBottom();
+      saveDraft();
+    }).catch(function () {
+      showToast('建单失败，请重试', 'error');
+      if (commitBtn) { commitBtn.disabled = false; commitBtn.innerHTML = '<i class="ti ti-check"></i> 确认建单'; }
+    });
+  }
+
   function appendArchiveCard(info) {
     clearPlaceholder();
     var box = chatBox(); if (!box) return;
@@ -2838,8 +3045,8 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     chat.abortCtrl = new AbortController();   // 「停止」：本轮发送的中断控制器，signal 传进三条发送路径的 fetch/api；点「停止」→ abort()
     setSending(true);
     if (chat.submitKind === 'consult') sendConsult(imgs);
-    // 安全续聊（杜绝重单）：reopen 的已建单（intake 模式 + savedId + 锁定的工单 project）→ 走 intake-reply append 同一张单，绝不走 intake-chat 再建新单。
-    else if (chat.savedId && chat.reopenIntakeProject) sendIntakeReply(text, imgs);
+    // FS-04 v2（2026-08-07）治本：续聊已建单会话也走 intake-chat（plan 流）——AI 出计划、用户在确认卡上决定「补充旧单 or 新建」，
+    //   不再无脑 append 到旧单（旧 sendIntakeReply 会把新提的需求闷头追加进那张旧单，见踩坑背景）。builtTickets 随请求上送供 AI 判 append/new。
     else sendIntake(imgs);
   }
 
@@ -2882,6 +3089,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
         site: archive.site, subsystem: archive.subsystem, messages: chat.messages,
         filedUpTo: chat.filedUpTo || 0,   // FS-04 已建单水位线：前 filedUpTo 条 messages=已归档建单背景（只读、禁止再建/合并）；后端只对 messages.slice(filedUpTo) 判是否要建新单 → 杜绝把已建单旧需求跟新需求混一起
         sessionId: (chat.sessionId || (chat.sessionId = newSessionId())),   // FS-04：会话 id——这次聊天建的多张单同此 id → 右上「对话记录」归一条（兜底：无则即时生成）
+        builtTickets: (chat.builtTickets || []).map(function (t) { return { ticketId: t.id, title: t.title }; }),   // FS-04 v2：本会话已建单清单 → 后端让 AI 在 plan 里对「补充某已建单」用 action=append、否则 new（默认 new）
         // AC-32（2026-08-06 改）：不再传全局 priority——紧急程度改 per-ticket，AI 每条 record 自判、建单后现场在卡片上逐条改（/api/intake-set-priority）
         images: (Array.isArray(imgs) && imgs.length) ? imgs : undefined   // 附图 → 后端多模态看图 + 建 record 时落 media
       })
@@ -2893,28 +3101,11 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       if (thinking) { setThinking(thinking, false); thinking.classList.remove('streaming'); thinking.innerHTML = md(reply); }
       chat.messages.push({ role: 'assistant', content: reply });
       chat.lastA = reply;
-      // Part A（多单）：AI 一次可产出多个 intake-record → 服务端建多张单，回带 savedIds:[{id,type,priority}]；老结构只回 savedId → 兼容归一成单元素数组。
-      // AC-11/12/22 幂等：同会话已建单（chat.savedId 非空）则本轮不再建卡（intake-chat 服务端仅在 AI 再出新 record 时建单）。
-      var tickets = Array.isArray(b.savedIds) && b.savedIds.length
-        ? b.savedIds
-        : (b.savedId ? [{ id: b.savedId, type: (archive._recType || ''), priority: b.priority }] : []);
-      // FS-04 已建单水位线上移：本轮建了单（本轮 AI 出了 record 块）→ 把水位线推到当前 messages 末尾（含本轮 user + 本轮归档回复），
-      //   下一轮 active=messages.slice(filedUpTo) 从新内容起，AI 不会再翻出这些已闭环需求（顺序流不重复不合并）。即便已 savedId（前面建过单）也照样上移覆盖本轮新建的。
-      if (tickets.length) chat.filedUpTo = chat.messages.length;
-      if (tickets.length && !chat.savedId) {
-        chat.savedId = tickets[0].id;   // 幂等锚点：本会话已建单（首张）；同会话续聊不再建新单/新卡
-        tickets.forEach(function (t) {
-          appendArchiveCard({ id: t.id, type: t.type || '', site: archive.site, subsystem: archive.subsystem, version: archive.version, priority: t.priority, project: archive.project });   // AC-32：每张单各带自己 AI 判的紧急程度 + project → 现场逐条改
-          showAnalyze(archive, t.id);   // NH-3：每张单建单后即时 AI 初判
-        });
-        refreshLeftList();              // 建单后刷新左侧提交清单（可回链，多张单都在）
-      } else if (tickets.length && chat.savedId) {
-        // 同会话「先建单 A，隔几轮再提 B」：A 之后 savedId 已置，但 B 仍会经此分支（intake-chat 每轮独立判建单）→ 为 B 补卡 + 初判 + 刷新左侧。
-        tickets.forEach(function (t) {
-          appendArchiveCard({ id: t.id, type: t.type || '', site: archive.site, subsystem: archive.subsystem, version: archive.version, priority: t.priority, project: archive.project });
-          showAnalyze(archive, t.id);
-        });
-        refreshLeftList();
+      // FS-04 v2（2026-08-07）治本：AI 不再直接建单——服务端回 plan.items（识别到的每条独立需求/BUG）。
+      //   渲染一张「确认清单」卡：用户可改标题/摘要、切换 新建/补充到某已建单、删条、拆条、加条；点「确认建单」才走 /api/intake-commit-plan 确定性建单。
+      var plan = (b.plan && Array.isArray(b.plan.items)) ? b.plan : null;
+      if (plan && plan.items.length) {
+        renderPlanCard(plan, archive, imgs);   // imgs：本轮附图随确认后建单落 media（多张单各存一份）
       }
       scrollChatBottom();
       saveDraft();
@@ -3326,7 +3517,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     // 「停止」：切新对话/切系统时若上一轮还在发送中 → 先 abort 旧请求（signal 传进三条路径），避免旧响应/流式串进新对话
     if (chat.sending && chat.abortCtrl) { try { chat.abortCtrl.abort(); } catch (e) {} }
     chat.abortCtrl = null;
-    chat.messages = []; chat.savedId = ''; chat.filedUpTo = 0; chat.convId = ''; chat.sessionId = newSessionId(); chat.reopenSessionId = ''; chat.analyzed = false; chat.sending = false; chat.lastQ = ''; chat.lastA = ''; chat.reopenProject = ''; chat.reopenSubsystem = ''; chat.reopenIntakeProject = ''; chat.reopenConvProject = ''; chat.reopenConvSite = ''; chat.reopenConvSubsystem = ''; chat.reopenConvVersion = ''; chat.deep = false;   // 新对话重置深入思考为关（合理默认：新会话不默认耗时的源码检索）；清 reopenIntakeProject/reopenConv* + filedUpTo=0（水位线归零，新会话不带旧已建单背景）；新 sessionId（这次聊天建的单归新的一条对话记录）。AC-32：紧急程度已移到 per-ticket 卡片，无全局态可重置
+    chat.messages = []; chat.savedId = ''; chat.builtTickets = []; chat.lastPlanCard = null; chat.filedUpTo = 0; chat.convId = ''; chat.sessionId = newSessionId(); chat.reopenSessionId = ''; chat.analyzed = false; chat.sending = false; chat.lastQ = ''; chat.lastA = ''; chat.reopenProject = ''; chat.reopenSubsystem = ''; chat.reopenIntakeProject = ''; chat.reopenConvProject = ''; chat.reopenConvSite = ''; chat.reopenConvSubsystem = ''; chat.reopenConvVersion = ''; chat.deep = false;   // 新对话重置深入思考为关；FS-04 v2 清 builtTickets/lastPlanCard（新会话不带旧已建单清单、无待确认计划卡）（合理默认：新会话不默认耗时的源码检索）；清 reopenIntakeProject/reopenConv* + filedUpTo=0（水位线归零，新会话不带旧已建单背景）；新 sessionId（这次聊天建的单归新的一条对话记录）。AC-32：紧急程度已移到 per-ticket 卡片，无全局态可重置
     var box = chatBox();
     if (box) {
       box.innerHTML = '';
@@ -3354,7 +3545,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   function saveDraft() {
     try {
       var input = $('fChatInput');
-      var d = { kind: chat.submitKind, messages: chat.messages, savedId: chat.savedId, filedUpTo: chat.filedUpTo || 0, convId: chat.convId, sessionId: chat.sessionId || '', reopenSessionId: chat.reopenSessionId || '', reopenProject: chat.reopenProject || '', reopenSubsystem: chat.reopenSubsystem || '', reopenIntakeProject: chat.reopenIntakeProject || '', reopenConvProject: chat.reopenConvProject || '', reopenConvSite: chat.reopenConvSite || '', reopenConvSubsystem: chat.reopenConvSubsystem || '', reopenConvVersion: chat.reopenConvVersion || '', deep: !!chat.deep, input: input ? input.value : '', user: (state.me && (state.me.username || state.me.name)) || '' };
+      var d = { kind: chat.submitKind, messages: chat.messages, savedId: chat.savedId, builtTickets: (chat.builtTickets || []).slice(), filedUpTo: chat.filedUpTo || 0, convId: chat.convId, sessionId: chat.sessionId || '', reopenSessionId: chat.reopenSessionId || '', reopenProject: chat.reopenProject || '', reopenSubsystem: chat.reopenSubsystem || '', reopenIntakeProject: chat.reopenIntakeProject || '', reopenConvProject: chat.reopenConvProject || '', reopenConvSite: chat.reopenConvSite || '', reopenConvSubsystem: chat.reopenConvSubsystem || '', reopenConvVersion: chat.reopenConvVersion || '', deep: !!chat.deep, input: input ? input.value : '', user: (state.me && (state.me.username || state.me.name)) || '' };
       sessionStorage.setItem(DRAFT_KEY, JSON.stringify(d));
     } catch (e) {}
   }
@@ -3367,7 +3558,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       if (d.user && state.me && (state.me.username || state.me.name) && d.user !== (state.me.username || state.me.name)) { clearDraft(); return; }
       chat.deep = !!d.deep;   // 先恢复深入思考设置，再 setSubmitKind（内部 syncDeep 会据此点亮开关）
       setSubmitKind(d.kind || 'intake');
-      chat.savedId = d.savedId || ''; chat.convId = d.convId || ''; chat.sessionId = d.sessionId || newSessionId(); chat.reopenSessionId = d.reopenSessionId || ''; chat.reopenProject = d.reopenProject || ''; chat.reopenSubsystem = d.reopenSubsystem || ''; chat.reopenIntakeProject = d.reopenIntakeProject || ''; chat.reopenConvProject = d.reopenConvProject || ''; chat.reopenConvSite = d.reopenConvSite || ''; chat.reopenConvSubsystem = d.reopenConvSubsystem || ''; chat.reopenConvVersion = d.reopenConvVersion || '';   // FS-04：恢复会话 id（无则新的，刷新后续聊建单仍归一条对话记录）+ 未建单会话记录续聊上下文（AC-36）
+      chat.savedId = d.savedId || ''; chat.builtTickets = Array.isArray(d.builtTickets) ? d.builtTickets.slice() : []; chat.lastPlanCard = null; chat.convId = d.convId || ''; chat.sessionId = d.sessionId || newSessionId(); chat.reopenSessionId = d.reopenSessionId || ''; chat.reopenProject = d.reopenProject || ''; chat.reopenSubsystem = d.reopenSubsystem || ''; chat.reopenIntakeProject = d.reopenIntakeProject || ''; chat.reopenConvProject = d.reopenConvProject || ''; chat.reopenConvSite = d.reopenConvSite || ''; chat.reopenConvSubsystem = d.reopenConvSubsystem || ''; chat.reopenConvVersion = d.reopenConvVersion || '';   // FS-04：恢复会话 id（无则新的，刷新后续聊建单仍归一条对话记录）+ 未建单会话记录续聊上下文（AC-36）
       syncDeep();   // 刷新开关显隐/高亮（草稿 kind + deep 都恢复后）
       if (Array.isArray(d.messages) && d.messages.length) {
         chat.messages = d.messages.slice();
@@ -3604,19 +3795,26 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       msgs.forEach(function (m) { appendBubble(m.role === 'user' ? 'me' : 'ai', m.content, false, []); });
       var built = (Array.isArray(tickets) ? tickets : []).slice().sort(function (a, b) { return String(a.submittedAt || '').localeCompare(String(b.submittedAt || '')); });
       if (built.length) {
-        // 已建单会话：续聊 append 到代表单（首张）；逐张补「已建单」卡
+        // 已建单会话：FS-04 v2 续聊走 intake-chat（plan 流）——AI 出计划、确认卡上决定「补充旧单 or 新建」，不再无脑 append。
+        //   锁 reopenConv* 上下文（保证新建单落对 project/site/subsystem，不受当前视图切换影响）+ 填 builtTickets 供 AI 判 append/new。
         var rep = built[0];
-        chat.savedId = rep.id;
-        chat.filedUpTo = chat.messages.length;   // FS-04：已建单会话 reopen → 整段历史都是已归档背景（续聊虽走 intake-reply，但水位线置满以保证语义一致：恢复的历史不再被当"待建单"）
-        chat.reopenIntakeProject = it.project;
-        chat.reopenConvProject = ''; chat.reopenConvSite = ''; chat.reopenConvSubsystem = ''; chat.reopenConvVersion = '';
+        chat.savedId = rep.id;   // 幂等锚点（首张已建单）：草稿恢复重建卡片用
+        chat.filedUpTo = chat.messages.length;   // FS-04：已建单会话 reopen → 整段历史都是已归档背景（水位线置满，恢复的历史不再被当"待建单"）
+        chat.reopenIntakeProject = '';   // 不再走 intake-reply（改 plan 流），清掉旧的 reply 锁
+        chat.sessionId = it.sessionId || item.sessionId || newSessionId();   // 同 sessionId → 新建单仍归同一条对话记录
+        chat.reopenConvProject = it.project || '';
+        chat.reopenConvSite = it.site || item.site || '';
+        chat.reopenConvSubsystem = it.subsystem || item.subsystem || '';
+        chat.reopenConvVersion = item.version || '';
         chat.reopenSessionId = '';
+        chat.builtTickets = built.map(function (t) { return { id: t.id, title: t.title || '', type: t.type || '' }; });   // 供续聊 intake-chat 上送 → AI 在 plan 里对「补充某已建单」用 append
         built.forEach(function (t) { appendArchiveCard({ id: t.id, type: t.type || '', site: it.site || '', subsystem: t.subsystem || it.subsystem || '', version: t.version || '', priority: t.priority, project: it.project }); });
       } else {
         // 未建单会话：续聊走 intake-chat 同 sessionId（够了再建单落该 sessionId）；锁归档上下文
         chat.savedId = '';
         chat.filedUpTo = 0;   // FS-04：未建单会话 reopen → 恢复的历史都还没建单，全部当"待处理"（水位线 0），续聊 AI 据此判建单
         chat.reopenIntakeProject = '';
+        chat.builtTickets = [];
         chat.sessionId = it.sessionId || item.sessionId || newSessionId();
         chat.reopenConvProject = it.project || '';
         chat.reopenConvSite = it.site || item.site || '';

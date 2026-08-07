@@ -251,9 +251,10 @@ test('C7 对话记录删除入口（软删）：仅会话记录/咨询、调 int
   assert.ok(/api\('\/api\/intake-delete', \{ method: 'POST', body: JSON\.stringify\(\{ project: it\.project, id: it\.id \}\)/.test(seg2), '软删调 intake-delete（id=会话记录自身，非工单）');
   assert.ok(/它建的工单不受影响/.test(seg2), '确认文案说明不连带删工单');
 });
-test('C8 未建单会话续聊：currentArchive 锁 reopenConvProject（intake 且未建单）', () => {
+test('C8 会话续聊：currentArchive 锁 reopenConvProject（intake · FS-04 v2 已建单会话也走 plan 流，不再要求 !savedId）', () => {
   const seg = FIELD_HTML.slice(FIELD_HTML.indexOf('function currentArchive'), FIELD_HTML.indexOf('function currentArchive') + 2600);
-  assert.ok(/if \(chat\.reopenConvProject && chat\.submitKind === 'intake' && !chat\.savedId\)/.test(seg), 'reopen 未建单会话续聊锁归档上下文');
+  // FS-04 v2（2026-08-07）：已建单会话 reopen 同样走 plan 流（chat.savedId 已置），故 guard 去掉 !chat.savedId——只要 reopenConvProject 有值就锁上下文。
+  assert.ok(/if \(chat\.reopenConvProject && chat\.submitKind === 'intake'\) \{/.test(seg), 'reopen 会话续聊锁归档上下文（不再要求未建单）');
   // 新对话/草稿重置/恢复 reopenConv*
   assert.ok(/chat\.reopenConvProject = ''; chat\.reopenConvSite = ''/.test(FIELD_HTML), 'newConversation 重置 reopenConv*');
   assert.ok(/chat\.reopenConvProject = d\.reopenConvProject/.test(FIELD_HTML), 'restoreDraft 恢复 reopenConv*');
