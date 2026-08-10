@@ -70,6 +70,31 @@
   .subitem .sn{color:var(--color-text);min-width:0}
   .subitem .sdesc{color:var(--color-text-tertiary);font-size:11.5px;margin-left:auto;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 0 auto}
   .subempty{font-size:12.5px;color:var(--color-text-tertiary);font-style:italic}
+
+  /* PD-01：子系统「分支 / tag」多选（下拉复选面板，无框架自实现） */
+  .subitem{flex-wrap:wrap}
+  .sub-refs{flex:1 1 100%;display:flex;gap:8px;margin-top:5px;min-width:0}
+  .ref-field{flex:1 1 0;min-width:0;position:relative}
+  .ref-field .ref-lbl{font-size:11px;color:var(--color-text-tertiary);margin-bottom:2px;display:flex;align-items:center;gap:4px}
+  .ref-trigger{display:flex;align-items:center;gap:5px;width:100%;min-height:26px;padding:2px 8px;border:1px solid var(--color-border);border-radius:var(--radius);background:var(--color-surface);cursor:pointer;font-size:11.5px;color:var(--color-text);box-sizing:border-box;user-select:none}
+  .ref-trigger:hover{border-color:var(--color-primary)}
+  .ref-trigger.on{border-color:var(--color-primary);box-shadow:0 0 0 2px var(--color-primary-light)}
+  .ref-trigger .rt-txt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ref-trigger .rt-txt.ph{color:var(--color-text-tertiary)}
+  .ref-trigger .rt-n{flex:0 0 auto;font-weight:600;color:var(--color-primary);font-family:var(--font-num);font-size:11px;background:var(--color-primary-light);border-radius:var(--radius);padding:0 6px}
+  .ref-trigger .ti-chevron-down{flex:0 0 auto;font-size:13px;color:var(--color-text-tertiary)}
+  .ref-panel{position:absolute;z-index:60;top:calc(100% + 3px);left:0;right:0;min-width:180px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius);box-shadow:0 6px 22px rgba(0,0,0,.14);padding:6px;display:none;max-height:240px;box-sizing:border-box}
+  .ref-panel.open{display:flex;flex-direction:column}
+  .ref-search{width:100%;box-sizing:border-box;font-size:11.5px;padding:3px 7px;border:1px solid var(--color-border);border-radius:var(--radius);margin-bottom:5px;font-family:var(--font-num)}
+  .ref-opts{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:1px}
+  .ref-opt{display:flex;align-items:center;gap:6px;padding:3px 6px;border-radius:var(--radius);cursor:pointer;font-size:11.5px;font-family:var(--font-num);color:var(--color-text)}
+  .ref-opt:hover{background:var(--color-surface-alt)}
+  .ref-opt.sel{background:var(--color-primary-light)}
+  .ref-opt input{margin:0;flex:0 0 auto;accent-color:var(--color-primary)}
+  .ref-opt .ro-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ref-opt .ro-stale{flex:0 0 auto;font-size:10px;color:var(--color-warning);background:var(--color-warning-light);border-radius:var(--radius);padding:0 5px;font-family:var(--font-sans)}
+  .ref-empty{font-size:11.5px;color:var(--color-text-tertiary);font-style:italic;padding:6px}
+  .ref-loading{font-size:11px;color:var(--color-text-tertiary);font-style:italic}
 </style>
 <script src="/assets/ui.js" defer></script>
 <script src="/assets/shell.js" defer></script>
@@ -251,6 +276,10 @@ function openModal(id,maskId){ const m=document.getElementById(id); if(!m)return
 function closeModal(id,maskId){ const m=document.getElementById(id); if(m)m.classList.remove('open'); document.getElementById(maskId).classList.remove('open'); }
 
 let PROJECTS=[], editingId=null, delId=null, linkId=null, inspected=null;
+/* PD-01：编辑抽屉内「每个子系统各自的分支/tag 多选」状态。
+ *   subsRefs[key] = { branches:[remote分支], tags:[remote tag], selBranches:Set, selTags:Set, error, loading }
+ *   sel* 来自 proj.subsystems[i].{branches,tags} 回显 + 用户勾选；保存时读它拼进各子系统 payload。 */
+let subsRefs={};
 
 /* ===================== 列表渲染 ===================== */
 function render(){
@@ -406,20 +435,114 @@ $('#syncAllBtn').addEventListener('click',syncAll);
 function clearErr(){ ['id','name'].forEach(w=>{ $('#'+w+'Err').classList.add('hidden'); $('#f'+w.charAt(0).toUpperCase()+w.slice(1)).classList.remove('invalid'); }); }
 function setErr(which,msg){ const box=$('#'+which+'Err'); box.textContent=msg; box.classList.remove('hidden'); $('#f'+which.charAt(0).toUpperCase()+which.slice(1)).classList.add('invalid'); }
 
+// 子系统在 subsRefs 里的稳定键（与后端 refs 键一致：key || name || 'main'）
+function subKey(s){ return String((s&&s.key)||(s&&s.name)||'main').trim()||'main'; }
+
 function renderSubsPreview(subs){
   const box=$('#subsPreview'), list=$('#subsList'), lbl=$('#subsCntLbl');
-  if(!subs){ box.classList.add('hidden'); list.innerHTML=''; lbl.textContent=''; return; }
+  if(!subs){ box.classList.add('hidden'); list.innerHTML=''; lbl.textContent=''; subsRefs={}; return; }
   box.classList.remove('hidden');
   lbl.textContent='（'+subs.length+'）';
   if(!subs.length){ list.innerHTML='<div class="subempty">该地址下未发现子系统仓</div>'; return; }
+  // 初始化每个子系统的 refs 状态（保留已存在的 remote 结果/勾选，仅补新 key）；已选来自 s.branches/s.tags 回显
+  subs.forEach(s=>{ const k=subKey(s); if(!subsRefs[k]) subsRefs[k]={ branches:[], tags:[], error:'', loading:false }; const st=subsRefs[k];
+    if(!st.selBranches) st.selBranches=new Set((Array.isArray(s.branches)?s.branches:[]).map(String));
+    if(!st.selTags)     st.selTags    =new Set((Array.isArray(s.tags)?s.tags:[]).map(String));
+  });
   list.innerHTML=subs.map(s=>{
-    const key=(s&&s.key)||'', name=(s&&s.name)||key||'', desc=(s&&s.desc)||'';
-    return `<div class="subitem"><span class="sk" title="${esc(key)}">${esc(key||'—')}</span><span class="sd">·</span><span class="sn" title="${esc(name)}">${esc(name)}</span>${desc?`<span class="sdesc" title="${esc(desc)}">${esc(desc)}</span>`:''}</div>`;
+    const key=(s&&s.key)||'', name=(s&&s.name)||key||'', desc=(s&&s.desc)||'', k=subKey(s);
+    return `<div class="subitem" data-sub="${esc(k)}">`
+      +`<span class="sk" title="${esc(key)}">${esc(key||'—')}</span><span class="sd">·</span><span class="sn" title="${esc(name)}">${esc(name)}</span>${desc?`<span class="sdesc" title="${esc(desc)}">${esc(desc)}</span>`:''}`
+      +`<div class="sub-refs">`
+        +refFieldHtml(k,'branch','分支','ti-git-branch')
+        +refFieldHtml(k,'tag','tag','ti-tag')
+      +`</div>`
+    +`</div>`;
   }).join('');
+  // 拉 remote refs 填充选项（带 loading 态）
+  loadRefs(subs);
 }
 
+// 单个 ref 多选控件（触发器 + 面板骨架；选项由 renderRefField 填充）
+function refFieldHtml(k,kind,label,icon){
+  return `<div class="ref-field" data-sub="${esc(k)}" data-kind="${kind}">`
+    +`<div class="ref-lbl"><i class="ti ${icon}" style="font-size:12px;vertical-align:-1px"></i> ${label}<span class="ref-loading hidden"> · 拉取中…</span></div>`
+    +`<div class="ref-trigger" tabindex="0"><span class="rt-txt ph">未选（回落全部 tag）</span><span class="rt-n hidden">0</span><i class="ti ti-chevron-down"></i></div>`
+    +`<div class="ref-panel"><input class="ref-search" placeholder="搜索…" spellcheck="false"><div class="ref-opts"></div></div>`
+  +`</div>`;
+}
+
+// 拉某组子系统的 remote refs（复用 subsRefs 已有结果避免重复请求；已保存产品传 project、未保存传 subsystems 的 repoUrl）
+async function loadRefs(subs){
+  // 需要拉的（无 remote 结果且无 error 的）；已保存产品优先用 project 一次拉全，否则用 repoUrl 逐仓
+  const need=subs.filter(s=>{ const st=subsRefs[subKey(s)]; return st && !st.branches.length && !st.tags.length && !st._loaded; });
+  if(!need.length){ subs.forEach(s=>renderRefField(subKey(s))); return; }
+  need.forEach(s=>{ const st=subsRefs[subKey(s)]; st.loading=true; }); subs.forEach(s=>renderRefField(subKey(s)));
+  let payload;
+  if(editingId && (!inspected || !need.some(s=>s.repoUrl))) payload={ project: editingId };
+  else payload={ subsystems: need.map(s=>({ key: subKey(s), repoUrl: (s&&s.repoUrl)||'' })) };
+  try{
+    const r=await (await fetch('/api/git-refs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})).json();
+    const refs=(r&&r.refs)||{};
+    need.forEach(s=>{ const k=subKey(s), st=subsRefs[k]; st.loading=false; st._loaded=true; const rf=refs[k]||refs[(s&&s.name)]||{};
+      st.branches=Array.isArray(rf.branches)?rf.branches:[]; st.tags=Array.isArray(rf.tags)?rf.tags:[]; st.error=rf.error||(r&&r.ok===false?(r.error||'拉取失败'):''); });
+  }catch(e){ need.forEach(s=>{ const st=subsRefs[subKey(s)]; st.loading=false; st._loaded=true; st.error='拉取失败：'+e.message; }); }
+  subs.forEach(s=>renderRefField(subKey(s)));
+}
+
+// 渲染某子系统的两个 ref 控件（触发器摘要 + 面板选项）；已选但 remote 已无的 ref 标「已失效」但保留可见
+function renderRefField(k){
+  const st=subsRefs[k]; if(!st) return;
+  ['branch','tag'].forEach(kind=>{
+    const field=document.querySelector(`.ref-field[data-sub="${cssq(k)}"][data-kind="${kind}"]`); if(!field) return;
+    const remote=kind==='branch'?st.branches:st.tags, sel=kind==='branch'?st.selBranches:st.selTags;
+    field.querySelector('.ref-loading').classList.toggle('hidden',!st.loading);
+    // 触发器摘要
+    const trig=field.querySelector('.ref-trigger'), txt=trig.querySelector('.rt-txt'), nEl=trig.querySelector('.rt-n');
+    const selArr=[...sel];
+    if(selArr.length){ txt.classList.remove('ph'); txt.textContent=selArr.join('、'); txt.title=selArr.join('、'); nEl.classList.remove('hidden'); nEl.textContent=selArr.length; trig.classList.add('on'); }
+    else { txt.classList.add('ph'); txt.textContent=st.loading?'拉取中…':'未选（回落全部 tag）'; txt.title=''; nEl.classList.add('hidden'); trig.classList.remove('on'); }
+    // 面板选项：remote + 已选但 remote 无的（失效项）；受搜索框过滤
+    const panel=field.querySelector('.ref-panel'), opts=field.querySelector('.ref-opts'), search=field.querySelector('.ref-search');
+    const q=(search.value||'').trim().toLowerCase();
+    const stale=selArr.filter(v=>!remote.includes(v));
+    const all=[...remote, ...stale];
+    if(st.error && !all.length){ opts.innerHTML='<div class="ref-empty">'+esc(st.error)+'</div>'; return; }
+    if(!all.length){ opts.innerHTML='<div class="ref-empty">'+(st.loading?'拉取中…':(kind==='branch'?'无分支':'无 tag'))+'</div>'; return; }
+    const shown=all.filter(v=>!q||v.toLowerCase().includes(q));
+    opts.innerHTML=shown.length?shown.map(v=>{ const on=sel.has(v), bad=stale.includes(v);
+      return `<label class="ref-opt${on?' sel':''}"><input type="checkbox" ${on?'checked':''} data-ref="${esc(v)}"><span class="ro-name" title="${esc(v)}">${esc(v)}</span>${bad?'<span class="ro-stale">已失效</span>':''}</label>`;
+    }).join(''):'<div class="ref-empty">无匹配</div>';
+  });
+}
+function cssq(s){ return String(s).replace(/["\\]/g,'\\$&'); }
+
+// 事件委托：触发器开关面板 / 勾选 / 搜索（挂在子系统列表容器上，一次绑定）
+function bindRefEvents(){
+  const host=$('#subsList'); if(!host||host._refBound) return; host._refBound=true;
+  host.addEventListener('click',e=>{
+    const trig=e.target.closest('.ref-trigger');
+    if(trig){ const panel=trig.parentElement.querySelector('.ref-panel'); const open=panel.classList.contains('open');
+      $$('#subsList .ref-panel.open').forEach(p=>{ p.classList.remove('open'); p.parentElement.querySelector('.ref-trigger').classList.remove('on-open'); });
+      if(!open){ panel.classList.add('open'); const s=panel.querySelector('.ref-search'); if(s){ s.value=''; renderFieldOpts(trig.closest('.ref-field')); setTimeout(()=>s.focus(),0); } }
+      return; }
+    const opt=e.target.closest('.ref-opt input');
+    if(opt){ const field=opt.closest('.ref-field'), k=field.getAttribute('data-sub'), kind=field.getAttribute('data-kind'), v=opt.getAttribute('data-ref');
+      const st=subsRefs[k]; if(!st) return; const sel=kind==='branch'?st.selBranches:st.selTags;
+      if(opt.checked) sel.add(v); else sel.delete(v);
+      renderRefField(k);   // 刷新触发器摘要 + 面板勾选态
+      const p=field.querySelector('.ref-panel'); if(p) p.classList.add('open');   // 勾选后保持面板打开
+      return; }
+  });
+  host.addEventListener('input',e=>{ const s=e.target.closest('.ref-search'); if(s) renderFieldOpts(s.closest('.ref-field')); });
+}
+// 只重渲染某控件面板选项（搜索用，不动触发器）
+function renderFieldOpts(field){ if(!field) return; const k=field.getAttribute('data-sub'); renderRefField(k); const p=field.querySelector('.ref-panel'); if(p) p.classList.add('open'); }
+// 点面板外 → 关所有面板
+document.addEventListener('click',e=>{ if(!e.target.closest('.ref-field')) $$('#subsList .ref-panel.open').forEach(p=>p.classList.remove('open')); });
+
 function openAdd(){
-  editingId=null; inspected=null;
+  editingId=null; inspected=null; subsRefs={};
   $('#fGit').value=''; $('#fId').value=''; $('#fName').value='';
   $('#fId').disabled=false; $('#idHelp').style.display='';
   $('#idCount').textContent='0/40'; $('#nameCount').textContent='0/40';
@@ -431,7 +554,7 @@ $('#addBtn').addEventListener('click',openAdd);
 
 function startEdit(id){
   const p=PROJECTS.find(x=>x.id===id); if(!p)return;
-  editingId=id; inspected=null;
+  editingId=id; inspected=null; subsRefs={};
   $('#fGit').value=p.gitUrl||'';
   $('#fId').value=p.id; $('#fId').disabled=true; $('#idHelp').style.display='none';
   $('#fName').value=p.name||'';
@@ -467,6 +590,7 @@ async function inspect(){
     const subs=Array.isArray(r.subsystems)?r.subsystems:[];
     inspected={ gitUrl:r.gitUrl||url, subsystems:subs };
     if(r.gitUrl) $('#fGit').value=r.gitUrl;
+    subsRefs={};   // 重新解析 = 新的子系统集合，清掉上次的 refs/勾选，避免串味
     renderSubsPreview(subs);
     toast('解析成功，发现 '+subs.length+' 个子系统','success');
   }catch(e){ toast('解析失败：'+e.message,'error'); }
@@ -484,7 +608,15 @@ async function save(){
   if(!name){ setErr('name','项目名必填'); bad=true; }
   else if(name.length>40){ setErr('name','项目名不超过 40 字'); bad=true; }
   if(bad){ toast('请修正表单中的错误','error'); return; }
-  const body={ id, name, gitUrl:(inspected&&inspected.gitUrl)||$('#fGit').value.trim(), subsystems:(inspected&&inspected.subsystems)||[] };
+  // 子系统来源：本次重新解析用 inspected.subsystems，否则编辑态用已有 proj.subsystems（保留 key/desc/repoUrl/repoPath）
+  let subsBase=(inspected&&inspected.subsystems)||null;
+  if(!subsBase&&editingId){ const p=PROJECTS.find(x=>x.id===editingId); subsBase=(p&&p.subsystems)||[]; }
+  // 合并各子系统所选分支/tag（从 subsRefs 读，未初始化则回落原 s.branches/s.tags）
+  const subsystems=(subsBase||[]).map(s=>{ if(typeof s==='string') s={name:s}; const k=subKey(s); const st=subsRefs[k];
+    const branches=st&&st.selBranches?[...st.selBranches]:(Array.isArray(s.branches)?s.branches:[]);
+    const tags=st&&st.selTags?[...st.selTags]:(Array.isArray(s.tags)?s.tags:[]);
+    return {...s, branches, tags}; });
+  const body={ id, name, gitUrl:(inspected&&inspected.gitUrl)||$('#fGit').value.trim(), subsystems };
   const btn=$('#saveBtn'), lbl=btn.querySelector('span'), prevLbl=lbl.textContent;
   btn.disabled=true; lbl.textContent='保存中…（克隆代码仓）';
   try{
@@ -593,6 +725,7 @@ async function loadProjects(){
   catch(e){ PROJECTS=[]; toast('加载产品失败：'+e.message,'error'); }
   render();
 }
+bindRefEvents();
 loadProjects();
 </script>
 </body>

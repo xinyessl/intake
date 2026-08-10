@@ -422,25 +422,90 @@ function safeRef(v) { v = String(v || '').trim(); return (/^[A-Za-z0-9._\-\/]+$/
 function gitOut(repoPath, args) { try { const r = spawnSync('git', ['-c', 'core.quotepath=false', ...args], { cwd: repoPath, encoding: 'utf8', timeout: 8000 }); return r.status === 0 ? (r.stdout || '') : ''; } catch { return ''; } }
 
 // ===== 产品仓只读上下文：git tag 列表 + spec@tag =====
-function listVersions(proj) {   // 产品版本候选 = 各子系统仓 git tag 的并集（按版本号倒序）
-  const set = new Set(); const repos = [];
-  ((proj && proj.subsystems) || []).forEach(s => { if (s && s.repoPath) repos.push(s.repoPath); });
-  if (proj && proj.repoPath) repos.push(proj.repoPath);
-  for (const rp of repos) { if (!fs.existsSync(rp)) continue; gitOut(rp, ['tag', '-l', '--sort=-v:refname']).split('\n').forEach(t => { t = t.trim(); if (t) set.add(t); }); }
-  return [...set].sort((a, b) => b.localeCompare(a, undefined, { numeric: true })).slice(0, 200);
+// 版本号倒序比较（复用，保证各处「按版本排序」口径一致：数字感知、倒序）
+function verCmpDesc(a, b) { return String(b).localeCompare(String(a), undefined, { numeric: true }); }
+// 默认分支优先级（越小越靠前）：main→master→develop/dev→release/*→其余字母序。用于 branches 排序把「主干」置顶。
+function branchRank(b) { const s = String(b || ''); if (s === 'main') return 0; if (s === 'master') return 1; if (s === 'develop' || s === 'dev') return 2; if (/^release(\/|$)/.test(s)) return 3; return 9; }
+function sortBranches(list) { return [...new Set((list || []).map(x => String(x || '').trim()).filter(Boolean))].sort((a, b) => { const ra = branchRank(a), rb = branchRank(b); return ra !== rb ? ra - rb : a.localeCompare(b, undefined, { numeric: true }); }); }
+// PD-01：解析 `git ls-remote --heads --tags` 输出 → {branches:[…], tags:[…]}。
+//   每行形如 `<sha>\trefs/heads/<X>` / `<sha>\trefs/tags/<Y>` / `<sha>\trefs/tags/<Y>^{}`（tag 解引用行）。
+//   规则：剥离 refs/heads|refs/tags 前缀；**丢弃 `^{}` 解引用行**（否则版本号里混进 `v1.0^{}`）；tags 版本倒序、branches 默认分支置顶。
+//   纯函数（不碰 git/网络/fs）→ 可脱库单测。
+function parseGitRefs(lsRemoteOut) {
+  const branches = new Set(), tags = new Set();
+  for (const raw of String(lsRemoteOut || '').split('\n')) {
+    const line = raw.trim(); if (!line) continue;
+    const m = line.match(/^[0-9a-fA-F]+\s+(refs\/(?:heads|tags)\/.+)$/);
+    const ref = m ? m[1] : line;   // 兼容只有 ref 无 sha 的行
+    if (ref.startsWith('refs/heads/')) { const b = ref.slice('refs/heads/'.length).trim(); if (b) branches.add(b); }
+    else if (ref.startsWith('refs/tags/')) { if (ref.endsWith('^{}')) continue; const t = ref.slice('refs/tags/'.length).trim(); if (t) tags.add(t); }
+  }
+  return { branches: sortBranches([...branches]), tags: [...tags].sort(verCmpDesc).slice(0, 500) };
 }
-// 每个子系统仓各自的 git tag（各子系统 git 地址/tag 不同 → 各显各的，别用产品级并集）。返回 { 子系统name: [tag倒序] }。
+// PD-01：归一化子系统所选 refs（branches/tags）——校验为字符串数组、trim、去空、去重、单元素 ≤200 字符、数组 ≤100。非数组→[]。
+//   纯函数（可脱库单测）；project-save 落库前对 branches/tags 各调一次，防脏数据/超长写库。
+function normRefList(arr) {
+  if (!Array.isArray(arr)) return [];
+  const seen = new Set(), out = [];
+  for (const x of arr) {
+    if (typeof x !== 'string' && typeof x !== 'number') continue;
+    const v = String(x).trim().slice(0, 200);
+    if (!v || seen.has(v)) continue;
+    seen.add(v); out.push(v);
+    if (out.length >= 100) break;
+  }
+  return out;
+}
+// PD-01：某子系统的「最终版本清单」——若该子系统有选（tags/branches 任一非空）用所选（tag 版本倒序在前 + branch 作滚动版本在后）；
+//   否则回落旧行为（该仓全部 git tag，倒序）。**没选的子系统行为与改造前一模一样**（老产品不受影响）。
+//   selTags/selBranches = 子系统对象上持久化的 s.tags / s.branches；allTags = 回落时读到的该仓全 tag（已倒序）。纯函数，可单测两分支。
+function subsystemVersionList(selTags, selBranches, allTags) {
+  const st = Array.isArray(selTags) ? selTags.map(x => String(x || '').trim()).filter(Boolean) : [];
+  const sb = Array.isArray(selBranches) ? selBranches.map(x => String(x || '').trim()).filter(Boolean) : [];
+  if (st.length || sb.length) {
+    const tags = [...new Set(st)].sort(verCmpDesc);         // 选中的 tag，版本倒序在前
+    const branches = sortBranches(sb);                      // 选中的分支，作「滚动版本」在后（版本字符串=分支名）
+    return [...tags, ...branches.filter(b => !tags.includes(b))].slice(0, 200);
+  }
+  return [...(allTags || [])].slice(0, 200);                // 未选 → 回落：该仓全 tag（倒序，调用方保证）
+}
+function listVersions(proj) {   // 产品版本候选 = 各子系统「最终版本清单」的并集（选中优先、未选回落全 tag，按版本倒序）
+  const set = new Set();
+  ((proj && proj.subsystems) || []).forEach(s => {
+    if (typeof s === 'string') return;   // 顶层裸字符串子系统无仓/无选，跳（并集靠下方顶层单仓兜底）
+    let allTags = [];
+    if (s && s.repoPath && fs.existsSync(s.repoPath)) { try { allTags = gitOut(s.repoPath, ['tag', '-l', '--sort=-v:refname']).split('\n').map(t => t.trim()).filter(Boolean); } catch {} }
+    subsystemVersionList(s && s.tags, s && s.branches, allTags).forEach(v => set.add(v));
+  });
+  if (proj && proj.repoPath && fs.existsSync(proj.repoPath)) { try { gitOut(proj.repoPath, ['tag', '-l', '--sort=-v:refname']).split('\n').forEach(t => { t = t.trim(); if (t) set.add(t); }); } catch {} }   // 兼容顶层单仓（无选字段，回落全 tag）
+  return [...set].sort(verCmpDesc).slice(0, 200);
+}
+// 每个子系统仓各自的版本清单（各子系统 git 地址/tag 不同 → 各显各的，别用产品级并集）。返回 { 子系统name: [版本倒序] }。
+//   PD-01：有选（s.tags/s.branches）→ 用所选（tag 在前、branch 滚动版本在后）；未选 → 回落该仓全 git tag。老产品不受影响。
 function versionsBySubsystem(proj) {
   const out = {};
   ((proj && proj.subsystems) || []).forEach(s => {
     const name = (typeof s === 'string') ? s : (s && s.name);
     const rp = (typeof s === 'string') ? '' : (s && s.repoPath);
     if (!name) return;
-    let tags = [];
-    if (rp && fs.existsSync(rp)) { try { tags = gitOut(rp, ['tag', '-l', '--sort=-v:refname']).split('\n').map(t => t.trim()).filter(Boolean); } catch {} }
-    out[name] = tags.sort((a, b) => b.localeCompare(a, undefined, { numeric: true })).slice(0, 200);
+    let allTags = [];
+    if (rp && fs.existsSync(rp)) { try { allTags = gitOut(rp, ['tag', '-l', '--sort=-v:refname']).split('\n').map(t => t.trim()).filter(Boolean); } catch {} }
+    out[name] = subsystemVersionList((typeof s === 'string') ? null : s.tags, (typeof s === 'string') ? null : s.branches, allTags);
   });
   return out;
+}
+// PD-01：用 `git ls-remote --heads --tags <authUrl>` 列某仓远端 refs（只读，不 clone；快）。token 注入同 cloneRepo。
+//   失败/超时/未配 token → 返回 {branches:[],tags:[],error} 而非抛异常，让端点逐仓兜底、整体不 500。
+function lsRemoteRefs(repoUrl) {
+  const c = readGitCfg();
+  if (!repoUrl) return { branches: [], tags: [], error: '缺少仓库地址' };
+  if (!c.token) return { branches: [], tags: [], error: '未配置 Git token' };
+  const authUrl = String(repoUrl).replace(/^(https?:\/\/)/, (m) => m + 'oauth2:' + c.token + '@');
+  try {
+    const r = spawnSync('git', ['ls-remote', '--heads', '--tags', authUrl], { encoding: 'utf8', timeout: 20000 });
+    if (r.status !== 0) { const msg = String((r.stderr || '') || (r.error && r.error.message) || '').replace(/oauth2:[^@]*@/g, 'oauth2:***@').trim().slice(0, 200); return { branches: [], tags: [], error: msg || ('ls-remote 失败（状态 ' + r.status + '）') }; }
+    return parseGitRefs(r.stdout || '');
+  } catch (e) { return { branches: [], tags: [], error: String((e && e.message) || e).replace(/oauth2:[^@]*@/g, 'oauth2:***@').slice(0, 200) }; }
 }
 function specFilesAt(repoPath, ref) {   // 列出某版本(或工作树) docs/specs 下的 .md
   if (ref) { const out = gitOut(repoPath, ['ls-tree', '-r', '--name-only', ref, '--', 'docs/specs']); return out.split('\n').map(s => s.trim()).filter(f => f.endsWith('.md') && !path.basename(f).startsWith('_') && path.basename(f).toLowerCase() !== 'readme.md'); }
@@ -2231,8 +2296,8 @@ const server = http.createServer((req, res) => {
       const name = String(b.name || '').trim(); if (!name) return send(res, 400, JSON.stringify({ ok: false, error: '项目名必填' })); if (name.length > 40) return send(res, 400, JSON.stringify({ ok: false, error: '项目名不超过 40 字' }));
       const repoPath = String(b.repoPath || '').trim(), specsPath = String(b.specsPath || '').trim();
       const gitUrl = String(b.gitUrl || '').trim();
-      const subsIn = (Array.isArray(b.subsystems) ? b.subsystems : []).map(s => (typeof s === 'string' ? { name: s.trim() } : { key: String(s.key || '').trim(), name: String(s.name || '').trim(), desc: String(s.desc || '').trim(), repoPath: String(s.repoPath || '').trim(), repoUrl: String(s.repoUrl || '').trim() })).filter(s => s.name).slice(0, 60);
-      const subsystems = subsIn.map(s => { const o = { name: s.name }; if (s.key) o.key = s.key; if (s.desc) o.desc = s.desc; if (s.repoUrl) { o.repoUrl = s.repoUrl; const dir = cloneRepo(id, s.key || s.name, s.repoUrl); if (dir) o.repoPath = dir; } else if (s.repoPath) o.repoPath = s.repoPath; return o; });   // git 子系统仓 → clone 到缓存
+      const subsIn = (Array.isArray(b.subsystems) ? b.subsystems : []).map(s => (typeof s === 'string' ? { name: s.trim() } : { key: String(s.key || '').trim(), name: String(s.name || '').trim(), desc: String(s.desc || '').trim(), repoPath: String(s.repoPath || '').trim(), repoUrl: String(s.repoUrl || '').trim(), branches: normRefList(s.branches), tags: normRefList(s.tags) })).filter(s => s.name).slice(0, 60);
+      const subsystems = subsIn.map(s => { const o = { name: s.name }; if (s.key) o.key = s.key; if (s.desc) o.desc = s.desc; if (s.repoUrl) { o.repoUrl = s.repoUrl; const dir = cloneRepo(id, s.key || s.name, s.repoUrl); if (dir) o.repoPath = dir; } else if (s.repoPath) o.repoPath = s.repoPath; if (s.branches.length) o.branches = s.branches; if (s.tags.length) o.tags = s.tags; return o; });   // git 子系统仓 → clone 到缓存；PD-01：持久化各子系统所选分支/tag（版本清单来源）
       const ps = loadProjects(); const i = ps.findIndex(p => p.id === id); const existing = i >= 0 ? ps[i] : null;
       // 编辑时本次未带子系统/Git 则保留已有——避免改名等操作把子系统与克隆路径误清（曾踩坑，见 lessons）
       const finalSubs = subsystems.length ? subsystems : ((existing && existing.subsystems) || []);
@@ -2304,6 +2369,23 @@ const server = http.createServer((req, res) => {
       if (!b) return send(res, 400, JSON.stringify({ ok: false, error: err }));
       try { const r = await gitInspect(b.url || ''); send(res, 200, JSON.stringify({ ok: true, ...r })); }
       catch (e) { send(res, 200, JSON.stringify({ ok: false, error: String((e && e.message) || e) })); }
+    });
+  }
+  if (url.pathname === '/api/git-refs' && req.method === 'POST') {   // PD-01：列各子系统仓可选 refs（branches/tags）供编辑抽屉多选（ls-remote 只读，不 clone）
+    // 入参二选一：{subsystems:[{key,repoUrl}]}（解析后未保存，直接用 repoUrl）｜{project:<id>}（已保存产品，用其 subsystems 的 repoUrl/deriveGitUrl 还原）。
+    return readBody(req, (b, err) => {
+      if (!b) return send(res, 400, JSON.stringify({ ok: false, error: err }));
+      let subs = [];
+      if (Array.isArray(b.subsystems) && b.subsystems.length) {
+        subs = b.subsystems.filter(s => s && typeof s === 'object').map(s => ({ key: String(s.key || s.name || '').trim(), repoUrl: String(s.repoUrl || '').trim() }));
+      } else if (b.project) {
+        const proj = projById(String(b.project)); if (!proj) return send(res, 200, JSON.stringify({ ok: false, error: '项目不存在', refs: {} }));
+        subs = ((proj.subsystems) || []).filter(s => s && typeof s === 'object').map(s => ({ key: String(s.key || s.name || '').trim(), repoUrl: String(s.repoUrl || '').trim() }));
+      }
+      if (!subs.length) return send(res, 200, JSON.stringify({ ok: true, refs: {} }));   // 无子系统 = 空（前端按空态处理）
+      const refs = {};
+      for (const s of subs) { const key = s.key || 'main'; refs[key] = lsRemoteRefs(s.repoUrl); }   // 逐仓 ls-remote；单仓失败只落该 key.error，整体不 500
+      send(res, 200, JSON.stringify({ ok: true, refs }));
     });
   }
 
