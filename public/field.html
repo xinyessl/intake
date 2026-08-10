@@ -213,6 +213,72 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
 .f-ws-placeholder .d { font-size: 13px; }
 .f-ws-scope { font-size: 12.5px; color: var(--color-text-secondary); background: var(--color-surface-alt); border: 1px solid var(--color-border); border-radius: var(--radius-pill); padding: 4px 12px; margin-top: 4px; }
 
+/* ========== FS-09 · 全览（个人全局图） ========== */
+/* 面板自身内部滚动（外壳已 100vh，body overflow:hidden）：flex:1 撑满 + overflow:auto，不出现 body 全局滚动条 */
+.f-overview { flex: 1 1 auto; min-height: 0; overflow: auto; background: var(--color-bg); }
+.f-ov-body { padding: 16px 20px 28px; max-width: 1560px; margin: 0 auto; }
+.f-ov-sec { margin-bottom: 26px; }
+.f-ov-sec-hd { display: flex; align-items: center; gap: 8px; margin: 4px 0 12px; font-size: 15px; font-weight: 700; color: var(--color-text); }
+.f-ov-sec-hd .ti { font-size: 18px; color: var(--color-primary); }
+.f-ov-sec-hd .cnt { font-size: 12px; font-weight: 600; color: var(--color-text-tertiary); background: var(--color-surface-alt); border: 1px solid var(--color-border); border-radius: var(--radius-pill); padding: 1px 9px; }
+.f-ov-sec-hd .sub { font-size: 12px; font-weight: 400; color: var(--color-text-tertiary); }
+/* 响应式卡片网格（紧凑，全局规范 #5） */
+.f-ov-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.f-ov-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-card); padding: 13px 14px; display: flex; flex-direction: column; gap: 9px; position: relative; }
+.f-ov-card.click { cursor: pointer; transition: box-shadow .14s, border-color .14s, transform .08s; }
+.f-ov-card.click:hover { box-shadow: var(--shadow-card-hover); border-color: var(--color-primary-border); }
+.f-ov-card.click:active { transform: translateY(1px); }
+/* 卡头：标题 + 维保徽章 */
+.f-ov-ch { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.f-ov-ch .nm { font-size: 14px; font-weight: 700; color: var(--color-text); line-height: 1.35; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.f-ov-ch .nm .ti { font-size: 16px; color: var(--color-text-tertiary); flex: 0 0 auto; }
+.f-ov-ch .nm .txt { overflow: hidden; text-overflow: ellipsis; }
+/* 维保徽章 */
+.f-ov-mnt { flex: 0 0 auto; font-size: 11.5px; font-weight: 600; border-radius: var(--radius-pill); padding: 2px 9px; white-space: nowrap; border: 1px solid transparent; }
+.f-ov-mnt.normal { color: var(--color-success); background: var(--color-success-light); border-color: var(--color-success-border); }
+.f-ov-mnt.soon { color: var(--color-warning); background: var(--color-warning-light); border-color: var(--color-warning-border); }
+.f-ov-mnt.expired { color: var(--color-danger); background: var(--color-danger-light); border-color: var(--color-danger-border); }
+.f-ov-mnt.none { color: var(--color-text-tertiary); background: var(--color-surface-alt); border-color: var(--color-border); }
+/* 紧急角标 */
+.f-ov-urg { position: absolute; top: -7px; right: -7px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: var(--radius-pill); background: var(--color-danger); color: #fff; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(192,57,43,.4); z-index: 2; }
+/* 4 阶段计数条 */
+.f-ov-stages { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.f-ov-st { text-align: center; border-radius: var(--radius); padding: 6px 2px 5px; background: var(--color-surface-alt); border: 1px solid var(--color-border); }
+.f-ov-st .n { font-size: 17px; font-weight: 700; color: var(--color-text); line-height: 1.1; }
+.f-ov-st .l { font-size: 10.5px; color: var(--color-text-tertiary); margin-top: 2px; }
+.f-ov-st.zero .n { color: var(--color-text-tertiary); }
+/* 待验证高亮（现场最该盯的） */
+.f-ov-st.verify { background: var(--color-accent-light); border-color: var(--color-accent-border); }
+.f-ov-st.verify .n { color: var(--color-accent); }
+.f-ov-st.verify .l { color: var(--color-accent); font-weight: 600; }
+.f-ov-st.verify.zero { background: var(--color-surface-alt); border-color: var(--color-border); }
+.f-ov-st.verify.zero .n, .f-ov-st.verify.zero .l { color: var(--color-text-tertiary); font-weight: 400; }
+/* 卡内字段行 */
+.f-ov-row { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; color: var(--color-text-secondary); line-height: 1.5; }
+.f-ov-row > .k { flex: 0 0 auto; color: var(--color-text-tertiary); min-width: 60px; }
+.f-ov-row > .v { flex: 1 1 auto; min-width: 0; color: var(--color-text); word-break: break-word; }
+.f-ov-row .muted { color: var(--color-text-tertiary); }
+.f-ov-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; background: var(--color-surface-alt); border: 1px solid var(--color-border); border-radius: var(--radius); padding: 1px 7px; margin: 1px 3px 1px 0; color: var(--color-text-secondary); }
+.f-ov-chip b { color: var(--color-text); font-weight: 600; }
+.f-ov-chip.warn { background: var(--color-warning-light); border-color: var(--color-warning-border); color: var(--color-warning); }
+.f-ov-chip.warn b { color: var(--color-warning); }
+.f-ov-chip.accent { background: var(--color-accent-light); border-color: var(--color-accent-border); color: var(--color-accent); }
+.f-ov-chip.accent b { color: var(--color-accent); }
+.f-ov-div { border-top: 1px dashed var(--color-border); margin: 1px 0; }
+/* 产品卡·版本分布 */
+.f-ov-vd { display: flex; flex-direction: column; gap: 5px; }
+.f-ov-vd-row { font-size: 12px; line-height: 1.5; }
+.f-ov-vd-row .sn { color: var(--color-text-tertiary); margin-right: 4px; }
+.f-ov-vg { display: inline-flex; align-items: baseline; gap: 3px; margin: 1px 6px 1px 0; }
+.f-ov-vg .ver { font-weight: 600; color: var(--color-text); font-family: var(--font-mono, ui-monospace, monospace); font-size: 11.5px; }
+.f-ov-vg .hs { color: var(--color-text-tertiary); font-size: 11px; }
+/* 空态 */
+.f-ov-empty { text-align: center; color: var(--color-text-tertiary); padding: 40px 20px; font-size: 13px; }
+.f-ov-empty .ti { font-size: 38px; opacity: .45; display: block; margin-bottom: 8px; }
+.f-ov-loading { text-align: center; color: var(--color-text-tertiary); padding: 48px 20px; font-size: 13px; }
+.f-ov-loading .ti { font-size: 22px; opacity: .6; animation: fovspin 1s linear infinite; display: inline-block; margin-right: 6px; vertical-align: -3px; }
+@keyframes fovspin { to { transform: rotate(360deg); } }
+
 /* ========== FS-02 · 提交清单（医院视图左栏） ========== */
 .f-submit-pane { flex: 0 0 420px; max-width: 72%; min-width: 300px; display: flex; flex-direction: column; min-height: 0; background: var(--color-surface); }
 /* 左右可拖分隔条：7px 抓取区 + 1px 视觉线，hover/拖拽变主色 */
@@ -697,6 +763,7 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
         <i class="ti ti-chevron-down chev"></i>
       </button>
       <div class="f-mode-menu" id="fModeMenu">
+        <div class="f-mode-item" data-m="overview"><i class="ti ti-layout-dashboard"></i> 全览</div>
         <div class="f-mode-item active" data-m="hosp"><i class="ti ti-building-hospital"></i> 医院视图</div>
         <div class="f-mode-item" data-m="sys"><i class="ti ti-stack-2"></i> 系统视图</div>
       </div>
@@ -799,6 +866,13 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
       </div>
     </div>
   </main>
+
+  <!-- ================= FS-09 · 全览（个人全局图）：切 mode=overview 时显示，隐藏 #fWorkspace ================= -->
+  <section class="f-overview" id="fOverview" style="display:none">
+    <div class="f-ov-body" id="fOvBody">
+      <!-- 医院维度 + 产品维度两段（渲染时填充） -->
+    </div>
+  </section>
 </div>
 
 <!-- ================= 经验库检索面板（FS-07 · 抽屉，自实现 open/close） ================= -->
@@ -991,13 +1065,33 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
   }
 
   // ---------- 顶部维度切换 + 实体 tab ----------
+  var MODE_META = {
+    overview: { label: '全览', icon: 'ti-layout-dashboard' },
+    hosp: { label: '医院视图', icon: 'ti-building-hospital' },
+    sys: { label: '系统视图', icon: 'ti-stack-2' }
+  };
   function setMode(m) {
-    state.mode = (m === 'sys') ? 'sys' : 'hosp';
-    $('fModeLabel').textContent = state.mode === 'sys' ? '系统视图' : '医院视图';
+    state.mode = (m === 'sys' || m === 'overview') ? m : 'hosp';
+    var meta = MODE_META[state.mode] || MODE_META.hosp;
+    $('fModeLabel').textContent = meta.label;
+    var trigIcon = $('fModeCur') && $('fModeCur').querySelector('.ti');   // 触发器左侧图标随模式变
+    if (trigIcon) trigIcon.className = 'ti ' + meta.icon;
     var items = $('fModeMenu').querySelectorAll('.f-mode-item');
     for (var i = 0; i < items.length; i++) {
       items[i].classList.toggle('active', items[i].getAttribute('data-m') === state.mode);
     }
+    // FS-09：全览 = 全宽面板（隐藏左右分栏工作区）；切回 hosp/sys 反之
+    var ws = $('fWorkspace'), ov = $('fOverview'), htabs = $('fHtabs');
+    if (state.mode === 'overview') {
+      if (ws) ws.style.display = 'none';
+      if (ov) ov.style.display = '';
+      if (htabs) htabs.style.display = 'none';   // 全览无医院/系统下拉上下文，隐藏顶栏实体 tab
+      loadOverview();
+      return;   // 全览不涉及提交清单/系统聚合/会话同步
+    }
+    if (ws) ws.style.display = '';
+    if (ov) ov.style.display = 'none';
+    if (htabs) htabs.style.display = '';
     if (state.mode === 'sys') {
       // AC-1：切系统视图 → 默认「全部系统」；AC-15：换视图重置 ctxVer；AC-11：隐藏「按批次/按类型」+「全部子项目」下拉
       state.curSys = null; state.ctxVer = null; state.verOpen = false;
@@ -1298,6 +1392,161 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
     } else {
       el.textContent = state.curSite ? ('医院视图 · ' + state.curSite) : '医院视图 · 未分配医院';
     }
+  }
+
+  // ========== FS-09 · 全览（个人全局图）：医院维度卡 + 产品维度卡 ==========
+  var STAGE_ORDER = [
+    { k: 'review', l: '待评审' }, { k: 'dev', l: '开发中' },
+    { k: 'verify', l: '待验证' }, { k: 'closed', l: '已关闭' }
+  ];
+  function loadOverview() {
+    var body = $('fOvBody'); if (!body) return;
+    body.innerHTML = '<div class="f-ov-loading"><i class="ti ti-loader"></i> 加载全览…</div>';
+    api('/api/field/overview', { method: 'GET' }).then(function (r) {
+      if (state.mode !== 'overview') return;   // 用户可能已切走
+      var b = (r && r.body) || {};
+      renderOverview(Array.isArray(b.hospitals) ? b.hospitals : [], Array.isArray(b.products) ? b.products : []);
+    }).catch(function () {
+      if (state.mode !== 'overview') return;
+      body.innerHTML = '<div class="f-ov-empty"><i class="ti ti-alert-triangle"></i>加载失败，请重试</div>';
+    });
+  }
+
+  function renderOverview(hospitals, products) {
+    var body = $('fOvBody'); if (!body) return;
+    var html = '';
+    // ---- A 医院维度 ----
+    html += '<div class="f-ov-sec">';
+    html += '<div class="f-ov-sec-hd"><i class="ti ti-building-hospital"></i> 医院维度 <span class="cnt">' + hospitals.length + ' 家</span> <span class="sub">我负责的医院 · 点卡片进医院视图</span></div>';
+    if (!hospitals.length) {
+      html += '<div class="f-ov-empty"><i class="ti ti-building-hospital"></i>尚未分配医院</div>';
+    } else {
+      html += '<div class="f-ov-grid">';
+      for (var i = 0; i < hospitals.length; i++) html += hospCardHtml(hospitals[i]);
+      html += '</div>';
+    }
+    html += '</div>';
+    // ---- B 产品维度 ----
+    html += '<div class="f-ov-sec">';
+    html += '<div class="f-ov-sec-hd"><i class="ti ti-stack-2"></i> 产品维度 <span class="cnt">' + products.length + ' 个</span> <span class="sub">跨医院聚合总览</span></div>';
+    if (!products.length) {
+      html += '<div class="f-ov-empty"><i class="ti ti-stack-2"></i>尚未分配产品</div>';
+    } else {
+      html += '<div class="f-ov-grid">';
+      for (var j = 0; j < products.length; j++) html += prodCardHtml(products[j]);
+      html += '</div>';
+    }
+    html += '</div>';
+    body.innerHTML = html;
+    // 医院卡点击 → 切医院视图 + 选中该院（事件委托，见全局 lessons L039）
+    body.querySelectorAll('.f-ov-card[data-hosp]').forEach(function (c) {
+      c.addEventListener('click', function () { gotoHospital(c.getAttribute('data-hosp')); });
+    });
+  }
+
+  // 4 阶段计数条（待验证高亮）
+  function stagesHtml(stages) {
+    var s = stages || {};
+    var out = '<div class="f-ov-stages">';
+    for (var i = 0; i < STAGE_ORDER.length; i++) {
+      var so = STAGE_ORDER[i]; var n = s[so.k] || 0;
+      var cls = 'f-ov-st' + (so.k === 'verify' ? ' verify' : '') + (n === 0 ? ' zero' : '');
+      out += '<div class="' + cls + '"><div class="n">' + n + '</div><div class="l">' + so.l + '</div></div>';
+    }
+    out += '</div>';
+    return out;
+  }
+
+  // 维保徽章文案：临期显剩 N 天、过期显已过期 M 天
+  function mntBadgeHtml(h) {
+    var st = h.maintainStatus || 'none';
+    var txt;
+    if (st === 'none') txt = '维保 —';
+    else if (st === 'expired') txt = '已过期 ' + Math.abs(h.maintainDaysLeft) + ' 天';
+    else if (st === 'soon') txt = '维保剩 ' + h.maintainDaysLeft + ' 天';
+    else txt = '维保 ' + fmtTime(h.maintainEnd);
+    return '<span class="f-ov-mnt ' + st + '" title="' + (h.maintainEnd ? ('维保到期 ' + escapeHtml(h.maintainEnd)) : '无维保到期') + '">' + escapeHtml(txt) + '</span>';
+  }
+
+  function hospCardHtml(h) {
+    var out = '<div class="f-ov-card click" data-hosp="' + escapeHtml(h.site) + '">';
+    if (h.urgent > 0) out += '<span class="f-ov-urg" title="紧急/高优先未关闭工单">' + h.urgent + '</span>';
+    out += '<div class="f-ov-ch"><div class="nm"><i class="ti ti-building-hospital"></i><span class="txt">' + escapeHtml(h.hospitalName || h.site) + '</span></div>' + mntBadgeHtml(h) + '</div>';
+    out += stagesHtml(h.stages);
+    // 现场版本（各产品各子系统）
+    out += '<div class="f-ov-div"></div>';
+    if (h.versions && h.versions.length) {
+      var vparts = [];
+      for (var v = 0; v < h.versions.length; v++) {
+        var pv = h.versions[v];
+        for (var s = 0; s < pv.subsystems.length; s++) {
+          vparts.push('<span class="f-ov-chip">' + escapeHtml(pv.subsystems[s].subsystemLabel || pv.subsystems[s].subsystem) + ' <b>' + escapeHtml(pv.subsystems[s].version) + '</b></span>');
+        }
+      }
+      out += '<div class="f-ov-row"><span class="k">现场版本</span><span class="v">' + (vparts.length ? vparts.join('') : '<span class="muted">—</span>') + '</span></div>';
+    } else {
+      out += '<div class="f-ov-row"><span class="k">现场版本</span><span class="v muted">—</span></div>';
+    }
+    // 下次更新
+    if (h.nextUpdate) {
+      var nu = h.nextUpdate;
+      out += '<div class="f-ov-row"><span class="k">下次更新</span><span class="v"><span class="f-ov-chip accent"><b>' + escapeHtml(nu.pkgVersion || '待定') + '</b></span>' + (nu.scheduleDate ? ('<span class="muted">计划 ' + escapeHtml(nu.scheduleDate) + '</span>') : '') + '</span></div>';
+    } else {
+      out += '<div class="f-ov-row"><span class="k">下次更新</span><span class="v muted">暂无</span></div>';
+    }
+    // 待下载更新包数 + 最近一次更新
+    var foot = [];
+    if (h.pendingDownload > 0) foot.push('<span class="f-ov-chip warn"><i class="ti ti-download"></i> 待下载 <b>' + h.pendingDownload + '</b></span>');
+    foot.push('<span class="muted">最近更新 ' + (h.lastUpdated ? escapeHtml(fmtTime(h.lastUpdated)) : '—') + '</span>');
+    out += '<div class="f-ov-row"><span class="v">' + foot.join(' ') + '</span></div>';
+    out += '</div>';
+    return out;
+  }
+
+  function prodCardHtml(p) {
+    var out = '<div class="f-ov-card">';
+    if (p.urgent > 0) out += '<span class="f-ov-urg" title="紧急/高优先未关闭工单">' + p.urgent + '</span>';
+    out += '<div class="f-ov-ch"><div class="nm"><i class="ti ti-stack-2"></i><span class="txt">' + escapeHtml(p.productName || p.product) + '</span></div><span class="f-ov-chip">' + (p.hospitalCount || 0) + ' 家院</span></div>';
+    out += stagesHtml(p.stages);
+    // 各医院版本分布（按子系统分组：版本 → 哪些医院）
+    out += '<div class="f-ov-div"></div>';
+    if (p.versionDist && p.versionDist.length) {
+      out += '<div class="f-ov-row"><span class="k">版本分布</span><span class="v"><div class="f-ov-vd">';
+      for (var i = 0; i < p.versionDist.length; i++) {
+        var vd = p.versionDist[i];
+        var vgs = [];
+        for (var v = 0; v < vd.versions.length; v++) {
+          vgs.push('<span class="f-ov-vg"><span class="ver">' + escapeHtml(vd.versions[v].version) + '</span><span class="hs">(' + vd.versions[v].hospitals.map(escapeHtml).join('、') + ')</span></span>');
+        }
+        out += '<div class="f-ov-vd-row"><span class="sn">' + escapeHtml(vd.subsystemLabel || vd.subsystem) + '：</span>' + vgs.join(' ') + '</div>';
+      }
+      out += '</div></span></div>';
+    } else {
+      out += '<div class="f-ov-row"><span class="k">版本分布</span><span class="v muted">—</span></div>';
+    }
+    // 待发布 / 待更新提醒
+    if (p.reminders && p.reminders.length) {
+      var rparts = [];
+      for (var r = 0; r < p.reminders.length; r++) {
+        var rm = p.reminders[r];
+        if (rm.kind === 'pending-release') {
+          rparts.push('<span class="f-ov-chip warn" title="批次 ' + escapeHtml(rm.batchId) + ' 开发中·未出包">待发布 <b>' + escapeHtml(rm.batchId) + '</b> · 覆盖 ' + rm.coverSites + ' 院' + (rm.scheduleDate ? (' · 计划 ' + escapeHtml(rm.scheduleDate)) : '') + '</span>');
+        } else {
+          rparts.push('<span class="f-ov-chip accent" title="批次 ' + escapeHtml(rm.batchId) + ' 有院未应用">待更新 <b>' + escapeHtml(rm.pkgVersion || '') + '</b> · 覆盖 ' + rm.coverSites + ' 院' + (rm.scheduleDate ? (' · 计划 ' + escapeHtml(rm.scheduleDate)) : '') + '</span>');
+        }
+      }
+      out += '<div class="f-ov-row"><span class="k">发布提醒</span><span class="v">' + rparts.join('') + '</span></div>';
+    } else {
+      out += '<div class="f-ov-row"><span class="k">发布提醒</span><span class="v muted">暂无</span></div>';
+    }
+    out += '</div>';
+    return out;
+  }
+
+  // 从全览点某医院 → 切医院视图 + 选中该院（复用现有 setMode/onHospSelect 数据流）
+  function gotoHospital(site) {
+    setMode('hosp');
+    if (site && state.sites.indexOf(site) >= 0) { onHospSelect(site); }
   }
 
   // ---------- 待办（本条只挂载点，FS-05 填数据；此处只读 /api/notifications 计数示意） ----------

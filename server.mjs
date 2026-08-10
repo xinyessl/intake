@@ -30,6 +30,8 @@ import * as db from './db.mjs';
 // 更新包「按版本独立维护 + 跨版本累积」纯逻辑（区间/累积/左连/勾选/合并SQL，可独立单测：tools/version-plan.logic.test.mjs）
 import { rangeVersions, accumulateManifests, joinProgress as vpJoinProgress, applyToggle as vpApplyToggle, applySqlBundleToggle as vpApplySqlBundleToggle, sqlBundleSummary as vpSqlBundleSummary, mergeSql as vpMergeSql, joinBatchProgress as vpJoinBatchProgress, batchSqlSummary as vpBatchSqlSummary, applyBatchTaskToggle as vpApplyBatchTaskToggle, applyBatchSqlToggle as vpApplyBatchSqlToggle, mergeBatchSql as vpMergeBatchSql } from './tools/version-plan-logic.mjs';
 import { readSqlAtTag, readDeployManifestFromSubs, readDeployDirFromSubs, readSqlFileAtHead } from './tools/deploy-manifest-reader.mjs';
+// FS-09 实施端「个人全览图」纯聚合逻辑（医院卡 + 产品卡；可脱 DB/server 单测：tools/fs-09-overview.logic.test.mjs）
+import { buildHospitalCards as ovBuildHospitalCards, buildProductCards as ovBuildProductCards, todayParts as ovTodayParts } from './tools/fs-09-overview-logic.mjs';
 import { sortVersions as vpSortVersions } from './tools/version-plan-logic.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));           // 收件项目根目录
@@ -1176,12 +1178,12 @@ function authGate(pathname, user, link) {
   if (!user) return 'login';
   if (isAdmin(user)) return 'allow';                                    // 管理员：全放行
   // 现场侧（产品经理 / 实施工程师）：只允许 提交面 + 工单查看 + 验证
-  const FIELD_OK = new Set(['/', '/submit.html', '/detail.html', '/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/intake-commit-plan', '/api/consult', '/api/consult-to-intake', '/api/intake-delete', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-media', '/api/intake-transition', '/api/field/submissions', '/api/field/conversations', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/intake-set-priority', '/api/field/update-plan', '/api/field/update-toggle', '/api/field/update-sql-merged']);   // FS-04：/api/field/conversations = 右上「对话记录」数据源；/api/intake-commit-plan = 建单前确认清单确定性建单（v2 2026-08-07）（consult 每条 + intake 按 sessionId 分组），端点内按 user.sites 收敛   // FS-05：现场端新端点（按批次视图/下载/改版本/维保回写/逐单验证）+ 累积更新计划（读代码 docs/deploy.json/累积计划/勾选/合并SQL），均端点内按 user.sites 二次收敛。2026-08-05 架构重构删 deploy-template/customer-deploy-task/batch-task/version-releases（跟随产品代码，废弃手工登记与部署模板）
+  const FIELD_OK = new Set(['/', '/submit.html', '/detail.html', '/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/intake-commit-plan', '/api/consult', '/api/consult-to-intake', '/api/intake-delete', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-media', '/api/intake-transition', '/api/field/submissions', '/api/field/conversations', '/api/field/overview', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/intake-set-priority', '/api/field/update-plan', '/api/field/update-toggle', '/api/field/update-sql-merged']);   // FS-09：/api/field/overview = 「全览」个人全局图（医院卡 + 产品卡）数据源，端点内按 user.sites+projects 收敛。   // FS-04：/api/field/conversations = 右上「对话记录」数据源；/api/intake-commit-plan = 建单前确认清单确定性建单（v2 2026-08-07）（consult 每条 + intake 按 sessionId 分组），端点内按 user.sites 收敛   // FS-05：现场端新端点（按批次视图/下载/改版本/维保回写/逐单验证）+ 累积更新计划（读代码 docs/deploy.json/累积计划/勾选/合并SQL），均端点内按 user.sites 二次收敛。2026-08-05 架构重构删 deploy-template/customer-deploy-task/batch-task/version-releases（跟随产品代码，废弃手工登记与部署模板）
   return FIELD_OK.has(pathname) ? 'allow' : 'forbidden';
 }
 // FS-08 §4①：field 域接口允许集 = LINK_OK ∪ FIELD_OK（供访客链接 + 现场账号），与 authGate 内 FIELD_OK 同源，避免漂移。
 //   注意：这里是 authGate 里那份 FIELD_OK 的镜像常量——两者若改一处务必同步（authGate 用于登录态白名单，本集用于 field 域名层外层闸）。
-const FS08_FIELD_API = new Set(['/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/intake-commit-plan', '/api/consult', '/api/consult-to-intake', '/api/intake-delete', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-media', '/api/intake-transition', '/api/field/submissions', '/api/field/conversations', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/intake-set-priority', '/api/field/update-plan', '/api/field/update-toggle', '/api/field/update-sql-merged', '/api/model-config']);   // FS-04：/api/field/conversations + /api/intake-commit-plan 须与 FIELD_OK 同步（否则实施域 originGate deny→forbidden）（否则实施域 originGate deny→forbidden，见 fs-08 防漂移断言）   // FS-05 端点须与 FIELD_OK 同步，否则实施域(field)整个流被 originGate deny→forbidden（实测坑，见 fs-08 防漂移断言）；update-plan/update-toggle/update-sql-merged 为累积更新计划现场端。2026-08-05 架构重构删 deploy-template/customer-deploy-task/batch-task/version-releases（跟随产品代码）
+const FS08_FIELD_API = new Set(['/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/intake-commit-plan', '/api/consult', '/api/consult-to-intake', '/api/intake-delete', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-media', '/api/intake-transition', '/api/field/submissions', '/api/field/conversations', '/api/field/overview', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/intake-set-priority', '/api/field/update-plan', '/api/field/update-toggle', '/api/field/update-sql-merged', '/api/model-config']);   // FS-09：/api/field/overview 须与 FIELD_OK 同步（否则实施域 originGate deny→forbidden，见 fs-08 防漂移断言）。   // FS-04：/api/field/conversations + /api/intake-commit-plan 须与 FIELD_OK 同步（否则实施域 originGate deny→forbidden）（否则实施域 originGate deny→forbidden，见 fs-08 防漂移断言）   // FS-05 端点须与 FIELD_OK 同步，否则实施域(field)整个流被 originGate deny→forbidden（实测坑，见 fs-08 防漂移断言）；update-plan/update-toggle/update-sql-merged 为累积更新计划现场端。2026-08-05 架构重构删 deploy-template/customer-deploy-task/batch-task/version-releases（跟随产品代码）
 // field 域可加载的静态页（现场提交面 + 实施端外壳 + 现场可看的详情 + 登录页）。console/inbox/customers/kb/model-config/accounts/projects 等后台页不在其中 → 越域拒。
 const FS08_FIELD_PAGES = new Set(['/', '/field.html', '/submit.html', '/detail.html', '/login.html']);
 // 鉴权/健康端点：两域都放（field 域现场登录/查身份/登出/健康探测需要）。
@@ -2979,6 +2981,66 @@ const server = http.createServer((req, res) => {
     items.sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));   // 均按 updatedAt 倒序
     return send(res, 200, JSON.stringify({ items }));
   }
+
+  // ---------- GET /api/field/overview：实施端「个人全览图」（FS-09）----------
+  //   两维度卡：A 医院维度（每家我负责医院一张卡）+ B 产品维度（每个我负责产品一张卡·跨院聚合总览）。
+  //   服务端按 user.sites + user.projects 收敛，忽略前端越权传参（口径与 /api/field/submissions、/api/field/batches 完全一致）。
+  //   数据来源全部复用现成 helper（禁止臆造库表/列）：loadProjects/listIntake/scopedForField（工单）、loadCustomers（客户/维保/现场版本）、
+  //     loadBatches + batchTicketsForUser（批次覆盖工单）、fieldStatusLabel（4 阶段归并同源）、kbSubLabel（子系统中文名）、projById（产品名）。
+  //   纯聚合在 tools/fs-09-overview-logic.mjs（脱 DB 可单测）。
+  if (url.pathname === '/api/field/overview') {
+    if (!user) return send(res, 401, JSON.stringify({ error: '未登录' }));   // authGate 已挡，双保险
+    const mySites = fieldSites(user);   // null=管理员不限
+    const myProjects = (!isAdmin(user) && Array.isArray(user.projects) && user.projects.length) ? user.projects.map(String) : null;   // null=不限
+    // 工单：与 /api/field/submissions 同源——loadProjects → listIntake（无 consult）→ scopedForField（按 sites+project 越权裁掉）
+    let allTickets = [];
+    for (const p of loadProjects()) {
+      if (myProjects && !myProjects.includes(p.id)) continue;   // 产品范围收敛
+      for (const it of listIntake(p, { withConsult: false })) { allTickets.push(Object.assign({ project: p.id }, it)); }
+    }
+    allTickets = scopedForField(user, allTickets);   // 忽略前端越权，按 me.sites（+project）裁掉
+    // 批次：每个批次挂 _mineTickets = 该账号 sites 范围内覆盖工单（管理员=全部覆盖工单），供纯逻辑判「覆盖我几家院/待下载/待更新」
+    const batches = [];
+    for (const bt of loadBatches()) {
+      if (myProjects && !myProjects.includes(bt.product)) continue;   // 产品范围收敛
+      const proj = projById(bt.product);
+      const mine = batchTicketsForUser(bt, proj, mySites);   // 越权医院的覆盖单已裁掉
+      batches.push(Object.assign({}, bt, { _mineTickets: mine }));
+    }
+    // 客户台账（按医院名匹配，与 custWithTicketCount/customer-version 一致）
+    const custByName = new Map();
+    for (const c of loadCustomers()) { const nm = String((c && c.name) || '').trim(); if (nm) custByName.set(nm, c); }
+    // 我负责医院集合：非管理员 = user.sites；管理员 = 工单/批次里出现过的 site（无固定 sites，取其相关院）
+    let sitesForCards;
+    if (mySites) sitesForCards = mySites.slice();
+    else {
+      const s = new Set();
+      for (const it of allTickets) { const nm = String((it && it.site) || '').trim(); if (nm) s.add(nm); }
+      for (const c of custByName.keys()) s.add(c);   // 管理员也把台账里的院纳入（便于看全景）
+      sitesForCards = [...s];
+    }
+    // 我负责产品集合：非管理员 = user.projects；管理员 = 工单/批次里出现过的产品
+    let productIds;
+    if (myProjects) productIds = myProjects.slice();
+    else {
+      const s = new Set();
+      for (const it of allTickets) { const pid = String((it && it.project) || '').trim(); if (pid) s.add(pid); }
+      for (const bt of batches) { if (bt.product) s.add(String(bt.product)); }
+      productIds = [...s];
+    }
+    const deps = { fieldStatusLabelFn: fieldStatusLabel, subLabelFn: kbSubLabel, projNameFn: (id) => (projById(id) || {}).name || id, today: ovTodayParts() };
+    const hospitals = ovBuildHospitalCards(sitesForCards, allTickets, batches, custByName, myProjects, user.username || '', deps);
+    const products = ovBuildProductCards(productIds, allTickets, batches, custByName, sitesForCards, user.username || '', deps);
+    // 医院卡按「待验证多的、临期/过期、紧急多的」优先靠前，便于现场一眼盯重点；同权按名稳定排序
+    const mntRank = { expired: 0, soon: 1, normal: 2, none: 3 };
+    hospitals.sort((a, b) => (b.stages.verify - a.stages.verify) || (b.urgent - a.urgent) || (mntRank[a.maintainStatus] - mntRank[b.maintainStatus]) || String(a.site).localeCompare(String(b.site)));
+    products.sort((a, b) => String(a.productName).localeCompare(String(b.productName)));
+    return send(res, 200, JSON.stringify({
+      me: { username: user.username || '', name: user.name || user.username || '', siteCount: sitesForCards.length, projectCount: productIds.length },
+      hospitals, products,
+    }));
+  }
+
   if (url.pathname === '/api/intake-detail') {
     const proj = projById(url.searchParams.get('project')); const e = proj ? loadIntake(proj, url.searchParams.get('id')) : null;
     if (e && e.deleted) return send(res, 404, JSON.stringify({ item: null, error: '记录已删除' }));   // 软删记录详情不可读、不可 reopen
