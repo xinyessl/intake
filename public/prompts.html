@@ -9,27 +9,44 @@
 <script src="/assets/ui.js" defer></script>
 <script src="/assets/shell.js" defer></script>
 <style>
-  /* 列表区内部滚动，页面外壳不整页滚动（配合 body data-content-layout="list"） */
+  /* 外壳固定视口：banner 通栏 + 下方左导航/右编辑各自内部滚动，不出现 body 全局滚动条（配合 body data-content-layout="list"） */
   .panel-fill{ flex:1; min-height:0; display:flex; flex-direction:column; }
-  .prompt-scroll{ flex:1; min-height:0; overflow:auto; padding:2px 2px 8px; }
-  .pgroup-title{ font-size:12px; font-weight:600; color:var(--color-text-tertiary); margin:14px 4px 8px; letter-spacing:.5px; }
-  .pgroup-title:first-child{ margin-top:4px; }
-  .pcard{ border:1px solid var(--color-border); border-radius:10px; padding:12px 14px; margin-bottom:12px; background:var(--color-bg-card,#fff); }
+  .pwrap{ flex:1; min-height:0; display:flex; gap:12px; }
+  /* 左侧标题导航 */
+  .pnav{ flex:0 0 268px; min-height:0; overflow:auto; border:1px solid var(--color-border); border-radius:10px; background:var(--color-bg-card,#fff); padding:6px; }
+  .pnav-group{ font-size:11px; font-weight:600; color:var(--color-text-tertiary); letter-spacing:.5px; padding:10px 8px 5px; }
+  .pnav-item{ display:flex; align-items:center; gap:6px; padding:8px 9px; border-radius:8px; cursor:pointer; margin-bottom:2px; }
+  .pnav-item:hover{ background:var(--color-bg-subtle,#f4f5f7); }
+  .pnav-item.active{ background:rgba(58,76,168,.10); }
+  .pnav-item.active .pnav-title{ color:var(--color-primary); font-weight:600; }
+  .pnav-main{ min-width:0; flex:1; }
+  .pnav-title{ font-size:13px; line-height:1.3; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pnav-key{ font-size:10.5px; color:var(--color-text-tertiary); font-family:var(--font-mono,monospace); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pnav-badge{ flex:0 0 auto; }
+  /* 右侧编辑区 */
+  .pedit{ flex:1; min-width:0; min-height:0; overflow:auto; border:1px solid var(--color-border); border-radius:10px; background:var(--color-bg-card,#fff); padding:16px 18px; }
   .pcard-head{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-  .pcard-title{ font-size:14px; font-weight:600; }
-  .pcard-desc{ font-size:12px; color:var(--color-text-tertiary); margin:6px 0 8px; line-height:1.5; }
+  .pcard-title{ font-size:15px; font-weight:600; }
+  .pcard-desc{ font-size:12.5px; color:var(--color-text-tertiary); margin:8px 0 10px; line-height:1.55; }
   .ph-list{ display:flex; flex-wrap:wrap; gap:6px; margin:8px 0; }
   .ph-chip{ font-size:11px; font-family:var(--font-mono,monospace); background:var(--color-bg-subtle,#f4f5f7); border:1px solid var(--color-border); border-radius:6px; padding:2px 7px; cursor:pointer; user-select:none; }
   .ph-chip:hover{ border-color:var(--color-primary); color:var(--color-primary); }
   .ph-chip.locked{ cursor:not-allowed; opacity:.7; }
   .ph-chip.locked:hover{ border-color:var(--color-border); color:inherit; }
-  .ptext{ width:100%; box-sizing:border-box; font-family:var(--font-mono,ui-monospace,Menlo,Consolas,monospace); font-size:12.5px; line-height:1.6; min-height:180px; resize:vertical; padding:10px 12px; border:1px solid var(--color-border); border-radius:8px; background:var(--color-bg-input,#fff); color:var(--color-text); tab-size:2; }
+  .ptext{ width:100%; box-sizing:border-box; font-family:var(--font-mono,ui-monospace,Menlo,Consolas,monospace); font-size:12.5px; line-height:1.6; min-height:calc(100vh - 380px); resize:vertical; padding:10px 12px; border:1px solid var(--color-border); border-radius:8px; background:var(--color-bg-input,#fff); color:var(--color-text); tab-size:2; }
   .ptext:focus{ outline:none; border-color:var(--color-primary); box-shadow:0 0 0 3px rgba(58,76,168,.12); }
   .ptext.warn{ border-color:var(--color-warning,#e6a23c); }
-  .pcard-foot{ display:flex; align-items:center; gap:10px; margin-top:8px; }
+  .pcard-foot{ display:flex; align-items:center; gap:10px; margin-top:10px; }
   .pwarn{ font-size:12px; color:var(--color-danger,#d9534f); display:none; align-items:center; gap:5px; }
   .pwarn.show{ display:inline-flex; }
-  .pmeta{ font-size:11px; color:var(--color-text-tertiary); margin-left:auto; }
+  .pmeta{ font-size:11px; color:var(--color-text-tertiary); }
+  .pmeta.right{ margin-left:auto; }
+  /* 窄屏：左导航退化成顶部横向 tab 条 */
+  @media (max-width:860px){
+    .pwrap{ flex-direction:column; }
+    .pnav{ flex:0 0 auto; max-height:34vh; }
+    .ptext{ min-height:240px; }
+  }
 </style>
 </head>
 <body data-shell="admin" data-nav="prompts" data-breadcrumb="AI 引擎 > 提示词配置" data-content-layout="list">
@@ -39,10 +56,13 @@
 <div class="card panel-fill">
   <div class="card-header">
     <div class="card-title"><i class="ti ti-message-code"></i>AI 系统提示词<span class="text-12 text-tertiary" id="cntTag" style="margin-left:6px;font-weight:400"></span></div>
-    <div class="text-12 text-tertiary">改了才生效 · 缺占位仅警告不拦截</div>
+    <div class="text-12 text-tertiary">左选标题 · 右编辑单条 · 改了才生效 · 缺占位仅警告不拦截</div>
   </div>
-  <div class="prompt-scroll" id="listHost">
-    <div style="text-align:center;color:var(--color-text-tertiary);padding:50px 10px" id="loading"><i class="ti ti-loader"></i> 加载中…</div>
+  <div class="pwrap">
+    <div class="pnav" id="navHost"></div>
+    <div class="pedit" id="editHost">
+      <div style="text-align:center;color:var(--color-text-tertiary);padding:50px 10px" id="loading"><i class="ti ti-loader"></i> 加载中…</div>
+    </div>
   </div>
 </div>
 
@@ -54,93 +74,106 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','
 /* —— toast（部署 shell.js 无 toast helper，自建；用 theme.css .toast-container/.toast.show）—— */
 function toast(msg,type){ const host=$('#toastHost'); if(!host)return; const el=document.createElement('div'); el.className='toast '+(type||''); const ic=type==='success'?'ti-circle-check':type==='error'?'ti-alert-circle':type==='warning'?'ti-alert-triangle':'ti-info-circle'; el.innerHTML=`<i class="ti ${ic}"></i><span>${esc(msg)}</span>`; host.appendChild(el); requestAnimationFrame(()=>el.classList.add('show')); setTimeout(()=>{ el.classList.remove('show'); setTimeout(()=>el.remove(),300); },2800); }
 
-let ITEMS=[];   // [{key,label,desc,group,template,isDefault,placeholders,requiredPlaceholders,missingRequired,maxLen}]
+let ITEMS=[];       // [{key,label,desc,group,template,isDefault,placeholders,requiredPlaceholders,missingRequired,maxLen}]
+let CUR=0;          // 当前选中项下标
 const GROUP_ORDER=['现场对话类','后台初判类','其它'];
 
 function badge(it){ return it.isDefault ? '<span class="tag tag-gray tag-dot">默认</span>' : '<span class="tag tag-primary tag-dot">已自定义</span>'; }
 
-function render(){
+/* ============ 左侧标题导航（分组 + 标题 + key + 徽章 + 高亮当前） ============ */
+function renderNav(){
   $('#cntTag').textContent = ITEMS.length ? '（共 '+ITEMS.length+' 条）' : '';
-  const host=$('#listHost');
-  if(!ITEMS.length){ host.innerHTML='<div style="text-align:center;color:var(--color-text-tertiary);padding:50px 10px">无提示词配置</div>'; return; }
+  const host=$('#navHost'); if(!host) return;
+  if(!ITEMS.length){ host.innerHTML='<div style="text-align:center;color:var(--color-text-tertiary);padding:30px 10px">无提示词</div>'; return; }
   const byGroup={}; ITEMS.forEach((it,i)=>{ (byGroup[it.group]||(byGroup[it.group]=[])).push(i); });
   const groups=[...GROUP_ORDER.filter(g=>byGroup[g]), ...Object.keys(byGroup).filter(g=>!GROUP_ORDER.includes(g))];
   let html='';
   for(const g of groups){
-    html+='<div class="pgroup-title">'+esc(g)+'</div>';
-    for(const i of byGroup[g]) html+=cardHtml(i);
+    html+='<div class="pnav-group">'+esc(g)+'</div>';
+    for(const i of byGroup[g]){
+      const it=ITEMS[i];
+      html+=`<div class="pnav-item${i===CUR?' active':''}" data-i="${i}">
+        <div class="pnav-main">
+          <div class="pnav-title" title="${esc(it.label)}">${esc(it.label)}</div>
+          <div class="pnav-key" title="${esc(it.key)}">${esc(it.key)}</div>
+        </div>
+        <span class="pnav-badge" data-navbadge="${i}">${badge(it)}</span>
+      </div>`;
+    }
   }
   host.innerHTML=html;
 }
+function updateNavBadge(i){ const el=document.querySelector(`[data-navbadge="${i}"]`); if(el) el.innerHTML=badge(ITEMS[i]); }
+$('#navHost')?.addEventListener('click', e=>{ const it=e.target.closest('.pnav-item'); if(!it) return; const i=+it.getAttribute('data-i'); if(i===CUR) return; CUR=i; renderNav(); renderEditor(); });
 
-function cardHtml(i){
-  const it=ITEMS[i];
+/* ============ 右侧编辑区（只渲染当前选中的一条） ============ */
+function renderEditor(){
+  const host=$('#editHost'); const it=ITEMS[CUR]; if(!host||!it){ if(host) host.innerHTML=''; return; }
   const required=new Set(it.requiredPlaceholders||[]);
   const chips=(it.placeholders||[]).map(p=>{
     const locked=required.has(p.name);
     const title=esc(p.desc||'')+(locked?'（系统注入·不可编辑）':'');
-    return `<span class="ph-chip${locked?' locked':''}" data-i="${i}" data-ph="${esc(p.name)}" data-locked="${locked?1:''}" title="${title}">{{${esc(p.name)}}}${locked?' 🔒':''}</span>`;
+    return `<span class="ph-chip${locked?' locked':''}" data-ph="${esc(p.name)}" data-locked="${locked?1:''}" title="${title}">{{${esc(p.name)}}}${locked?' 🔒':''}</span>`;
   }).join('');
   const noph=(it.placeholders||[]).length?'':'<span class="text-12 text-tertiary">（此提示词无占位变量）</span>';
-  return `<div class="pcard" data-card="${i}">
+  host.innerHTML=`
     <div class="pcard-head">
       <span class="pcard-title">${esc(it.label)}</span>
       <span data-badge>${badge(it)}</span>
-      <span class="pmeta"><code class="mono">${esc(it.key)}</code></span>
+      <span class="pmeta right"><code class="mono">${esc(it.key)}</code></span>
     </div>
     <div class="pcard-desc">${esc(it.desc||'')}</div>
     <div class="ph-list">${chips||noph}</div>
-    <textarea class="ptext" data-i="${i}" spellcheck="false" maxlength="${it.maxLen||20000}">${esc(it.template||'')}</textarea>
+    <textarea class="ptext" id="curText" spellcheck="false" maxlength="${it.maxLen||20000}">${esc(it.template||'')}</textarea>
     <div class="pcard-foot">
-      <button class="btn btn-primary btn-sm" data-act="save" data-i="${i}"><i class="ti ti-check"></i>保存</button>
-      <button class="btn btn-sm" data-act="reset" data-i="${i}"><i class="ti ti-rotate"></i>恢复默认</button>
-      <span class="pwarn" data-warn="${i}"><i class="ti ti-alert-triangle"></i><span data-warntext></span></span>
-      <span class="pmeta" data-len="${i}"></span>
-    </div>
-  </div>`;
+      <button class="btn btn-primary btn-sm" data-act="save"><i class="ti ti-check"></i>保存</button>
+      <button class="btn btn-sm" data-act="reset"><i class="ti ti-rotate"></i>恢复默认</button>
+      <span class="pwarn" id="curWarn"><i class="ti ti-alert-triangle"></i><span data-warntext></span></span>
+      <span class="pmeta right" id="curLen"></span>
+    </div>`;
+  updateWarn();
 }
 
 /* 占位缺失检查（前端即时提示，与后端 checkRequiredPlaceholders 同口径） */
 function missingReq(it, tpl){ return (it.requiredPlaceholders||[]).filter(name=>!new RegExp('\\{\\{\\s*'+name+'\\s*\\}\\}').test(tpl)); }
-function updateWarn(i){
-  const it=ITEMS[i]; const ta=document.querySelector(`textarea[data-i="${i}"]`); if(!it||!ta) return;
+function updateWarn(){
+  const it=ITEMS[CUR]; const ta=$('#curText'); if(!it||!ta) return;
   const tpl=ta.value; const missing=missingReq(it, tpl);
-  const warn=document.querySelector(`[data-warn="${i}"]`); const wt=warn?warn.querySelector('[data-warntext]'):null;
-  if(missing.length){ ta.classList.add('warn'); if(warn){warn.classList.add('show'); if(wt) wt.textContent='缺少必需占位 '+missing.map(m=>'{{'+m+'}}').join('、')+'，可能导致对应功能失效（仍可保存）'; } }
+  const warn=$('#curWarn'); const wt=warn?warn.querySelector('[data-warntext]'):null;
+  if(missing.length){ ta.classList.add('warn'); if(warn){ warn.classList.add('show'); if(wt) wt.textContent='缺少必需占位 '+missing.map(m=>'{{'+m+'}}').join('、')+'，可能导致对应功能失效（仍可保存）'; } }
   else{ ta.classList.remove('warn'); if(warn) warn.classList.remove('show'); }
-  const lenEl=document.querySelector(`[data-len="${i}"]`); if(lenEl) lenEl.textContent=tpl.length+' / '+(it.maxLen||20000);
+  const lenEl=$('#curLen'); if(lenEl) lenEl.textContent=tpl.length+' / '+(it.maxLen||20000);
 }
 
-/* 事件委托：占位 chip 点击插入 / 输入即时校验 / 保存 / 恢复默认 */
-$('#listHost').addEventListener('click', e=>{
+/* 右侧事件委托：占位 chip 插入 / 输入即时校验 / 保存 / 恢复默认 */
+$('#editHost')?.addEventListener('click', e=>{
   const chip=e.target.closest('.ph-chip');
   if(chip){
     if(chip.getAttribute('data-locked')){ toast('该占位由系统注入，改动无效（保留即可）','info'); return; }
-    const i=+chip.getAttribute('data-i'); const ph=chip.getAttribute('data-ph');
-    const ta=document.querySelector(`textarea[data-i="${i}"]`); if(!ta) return;
+    const ph=chip.getAttribute('data-ph'); const ta=$('#curText'); if(!ta) return;
     const s=ta.selectionStart||0, en=ta.selectionEnd||0, ins='{{'+ph+'}}';
     ta.value=ta.value.slice(0,s)+ins+ta.value.slice(en); ta.focus(); ta.selectionStart=ta.selectionEnd=s+ins.length;
-    updateWarn(i); return;
+    updateWarn(); return;
   }
   const btn=e.target.closest('[data-act]'); if(!btn) return;
-  const i=+btn.getAttribute('data-i'); const act=btn.getAttribute('data-act');
-  if(act==='save') saveOne(i);
-  else if(act==='reset') resetOne(i);
+  const act=btn.getAttribute('data-act');
+  if(act==='save') saveCur();
+  else if(act==='reset') resetCur();
 });
-$('#listHost').addEventListener('input', e=>{ const ta=e.target.closest('textarea[data-i]'); if(ta) updateWarn(+ta.getAttribute('data-i')); });
+$('#editHost')?.addEventListener('input', e=>{ if(e.target.closest('#curText')) updateWarn(); });
 
-async function saveOne(i){
-  const it=ITEMS[i]; const ta=document.querySelector(`textarea[data-i="${i}"]`); if(!it||!ta) return;
+async function saveCur(){
+  const it=ITEMS[CUR]; const ta=$('#curText'); if(!it||!ta) return;
   const tpl=ta.value;
   if(tpl.length>(it.maxLen||20000)){ toast('模板过长（上限 '+(it.maxLen||20000)+' 字）','error'); return; }
-  const btn=document.querySelector(`[data-act="save"][data-i="${i}"]`); if(btn) btn.disabled=true;
+  const btn=$('#editHost [data-act="save"]'); if(btn) btn.disabled=true;
   try{
     const r=await (await fetch('/api/prompts-config-save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:it.key, template:tpl})})).json();
     const res=(r.results||[])[0]||{};
     if(!r.ok || res.ok===false){ toast('保存失败：'+(res.error||r.error||''),'error'); if(btn) btn.disabled=false; return; }
     const upd=(r.updated||[]).find(u=>u.key===it.key);
     if(upd){ it.template=upd.template; it.isDefault=upd.isDefault; it.missingRequired=upd.missingRequired||[]; }
-    refreshCard(i);
+    afterMutate();
     const warns=res.warnings||[];
     if(warns.length) toast('已保存（缺占位 '+warns.map(m=>'{{'+m+'}}').join('、')+'，请留意）','warning');
     else if(res.reset) toast('内容与默认相同，已恢复为默认','success');
@@ -149,37 +182,37 @@ async function saveOne(i){
   if(btn) btn.disabled=false;
 }
 
-async function resetOne(i){
-  const it=ITEMS[i]; if(!it) return;
+async function resetCur(){
+  const it=ITEMS[CUR]; if(!it) return;
   if(!(await uiConfirm('恢复「'+it.label+'」为系统默认提示词？当前自定义内容将被清除。',{title:'恢复默认',danger:true,okText:'恢复默认'}))) return;
-  const btn=document.querySelector(`[data-act="reset"][data-i="${i}"]`); if(btn) btn.disabled=true;
+  const btn=$('#editHost [data-act="reset"]'); if(btn) btn.disabled=true;
   try{
     const r=await (await fetch('/api/prompts-config-save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:it.key, reset:true})})).json();
     if(!r.ok){ toast('恢复失败：'+(r.error||''),'error'); if(btn) btn.disabled=false; return; }
     const upd=(r.updated||[]).find(u=>u.key===it.key);
     if(upd){ it.template=upd.template; it.isDefault=upd.isDefault; it.missingRequired=upd.missingRequired||[]; }
-    refreshCard(i);
-    const ta=document.querySelector(`textarea[data-i="${i}"]`); if(ta) ta.value=it.template||'';
-    updateWarn(i);
+    const ta=$('#curText'); if(ta) ta.value=it.template||'';
+    afterMutate();
     toast('已恢复默认','success');
   }catch(e){ toast('恢复失败：'+e.message,'error'); }
   if(btn) btn.disabled=false;
 }
 
-function refreshCard(i){
-  const it=ITEMS[i];
-  const b=document.querySelector(`.pcard[data-card="${i}"] [data-badge]`); if(b) b.innerHTML=badge(it);
-  const ta=document.querySelector(`textarea[data-i="${i}"]`); if(ta && document.activeElement!==ta) ta.value=it.template||'';
-  updateWarn(i);
+/* 保存/恢复后：刷新右侧徽章 + 左侧对应项徽章 + 警告/计数 */
+function afterMutate(){
+  const b=$('#editHost [data-badge]'); if(b) b.innerHTML=badge(ITEMS[CUR]);
+  updateNavBadge(CUR);
+  updateWarn();
 }
 
 async function load(){
   try{
     const r=await (await fetch('/api/prompts-config')).json();
     ITEMS=(r.items||[]).map(x=>({...x}));
-    render();
-    ITEMS.forEach((_,i)=>updateWarn(i));
-  }catch(e){ $('#loading').innerHTML='读取失败：'+esc(e.message); toast('读取配置失败：'+e.message,'error'); }
+    // 默认选中「实施进件对话」（intakeChatSystem），否则第一条
+    const idx=ITEMS.findIndex(x=>x.key==='intakeChatSystem'); CUR=idx>=0?idx:0;
+    renderNav(); renderEditor();
+  }catch(e){ const h=$('#editHost'); if(h) h.innerHTML='读取失败：'+esc(e.message); toast('读取配置失败：'+e.message,'error'); }
 }
 load();
 </script>
