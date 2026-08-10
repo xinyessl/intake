@@ -339,8 +339,32 @@ test('B8 field.html：拉 /api/field/overview + 两维度渲染 + 医院卡点�
   assert.ok(/api\('\/api\/field\/overview'/.test(FIELD_HTML), '进 overview 拉 /api/field/overview');
   assert.ok(/function renderOverview/.test(FIELD_HTML) && /医院维度/.test(FIELD_HTML) && /产品维度/.test(FIELD_HTML), '渲染两维度区块');
   assert.ok(/function gotoHospital/.test(FIELD_HTML) && /setMode\('hosp'\)/.test(FIELD_HTML) && /onHospSelect\(site\)/.test(FIELD_HTML), '医院卡点击→切医院视图+选中该院（复用现有数据流）');
-  assert.ok(/f-ov-st verify/.test(FIELD_HTML) || /so\.k === 'verify'/.test(FIELD_HTML), '待验证阶段高亮');
-  assert.ok(/repeat\(auto-fill, minmax\(320px, 1fr\)\)/.test(FIELD_HTML), '响应式卡片网格');
+  // 待验证段高亮（CSS .f-ov-st.verify 浅 teal 底 + 渲染时 so.k==='verify' 加 verify 类 + 小圆点）
+  assert.ok(/\.f-ov-st\.verify\b/.test(FIELD_HTML) && /so\.k/.test(FIELD_HTML), '待验证阶段高亮');
+  // 响应式卡片网格（minmax 任意 px，重设计后为 330px）
+  assert.ok(/f-ov-grid \{[^}]*repeat\(auto-fill, minmax\(\d+px, 1fr\)\)/.test(FIELD_HTML), '响应式卡片网格');
   // 空态友好占位
   assert.ok(/尚未分配医院/.test(FIELD_HTML) && /尚未分配产品/.test(FIELD_HTML), '空态占位');
+});
+
+test('B9 field.html：dashboard 重设计元素齐（KPI 概览条 + 阶段分段条语义色 + 卡片状态条 + 版本落后琥珀）', () => {
+  // KPI 概览条：函数 + 5 磁贴（负责医院/工单总数/待验证/紧急/待下载）
+  assert.ok(/function kpiBarHtml/.test(FIELD_HTML) && /class="f-ov-kpis"/.test(FIELD_HTML), '有 KPI 概览条');
+  assert.ok(/负责医院/.test(FIELD_HTML) && /工单总数/.test(FIELD_HTML) && /待验证/.test(FIELD_HTML) && /待下载/.test(FIELD_HTML), 'KPI 含关键指标');
+  // 阶段分段条语义色（待评审 warning / 开发中 btn / 已关闭 灰）
+  assert.ok(/\.f-ov-st\.review\b/.test(FIELD_HTML) && /\.f-ov-st\.dev\b/.test(FIELD_HTML) && /\.f-ov-st\.closed\b/.test(FIELD_HTML), '阶段段各语义色');
+  // 卡片左侧状态色条（hospAccent/prodAccent → st-danger/st-warning/st-accent/st-calm）
+  assert.ok(/function hospAccent/.test(FIELD_HTML) && /function prodAccent/.test(FIELD_HTML), '卡片状态色派生');
+  assert.ok(/\.f-ov-card\.st-danger::before/.test(FIELD_HTML) && /\.f-ov-card\.st-warning::before/.test(FIELD_HTML), '卡片左侧状态条');
+  // hover 微升
+  assert.ok(/\.f-ov-card\.click:hover \{[^}]*translateY\(-2px\)/.test(FIELD_HTML), '卡片 hover 微升');
+  // 版本分布落后旧版本琥珀
+  assert.ok(/f-ov-vg' \+ lag/.test(FIELD_HTML) && /\.f-ov-vg\.lag/.test(FIELD_HTML), '版本分布落后版本琥珀标记');
+  // 仅复用 theme.css token（不硬编码新色值）——抽 .f-ov-* CSS 段核对无裸 #hex 色值
+  //   （白色 #fff/#ffffff 是"色上白字"通用字面量，全站顶栏等也这么写，放行；其余色一律走 var(--color-*)）。
+  const cssStart = FIELD_HTML.indexOf('/* ========== FS-09 · 全览');
+  const cssEnd = FIELD_HTML.indexOf('/* ========== FS-02');
+  const ovCss = FIELD_HTML.slice(cssStart, cssEnd);
+  const hexes = (ovCss.match(/#[0-9A-Fa-f]{3,6}\b/g) || []).filter(x => !/^#(fff|ffffff)$/i.test(x));
+  assert.deepEqual(hexes, [], '全览 CSS 不硬编码非白色 #hex（一律走 theme token var()）：' + JSON.stringify(hexes));
 });
