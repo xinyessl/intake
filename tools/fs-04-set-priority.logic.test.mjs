@@ -80,7 +80,9 @@ test('B6 server：/api/intake-set-priority 同进 FIELD_OK + FS08_FIELD_API（�
   assert.match(fs08, /'\/api\/intake-set-priority'/, '在 FS08_FIELD_API（否则 field 域被 originGate deny）');
 });
 test('B7 server：AI 提示词让 AI 按严重度/影响面判 priority（四档），不总是「中」', () => {
-  const p = SRC.slice(SRC.indexOf('function intakeChatSystem'), SRC.indexOf('async function intakeAI'));
+  // PD-02：intakeChatSystem 模板外部化到 prompts.mjs 的 DEFAULT_PROMPTS.intakeChatSystem——断言点从 server.mjs 迁到默认模板。
+  const PROMPTS = fs.readFileSync(path.join(ROOT, 'prompts.mjs'), 'utf8');
+  const p = PROMPTS.slice(PROMPTS.indexOf('intakeChatSystem:'), PROMPTS.indexOf('consultNormal:'));
   assert.match(p, /priority 必填/, '提示 priority 必填');
   assert.match(p, /紧急\/高\/中\/低/, '限定四档取值');
   assert.match(p, /严重度|影响面/, '按严重度/影响面判定');

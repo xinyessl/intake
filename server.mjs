@@ -30,6 +30,8 @@ import * as db from './db.mjs';
 // 更新包「按版本独立维护 + 跨版本累积」纯逻辑（区间/累积/左连/勾选/合并SQL，可独立单测：tools/version-plan.logic.test.mjs）
 import { rangeVersions, accumulateManifests, joinProgress as vpJoinProgress, applyToggle as vpApplyToggle, applySqlBundleToggle as vpApplySqlBundleToggle, sqlBundleSummary as vpSqlBundleSummary, mergeSql as vpMergeSql, joinBatchProgress as vpJoinBatchProgress, batchSqlSummary as vpBatchSqlSummary, applyBatchTaskToggle as vpApplyBatchTaskToggle, applyBatchSqlToggle as vpApplyBatchSqlToggle, mergeBatchSql as vpMergeBatchSql } from './tools/version-plan-logic.mjs';
 import { readSqlAtTag, readDeployManifestFromSubs, readDeployDirFromSubs, readSqlFileAtHead } from './tools/deploy-manifest-reader.mjs';
+// PD-02：AI 系统提示词外部化（整段模板 + {{占位}}），默认值=现原文·行为不变；纯逻辑无 DB，可独立单测 tools/pd-02-prompts.logic.test.mjs
+import { renderPrompt as renderPromptTpl, readPromptsCfg, writePromptsCfg, effectiveTemplate, isCustomized, checkRequiredPlaceholders, DEFAULT_PROMPTS, PROMPT_META, PROMPT_KEYS, INTAKE_PLAN_SCHEMA, PROMPT_MAX_LEN } from './prompts.mjs';
 // FS-09 实施端「个人全览图」纯聚合逻辑（医院卡 + 产品卡；可脱 DB/server 单测：tools/fs-09-overview.logic.test.mjs）
 import { buildHospitalCards as ovBuildHospitalCards, buildProductCards as ovBuildProductCards, todayParts as ovTodayParts } from './tools/fs-09-overview-logic.mjs';
 import { sortVersions as vpSortVersions } from './tools/version-plan-logic.mjs';
@@ -976,15 +978,23 @@ function parseIntakePlan(reply, forceType) {
 function intakeHead(e) {   // 把一条工单压成给模型看的正文（AI 沟通 + 分析共用）
   return `【${e.type === 'bug' ? 'BUG' : '需求'}】${e.title}\n版本：${e.version || '未指定'}｜现场：${e.site || '未指定'}｜模块：${e.module}｜优先级：${e.priority}` + (e.type === 'bug' ? `｜严重：${e.severity}｜环境：${e.env}｜频率：${e.freq}\n现象：${e.desc}\n报错：${e.errorInfo || '无'}\n复现：${e.steps}\n期望：${e.expectResult || '无'}` : `\n背景：${e.bg}\n期望效果：${e.reqDesc}\n场景：${e.scene || '无'}\n验收：${e.accept || '无'}\n关联：${e.relate || '无'}`);
 }
-function analyzeSystem(proj, ver) {   // 平台内 AI 版本感知初判：只输出严格 JSON
+function analyzeSystem(proj, ver) {   // 平台内 AI 版本感知初判：只输出严格 JSON（PD-02：模板外部化，默认逐字不变）
   const idx = specIndex(proj, ver);
-  return `你是「版本感知的进件分析助手」，面向开发。项目「${proj.name}」${ver ? `版本 ${ver}` : ''} 的系统模块清单：\n${idx || '（暂无 spec 索引）'}\n\n判断下面这条进件，只输出一个严格 JSON（不要任何多余文字/解释/JSON 之外的内容），字段：\n{"category":"非bug|bug|该版本已修|需求","verdict":"一句话结论","suggestion":"reply|file","detail":"给开发的要点：可能原因/建议先查什么/大概落哪个模块；若能当场答复，附一段可直接发给现场的话"}\n判定口径：该版本 spec 本就这样→非bug（可能是新需求）；违反该版本 spec→bug；该现象在更高版本已修→该版本已修（建议现场升级）；全新诉求→需求。suggestion：能当场解决=reply，需要开发改动=file。`;
+  return renderPromptTpl(DATA_DIR, 'analyzeSystem', {
+    projectName: proj.name,
+    versionSuffix: ver ? `版本 ${ver}` : '',
+    specIndex: idx || '（暂无 spec 索引）',
+  });
 }
 function parseAnalysis(txt) { try { const m = /\{[\s\S]*\}/.exec(String(txt || '')); if (!m) return null; const j = JSON.parse(m[0]); const cat = ['非bug', 'bug', '该版本已修', '需求'].includes(j.category) ? j.category : 'bug'; const sug = j.suggestion === 'reply' ? 'reply' : 'file'; return { category: cat, verdict: String(j.verdict || '').trim(), suggestion: sug, detail: String(j.detail || '').trim() }; } catch { return null; } }
 
-function intakeSystem(type, proj, ver) {
+function intakeSystem(type, proj, ver) {   // PD-02：模板外部化，默认逐字不变
   const idx = specIndex(proj, ver);
-  return `你是「需求/BUG 进件助手」。对面是产品经理/实施工程师(不懂技术、不看代码)。项目「${proj.name}」${ver ? `（版本 ${ver}）` : ''}的系统模块清单（供你把进件对到正确模块）：\n${idx || '（暂无 spec 索引）'}\n\n你的任务：\n- 若是【需求】：判断是否讲清楚了。没讲清就用大白话问 1~2 个最关键的澄清问题（每次别超过2个）；讲清了就一句话确认你的理解 + 指出它大概落在哪个模块。\n- 若是【BUG】：根据现象/报错，给一个初步「处理意见 / 可能原因 / 建议先排查什么」，供开发参考；信息不足就问关键的1个点（如具体报错、哪条数据）。\n- 【绝不写代码、不臆造功能】。回复要简短、口语化、条理清楚，中文。`;
+  return renderPromptTpl(DATA_DIR, 'intakeSystem', {
+    projectName: proj.name,
+    versionParen: ver ? `（版本 ${ver}）` : '',
+    specIndex: idx || '（暂无 spec 索引）',
+  });
 }
 function subsystemNames(proj) { return ((proj && proj.subsystems) || []).map(s => (typeof s === 'string' ? s : (s && s.name) || '')).filter(Boolean); }
 // 对话式进件：AI 主导按「提交标准」逐条问齐 + 推断子系统/模块，够了就输出 intake-plan「建单计划」块（不再直接建单）。
@@ -993,7 +1003,7 @@ function subsystemNames(proj) { return ((proj && proj.subsystems) || []).map(s =
 //   顺序流坑（2026-08-06 v1）：AI 回复里的 record 块建单后被服务端剥掉再回前端，历史里看不到"已归档"，
 //   导致隔几轮再提新需求时 AI 把已建单的旧需求当"还在讨论"、跟新需求合并/重复。v1 主修=「已建单水位线」代码切上下文（见 /api/intake-chat）。
 //   治本（2026-08-07 v2）：AI 不再直接建单，改出「建单计划」intake-plan（一条独立需求=一个 item，绝不合并）→ 前端确认卡让用户拍板/编辑 → /api/intake-commit-plan 按清单确定性建单。本参数让提示词与之呼应。
-function intakeChatSystem(proj, type, ver, subKey, hasArchivedBg, builtTickets) {
+function intakeChatSystem(proj, type, ver, subKey, hasArchivedBg, builtTickets) {   // PD-02：模板外部化（正文可整段编辑；条件块/schema 为注入占位），默认逐字不变
   const idx = specIndex(proj, ver), subs = subsystemNames(proj);
   const merged = type !== 'bug' && type !== 'requirement';   // 合并模式：AI 自己判是需求还是 BUG
   const typ = merged ? '需求 / BUG' : (type === 'bug' ? 'BUG' : '需求');
@@ -1004,29 +1014,20 @@ function intakeChatSystem(proj, type, ver, subKey, hasArchivedBg, builtTickets) 
     : (type === 'bug' ? '· ' + stdBug : '· ' + stdReq);
   const pinned = subKey && subs.includes(subKey);
   const subBlock = subs.length ? `\n产品「${proj.name}」下分这些【子系统】：\n${subs.map(s => '· ' + s + (s === subKey ? '（用户已指定，就归到这里）' : '')).join('\n')}\n${pinned ? `※ 用户已明确选定子系统【${subKey}】——subsystem 字段直接填「${subKey}」，别再判别/追问是哪个子系统（模块 module 仍按描述判断）。\n` : ''}` : '';
-  return `你是「${typ}进件助手」，正在和产品经理/实施工程师(不懂技术、不看代码)对话，帮 TA 把一条${merged ? '【需求或 BUG】' : `【${typ}】`}按标准说清楚并归档。产品「${proj.name}」${ver ? `（版本 ${ver}）` : ''}。${subBlock}${idx ? `各子系统/模块功能清单（帮你对到正确位置）：\n${idx}\n` : ''}
-【路由纪律 · 很重要】用户往往分不清自己的问题属于哪个子系统/模块——
-- 绝不让 TA 从列表里选、也别问"属于哪个子系统"这种术语问题。你根据 TA 的大白话描述，自己判断落在哪个【子系统】+【模块】。
-- 判出来后用大白话确认，例：「这个听起来是在【审方】开处方时遇到的，对吗？」——让 TA 点头即可。
-- 若一句话分不清，只问一个"用户能答的场景问题"来区分（例：「你是在开处方时遇到的，还是事后看点评报告时？」），据答案归位。
-- 实在判不了，就先把 subsystem、module 都填「待定」，不要卡着不归档——开发侧会再归位。
-
-对话风格：一次最多问 1~2 个最关键的问题，别一股脑问；简短、口语、中文；绝不写代码、不臆造。开场先热情地请 TA 一句话说说想要什么/遇到什么。
-按提交标准核对信息是否齐（缺什么问什么，已说清的别重复问）：
-${std}
-
-【你就是进件系统本身 · 你出「建单计划」，系统按计划建单，绝不让用户去别处复制粘贴】——你不是"帮用户整理文字再让 TA 拿去别的需求/工单系统提交"的助手。信息齐了，你就在回复末尾输出一个**建单计划块**（intake-plan），列出你识别到的**每一条独立**需求/BUG——用户会在页面上确认/编辑这份计划，系统据此建单。绝不把单子写成"已整理为N条，可复制提交""请复制到你们的需求管理系统"这类给用户手工搬运的文字（那是错的、之前就踩过这个坑）。
-
-当信息按标准基本齐、且子系统/模块已确认（或标待定）后：先用一两句确认你的理解(若是 BUG 顺带给处理意见)，然后在回复的最末尾附**一个** intake-plan 块（用户看不到块里内容，别在正文里提"计划块""intake-plan"这些字），严格 JSON，\`items\` 是数组、**每条独立需求/BUG 一个 item**：
-\`\`\`intake-plan
-{"items":[{"action":"new","type":"","subsystem":"","module":"","title":"","priority":"中","summary":"","desc":"","errorInfo":"","steps":"","expectResult":"","severity":"","scope":"","env":"","freq":"","bg":"","reqDesc":"","accept":"","relate":"","opinion":""}]}
-\`\`\`
-【一条独立需求 = 一个 item · 绝不合并 · 硬性】只要你识别/确认/拆分出 **N 条独立**的需求或 BUG（哪怕你嘴上说了"拆成两条""一起打包转开发""都已登记"），\`items\` 里就**必须**有 **N 个 item**，一个都不能少、**绝不**把多条揉进一个 item、也**绝不**用"打包转开发/一起排期/已登记"这类**文字**代替 item。**少一个 item = 漏建单 = 错。** 若其中某条还差澄清、另一条已齐 → 已齐的先放进 items（继续追问没齐的那条即可，别为了"一起提交"而都不放）。哪几条还没问清就先别放进 items，也可以先不出 plan 块、继续追问补齐。
-【summary 必填】每个 item 的 \`summary\` 用一两句大白话概括这条需求/BUG（给用户在确认卡上一眼看懂"这条是什么"），其余字段（desc/steps/bg/reqDesc 等）照你收集到的信息填。
-【action 判定 · 默认 new】${(Array.isArray(builtTickets) && builtTickets.length) ? `本会话此前已经建过这些单：\n${builtTickets.map(t => `· ${t.ticketId}：${t.title}`).join('\n')}\n对当前这段对话里用户新说的内容：\n- 若某条明显是对上面**某张已建单的补充/追问**（如"刚才那个导出再加个筛选""上面那个也要支持…"）→ 这个 item 用 \`{"action":"append","ticketId":"对应单号","title":"…","summary":"补充点…"}\`；\n- 若是**新的、和已建单不同**的需求/BUG → \`{"action":"new",…}\`。\n**默认倾向 new**：拿不准就填 new（宁可让用户在确认卡上改成 append，也别默认合并进旧单）。` : `所有 item 都用 \`"action":"new"\`（本会话还没建过任何单）。`}
-【只出计划、不催确认】你只负责把计划列清楚。别在正文里说"我已经建好单了""已提交"——**建单要等用户在确认卡上点确认**，此刻还没建。信息不齐就继续追问、别出 plan 块。${hasArchivedBg ? `
-【已建单归档背景 · 只读】本轮对话开头有一段【已建单归档·只读背景】——那是本次会话里**此前已确认建单、已闭环**的需求/BUG，**只供你理解上下文**。你**只对「当前待处理」这段（背景之后的对话）判断有没有新的需求/BUG 要放进 plan**：绝不为「已归档背景」里的内容再列 item。若用户在「当前待处理」里明确针对某条已建单做补充/追问，按上面的 action 规则处理。` : ''}
-${merged ? '每个 item 的 type 必填："bug"(问题/缺陷) 或 "requirement"(需求/改进)，按你判断的类别填；' : `每个 item 的 type 填 "${type}"；`}priority 必填，按问题严重度/影响面判定，取值仅限【紧急/高/中/低】：紧急=线上阻断/资损/大面积无法使用；高=核心流程受阻但有临时办法或影响部分人；中=一般问题/改进(默认)；低=轻微/优化建议。拿不准填「中」。只有信息按标准基本齐才输出 plan；还在澄清阶段就别输出。`;
+  const specIndexBlock = idx ? `各子系统/模块功能清单（帮你对到正确位置）：\n${idx}\n` : '';
+  const actionBlock = (Array.isArray(builtTickets) && builtTickets.length)
+    ? `本会话此前已经建过这些单：\n${builtTickets.map(t => `· ${t.ticketId}：${t.title}`).join('\n')}\n对当前这段对话里用户新说的内容：\n- 若某条明显是对上面**某张已建单的补充/追问**（如"刚才那个导出再加个筛选""上面那个也要支持…"）→ 这个 item 用 \`{"action":"append","ticketId":"对应单号","title":"…","summary":"补充点…"}\`；\n- 若是**新的、和已建单不同**的需求/BUG → \`{"action":"new",…}\`。\n**默认倾向 new**：拿不准就填 new（宁可让用户在确认卡上改成 append，也别默认合并进旧单）。`
+    : `所有 item 都用 \`"action":"new"\`（本会话还没建过任何单）。`;
+  const archivedBlock = hasArchivedBg ? `
+【已建单归档背景 · 只读】本轮对话开头有一段【已建单归档·只读背景】——那是本次会话里**此前已确认建单、已闭环**的需求/BUG，**只供你理解上下文**。你**只对「当前待处理」这段（背景之后的对话）判断有没有新的需求/BUG 要放进 plan**：绝不为「已归档背景」里的内容再列 item。若用户在「当前待处理」里明确针对某条已建单做补充/追问，按上面的 action 规则处理。` : '';
+  const typeRule = merged ? '每个 item 的 type 必填："bug"(问题/缺陷) 或 "requirement"(需求/改进)，按你判断的类别填；' : `每个 item 的 type 填 "${type}"；`;
+  return renderPromptTpl(DATA_DIR, 'intakeChatSystem', {
+    typ, mergedLabel: merged ? '【需求或 BUG】' : `【${typ}】`,
+    projectName: proj.name, versionParen: ver ? `（版本 ${ver}）` : '',
+    subBlock, specIndexBlock, std,
+    intakePlanSchema: INTAKE_PLAN_SCHEMA,   // ⚠️ 安全护栏：系统注入·不可编辑（与确定性建单/解析死耦合）
+    actionBlock, archivedBlock, typeRule,
+  });
 }
 async function intakeAI(proj, e) {   // 组装对话喂模型，返回 AI 文本
   const cfg = readModelCfg(); if (!cfg.apiKey) return { ok: false, reply: '（未配置模型 API，管理员配置后 AI 才会自动沟通。内容已收到并存档。）', configured: false };
@@ -1163,18 +1164,16 @@ function consultSystem(proj, ver, hits, specs, code) {   // 答疑助手系统�
   const specTxt = (specs && specs.length) ? '相关规格摘录（从系统 spec 正文按问题检索出来的真实规则 / 验收标准，回答请优先依据这里，别只凭常识猜）：\n' + specs.map(s => `《${s.subsystem ? s.subsystem + '·' : ''}${s.module || ''}｜${s.title}》\n${s.text}`).join('\n\n———\n\n') : '';
   const deep = code && code.length;
   const codeTxt = deep ? '【深入思考 · 相关源码片段】用户点了「深入思考」，下面是从系统源码里检索出的相关实现片段（每条含文件路径 + 具体代码），这是本次回答的**主要依据**，请据此说清该功能实际是怎么实现的：\n' + code.map(c => `《${c.file}》\n${c.text}`).join('\n\n———\n\n') : '';
-  return `你是「${proj.name}」的答疑助手，面向产品经理/实施工程师。任务：依据系统说明书(spec)${deep ? '和源码片段' : ''}，回答 TA 关于系统使用/操作/"为什么会这样"、以及"某功能对应哪张表 / 哪些字段 / 哪个接口"的问题，并给可执行的解决思路。${subs.length ? `产品含子系统：${subs.join('、')}。` : ''}\n${idx ? `系统模块清单：\n${idx}\n` : ''}${specTxt ? '\n' + specTxt + '\n' : ''}${codeTxt ? '\n' + codeTxt + '\n' : ''}${kb ? '\n' + kb + '\n' : ''}
-规则：
-${deep ? `- **本次是「深入思考」，已给你上面的「相关源码片段」——请优先结合源码片段作答（规格摘录为辅），并点名源码出处**：
-  · **必须把答案落在源码片段上、点名具体出处**——引用到底是哪个文件 / 哪个组件 / 哪个函数/方法（如「在 \`intervention.vue\` 的 \`onDrugPath\` 里」），说清它**实际怎么做的**（如「点按钮走 \`$openUrl(...config.value)\` 打开外部链接、由 \`config.open/config.value\` 控制」），而不是泛泛给排查话术。
-  · **既然已检索到相关源码，就据源码作答，禁止开口就说「规格摘录未包含 / 未收录 / 没有相关资料」当没料**——规格摘录只是补充，别把「深入思考」答成「我没有资料」。
-  · **禁止把猜测当事实**：不要写「常见如 \`xxx_table\`／大概率在 xxx」这种臆造的表名/接口/字段当答案；只讲源码片段里**实际出现**的东西。源码没显示的（如后端落库表名、前端片段里看不到的服务端逻辑），如实说「源码片段里只看到这段前端/这段逻辑，具体 XX 需看后端代码或问开发」，别编。
-  · **① 翻译成大白话，绝不贴大段代码给用户；② 明确标注"这是根据代码实现推断的，最终以开发确认为准"。**
-- 规格摘录作为补充：其中的规则/AC、「数据契约」(库表/字段)、「接口契约」(接口路径)若与问题相关也可点名引用（哪条 / 哪个模块）；源码与摘录都没有、你又不确定的，才说不确定 + 建议下一步，别编。` : `- **优先依据上面「相关规格摘录」里的真实内容作答**——规则/AC、以及「数据契约」(库表/字段)、「接口契约」(接口路径)都算，可点名是哪条 / 哪个模块；摘录里确实没有、你又不确定的，才说不确定 + 建议下一步，别编。
-- **问到某功能"看哪张表 / 什么字段 / 哪个接口"**：只要「相关规格摘录」的数据契约 / 接口契约里写了，就照实告诉 TA（表名、字段名、接口路径）——这是说明书明文写的，不算"看代码"，别推说"技术细节我不看"。摘录里确实没有，才说这块要问开发。`}
-- 能答就直接答，条理清楚，给"怎么做 / 先查什么"的思路；能引用经验库就引用。
-- 若这其实是个缺陷(BUG)或新需求、需要开发介入，就明说"这个可能得转成工单让开发处理"，简述理由。
-- 不臆造 spec / 源码里没有的表/字段；${deep ? '' : '不写具体代码实现；'}简短、口语、中文。`;
+  // PD-02：拆 consultDeep（深入思考版）/ consultNormal（普通版）两个干净整段模板；条件片段作注入占位（默认逐字不变）
+  const vars = {
+    projectName: proj.name,
+    subsSentence: subs.length ? `产品含子系统：${subs.join('、')}。` : '',
+    specIndexBlock: idx ? `系统模块清单：\n${idx}\n` : '',
+    specExcerpts: specTxt ? '\n' + specTxt + '\n' : '',
+    kbBlock: kb ? '\n' + kb + '\n' : '',
+  };
+  if (deep) { vars.codeExcerpts = codeTxt ? '\n' + codeTxt + '\n' : ''; return renderPromptTpl(DATA_DIR, 'consultDeep', vars); }
+  return renderPromptTpl(DATA_DIR, 'consultNormal', vars);
 }
 
 // ===== 首次运行：建数据目录 + 播示例项目/默认管理员（库空时）=====
@@ -2453,6 +2452,50 @@ const server = http.createServer((req, res) => {
     });
   }
 
+  // ---------- 提示词配置（PD-02 · admin：未进 FIELD_OK/LINK_OK/FS08 → authGate 已对非 admin 返 403/401，无需页内再判） ----------
+  if (url.pathname === '/api/prompts-config') {   // 返回每个提示词的当前生效模板 + 元信息（是否自定义 / 占位说明 / 必需占位）
+    const items = PROMPT_KEYS.map(key => {
+      const meta = PROMPT_META[key] || {};
+      const template = effectiveTemplate(DATA_DIR, key);
+      return {
+        key, label: meta.label || key, desc: meta.desc || '', group: meta.group || '其它',
+        template, isDefault: !isCustomized(DATA_DIR, key),
+        placeholders: meta.placeholders || [],
+        requiredPlaceholders: meta.required || [],
+        missingRequired: checkRequiredPlaceholders(key, template),   // 当前生效模板缺哪些必需占位（默认必为空）
+        maxLen: PROMPT_MAX_LEN,
+      };
+    });
+    return send(res, 200, JSON.stringify({ ok: true, items }));
+  }
+  if (url.pathname === '/api/prompts-config-save' && req.method === 'POST') {   // 保存单个/批量提示词模板；支持恢复默认（reset 或空模板 → 删该 key 回落默认）
+    return readBody(req, async (b, err) => {
+      if (!b) return send(res, 400, JSON.stringify({ ok: false, error: err }));
+      // 兼容单条 {key, template, reset?} 与批量 {items:[{key,template,reset?}]}
+      const list = Array.isArray(b.items) ? b.items : [{ key: b.key, template: b.template, reset: b.reset }];
+      const cfg = { ...readPromptsCfg(DATA_DIR) };
+      const results = [];
+      for (const it of list) {
+        const key = String((it && it.key) || '').trim();
+        if (!key || !Object.prototype.hasOwnProperty.call(DEFAULT_PROMPTS, key)) { results.push({ key, ok: false, error: '未知提示词 key' }); continue; }
+        const reset = !!(it && it.reset);
+        const tpl = (it && typeof it.template === 'string') ? it.template : '';
+        if (reset || !tpl.trim()) { delete cfg[key]; results.push({ key, ok: true, reset: true }); continue; }   // 恢复默认：删该 key
+        if (tpl.length > PROMPT_MAX_LEN) { results.push({ key, ok: false, error: `模板过长（>${PROMPT_MAX_LEN} 字）` }); continue; }
+        // 占位校验：缺必需占位 → 非阻塞警告（用户选了灵活性，允许保存但明确回警告）
+        const missing = checkRequiredPlaceholders(key, tpl);
+        if (tpl === DEFAULT_PROMPTS[key]) { delete cfg[key]; results.push({ key, ok: true, reset: true, warnings: missing }); continue; }   // 与默认逐字相同 → 视为未改，删 key
+        cfg[key] = tpl;
+        results.push({ key, ok: true, warnings: missing });
+      }
+      writePromptsCfg(DATA_DIR, cfg);   // 失效缓存，下次读最新
+      // 回读该批 key 的最新状态供前端刷新
+      const updated = list.map(it => { const key = String((it && it.key) || '').trim(); if (!Object.prototype.hasOwnProperty.call(DEFAULT_PROMPTS, key)) return null; const template = effectiveTemplate(DATA_DIR, key); return { key, template, isDefault: !isCustomized(DATA_DIR, key), missingRequired: checkRequiredPlaceholders(key, template) }; }).filter(Boolean);
+      const anyFail = results.some(r => !r.ok);
+      send(res, 200, JSON.stringify({ ok: !anyFail, results, updated }));
+    });
+  }
+
   // ---------- 进件 ----------
   if (url.pathname === '/api/intake-submit' && req.method === 'POST') {   // H5 提交需求/BUG → 写 intake-store → AI 首轮沟通
     return readBody(req, async (b, err) => {
@@ -2829,10 +2872,7 @@ const server = http.createServer((req, res) => {
         const cfg = readModelCfg();
         if (cfg.apiKey && chat.length) {
           const dialog = chat.map(m => `${m.role === 'assistant' ? 'AI' : (m.role === 'dev' ? '开发' : '现场')}：${String(m.text || '').trim()}`).join('\n');
-          const sys = '把下面这段现场咨询对话整理成一条「经验库」条目，输出严格 JSON `{"q":"…","a":"…"}`（不要任何解释文字、不要代码块围栏）：\n' +
-            'q = 用户遇到的**核心问题**（一句话，抓真正要解决的那个，**不是最后一个追问**，比如整段在排查"为什么功能没生效"，核心就是它，而非中途某个技术现象）；\n' +
-            'a = **最终解决方案/结论**，要**涵盖整段排查的关键脉络**（从核心问题 → 关键排查步骤 → 最终定位与解法），条理清晰、可操作，给下一个人照做。\n' +
-            '别把整段对话原样堆上来、别只写最后一步、别丢掉真正的核心问题。';
+          const sys = renderPromptTpl(DATA_DIR, 'kbFromConsult', {});   // PD-02：模板外部化（无占位），默认逐字不变
           try {
             const txt = await callModel(cfg, { system: sys, messages: [{ role: 'user', content: dialog }], maxTokens: 900 });
             const mm = /\{[\s\S]*\}/.exec(String(txt || ''));

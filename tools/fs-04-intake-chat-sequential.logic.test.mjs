@@ -10,8 +10,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+// PD-02：提示词模板外部化到 prompts.mjs（intakeChatSystem 现调 renderPromptTpl(DATA_DIR,'intakeChatSystem',{...})）——
+//   抽真身评测时注入真实 renderPrompt/INTAKE_PLAN_SCHEMA/DATA_DIR，仍是「真实提示词内容」验证（默认模板即原文，能抓漂移）。
+import { renderPrompt as renderPromptTpl, INTAKE_PLAN_SCHEMA } from '../prompts.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = fs.readFileSync(path.join(ROOT, 'server.mjs'), 'utf8');
@@ -32,8 +36,9 @@ function extractFn(src, name) {
 }
 function makeIntakeChatSystem() {
   const body = extractFn(SRC, 'intakeChatSystem');
-  const factory = new Function('specIndex', 'subsystemNames', `${body}; return intakeChatSystem;`);
-  return factory(() => '', () => []);   // stub 掉纯展示依赖
+  // PD-02：注入真实 renderPromptTpl（读默认模板=原文）+ INTAKE_PLAN_SCHEMA + DATA_DIR（临时目录，无 prompts.json → 回落默认）。
+  const factory = new Function('specIndex', 'subsystemNames', 'renderPromptTpl', 'INTAKE_PLAN_SCHEMA', 'DATA_DIR', `${body}; return intakeChatSystem;`);
+  return factory(() => '', () => [], renderPromptTpl, INTAKE_PLAN_SCHEMA, os.tmpdir());   // stub 掉纯展示依赖；提示词走真实模板
 }
 // parseIntakePlan 依赖 normPriority + PLAN_BLOCK_RE + PRIORITY_SET（同 server.mjs）——一并注入真身。
 function makeParseIntakePlan() {
