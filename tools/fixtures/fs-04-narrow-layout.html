@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>FS-04 窄视口布局回归夹具</title>
+  <link rel="stylesheet" href="/public/assets/theme.css">
+</head>
+<body>
+  <main class="f-workspace" id="fWorkspace">
+    <section class="f-submit-pane" aria-label="提交清单"></section>
+    <div class="f-splitter" aria-hidden="true"></div>
+    <section class="f-ai-pane f-right" id="fAiPane">
+      <div class="f-rtool">咨询答疑</div>
+      <div class="f-chat-b" id="fChatB">
+        <div class="f-msg ai" data-layout-smoke>
+          <div class="av">AI</div>
+          <div class="bub">
+            <p class="md-p">结论：这是一段用于验证窄视口的超长答复。</p>
+            <p class="md-p">长地址 https://example.internal.example.com/api/very/long/path/that/does/not/contain/any/break/points?query=abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ</p>
+            <p class="md-p">行内代码 <code>patientIdAndVisitIdAndHospitalCodeAndVeryLongIdentifierWithoutBreakPoints0123456789</code> 应在气泡内换行。</p>
+            <div class="md-table-wrap" role="region" aria-label="Markdown 表格" tabindex="0">
+              <table class="md-table"><thead><tr><th>排查项</th><th>非常长的接口说明</th><th>处理建议</th></tr></thead><tbody><tr><td>接口</td><td>/proxyapi/very/long/path/with/many/segments/and/query?patientId=123456789</td><td>检查返回</td></tr></tbody></table>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="f-chat-f"><div class="f-chat-row"><input class="input" value="很长的输入内容仍应与按钮保持同一行"><button class="f-imgbtn">图</button><button class="send">发送</button></div></div>
+    </section>
+  </main>
+  <script>
+    fetch('/public/field.html').then(function (r) { return r.text(); }).then(function (src) {
+      var match = src.match(/<style>([\s\S]*?)<\/style>/);
+      if (!match) throw new Error('field style missing');
+      var style = document.createElement('style');
+      style.setAttribute('data-field-source', '');
+      style.textContent = match[1];
+      document.head.appendChild(style);
+      document.documentElement.setAttribute('data-ready', '1');
+    });
+  </script>
+</body>
+</html>

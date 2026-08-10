@@ -77,7 +77,7 @@
 
 // 共享 markdown 渲染：window.mdToHtml —— 提交页、经验库、详情页统一用（先转义再解析，安全）
 window.mdToHtml = function (src) {
-  const esc = s => String(s == null ? '' : s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const blocks = [];
   src = String(src == null ? '' : src).replace(/```[a-zA-Z0-9]*\n?([\s\S]*?)```/g, (m, c) => { blocks.push(c.replace(/\n$/, '')); return 'CODE' + (blocks.length - 1) + ''; });
   const inline = t => {
@@ -88,22 +88,78 @@ window.mdToHtml = function (src) {
     t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
     return t;
   };
+  const splitTableRow = row => {
+    let s = String(row == null ? '' : row).trim();
+    if (s.startsWith('|')) s = s.slice(1);
+    if (s.endsWith('|') && !s.endsWith('\\|')) s = s.slice(0, -1);
+    const cells = []; let cur = '';
+    for (let x = 0; x < s.length; x++) {
+      if (s[x] === '\\' && s[x + 1] === '|') { cur += '|'; x++; continue; }
+      if (s[x] === '|') { cells.push(cur.trim()); cur = ''; continue; }
+      cur += s[x];
+    }
+    cells.push(cur.trim());
+    return cells;
+  };
+  const tableAlign = cell => {
+    const s = String(cell || '').trim();
+    if (!/^:?-{3,}:?$/.test(s)) return null;
+    return s.startsWith(':') && s.endsWith(':') ? 'center' : (s.endsWith(':') ? 'right' : 'left');
+  };
+  const tableAt = (lines, idx) => {
+    if (idx + 1 >= lines.length || !lines[idx].includes('|')) return null;
+    const heads = splitTableRow(lines[idx]), divs = splitTableRow(lines[idx + 1]);
+    if (!heads.length || heads.length !== divs.length) return null;
+    const aligns = divs.map(tableAlign);
+    return aligns.every(a => a != null) ? { heads, aligns } : null;
+  };
   const cbRe = /^CODE(\d+)$/, ulRe = /^\s*[-*+•–]\s+/, olRe = /^\s*\d+[.、)]\s+/;
   const L = src.split('\n'); let h = '', i = 0;
-  const isBreak = s => /^\s*$/.test(s) || /^\s*#{1,4}\s/.test(s) || ulRe.test(s) || olRe.test(s) || /^\s*>\s?/.test(s) || cbRe.test(s) || /^\s*([-*_])\1\1+\s*$/.test(s);
+  const isBreak = (s, idx) => /^\s*$/.test(s) || /^\s*#{1,4}\s/.test(s) || ulRe.test(s) || olRe.test(s) || /^\s*>\s?/.test(s) || cbRe.test(s) || /^\s*(?:-{3,}|\*{3,})\s*$/.test(s) || !!tableAt(L, idx);
   while (i < L.length) {
     const ln = L[i]; const cb = ln.match(cbRe);
     if (cb) { h += '<pre><code>' + esc(blocks[+cb[1]]) + '</code></pre>'; i++; continue; }
     if (/^\s*$/.test(ln)) { i++; continue; }
-    if (/^\s*([-*_])\1\1+\s*$/.test(ln)) { h += '<hr>'; i++; continue; }
+    const tbl = tableAt(L, i);
+    if (tbl) {
+      const th = tbl.heads.map((cell, ci) => '<th class="md-align-' + tbl.aligns[ci] + '">' + inline(cell) + '</th>').join('');
+      const rows = []; i += 2;
+      while (i < L.length && L[i].trim() !== '' && L[i].includes('|')) {
+        let cells = splitTableRow(L[i]);
+        while (cells.length < tbl.heads.length) cells.push('');
+        cells = cells.slice(0, tbl.heads.length);
+        rows.push('<tr>' + cells.map((cell, ci) => '<td class="md-align-' + tbl.aligns[ci] + '">' + inline(cell) + '</td>').join('') + '</tr>');
+        i++;
+      }
+      h += '<div class="md-table-wrap" role="region" aria-label="Markdown 表格" tabindex="0"><table class="md-table"><thead><tr>' + th + '</tr></thead><tbody>' + rows.join('') + '</tbody></table></div>';
+      continue;
+    }
+    if (/^\s*(?:-{3,}|\*{3,})\s*$/.test(ln)) { h += '<hr class="md-divider">'; i++; continue; }
     const hm = ln.match(/^\s*(#{1,4})\s+(.*)$/); if (hm) { const lv = hm[1].length; h += '<h' + lv + '>' + inline(hm[2]) + '</h' + lv + '>'; i++; continue; }
     if (/^\s*>\s?/.test(ln)) { const b = []; while (i < L.length && /^\s*>\s?/.test(L[i])) { b.push(L[i].replace(/^\s*>\s?/, '')); i++; } h += '<blockquote>' + b.map(inline).join('<br>') + '</blockquote>'; continue; }
     if (ulRe.test(ln)) { h += '<ul>'; while (i < L.length && ulRe.test(L[i])) { h += '<li>' + inline(L[i].replace(ulRe, '')) + '</li>'; i++; } h += '</ul>'; continue; }
     if (olRe.test(ln)) { h += '<ol>'; while (i < L.length && olRe.test(L[i])) { h += '<li>' + inline(L[i].replace(olRe, '')) + '</li>'; i++; } h += '</ol>'; continue; }
-    const b = []; while (i < L.length && !isBreak(L[i])) { b.push(L[i]); i++; } h += '<p>' + b.map(inline).join('<br>') + '</p>';
+    const b = []; while (i < L.length && !isBreak(L[i], i)) { b.push(L[i]); i++; } h += '<p>' + b.map(inline).join('<br>') + '</p>';
   }
   return h;
 };
+
+// 管道表格的共享视觉：横向滚动而不是撑破窄屏；所有使用 ui.js 的页面自动获得。
+(function () {
+  if (window.__mdTableStyles) return;
+  window.__mdTableStyles = true;
+  var st = document.createElement('style'); st.setAttribute('data-md-table', '');
+  st.textContent = '.md-body{min-width:0;max-width:100%;box-sizing:border-box;overflow-wrap:anywhere;word-break:break-word}'
+    + '.md-body pre{max-width:100%;box-sizing:border-box;overflow-x:auto;white-space:pre}'
+    + '.md-body :not(pre)>code{white-space:normal;overflow-wrap:anywhere;word-break:break-word}'
+    + '.md-table-wrap{width:100%;min-width:0;max-width:100%;box-sizing:border-box;overflow-x:auto;-webkit-overflow-scrolling:touch;margin:8px 0;border:1px solid #D9E0E8;border-radius:8px;background:#fff}'
+    + '.md-table{width:max-content;min-width:100%;border-collapse:collapse;line-height:1.5}'
+    + '.md-table th,.md-table td{min-width:8em;padding:8px 10px;border-right:1px solid #D9E0E8;border-bottom:1px solid #D9E0E8;text-align:left;vertical-align:top;white-space:normal}'
+    + '.md-table th{background:#F5F7FA;color:#1B2430;font-weight:700}.md-table tr:last-child td{border-bottom:0}'
+    + '.md-table th:last-child,.md-table td:last-child{border-right:0}.md-table .md-align-center{text-align:center}.md-table .md-align-right{text-align:right}'
+    + '.md-divider{border:0;border-top:1px solid #D9E0E8;margin:10px 0}';
+  document.head.appendChild(st);
+})();
 
 /* 自定义下拉：接管带 .fancy 的原生 <select>，弹层用浅色 div 画（挂 body + fixed 定位，避免容器 overflow 裁剪）。
    保留原 select 的 value / change 语义，代码里 sel.value=.. 与 innerHTML 换选项都会自动同步显示。

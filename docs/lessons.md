@@ -14,6 +14,14 @@
 
 ## ✅ 本项目自检清单（每次交付前逐条过）
 - [ ]（在此追加本项目专属检查点，如：改了主题色记得同步深色态 / 本项目列表空数据有占位）
+- [ ] **【实施端对话窄屏/调试工具停靠回归】**：`field.html` 工作区与右侧 AI 面板必须逐层 `min-width:0`，右栏还需受控宽度和 `overflow:hidden`；消息/气泡/输入行同样不能依赖 flex 默认最小内容宽度。普通文字、URL、行内代码允许换行，`pre` 与 `.md-table-wrap` 只在自身横滚。改对话 CSS 后用 `tools/fixtures/fs-04-narrow-layout.html` 在 980px、760px 检查 `documentElement.scrollWidth <= clientWidth`，同时分别核对气泡、inline code、宽表和输入按钮没有越过右栏。
+- [ ] **【2026-08-10 AI 回复新增/修改 Markdown 块级能力时，必须同步核对三处渲染器】**：本项目不是单一 Markdown 入口——实施工作台用 `public/field.html` 内联 `md()`，后台/详情等页面用 `public/assets/ui.js` 的共享 `window.mdToHtml()`，免登录提交页用 `public/submit.html` 内联 `mdToHtml()`。GFM 管道表格等能力必须三处一起支持；测试要直接抽取并执行三处真实函数，至少覆盖标准表格、无首尾管道、单元格行内 Markdown、XSS 和普通段落。表格必须有 `max-width:100%` 横向滚动包装、清晰表头/单元格，并给 `role="region"` + `aria-label` 可访问名称；不得只做源码字符串存在性断言。
+- [ ] **【咨询“已参考经验”以模型首片段为证，不以检索命中为证】**：`/api/consult` 的 hits 会进入普通/深入两类 `consultSystem.kbBlock`，但检索完成不等于模型已使用。`kb` SSE 必须在 `callModelStream` 首个有效片段回调内发，并带 `kbInjected:true`；未配模型、首片段前失败、检索失败/无命中均不发且 `done.kbHits=0`。引用随对应 assistant 的 `kbRefs` 存 chat/草稿/系统快照，历史恢复逐条重放；续聊 payload 只传 role/content，不能信客户端引用声明。旧 L-013 的“流式前先发、未配模型也发”已被本条取代。
+- [ ] **【field.html 刷新恢复顺序】**：必须先拉实时引用数据，再校验 mode/医院/子项目/系统，加载对应视图后最后恢复对话；不能在 `restoreDraft` 前调 `onHospitalChange`/`syncConversationToSystem`/`newConversation`。版本要等真实版本列表返回后二次校验。「新对话」保导航，「退出」才清整份 session 草稿。
+- [ ] **【field.html 系统视图刷新恢复】**：`/api/field/systems` 返回的实时列表就是可选系统事实源，草稿 `curSys` 只按稳定 `name` 命中并规范化保存；不得再用 `me.projects` 对返回项的 `project` 二次过滤。线上必测「选中中文系统名→打开会话→F5」后标签、稳定值和消息数/全文都一致；列表不存在值才回退「全部系统」。
+- [ ] **【field.html 历史多单刷新恢复】**：不能只保存/恢复 `savedId` 首单；`builtTickets` 要带全部卡片展示字段并按 id 保序去重，每张卡还要保存 `afterMessageIndex`，否则刷新后即使 3 张卡都在，也会从原消息之间跑到对话末尾。线上验收必须 fresh reopen 后分别比较 F5 前后的 `.f-msg` 与 `.f-arch` 数量、全文和顺序；咨询路径还要确认 0 卡，避免串入上一段提单会话。
+- [ ] **【全览卡片网格】**：卡片数可少于列数时用 `auto-fit`（不是 `auto-fill`）折叠空轨道，否则两张卡只占左半边。同时核对 1280px/小屏列数、卡片 `min-width:0`、长版本列表限高滚动、原生按钮键盘焦点与「需要处理」明文（不只靠颜色）。
+- [ ] **【field.html 渐进挂 React 全览】**：旧页继续掌握登录/mode/权限/恢复，只把接口数据交给 `window.IntakeFieldOverview.mount`；必须保留 `renderOverviewNative`，覆盖 bundle 缺失、mount 抛错、ErrorBoundary 三路回退，并在离开全览/退出时卸载。卡内有可聚焦滚动区时，卡片本身不得再充当 button，导航用独立 44px Button。生产构建关闭 sourcemap并守产物上限。
 - [ ] **【2026-08-10 把 server.mjs 里的「AI 提示词 / 具名函数」外部化或改结构时，同步改掉那些「抽真身 eval」或「静态 SRC 字符串匹配」的老测试】**：本项目多个 FS-04 测试用 `extractFn(SRC,'intakeChatSystem')` 把函数体从 `server.mjs` 抠出来 `new Function(...)` 评测、或直接 `SRC.slice(...).match(/提示词文案/)` 断言。**一旦把提示词模板挪进 `prompts.mjs`（PD-02）或给函数加了新的模块级依赖（`renderPromptTpl`/`DATA_DIR`/`INTAKE_PLAN_SCHEMA`）**，这两类老测试会**突然红**——不是行为坏了，是①抽出的函数体引用了没注入的新依赖（`ReferenceError`）、②文案不在 `server.mjs` 源码里了（匹配不到）。修法：①「抽真身」测试的 `new Function(param..., body)` 参数表 + 调用实参**补上新依赖**（如 `new Function('specIndex','subsystemNames','renderPromptTpl','INTAKE_PLAN_SCHEMA','DATA_DIR', body)`，传真实 `renderPrompt`/`INTAKE_PLAN_SCHEMA`/`os.tmpdir()`——仍是真实提示词内容验证，能抓漂移）；②静态文案断言的 `SRC.slice(...)` 改成读**新家** `prompts.mjs` 的 `DEFAULT_PROMPTS.<key>`（`PROMPTS.slice(PROMPTS.indexOf('<key>:'), ...)`）。改结构前先 `grep -l "extractFn\|SRC.slice.*函数名\|SRC.*/提示词文案/" tools/*.test.mjs` 列出所有静态依赖该函数源码位置的测试，逐个跟改。（来源：PD-02 提示词外部化到 prompts.mjs，fs-04-intake-chat-sequential A1-A4 + fs-04-set-priority B7 因此变红。）
 - [ ] **【2026-08-10 提示词/模板外部化：默认值=现原文·逐字不变 是硬要求，且条件分支处理要选对策略】**：把内联 `` `你是「...${x}...` `` 模板抽成「`DEFAULT_PROMPTS[key]`（含 `{{占位}}`）+ server 计算占位 + `renderPrompt` 填充」时，**必须**有回归测试断言 `renderPrompt(默认, vars) === 原函数(...)` **逐字**（多组输入组合，别只测一组）——中文标点/`\n`/条件块拼接极易差一个字符。坑点：①原模板里 `${cond ? \`\n...\` : ''}` 的**换行在条件内还是模板里**要分清（archivedBlock 的 `\n` 在条件内、intakePlanSchema 的 `\n` 在模板里）；②有大模式分支的提示词（consult 的「深入思考」）**拆成两个干净整段模板**（consultDeep/consultNormal），别硬塞一个模板里放 `${deep?...:...}`（用户没法整段编辑）；③零散条件片段（subBlock/std/actionBlock）作 **server 计算后注入的 `{{占位}}`**；④和确定性解析死耦合的结构块（intake-plan JSON）作**不可编辑的注入占位** `{{intakePlanSchema}}`=模块常量，防用户改坏解析。抽提取原文用 `git show HEAD:server.mjs` + `node -e` 打印 `JSON.stringify(片段)` 看真实字节（换行/引号一目了然），别肉眼比。（来源：PD-02，5 个提示词外部化，逐字回归 100+ 组合断言通过。）
 - [ ] **【2026-08-10 判「本院是否已应用某批/某更新」用工单生命周期，别用「现场版本字符串 == 包版本」相等】**：本项目「某医院是否更新到某批次」的判据要用**该批覆盖本院的工单是否全部已关闭/已交付**（lifecycle∈{已关闭,已交付}），这也是 `bumpSiteVersionForBatch` 决定「该院覆盖单全关闭→回写版本」的信号。⚠️ **别用 `custSubVersion(cust,...) === bt.pkgVersion` 版本字符串相等判「已应用」**——现场版本常**比包版本还高/带尾号**（实测安吉 pkb 现场 `2.8.260801-2` vs 批次 `pkgVersion=2.8.260801-1`），字符串不等就误判成「未应用」，全览误显「下次更新/待更新」但其实早更完。FS-09 已抽 `appliedToSite(mineTickets,site)`=`覆盖本院工单.length>0 && 每条 lifecycle∈{已关闭,已交付}`；端点侧 `_mineTickets` 每条附派生 lifecycle（`e.lifecycle||deriveLifecycle(e)`，`batchTicketsForUser` 返回的原始工单 `e.lifecycle` 可能为空，同 `/api/field/batches` 口径）。测试 fixture 的 `_mineTickets` 带 `lifecycle`、造「全关闭→不提醒 / 有待验证→提醒」两态。（来源：FS-09 prod 冒烟，安吉现场版本高于包版本 + 覆盖单全关闭被误判未应用。）
@@ -72,8 +80,8 @@
 - [ ] **`account-save` 编辑分支「payload 未带某字段 → 保留原值」的保护要覆盖新字段**：`enabled`/`projects`/`sites` 早就有这保护（防停用/启用等**不带全量字段**的提交把它清空）。加 `phone` 时同理——`doToggle`（停用/启用）只回传 `{username,role,name,projects,sites,enabled}` **不带 phone**，若编辑分支无脑 `rec.phone = String(b.phone||'')` 会把手机号清成空串。解法：`const hasPhone = b.phone != null;` 编辑时 `phone: hasPhone ? phone : (accs[idx].phone||'')`。**新建分支照常用 phone**（无原值）。回归必测「停用/启用后 phone 仍在」。
 - [ ] **访客/现场提交端点的「产品归属」要一律 `projById(link ? link.project : b.project)`（强制 link.project），别信前端 `b.project`**：`intake-submit`(L909)、`intake-chat`(L942) 本就这么写；但 `consult`(L971) 历史上写成 `projById(b.project)`——**未对访客强制 link.project**，访客可传任意产品 id 把咨询串到别的产品，是相对「数据归属不可越权（硬约束）」的真实缺口（FS-06 修）。凡新增/改「访客可调（在 `LINK_OK`）」的落库端点，`proj` 取值必须走 `link ? link.project : b.project` 这一式（登录态 `link` 为 null、自然退回 `b.project`，不影响登录用户）。核对法：grep 每个 `LINK_OK` 端点的 `projById(...)` 实参，凡直接 `b.project` 的都要审是否漏了 link 强制。冒烟：访客带 token 但 body 传 `project=另一产品` 提交，`SELECT project_id FROM intakes WHERE id=?` 必须=link.project、另一产品下 0 行（见 `tools/fs-06.test.mjs` B-C2/C3/C4）。
 - [ ] **`/api/submit-link` 产品不存在返 HTTP 400（非 200）**：真实 server.mjs L678 `send(res,400,{ok:false,error:'项目不存在'})`；写测试/前端别按 200 判（FS-06 spec 早稿误写 200，已校正）。`ok:true` 成功才 200。
-- [ ] **给 consult SSE 加新事件/字段要"先发、独立事件、向后兼容"（2026-07-23 FS-06 答复内展示引用经验库）**：consult 现有契约 = 逐字 `{v:piece}`×N → `{done:true,convId,kbHits,stopped}`。加「参考经验库」引用回传时，① **在流式答复开始前**先发一个 `{kb:[{q,a,subsystem,module}]}` 独立事件（仅 `hits.length` 时发），别塞进 `done`（前端要先占位渲染引用区、答复再逐字流入）；② `hits`（`kbSearch` 结果）在模型调用**前**已算好，故**未配模型 API（降级回复）时 kb 事件照发**——测试不必配真 key 即可断言 kb 回传；③ 字段精简（`q/a` 已在 `kbSearch`/`loadKB` 内截断，别回传整条 entry）；④ **`done` 里旧 `kbHits` 计数保留别删**（老前端/旧断言依赖），新字段 `kb` 是**加法**——前端 SSE 解析器（`parseSSEChunk`→回调里逐字段 `if(o.kb)`/`if(o.v)`/`if(o.done)`）对未知字段天然忽略，老前端收到 `kb` 不报错（向后兼容）。冒烟：塞一条 KB（`kb-save`）→ consult 带命中 query → 断言 SSE 流出现 `kb` 事件且含塞入那条（`tools/fs-06.test.mjs` B-KB2）；无命中 query → 断言不发非空 kb（B-KB3）。
-- [ ] **field.html 渲染 consult 引用区「📚 参考经验库(N)」：kb 事件在流式前先到 → 在答复气泡所在 `.f-msg` 之后 `insertBefore` 插一个 `.f-kb-cite`（默认折叠、点开看每条问→答）**，答复继续逐字流入上方气泡不受影响。幂等守卫 `bub._kbCite`（重入/退化整体读取路径都可能触发 `renderKbCite`，只渲一次）；折叠状态用 DOM `class toggle('open')`（**别用 localStorage**——撞 FS-01 A5 静态断言，见 L-009）。**KB 答案含 markdown → 用页内受控 `md()` 渲染**（不是 `escapeHtml`；`md()` 内已先转义再套块级/行内，XSS 安全），且 `.md-*` 块级样式**必须把新容器 `.f-kb-cite-item .a` 加进已有 `.f-msg .bub`/`.f-kb-answer` 那组后代选择器**（同 L-011/L-010：换父容器不生效），否则引用区里的 `###`/`-`/`1.` 有结构无样式。新类 `.f-kb-cite`/`.f-kb-cite-hd`/`.f-kb-cite-item` 复用 theme.css token（浅底小卡）。
+- [ ] **[已被 2026-08-10“模型首片段为证”规则取代·留档] consult SSE 引用曾在模型调用前发送**：旧方案会在仅检索命中、未配模型或首片段前失败时也显示引用，现禁止沿用；当前规则见本清单上方“咨询‘已参考经验’以模型首片段为证”。
+- [ ] **field.html 渲染 consult 引用区「已参考经验(N条)」**：只接受 `kbInjected===true`，在答复 `.f-msg` 后插 `.f-kb-cite`；幂等守卫 `bub._kbCite`，折叠状态只存 DOM。KB 答案继续用先转义的受控 `md()`，并保留 `.f-kb-cite-item .a` 的块级样式作用域。
 - [ ] **写「连真库 smoke」若会动 `data/link-secret`（如 FS-06 AC-F2 换密钥整体吊销 token）：before 备份该文件、after/finally 无条件还原**，否则弄坏用户线上密钥令所有已发免登录链接失效。`linkSecret()` 每次读文件无进程缓存 → 改文件对运行中的服务立即生效（不用重启，方便测 F2）。token 可在测内用 `crypto.createHmac('sha256',secret)` + 同款 `b64u` 自算，从而伪造「过期 exp」「篡改 sig」token 验拒绝分支（见 `tools/fs-06.test.mjs` 顶部 `sign()`）。
 - [ ] **新增「自带登录门遮罩」的独立 SPA 外壳页（如 `field.html`）必须加进 `authGate` 顶部公开放行名单（与 `/login.html` 同级），否则未登录访问被 302 弹去 `/login.html`、页面自己的登录遮罩永远看不到**：`server.mjs authGate` 对**非 API 的 HTML 路径**：`!user`→`'login'`→302 `/login.html`（L634）；非管理员只放行 `FIELD_OK`（`/`,`/submit.html`,`/detail.html`）→ 别的 HTML 页 `forbidden`→302 `/submit.html`。故凭「页面内 JS 读 `/api/me` 决定显不显登录遮罩」的自建门禁页，其**外壳 HTML 本身**要在 `authGate` 第 2 行 `['/login.html','/field.html',...]` 放行加载（页面无数据、数据一律走仍受 gate 的 API，安全不破）。判断法：新页若不套 `shell.js`、自带 `.f-login`/遮罩式登录门 → 必加白名单；套 `shell.js` 的后台页走 admin 分发不需要。冒烟：未登录 `curl /你的页.html` 应 200 且含登录门 DOM（见 `tools/fs-01.test.mjs` B6）。
 - [ ] **`scopedForField(user, items)` 现覆盖「非管理员」而非死值 `field`（FS-01 AC-20 已修）**：角色归一后现场账号 role=`impl`（`pm` 设了 sites 同受约束），旧代码 `user.role!=='field'` 永不命中 = 隔离失效死码。现逻辑：`if(!user||isAdmin(user)) return items;`（管理员不限），非管理员按 `user.sites`（+ `user.projects` 若条目带 project 字段）过滤。`intake-list`/`notifications` 已改用它做单一事实源；`intake-detail` 仍是端点内联 403 判定（返回 403 而非过滤列表，别硬塞进 scopedForField）。注意：`listIntake` 出参**不带 project 字段**，故 scopedForField 的项目约束对无 project 的条目自动跳过（项目边界由端点 L1084 前置 gate 兜），改动别破坏这个「project 缺失即豁免」语义否则 pm/impl 设了 projects 时列表会被清空。
@@ -150,6 +158,38 @@
 ## 📚 教训明细
 > 还没有教训时本节为空。格式：现象 / 范围·模块 / 根因 / 解法 / 防复发 / 关联。
 
+### L-024 field.html 的 flex 右栏会被长 Markdown 最小内容宽度撑破，不能只给表格加 overflow
+- 现象（2026-08-10）：正常宽屏不明显；右侧停靠浏览器调试工具后，AI 长答复、超长 URL 或无断点行内代码把气泡/右栏撑宽，页面右侧被裁切。宽表虽已有 `overflow-x:auto`，仍不足以阻止祖先 flex 子项扩张。
+- 根因：`f-workspace → f-right → f-chat-b → f-msg → bub` 这条 flex/内容链上缺少 `min-width:0` 和受控最大宽度。flex 子项默认 `min-width:auto`，会采用后代的最小内容宽度；给最内层表格加滚动并不能替代祖先逐层允许收缩。底部 input 的长占位/内容也会以同样方式挤出发送按钮。
+- 解法：工作区与右栏逐层补可收缩边界，右栏用 `flex:1 1 0;width:0;min-width:0;overflow:hidden`；消息区只纵向滚动；气泡和输入行限制 `max-width:100%`/`box-sizing:border-box`。正文/URL/inline code 用 `overflow-wrap:anywhere`，`pre`/宽表用自身 `overflow-x:auto` 且包装层 `width:100%;min-width:0`。同一约束同步到本项目三份 Markdown 消费面（field/ui.js/submit）。
+- 防复发：静态契约测试锁各级约束，浏览器夹具直接读取 `field.html` 的真实 `<style>`；980px/760px 都断言页面无整体横向滚动、气泡/inline code/输入按钮在右栏内、宽表只有内部横滚。
+- 关联：FS-04 AC-41；`docs/changes/CHG-FS04-窄视口长答复防溢出.md`；`tools/fs-04-narrow-layout.test.mjs`；`tools/fixtures/fs-04-narrow-layout.html`。
+
+### L-020 AI Markdown 有三份渲染事实源：GFM 管道表格须三处同步 + 真执行测试 + 滚动/XSS/a11y 一起守
+- 现象（2026-08-10）：AI 能输出标准 Markdown 管道表格，但实施端把 `| 表头 |`、`| --- |` 当普通段落原样显示。只补某一个渲染器会造成「一个页面正常、另一个页面仍裸管道」的隐性分裂。
+- 范围：`public/field.html` 内联 `md()`（实施工作台）、`public/assets/ui.js` 的 `window.mdToHtml()`（后台/详情共享）、`public/submit.html` 内联 `mdToHtml()`（免登录提交页）。三者是本项目现存的三份 Markdown 渲染事实源，不能只改共享函数就假设所有页面自动生效。
+- 解法：三处统一识别 GFM 管道表格（首尾管道可选；分隔单元支持 `:---`、`---:`、`:---:`；单元格继续走受控行内 Markdown），输入先转义 `&<>"'` 再生成允许的 HTML，避免表格分支绕开既有 XSS 护栏。输出统一为 `.md-table-wrap > table.md-table`，包装层 `max-width:100%; overflow-x:auto`，窄屏横向滚动不撑破气泡；表头/单元格有清晰边框与底色。滚动区域可聚焦，并带 `role="region" aria-label="Markdown 表格"`，不能只有 `tabindex` 没有可访问名称。
+- 测试：`tools/markdown-table.logic.test.mjs` 不是查字符串，而是从三份真实源码中抽出函数并 `new Function` 执行；逐一断言 `table/thead/tbody/滚动包装/aria-label`、有/无首尾管道、对齐、`**粗体**`/`` `代码` ``、普通段落，以及 `<img onerror>`/`<script>` 被转义、分隔行不再原样出现。改任一 Markdown 渲染器后都跑该测试；改共享 `ui.js` 还要回归其整文件沙箱测试，避免新增 DOM API 让测试假 DOM 在加载阶段崩溃。
+- 关联：FS-04 AC-39；`docs/changes/CHG-FS04-AI答复可读性与Markdown表格.md`；`tools/markdown-table.logic.test.mjs`。
+
+### L-021 field.html 刷新恢复不能先走默认医院切换流
+- 现象：`saveDraft/restoreDraft` 虽保了对话，刷新后仍回到第一家医院、全部子项目；系统视图/所选版本和左侧选中态丢失。
+- 根因：`enterWorkspace` 先设第一家医院，`loadRefData` 后又先调 `onHospitalChange()`；它会清 `curSub`并调 `syncConversationToSystem/newConversation`，于是草稿恢复前已用默认界面覆盖上下文。
+- 解法：草稿同时保存 `nav` 与 `leftActive`，初始化改成「拉引用数据 → `normalizeNavigationDraft` 用 `me.sites/me.projects` 与实时台账校验 → 加载已恢复视图 → 恢复对话」。版本须等 `/api/versions` 返回后再用 `pickRestoredVersion` 二次校验。`newConversation` 写回空对话但保留 nav；退出专用 helper 最后 `clearDraft` 清全部。
+- 测试：`tools/fs-04-refresh-restore.logic.test.mjs` 直接抽出执行真实校验/恢复/清理函数，而非只查连线字符串。
+- 补充（2026-08-10）：多单会话的草稿虽然已有 `builtTickets`，旧恢复逻辑却只读 `savedId`，导致 3 卡变 1 卡；改为保序去重恢复全部卡后，又发现卡片统一落在消息末尾。最终由 fresh reopen 根据 `mergeConvTimeline` 给每张卡记录 `afterMessageIndex`，`renderSavedConversation` 按锚点穿插重放；咨询 reopen 必须清空 `builtTickets` 与提单锁定字段。只比“卡片数量相同”不够，必须比较整个 `.f-msg` 节点正文与顺序。
+
+### L-022 全览用 auto-fill 会保留空轨道，卡少时看起来像只做了左半页
+- 现象：大屏只有 1–2 张医院/产品卡时，`repeat(auto-fill,minmax(...))` 仍保留后续空列，实际卡只占左半边，右侧是大片留白。
+- 解法：可变数量卡片用 `auto-fit` 折叠空轨道并让现有卡铺满；配合宽度上限、`minmax(min(100%,360px),1fr)`、1280px 三列和小屏一列。卡内长版本分布用有明确产品/系统/医院关联的限高列表，而不是不断换行的小胶囊。待办同时给图标+文字+数字，医院卡用原生 button + `focus-visible`。
+- 测试：直接执行 KPI/医院卡/产品卡 HTML 生成器，并断言宽屏/1280/小屏 CSS 结构；不只断言「某个 class 存在」。
+
+### L-023 field.html 渐进挂 React/AntD：数据与生命周期仍由旧壳掌控，三路回退；滚动区不能嵌在整卡 button 内
+- 现象：把全览迁成 React 后，若 React 自己再拉接口/接管 mode，会与旧 `field.html` 的登录、权限和 sessionStorage 恢复形成两个状态源；若只假设 bundle 正常，产物漏发或渲染异常就白屏。首版还把医院 `Card role=button`，里面又放 `tabIndex=0` 的版本滚动区，用户在滚动区点击或按空格会冒泡进入医院，形成嵌套交互。
+- 解法：`field.html` 拉 `/api/field/overview` 后把同一份数据传给冻结的 `window.IntakeFieldOverview.mount(container, options)`；React 只渲染，医院选择经回调交回旧壳。保留 `renderOverviewNative`，bundle 缺失、mount 抛错、ErrorBoundary `onError` 均回退；离开 overview/退出先 `unmount`。医院 Card 是普通容器，唯一导航入口为有 `aria-label`、44px 和 focus-visible 的 AntD Button，滚动 region 独立。IIFE 固定文件名让 Node 静态服务直接发布，`sourcemap:false`，测试守 JS <1.5MB。
+- 防复发：见自检清单「field.html 渐进挂 React 全览」。接线测试要真实执行旧壳分流函数，不只搜 bundle 字符串；组件 SSR 测试同时断言卡不含 `role=button`、存在显式医院按钮。
+- 关联：FS-09 AC-11/12、FS-01 AC-21、UI-01 AC-26；`frontend/field-overview`、`public/field.html`、`tools/fs-09-react-overview.integration.test.mjs`。
+
 ### L-019 FS-05 实施侧批次消费：按批次视图替换降级占位 + 下载幂等 + 改版本回写新旧形状 + 逐单验证闭环联动
 - 现象/背景（2026-07-24）：FS-05 要在实施端把「按批次视图」从 FS-02 的降级占位（`renderBatchDegraded`「批次分组暂未开放」）升级成真实的下载/改版本/逐单验证闭环。涉及 4 新端点 + field.html 大改，几个非显然坑：① field.html 文案「发包」撞 FS-01 A6 禁词；② 下载触发 `已出包→待验证` 若走 intake-transition 会被现场角色流转限制拒；③ 改版本回写要兼容 customers 新旧两形状 + 幂等 + 留痕；④ 闭环联动要读工单 `e.batch` 反查批次。
 - 范围·模块：intake · `server.mjs`（field/batches·batch-download·customer-version·intake-verify + custSubVersion + FIELD_OK）· `public/field.html`（loadBatchView/mkPkgCard/renderBumpRows/mkBatchItem/doVerify/showToast，删 renderBatchDegraded）· `tools/fs-05.test.mjs` · `tools/fs-02.test.mjs`（A8 重写/B4 加注）。
@@ -209,7 +249,9 @@
 - 防复发：见自检清单两条新增（「读 ui.js 增强 select 值用 `select.类名` 不裸类」/「collectProducts 放 try 内」）。cu-01 三守卫：`[静态·防回归]`（`select.cprod`/`select.cver` + `doesNotMatch` 裸类）、`[静态·防静默失败]`（collectProducts 在 try 内 + catch 有 toast）、`[逻辑桩·防回归]`（DOM 桩还原增强后结构、回退成裸类即变红=真测试）。凡新写/改「读被 `.ui-sel-*` 增强的 select 的 value」，一律带 tag。
 - 关联：L-011（ui.js `.ui-sel-*` 增强机制：wrapper + setter + position:fixed）、L-013 上方自检项组、CHG-CU-01-编辑医院保存失败-wrapper命中回归.md、CHG-CU-01-版本改选择型下拉.md（本回归的引入次·`.cver` 从 input 改 select）。
 
-### L-013 consult「答复内展示引用经验库」：SSE 加 kb 事件（流式前先发·向后兼容）+ 无命中不谎称 KB + KB 答案用 md() 渲染
+### L-013 [历史方案·已被 2026-08-10 首片段门控取代] consult「答复内展示引用经验库」
+
+> 下述“流式前先发/未配模型也发”仅为事故沿革，**不得再照做**；当前事实源是本文件自检清单“咨询‘已参考经验’以模型首片段为证”。
 - 现象（2026-07-23 用户反馈）：AI 咨询答复说"根据历史经验库"，但用户在经验库抽屉（FS-07 独立空搜索态）里看不到它引用的是哪条 → 断层。排查实锤：`/api/consult` 里 `kbSearch(proj.id,qtext,5)` 取的命中 `hits` **只喂给模型（注入 `consultSystem` 提示）、从不回传前端**；`done` 事件仅带 `kbHits`(计数)、无内容。且无命中时 `consultSystem` 仍写「已有经验库…供你参考」，会诱导模型谎称有出处。
 - 范围·模块：intake · `server.mjs`（`/api/consult` + `consultSystem`）+ `public/field.html`（`sendConsult`/`renderKbCite`/`md()`/`.f-kb-cite`）· FS-06 AC-C5/C6 · `tools/fs-06.test.mjs`。
 - 根因：consult 设计只把 KB 当"模型内部依据"，没有"把引用条目透出给用户"这条链路；无命中分支的系统提示措辞会让模型编造 KB 出处。
@@ -233,6 +275,12 @@
 - 防复发：见自检清单三条新增项。回归 `tools/ui-select.test.mjs`（A 组源码静态 + B 组手搓 fake DOM 实跑「点选→value 变+change 冒泡」load-bearing 路径 + C 组护栏 field.html 0 处 ui.js / submit.html `.fancy` 保留）。删/改 `ui.js` 下拉相关代码前，先 `grep -rn 'class="[^"]*fancy' public/*.html` 确认 `.fancy` 仍有人用（submit.html）。
 - 关联：UI-01 spec §E'（AC-20~25，2026-07-23 draft 待评审）；`tools/ui-select.test.mjs`；`public/assets/ui.js`（`enhanceUiSelect`/`.ui-sel-*`）；L-010（field.html `.f-proddd` 下拉 · position:fixed 逃 overflow 同招）。
 - ⚠️ 通用性提示：本条「② MutationObserver 增强动态新增元素」「④ position:fixed 弹层逃祖先 overflow 裁剪」「③ 隐藏原生控件后需回写 value + 派发 change 以保原有监听」是**跨项目通用**的坑，本环境 `$STEWARD_LESSONS` 未配置故暂记此；配好后应把这三点挪到全局经验库。
+
+### L-022 field.html 系统视图恢复不能对已收敛接口结果再按 me.projects 二次过滤
+- 现象：系统视图选中「药师工作站」后 F5，草稿明明保存了 `curSys='pwrs'`，顶部却回到「全部系统」。
+- 根因：`/api/field/systems` 依 FS-03 已定义为平台全部产品子系统全集，前端恢复又用 `me.projects` 对 `s.project` 二次过滤；两者范围/形状不同时，合法值被误清为 `null`。
+- 解法：对已登录且实时返回的系统列表，只按稳定 `name` 命中；只有名称不在当次列表才回退。不要对已定义范围的接口响应自行叠加另一套权限口径。
+- 验证：逻辑测试同时覆盖「返回项 project 与 me.projects 形状不同仍恢复」和「实时列表不存在则回退」；真浏览器核对中文标签、`data-sys` 稳定值与右侧会话 F5 前后一致。
 
 ### L-010 field.html 系统视图改「下拉」：复用 .f-proddd 样式要连父容器一起写选择器；value=name/display=desc 双键语义别丢
 - 现象：把系统视图的「平铺系统 tab」（`.f-htab.sys`）改成「下拉选择器」（`.f-sysdd`，按产品分组·可搜·显中文，2026-07-23 用户裁决）时，两个坑：① 面板列表想复用现成的 `.f-proddd .opt`/`.grp` 样式，但直接把这些 class 用到新容器 `.f-sysdd-list` 里**完全没样式**（无 hover、无 `.on` 高亮、无 `.sub` 缩进）；② 系统的「显示名（中文 desc）」与「值（英文 name，匹配 `intakes.subsystem`）」是两套，稍不注意就会把 desc 当值传给 `onSystemTab`/`&system=`，导致聚合查不到记录。

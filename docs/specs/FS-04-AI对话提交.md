@@ -31,6 +31,7 @@ depends_on: [FS-01]
   - **系统视图**：`📦 <产品> · <子系统> · <版本▾>`（版本 = **运营维护 tag 版本下拉**，最新在前，选定后"提问/归档基于该版本"；数据源见 FS-03，本条只消费 chip 上下文去归档）。
 - **提交类型切换（`f-toggle`）**：`咨询答疑`（默认 `.on`，居左）｜`提需求 / 报BUG`（居右）二选一；切换影响走的端点（咨询 → consult；提需求/报BUG → intake-chat/intake-submit + intake-analyze）。2026-07-23 用户裁决：默认选中「咨询答疑」，且「咨询答疑」与「提需求/报BUG」左右对调（咨询在左默认激活）。
 - **对话流（`f-chat-b` / `f-msg`）**：AI/我 两方气泡消息流；输入框 `f-chat-f` **回车发送**（+ 发送按钮）。
+- **答复可读性**：AI 默认面向实施/产品，正文按「先说结论 → 现场可执行步骤 → 仍未解决时需补充的信息」组织；技术依据默认后置。AI 回复中的标准 Markdown 管道表格渲染为可横向滚动的真实表格，不显示原始 `|` 分隔文本。
 - **对话四步（核心）**：① 现场自然语言输入 → ② AI 判类型（需求 / BUG / 咨询）+ 必要时**追问补齐** 现象 / 复现 / 影响 → ③ AI 给**归档建议**（产品 · 子系统 · 版本 · 客户医院）请现场确认 → ④ **确认建单**：需求 / BUG → `intake-submit`/`intake-chat`（`status='待处理'`，进运营端工单流）；咨询 → `consult`（AI 直接答复，不进批次，有价值可 `kb-from-consult` 沉淀经验库）。
 - **新对话（`newc`）**：清空当前会话、开新单（不影响已提交的工单）。
 - **AI 兜底（PRD §8）**：分类/归档建议 AI 不可用或超时 → 降级为"人工选择 产品 · 子系统 · 类型"，**不阻断提交**（走 `intake-submit` 人工带参路径）。
@@ -74,7 +75,7 @@ depends_on: [FS-01]
 - **AC-16** Given 建单成功（intake-submit）When 返回 Then 响应含 `{ok:true, id, reply}`（AI 首轮沟通话术），前端把 `reply` 作为 AI 首条气泡展示，工单进入 `待处理`（或 AI 配置就绪时 `沟通中`）。
 
 ### E. 咨询答疑（consult · SSE · 不进批次 · 可沉淀经验库）
-- **AC-17** Given 切到「咨询答疑」模式 When 现场发问并回车 Then 以 `messages[]` 调 `POST /api/consult`（SSE 流式，带 `project`/`version`/`site`/`subsystem`），AI 答复**逐字流式**追加到 AI 气泡（`data: {v:片段}`），结束事件 `{done:true, convId, kbHits}`。
+- **AC-17** Given 切到「咨询答疑」模式 When 现场发问并回车 Then 以仅含 `role/content` 的 `messages[]` 调 `POST /api/consult`（SSE 流式，带 `project`/`version`/`site`/`subsystem`/`deep`），AI 答复**逐字流式**追加到 AI 气泡（`data: {v:片段}`），结束事件 `{done:true, convId, kbHits}`；经验引用的真实性与恢复契约见 FS-06 AC-C5/C6/C7。
 - **AC-18** Given 咨询会话产生答复 When `consult` 落库 Then 生成 `type='consult'` 记录（`lifecycle='已答复'`），**不进运营端工单收件箱**（`listIntake` 默认 `withConsult=false` 过滤掉）、**不进批次**；`convId` 返回供同会话续问（同 `convId` 续存，不新建）。
 - **AC-19-KB** Given 咨询"解决了"（现场点「已解决/沉淀经验库」）When 触发 Then 调 `POST /api/kb-from-consult`（带 `project`/`convId`；兼容旧入参 `q`/`a`）沉淀为经验库条目（`from='consult'`），成功反馈；不解决则不沉淀。
   - **整段对话 AI 整理（非只抓最后一轮）**：带 `convId` 时后端取该 consult 记录**整段 `chat`**，用 AI 整理成一条条目——`q`=用户**核心问题**（抓真正要解决的那个，**不是最后一个追问**）、`a`=**最终解决方案**且**涵盖整段排查脉络**（核心问题→关键排查→最终定位与解法）；`subsystem` 取 `src.subsystem`。
@@ -83,13 +84,13 @@ depends_on: [FS-01]
   - **兼容**：`convId` 缺失时回落旧的 `q`/`a` 直存路径（向后兼容不破坏）。
 
 ### F. 新对话 / 数据权限 / 幂等 / 兜底（贯穿）
-- **AC-20** Given 当前会话已有多轮对话（含已建单）When 点「新对话」`.newc` Then 清空对话流与输入、开新会话（新 `convId`/无 `savedId`），**不影响已提交的工单**，可重新走四步。
+- **AC-20** Given 当前会话已有多轮对话（含已建单）When 点「新对话」`.newc` Then 清空对话流与输入、开新会话（新 `convId`/无 `savedId`），**不影响已提交的工单，也不重置当前 mode/医院/子项目/系统/版本/分组方式**；退出登录才清除对话与全部导航草稿。
 - **AC-21【数据权限】** Given 现场账号 A（`sites=["山东省立医院"]`）When 提交时前端传 `site="郑州人民医院"`（不在其 sites）Then 服务端以**当前账号可归档医院**收敛（提交医院必须 ∈ `sites`；越权医院→改用当前所选合法医院 / 或 400），**不得**把工单落到非负责医院（对齐 PRD §3.3/§7、决策 B）。🔧 见 §4 微调项。
 - **AC-22【幂等】** Given 同一会话已建单（有 `savedId`/`convId`）When 因网络重试重复发送同一确认 Then 不产生第二张工单（intake-chat 仅在 AI 产出新 record 时建单；consult 同 `convId` 续存不新建）——防重复建单。
-- **AC-23【草稿】** Given 现场输入了内容但未发送/未建单 When 刷新页面 Then 当前会话输入/未提交草稿从本地暂存恢复（不丢），已建工单不受影响（PRD §8 离线/弱网草稿本地暂存）。
+- **AC-23【草稿 + 当前工作界面恢复】** Given 现场停留在某工作界面（含 `mode`=hosp/sys/overview、医院、子项目、系统、`groupBy`、系统版本）并有当前对话 When 同标签刷新 Then 用 `sessionStorage` 恢复导航上下文、`submitKind/deep`、完整对话/未发输入与左侧选中态。恢复顺序必须为「引用数据就绪 → 校验导航 → 加载对应清单/版本 → 恢复对话」；已删除或不在当前实时引用数据内的医院/子项目/系统不得恢复，其中系统以登录后 `/api/field/systems` 已返回的实时列表为唯一校验依据（按稳定 `name` 匹配），不得再用 `me.projects` 对返回项二次过滤；版本在实时版本列表中二次校验并失效时回退最新。草稿不存密码/token，换登录用户即丢弃。
 - **AC-24【未登录】** Given 未登录 When 调 `/api/intake-submit`·`/api/intake-chat`·`/api/consult` Then 依 FS-01 登录门 / `authGate`（这三端点在 `FIELD_OK`，登录后现场可调；未登录访问工作空间被登录门遮罩），不越权。
 - **AC-25【每系统各记一段会话 · 切系统跟随切换/恢复】**（2026-07-23 新增 · 用户裁决「切系统 → 恢复该系统的对话」）Given 实施端已登录、右侧 AI 对话区 When 用户在同一会话内**切换系统上下文**（医院视图切医院 `onHospSelect`/切子项目 `selectSub`、系统视图切系统 `onSystemTab`、或医院↔系统视图切换 `setMode`）Then 前端以**集中式** `syncConversationToSystem()`（幂等）在每个切换点末尾同步右侧对话——① 把**切走前**的当前会话打成快照存进旧「系统上下文」桶 `chat.bySystem[oldKey]`；② 若切入的系统桶**已有快照**→ `restoreConversation()` 恢复该段（清空对话流后逐条重渲染：user 转义、assistant 走 `md()`；恢复 `messages/convId/submitKind/savedId/analyzed/reopenProject/reopenSubsystem/输入框值`）；③ 若该系统**从未聊过**→ `newConversation()` 全新空会话。系统上下文键 `systemKey()`：系统视图 = `'sys||'+curSys`、医院视图 = `curSite+'||'+curSub`（尾部空串=「全部系统/全部子项目」桶，合法会话槽）。故：系统 A 聊几句→切系统 B（右侧显 B 之前聊到哪、B 未聊过则空）→切回 A（右侧恢复 A 的对话，含未发输入与续聊锁定）。
-- **AC-26【会话内存态 · 刷新可丢 · 与草稿/reopen/必选守卫共存】**（2026-07-23 新增）Given AC-25 的各系统会话 When 页面**刷新** Then `chat.bySystem` 是**纯内存态**（**不**进 `sessionStorage`/`localStorage`，避免端存储膨胀与 FS-01 A5 长效存储禁令），刷新后仅**当前**系统那段由草稿（`saveDraft/restoreDraft`，sessionStorage）恢复，**其它系统的段丢失可接受**（已发咨询本就持久化，可点记录 reopen 恢复，见 FS-06 AC-C7）。共存约束：① 必选子系统守卫（`guardConsultSubsystem`，FS-06 AC-C8）不变——具体子系统桶发 consult 不被拦、「全部」桶发 consult 仍被拦；② reopen（FS-06 AC-C7）载入的 consult 属**当前**系统桶，下次切系统随快照一并保存、切回续聊仍指原 consult（快照带 `reopenProject/reopenSubsystem`）；③ `newConversation` 清当前桶那份会话、`doLogout` 清空 `bySystem`+`lastSystemKey`、登录后 `restoreDraft` 完置 `chat.lastSystemKey = systemKey()` 为基线键。
+- **AC-26【会话桶内存态 · 当前界面可刷新恢复】** Given AC-25 的各系统会话 When 页面刷新 Then `chat.bySystem` 仍是纯内存态（不整桶进端存储），仅当前已校验导航上下文那段会话由 AC-23 草稿恢复，其他系统段可通过已持久化的「对话记录」reopen。`newConversation` 清当前桶但保留导航；`doLogout` 清空所有桶并移除整份草稿；恢复完后 `chat.lastSystemKey=systemKey()` 作为当前桶基线键。
 
 ### G. 对话提交附截图 + AI 多模态看图（2026-07-24 用户裁决：MVP 附图 + AI 多模态看图）
 - **AC-27【选图 / 粘贴 / 预览 / 上限】** Given 现场账号在右侧对话输入区 When 点图片入口 `#fImgBtn`（隐藏 `<input type="file" accept="image/*" multiple id="fImgInput">`）或在输入框 `#fChatInput` 直接**粘贴**截图（`paste` 事件从 `clipboardData` 取 `image/*` File）Then 选中/粘贴的图读成 data URL 加入待发送队列 `pendingImages`（**最多 6 张**，超出提示并只保留前几张），并在输入框上方 `#fImgPreview` 显**缩略图预览**（每张带删除 `×`）；单张过大先 `canvas` 缩到 ≤1600px 宽再 `toDataURL('image/jpeg',0.85)` 压缩（防炸 `MAX_BODY`=30MB 上限）。
@@ -114,7 +115,15 @@ depends_on: [FS-01]
 ### L. 左侧「提交清单」工单点击 = 只读详情抽屉（2026-08-07）
 - **AC-37【工单点击开只读抽屉，不进对话续聊】** Given 现场左侧「提交清单」的需求/BUG 工单卡 When 点击 Then 打开**右侧只读详情抽屉**（`openTicketDrawer` → `/api/intake-detail` 取完整 item → 渲染）——**不再** `reopenIntake` 恢复整段对话到右侧对话区（续聊改由右上「对话记录」承担）。抽屉展示（有才显）：类型标签+状态+编号+标题；元信息 现场/子系统/版本/紧急程度/提交人/提交时间；需求 bg/reqDesc/scene/accept/relate、BUG desc/errorInfo/steps/expectResult/severity/scope/env/freq、AI opinion+analysis、截图 media（`/api/intake-media` 缩略图点开原图）；长文本 `md()` 渲染。可 ×/遮罩/Esc 关闭（Esc 逐层关最上层）。consult（系统视图若有）点击仍 `reopenConsult`（咨询是对话、进对话区续聊）。左侧工单卡软删入口/选中态不变。
 
-> **AC 计数**：共 **37** 条（AC-1..37，其中 AC-19-KB 计为第 19 条）。AC-1..26 全 P1；AC-27..31（附图+多模态，2026-07-24）P1；AC-32（现场手选紧急程度，2026-08-06）P1；AC-33（附图按轮落位，2026-08-06）P1；AC-34（对话记录与工单分离，2026-08-06）P1；AC-35（发送中可中断「停止」，2026-08-06）P1；AC-36（对话全量持久化+软删，2026-08-06）P1；AC-37（工单点击=只读抽屉，2026-08-07）P1。
+### M. AI 答复可读性 + Markdown 表格（2026-08-10）
+- **AC-38【默认面向实施/产品的回答结构】** Given 现场在「咨询答疑」发起普通问答或「深入思考」 When AI 组织可见正文 Then 默认顺序为：①**先说结论**；②给**现场可执行步骤**（页面/按钮/可观察现象）；③仍未解决时说明**还需提供什么信息**（已解决可省略）。默认不得以 spec 编号、源码路径、类/方法、表名/字段、HTTP/JSON 等技术信息开场，也不为证明检索过程而强制罗列出处；仅当用户明确要求技术细节，或在正文末尾独立的「技术依据（研发参考）」中提供。深入思考仍可内部检索代码。所有结论必须基于真实 spec/源码/经验库证据；证据不足则说明未确认与下一步，禁止臆造。
+- **AC-39【标准 GFM 管道表格安全渲染】** Given AI 回复含标准管道表格（首尾 `|` 可省略、分隔行支持 `:---`/`---:`/`:---:`） When 在 `field.html`、共享 `ui.js` 消费页或 `submit.html` 渲染 Then 生成带 `<thead>`/`<tbody>` 的真实 `<table>`，单元格支持受控行内 Markdown（粗体/行内代码），分隔行不再原样显示；输入先转义再生成受控 HTML，`<script>`/事件属性等不得注入。表格外有最大宽度 100% 的横向滚动容器，窄屏不撑破页面；现场对话正文桌面字号 ≥15px、移动端为 16px。
+- **AC-40【Markdown 语义分隔线】** Given AI 回复含独占一行的 `---` 或 `***` When 经 `field.html`、共享 `ui.js` 或 `submit.html` 渲染 Then 输出低干扰的 `<hr class="md-divider">`，不得原样显示短横杠；列表项与 GFM 表格分隔行仍按各自语义渲染，且继续满足 AC-39 的先转义/XSS 护栏。
+- **AC-41【窄视口长答复不裁切】** Given 实施端因右侧打开浏览器调试工具等原因使工作区可用宽度收窄，且 AI 答复含超长 URL、无断点行内代码、代码块或宽 Markdown 表格 When 渲染对话与底部输入区 Then 页面及右侧对话区不得产生整体横向溢出，普通文本/URL/行内代码须在气泡内安全换行；代码块和宽表格仅在各自容器内横向滚动；AI 气泡、输入框、图片按钮和发送/停止按钮均保持在右侧面板内且可用。共享 `ui.js` 消费页与免登录 `submit.html` 遵守同一长内容约束。
+- **AC-42【历史多单会话刷新完整恢复】** Given 现场从「对话记录」打开一条已建多张工单的会话 When 异步详情加载并渲染完成后同标签刷新 Then 完整消息仍在，且 `builtTickets` 中全部已建单卡按保存顺序、原消息时间线锚点逐张恢复，同一工单 id 不重复；不能只凭 `savedId` 恢复首张卡，也不能把原本穿插在消息之间的卡片统一堆到末尾。每张卡继续保留工单号、类型、医院、子系统、版本、紧急程度和产品上下文；老草稿缺少 `builtTickets` 时才以 `savedId` 兜底一张。咨询会话刷新恢复不得串入上一段提单会话的卡片。
+- **AC-43【系统视图当前系统刷新保持】** Given 现场切到「系统视图」并在顶部选中某个实时可见系统（例如显示「药师工作站」、稳定值为该项 `name`），右侧已有当前会话 When 同标签 F5 Then 顶部仍显示原系统、清单仍按该系统加载，右侧会话不变。只有保存的 `name` 已不在当次 `/api/field/systems` 返回列表时才安全回退「全部系统」。
+
+> **AC 计数**：共 **42** 条（AC-1..42，其中 AC-19-KB 计为第 19 条）。AC-1..37 沿用既有优先级；AC-38..42 均为 P1。
 
 ## 4. 接口契约
 > 统一前缀 `/api`；除 `consult`（SSE）外返回 `{...}` JSON。**本条 100% 复用现有端点，不新增端点**；提交人 `reporter`、归档医院 `site` 服务端按当前登录用户收敛（忽略越权传参）。契约锚点见 `docs/specs/00-实施端-spec清单.md §4` 对照表。
@@ -239,6 +248,9 @@ depends_on: [FS-01]
   - 新对话 `.newc` 清空会话（AC-20）；草稿本地暂存恢复（AC-23）。
   - 时间 `yyyy-MM-dd HH:mm`、字段 `maxlength` 对齐列长（AC-15/6.3）。
   - **静态断言避坑（lessons L-005）**：写「不依赖某 token」断言时源文件注释别留该 token 字面量；抽屉/弹窗若自写别依赖部署 `shell.js` 没有的 `UI.openDrawer`（lessons L-004）。
+  - `tools/pd-02-prompts.logic.test.mjs` 精确基线 + 回答风格契约：普通/深入模板均锁定「结论→现场步骤→补充信息」、技术依据后置、证据/不臆造（AC-38）。
+  - `tools/markdown-table.logic.test.mjs` 直接抽取并执行三处真实渲染器，覆盖有/无首尾管道、对齐、粗体/代码、XSS、普通段落、滚动包装与字号（AC-39）；不得退化为仅查源码字符串。
+  - `tools/fs-04-narrow-layout.test.mjs` 锁定 legacy 工作区/右栏/气泡/输入区的可收缩边界，以及三处 Markdown 对长文本、代码与宽表的统一防溢出约束；浏览器夹具 `tools/fixtures/fs-04-narrow-layout.html` 直接加载 `field.html` 的真实样式，在 980px 与 760px 视口断言页面无整体横向溢出、宽表只在自身容器滚动（AC-41）。
 - **接口（B 组 · 连真库冒烟）**：
   - `POST /api/intake-chat`（真实现场账号会话，`type='intake'` + `project=hlyy` + `messages`）→ 断言 `{ok:true}` 且（AI 配置时）产出 record 建单后 `savedId` 非空、`SELECT type,lifecycle,site,reporter FROM intakes WHERE id=savedId` 为 `requirement|bug` / `待处理` / `reporter`=登录用户；AI 未配时 `savedId` 空、返回降级文案不 500（AC-9/11/14）。
   - `POST /api/intake-submit`（`type=bug` 缺 version）→ 400「请填/选产品版本」（AC-15）；带 version → `{ok:true,id}`，`SELECT` 断言 `type=bug`/`lifecycle=待处理`/`reporter`=登录用户/`site` ∈ 账号 sites（AC-16/21）。
@@ -256,4 +268,5 @@ depends_on: [FS-01]
 - [x] 界面对齐基线 `redesign.html`（`f-right`/`f-ctx`/`f-toggle`/`f-chat-f`/`f-msg` + `updateCtx` 版本感知）+ 时间 `yyyy-MM-dd HH:mm` + 回车发送 + 字段长度校验（§6.3）。
 - [x] 数据权限验收：`reporter` 服务端取登录用户、`site` ∈ 账号 sites（越权不落非负责医院）、三端点 FIELD_OK 登录可调、`intake-analyze` **现场可调但按 sites 收敛**（自己工单 200 / 越权 403，NH-3 已放开）、留痕 `history` 落 `data`。
 - [x] NH-1~3 已于 2026-07-22 裁决（§4.4：后端统一调模型 / 不做转需求 / intake-analyze 放开现场按 sites 收敛）；§4.3 🔧 `site` 服务端收敛本条实现。
+- [x] AC-38..41 的回答结构、Markdown 表格/分隔线与窄视口长内容回归通过；980px、760px 浏览器夹具均无页面级横向溢出，宽表只在自身容器横滚。
 - [ ] 人类验收通过。

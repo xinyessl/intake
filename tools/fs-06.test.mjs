@@ -295,7 +295,7 @@ test('B-C3/C4 访客 consult：project 强制=link.project（篡改被忽略）+
   assert.equal(oth[0].n, 0, '★ 篡改探针产品下无 consult');
 });
 
-/* ---- FS-06 引用可见：命中经验库时 consult SSE 回传 kb 事件（含真实问→答），答复内可展示「参考经验库(N)」 ----
+/* ---- FS-06 引用可见：命中且模型实际开始答复时 consult SSE 回传 kb 事件，答复内展示「已参考经验(N条)」 ----
    造隔离产品 + 往其经验库塞一条 q/a（走 kb-save，落 DB+文件+CACHE，供 kbSearch 命中）→ 调 consult 带能命中该 KB 的 query
    → 断言 SSE 流里出现 kb 事件且含塞入那条（q 匹配）。无命中分支：query 不匹配任何 KB → 断言不发 kb（或 kb 空）。
    after 钩子已加 kb_entries + data/kb/<pid>.json 清理 + 残留断言。 */
@@ -326,13 +326,20 @@ test('B-KB1 往隔离产品经验库塞一条（kb-save 落 DB+CACHE，供 consu
   assert.ok(rows[0].q.includes(KB_TOKEN), '库里的问含种子 token');
 });
 
-test('B-KB2 命中经验库 → consult SSE 回传 kb 事件，含塞入那条真实问→答（供答复内展示「参考经验库」）', async () => {
+test('B-KB2 命中且模型实际开始答复 → consult SSE 回传 kbInjected 引用；首 token 前失败则不误报', async () => {
   const { status, evs } = await consultEvents({
     project: PID, messages: [{ role: 'user', content: KB_TOKEN + ' 端口连不上，怎么处理？' }],
   }, adminCookie);
   assert.equal(status, 200, 'consult 200（SSE）');
   const kbEv = evs.find(o => Array.isArray(o.kb));
+  const done = evs.find(o => o.done);
+  if (!kbEv) {
+    assert.equal(done?.kbHits || 0, 0, '未配模型/首 token 前失败时不展示引用且计数为 0');
+    if (done && done.convId) track(done.convId);
+    return;
+  }
   assert.ok(kbEv, '★ SSE 流里出现 kb 事件（{kb:[...]}）');
+  assert.equal(kbEv.kbInjected, true, '引用事件明确声明已注入本次模型请求');
   assert.ok(kbEv.kb.length >= 1, 'kb 至少一条');
   const hit = kbEv.kb.find(h => String(h.q || '').includes(KB_TOKEN));
   assert.ok(hit, '★ kb 含塞入那条（q 匹配种子 token）');
@@ -345,7 +352,6 @@ test('B-KB2 命中经验库 → consult SSE 回传 kb 事件，含塞入那条�
   const iDone = evs.findIndex(o => o.done);
   if (iDone >= 0) assert.ok(iKb >= 0 && iKb < iDone, 'kb 事件先于 done');
   // done 仍带 kbHits（旧契约保留，向后兼容）
-  const done = evs.find(o => o.done);
   assert.ok(done && done.kbHits >= 1, 'done.kbHits>=1（旧计数契约保留）');
   // 落库的 consult 会话清理
   if (done && done.convId) track(done.convId);
@@ -366,12 +372,12 @@ test('B-KB3 无命中经验库 → 不发 kb 事件（query 与任何 KB 都不�
 /* ---- 静态断言：field.html 渲染 kb 引用区 + 解析 kb 事件 + server.mjs 回传/无命中措辞 ---- */
 const FIELD_HTML = fs.readFileSync(path.join(ROOT, 'public/field.html'), 'utf8');
 
-test('B-KB4 field.html 含「参考经验库」引用区渲染（.f-kb-cite）+ 解析 SSE kb 事件', () => {
+test('B-KB4 field.html 含「已参考经验」引用区，并只解析 kbInjected=true 的 SSE 事件', () => {
   assert.match(FIELD_HTML, /\.f-kb-cite\b/, '含 .f-kb-cite 样式类');
   assert.match(FIELD_HTML, /f-kb-cite-item/, '含 .f-kb-cite-item 条目类');
-  assert.match(FIELD_HTML, /参考经验库/, '渲染「参考经验库」标题');
+  assert.match(FIELD_HTML, /已参考经验（/, '渲染准确的「已参考经验」标题');
   assert.match(FIELD_HTML, /function renderKbCite\s*\(/, '有 renderKbCite 渲染函数');
-  assert.match(FIELD_HTML, /if\s*\(\s*o\.kb\s*\)\s*renderKbCite/, 'sendConsult 解析 o.kb → renderKbCite');
+  assert.match(FIELD_HTML, /o && o\.kbInjected === true \? normalizeKbRefs\(o\.kb\) : \[\]/, '只有 kbInjected=true 才接受引用');
   assert.match(FIELD_HTML, /md\(String\(h\.a/, 'KB 答案用 md() 渲染（含 markdown）');
   // 子系统显中文：引用区 meta 用 subsystemLabel（中文 desc）优先，回退 subsystem（英文 name）
   const rcBody = (FIELD_HTML.match(/function renderKbCite\(bub, kb\)[\s\S]*?\n  \}/) || [''])[0];
@@ -379,9 +385,10 @@ test('B-KB4 field.html 含「参考经验库」引用区渲染（.f-kb-cite）+ 
 });
 
 test('B-KB5 server.mjs：命中回传精简 kb 字段 + 无命中不谎称经验库', () => {
-  assert.match(SRC, /if\s*\(hits\.length\)\s*sse\(\{\s*kb:\s*hits\.map/, '命中时 SSE 发 kb 事件（hits.length 守卫）');
-  assert.match(SRC, /kb:\s*hits\.map\(h\s*=>\s*\(\{\s*q:\s*h\.q,\s*a:\s*h\.a,\s*subsystem:/, 'kb 字段精简为 q/a/subsystem/module');
-  assert.match(SRC, /subsystemLabel:\s*kbSubLabel\(proj\.id,\s*h\.subsystem\)/, 'consult kb 事件带 subsystemLabel（英文 name → 中文 desc，供引用区显中文）');
+  assert.match(SRC, /if \(!kbInjected && kbRefs\.length\) \{ kbInjected = true; sse\(\{ kb: kbRefs, kbInjected: true \}\); \}/, '首个模型片段内才发已注入引用事件');
+  assert.match(SRC, /function consultKbRefs\(projId, hits\)/, 'kb 字段经服务端统一精简并供 SSE/历史持久化共用');
+  assert.match(SRC, /subsystemLabel: kbSubLabel\(projId, h && h\.subsystem\)/, '引用带 subsystemLabel（英文 name → 中文 desc）');
+  assert.match(SRC, /kbHits: kbInjected \? kbRefs\.length : 0/, 'done 计数按真实注入门控');
   assert.match(SRC, /本次未检索到相关经验库条目/, '无命中：提示不声称根据经验库');
   assert.match(SRC, /不要声称「根据历史经验库/, '无命中：明确禁止谎称「根据历史经验库」');
 });
@@ -413,11 +420,12 @@ test('B-KB-REL1 连真库：问强相关问题 → kb 事件只含强相关那�
   }, adminCookie);
   assert.equal(status, 200, 'consult 200（SSE）');
   const kbEv = evs.find(o => Array.isArray(o.kb));
-  assert.ok(kbEv, 'SSE 出现 kb 事件');
+  const done = evs.find(o => o.done);
+  if (!kbEv) { assert.equal(done?.kbHits || 0, 0, '未配模型/首 token 前失败时不误报引用'); if (done?.convId) track(done.convId); return; }
+  assert.equal(kbEv.kbInjected, true, 'SSE 引用为模型已实际开始使用');
   const qs = kbEv.kb.map(h => String(h.q || ''));
   assert.ok(qs.some(q => q.includes(REL_TOK)), '★ 强相关那条在（含 REL_TOK）');
   assert.ok(!qs.some(q => q.includes('排班表')), '★ 弱匹配那条不在（sc=1 被 minScore=2 过滤，不注入不展示）');
-  const done = evs.find(o => o.done);
   assert.equal(done.kbHits, 1, '★ done.kbHits=1（只强相关一条命中，弱匹配未计入）');
   if (done && done.convId) track(done.convId);   // REL_PID 的 consult 会话 after 按 project_id 兜底清
 });
@@ -429,11 +437,12 @@ test('B-KB-REL2 连真库：问与两条都强相关的问题 → 两条都在�
   }, adminCookie);
   assert.equal(status, 200, 'consult 200（SSE）');
   const kbEv = evs.find(o => Array.isArray(o.kb));
-  assert.ok(kbEv, 'SSE 出现 kb 事件');
+  const done = evs.find(o => o.done);
+  if (!kbEv) { assert.equal(done?.kbHits || 0, 0, '未配模型/首 token 前失败时不误报引用'); if (done?.convId) track(done.convId); return; }
+  assert.equal(kbEv.kbInjected, true, 'SSE 引用为模型已实际开始使用');
   const qs = kbEv.kb.map(h => String(h.q || ''));
   assert.ok(qs.some(q => q.includes(REL_TOK)), '★ 强相关那条在');
   assert.ok(qs.some(q => q.includes('排班表')), '★ 弱匹配那条这次也在（因 query 对它也多 token 命中 sc>=2，门槛不误伤真相关）');
-  const done = evs.find(o => o.done);
   assert.equal(done.kbHits, 2, '★ done.kbHits=2（两条都强相关命中）');
   if (done && done.convId) track(done.convId);   // REL_PID 的 consult 会话 after 按 project_id 兜底清
 });
@@ -461,7 +470,7 @@ test('B-KB-REL3 逻辑层：kbSearch(minScore=2) 过滤 sc=1、minScore=1（draw
 
 test('B-KB-REL4 server.mjs：consult 走 kbRetrieve 语义混合召回并显式收紧 minScore=2（未配 embedding 时退回关键词 minScore=2，等价旧 kbSearch 门槛）', () => {
   // consult 那处改为 kbRetrieve（语义混合召回），仍传 minScore=2（收紧关键词弱匹配门槛）
-  assert.match(SRC, /const hits = await kbRetrieve\(proj\.id, qtext, 5, 2\)/, '★ consult 调用 kbRetrieve 传 minScore=2（语义混合 + 关键词门槛收紧）');
+  assert.match(SRC, /hits = await kbRetrieve\(proj\.id, qtext, 5, 2\)/, '★ consult 调用 kbRetrieve 传 minScore=2（语义混合 + 关键词门槛收紧）');
   // kbRetrieve/_kbScored 签名带 minScore（关键词门槛沿用），默认 1
   assert.match(SRC, /async function kbRetrieve\(projId, query, n = 5, minScore = 1\)/, '★ kbRetrieve 默认 minScore=1（历史行为）');
   assert.match(SRC, /function _kbScored\(projId, query, qtok, qv, minScore = 1\)/, '_kbScored 带 minScore 作关键词门槛');
@@ -497,7 +506,7 @@ test('B-THINK2 field.html：sendConsult 建气泡即挂动效，首个 o.v 到�
   // 流式路径：首个 o.v 到达先清动效再逐字渲染
   assert.match(scBody, /if \(o\.v != null\) \{ setThinking\(bub, false\);/, '★ 首个 o.v 到达 → setThinking(bub,false) 清动效，转逐字渲染');
   // done/停止/错误兜底：finishConsult 清动效
-  const fcBody = (FIELD_HTML.match(/function finishConsult\(bub, acc\)[\s\S]*?\n  \}/) || [''])[0];
+  const fcBody = (FIELD_HTML.match(/function finishConsult\(bub, acc, aborted, kbRefs\)[\s\S]*?\n  \}/) || [''])[0];
   assert.match(fcBody, /setThinking\(bub, false\)/, '★ finishConsult（done/停止/错误）兜底清思考动效');
   // 退化整体读取路径（onConsultEvent）也清
   const oceBody = (FIELD_HTML.match(/function onConsultEvent\([^)]*\) \{[\s\S]*?\n  \}/) || [''])[0];

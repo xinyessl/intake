@@ -229,8 +229,9 @@ test('E6 chat.builtTickets 状态存在 + 随草稿/快照 save/restore + newCon
   assert.match(FIELD_HTML, /chat\.savedId = ''; chat\.builtTickets = \[\];/, 'newConversation 清空 builtTickets');
 });
 test('E7 reopenIntakeConv 已建单会话：填 builtTickets + 走 plan 流（清 reopenIntakeProject）', () => {
-  const seg = FIELD_HTML.slice(FIELD_HTML.indexOf('function reopenIntakeConv'), FIELD_HTML.indexOf('function reopenIntakeConv') + 3200);
-  assert.match(seg, /chat\.builtTickets = built\.map\(function \(t\) \{ return \{ id: t\.id, title: t\.title/, '已建单会话 reopen → 填 builtTickets');
+  const seg = FIELD_HTML.slice(FIELD_HTML.indexOf('function reopenIntakeConv'), FIELD_HTML.indexOf('function reopenIntakeConv') + 5000);
+  assert.match(seg, /mergeConvTimeline\(msgs, built\)\.forEach/, '已建单会话 reopen → 按真实时间线生成 builtTickets');
+  assert.match(seg, /afterMessageIndex: messageIndex/, '每张已建单卡保存它位于第几条消息之后');
   assert.match(seg, /chat\.reopenIntakeProject = '';   \/\/ 不再走 intake-reply/, '清 reopenIntakeProject（改走 plan 流）');
   assert.match(seg, /chat\.filedUpTo = chat\.messages\.length;/, '已建单会话历史置满水位线（当只读背景）');
 });

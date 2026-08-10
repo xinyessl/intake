@@ -321,6 +321,101 @@
           "specRef": "FS-04"
         }
       ]
+    },
+    {
+      "id": "B-20260810-AI答复可读性",
+      "source": "CLI窗口·用户反馈",
+      "importedAt": "2026-08-10",
+      "ref": "实施端 AI 回复默认改为现场可执行表达，并修复 Markdown 管道表格显示原始文本",
+      "tasks": [
+        {
+          "id": "FS04-READ-1",
+          "title": "咨询提示词改为结论→现场步骤→补充信息，技术依据后置并补精确契约测试",
+          "status": "doing",
+          "specRef": "FS-04",
+          "note": "已实现，提示词精确基线/风格契约通过；待用户验收。FS-04/FS-06/FS-07 真库套件因本机缺 data/db.json/INTAKE_DB_* 被 before hook 阻断，待有真实连接配置后补跑。"
+        },
+        {
+          "id": "FS04-READ-2",
+          "title": "field/ui/submit 三处 Markdown 渲染器支持安全 GFM 管道表格并提升现场正文可读性",
+          "status": "doing",
+          "specRef": "FS-04",
+          "note": "已实现，三处真实渲染器行为测试 10/10 通过、语法检查通过；待用户验收。真库套件环境阻断同 FS04-READ-1。"
+        },
+        {
+          "id": "FS04-NARROW-1",
+          "title": "legacy 实施端窄视口下长答复、代码、宽表与输入区不溢出或被裁切",
+          "status": "doing",
+          "specRef": "FS-04",
+          "note": "已实现旧版公共布局防溢出；专项回归 17/17、脱库 legacy 回归 323/323 通过（另 9 条真库用例按环境跳过）；980px 与 760px 真实样式浏览器验证页面无整体横向溢出，宽表仅自身横滚。FS-01/04/06 真库整套因本机 MySQL 127.0.0.1:3306 未启动而在 before hook 阻断。待用户验收，未部署。"
+        }
+      ]
+    },
+    {
+      "id": "B-20260810-实施端刷新恢复与全览重设计",
+      "source": "CLI窗口·用户反馈",
+      "importedAt": "2026-08-10",
+      "ref": "同标签刷新后恢复当前工作界面；全览充分使用宽屏并重排 KPI、医院、产品信息层级",
+      "tasks": [
+        {
+          "id": "FS04-RESTORE-1",
+          "title": "刷新恢复 mode/医院/子项目/系统/版本/分组/当前对话与左侧选中态，并对过期越权值安全回退",
+          "status": "doing",
+          "specRef": "FS-04",
+          "note": "AC-42 历史多单会话刷新恢复已部署。AC-43 已实现并部署：系统视图当前系统仅按 `/api/field/systems` 实时列表的稳定 name 恢复，不再被 me.projects 二次过滤误清；不存在系统仍回退全部系统。精确回归 11/11、全量 legacy 325 通过/0 失败/9 真库环境跳过。生产真实浏览器：药师工作站(data-sys=pwrs) F5 前后标签一致，右侧消息 4→4 且正文一致。只改 legacy field.html，无 React/样式/接口/数据库改动；任务保持 doing，待用户验收。"
+        },
+        {
+          "id": "FS09-OVERVIEW-UI-1",
+          "title": "全览宽屏响应式重设计：KPI 事务层级、医院/产品卡及版本关联列表、键盘可访问",
+          "status": "doing",
+          "specRef": "FS-09",
+          "note": "已实现，全览结构/聚合/真实渲染目标测试通过；待用户验收，未标 done。"
+        }
+      ]
+    },
+    {
+      "id": "B-20260810-React全览渐进迁移",
+      "source": "CLI窗口·用户明确要求前端上框架",
+      "importedAt": "2026-08-10",
+      "ref": "第一阶段仅迁实施端全览：React 18 + Vite 5 + Ant Design 5，保留 field.html 业务壳与原生兜底",
+      "tasks": [
+        {
+          "id": "FS09-REACT-1",
+          "title": "React+AntD 重做全览组件并真实消费 /api/field/overview，覆盖响应式、明文待办和显式医院导航按钮",
+          "status": "doing",
+          "specRef": "FS-09",
+          "note": "已实现并构建，组件/模型与接线测试通过；待用户验收，未标 done。"
+        },
+        {
+          "id": "UI01-REACT-BRIDGE-1",
+          "title": "建立 Vite 工程与稳定 mount/unmount 接口，接入 field.html 并在 bundle/渲染异常时回退原生全览",
+          "status": "doing",
+          "specRef": "UI-01",
+          "note": "已实现，生产产物由现有 Node 静态服务直接提供；未改后端接口、数据库或部署，待用户验收。"
+        }
+      ]
+    },
+    {
+      "id": "B-20260810-咨询经验引用真实性",
+      "source": "CLI窗口·用户验收反馈",
+      "importedAt": "2026-08-10",
+      "ref": "咨询流式生成不应把仅检索命中误报为已参考；同时修复独占 Markdown 分隔线原样显示",
+      "tasks": [
+        {
+          "id": "FS06-KB-EVIDENCE-1",
+          "title": "核查咨询经验检索→提示注入→SSE→历史恢复全链路，仅在模型真实使用时显示已参考经验",
+          "status": "doing",
+          "specRef": "FS-06",
+          "note": "已实现首模型片段门控、真实计数及逐助手消息引用持久化/恢复，待用户验收。"
+        },
+        {
+          "id": "FS04-MD-DIVIDER-1",
+          "title": "field/ui/submit 三处 Markdown 渲染器支持安全语义分隔线并回归表格/XSS",
+          "status": "doing",
+          "specRef": "FS-04",
+          "note": "已实现并通过三处真实渲染器逻辑测试，待用户验收。"
+        }
+      ]
     }
   ]
 }

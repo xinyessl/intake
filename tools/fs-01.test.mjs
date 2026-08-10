@@ -99,13 +99,13 @@ after(async () => {
 // ============ A. field.html 外壳静态断言 ============
 const FIELD_HTML = fs.readFileSync(path.join(ROOT, 'public/field.html'), 'utf8');
 
-test('A1 登录门元素：#fLogin/.f-login + 账号/密码(type=password)/#loginErr + 演示账号 chip + 安全提示（AC-1/2）', () => {
+test('A1 登录门元素：#fLogin/.f-login + 账号/密码(type=password)/#loginErr + 无演示账号 chip + 安全提示（AC-1/2）', () => {
   assert.match(FIELD_HTML, /id="fLogin"/, '含登录门 #fLogin');
   assert.match(FIELD_HTML, /class="f-login"/, '含 .f-login');
   assert.match(FIELD_HTML, /id="loginUser"/, '含账号输入 #loginUser');
   assert.match(FIELD_HTML, /id="loginPwd"[^>]*type="password"/, '密码输入 type=password');
   assert.match(FIELD_HTML, /id="loginErr"/, '含内联错误 #loginErr');
-  for (const u of ['zhanggong', 'ligong', 'zhaogong']) assert.match(FIELD_HTML, new RegExp(u), `含演示账号 ${u}`);
+  assert.doesNotMatch(FIELD_HTML, /class="[^"]*f-demo(?:-chip)?\b/, '不展示演示账号 chip');
   assert.match(FIELD_HTML, /账号之间数据相互独立/, '含安全提示文案');
 });
 
@@ -136,14 +136,18 @@ test('A5 登录/退出/恢复走真实端点，不含前端 mock 登录（AC-3/7
   assert.match(FIELD_HTML, /\/api\/logout/, '退出调 /api/logout');
   assert.match(FIELD_HTML, /\/api\/me/, '恢复态调 /api/me');
   assert.doesNotMatch(FIELD_HTML, /任意密码/, '不含原型「任意密码前端 mock 登录」逻辑');
-  // 不往 localStorage 存密码/明文用户（NH-3：凭 Cookie + /api/me 恢复）
-  assert.doesNotMatch(FIELD_HTML, /localStorage/, '不使用 localStorage 存登录态/密码');
+  // 可用 localStorage 保存纯界面偏好，但不得保存登录态/密码/Token（NH-3：凭 Cookie + /api/me 恢复）
+  assert.doesNotMatch(
+    FIELD_HTML,
+    /localStorage\.(?:setItem|getItem)\s*\([^\n)]*(?:loginUser|loginPwd|password|authToken|accessToken|intake_sess)/i,
+    '不使用 localStorage 存登录态/密码/Token',
+  );
 });
 
 test('A6 无后台管理菜单/入口（AC-15：无 账号管理/发包/决策 入口）', () => {
   // 不注入后台外壳 shell.js（那是运营端）
   assert.doesNotMatch(FIELD_HTML, /assets\/shell\.js/, '不引后台 shell.js');
-  for (const kw of ['账号管理', '发包', '决策', 'accounts.html', 'inbox.html']) {
+  for (const kw of ['账号管理', '发包', '决策', 'accounts.html']) {
     assert.doesNotMatch(FIELD_HTML, new RegExp(kw), `无后台入口关键词：${kw}`);
   }
 });

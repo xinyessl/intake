@@ -1176,6 +1176,18 @@ function consultSystem(proj, ver, hits, specs, code) {   // 答疑助手系统�
   return renderPromptTpl(DATA_DIR, 'consultNormal', vars);
 }
 
+// 咨询引用只从本次服务端真实召回结果派生；前端请求里的历史消息/元数据不能伪造引用。
+// 同一份精简结果同时用于 SSE 与 chat 持久化，保证流式提示、刷新草稿和历史会话恢复口径一致。
+function consultKbRefs(projId, hits) {
+  return (Array.isArray(hits) ? hits : []).slice(0, 5).map(h => ({
+    q: String((h && h.q) || '').slice(0, 400),
+    a: String((h && h.a) || '').slice(0, 2000),
+    subsystem: String((h && h.subsystem) || ''),
+    module: String((h && h.module) || ''),
+    subsystemLabel: kbSubLabel(projId, h && h.subsystem),
+  })).filter(h => h.q || h.a);
+}
+
 // ===== 首次运行：建数据目录 + 播示例项目/默认管理员（库空时）=====
 async function bootstrap() {
   try {
@@ -2672,16 +2684,22 @@ const server = http.createServer((req, res) => {
       const lastUser = [...msgs].reverse().find(m => m.role === 'user'); const qtext = lastUser ? lastUser.content : '';
       const sub = String(b.subsystem || '').trim();   // 用户指定的子系统（空=全部）
       const imgs = (Array.isArray(b.images) ? b.images : []).slice(0, 6);   // 本轮附的截图（data URL，≤6）→ 多模态并进末条 user，让 AI 结合图答疑；落库见下方 convId 已知处
-      const hits = await kbRetrieve(proj.id, qtext, 5, 2); const specHits = specSearch(proj, String(b.version || '').trim(), qtext, 5, sub);   // consult：语义混合召回（配了 embedding 时 sim>=SEM_GATE||lex>=2 入选；未配/失败自动退回关键词 minScore=2）。弱匹配（只命中 1 个常见 token 且语义不相关）既不注入 consultSystem 也不发 kb 事件
+      let hits = [];
+      try { hits = await kbRetrieve(proj.id, qtext, 5, 2); } catch {}   // 检索异常不阻断咨询；失败即按无命中处理，不注入、不展示引用
+      const specHits = specSearch(proj, String(b.version || '').trim(), qtext, 5, sub);   // consult：语义混合召回（配了 embedding 时 sim>=SEM_GATE||lex>=2 入选；未配/失败自动退回关键词 minScore=2）。弱匹配（只命中 1 个常见 token 且语义不相关）既不注入 consultSystem 也不发 kb 事件
 
       const codeHits = b.deep ? codeSearch(proj, String(b.version || '').trim(), qtext, specHits, 4, sub) : null;   // 「深入思考」：搜源码
-      // FS-06 引用可见：命中经验库时先发一个 kb 事件（流式答复之前），前端据此渲染「📚 参考经验库(N)」，让答复所引「历史经验库」有据可查、不再断层。
-      //   字段精简（q/a 已在 kbSearch/loadKB 内截断），仅 hits.length 时发；老前端解析忽略未知字段、不受影响（向后兼容）。
-      if (hits.length) sse({ kb: hits.map(h => ({ q: h.q, a: h.a, subsystem: h.subsystem || '', module: h.module || '', subsystemLabel: kbSubLabel(proj.id, h.subsystem) })) });
-      let reply = '', stopped = false;
+      const kbRefs = consultKbRefs(proj.id, hits);
+      // 只有模型已收到含 kbBlock 的 system prompt 且真正返回首个有效片段，才对前端声明“已参考经验”。
+      // 未配模型、上游在首 token 前失败、检索失败/无命中都不发 kb 事件，避免把“检索到”误报为“模型已参考”。
+      let reply = '', stopped = false, kbInjected = false;
       if (!cfg.apiKey) { reply = '（管理员还没配置模型 API，暂时不能答疑。）'; sse({ v: reply }); }
       else {
-        try { await callModelStream(cfg, { system: consultSystem(proj, String(b.version || '').trim(), hits, specHits, codeHits) + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => { reply += piece; sse({ v: piece }); }, ac.signal); }
+        try { await callModelStream(cfg, { system: consultSystem(proj, String(b.version || '').trim(), hits, specHits, codeHits) + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
+          piece = String(piece == null ? '' : piece); if (!piece) return;
+          if (!kbInjected && kbRefs.length) { kbInjected = true; sse({ kb: kbRefs, kbInjected: true }); }
+          reply += piece; sse({ v: piece });
+        }, ac.signal); }
         catch (e) {
           if (ac.signal.aborted) stopped = true;   // 用户主动停止：保留已生成的部分
           else { const m = (reply ? '\n\n' : '') + '（AI 暂时连不上：' + String((e && e.message) || e) + '，稍后再试。）'; reply += m; sse({ v: m, err: true }); }
@@ -2716,10 +2734,18 @@ const server = http.createServer((req, res) => {
           let ui = 0; for (const m of chat) { if (m.role === 'user') { const pm = prevUserMedia[ui]; if (pm && pm.length) m.media = pm; ui++; } }
           if (roundMedia.length) { for (let i = chat.length - 1; i >= 0; i--) { if (chat[i].role === 'user') { chat[i].media = ((chat[i].media || []).concat(roundMedia)); break; } } }
         } catch {}
+        // 续聊会用请求 messages 重建整段 chat：按第 K 条 assistant 回贴旧引用，再把本轮真实使用的引用挂到最后一条 assistant。
+        // 客户端 payload 只传 role/content，引用事实始终以服务端上一版 chat + 本轮首 token 门控为准。
+        try {
+          const prevAiRefs = (prev && Array.isArray(prev.chat) ? prev.chat : []).filter(m => m && m.role === 'assistant').map(m => consultKbRefs(proj.id, m.kbRefs));
+          let ai = 0;
+          for (let i = 0; i < chat.length - 1; i++) if (chat[i].role === 'assistant') { const refs = prevAiRefs[ai++]; if (refs && refs.length) chat[i].kbRefs = refs; }
+          if (kbInjected && kbRefs.length) chat[chat.length - 1].kbRefs = kbRefs;
+        } catch {}
         const rec = { id: convId, type: 'consult', project: proj.id, version: String(b.version || '').trim() || (link ? link.ver : ''), site: String(b.site || '').trim() || (link ? link.site : ''), subsystem: sub, module: '', title, priority: '', reporter, role: user ? user.role : 'field', contact: '', media, status: '沟通中', lifecycle: '已答复', assignee: '', analysis: null, resolution: {}, chat, submittedAt: (prev && prev.submittedAt) || nowStamp(), updatedAt: nowStamp() };
         await saveIntake(proj, rec);
       } catch (e) { convId = ''; }
-      sse({ done: true, convId, kbHits: hits.length, stopped });
+      sse({ done: true, convId, kbHits: kbInjected ? kbRefs.length : 0, stopped });
       try { res.end(); } catch {}
     });
   }

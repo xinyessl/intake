@@ -70,7 +70,7 @@ test('A8 三路径 catch 区分 AbortError（主动停止不弹网络错误 / �
   assert.ok(/var aborted = isAbort\(e\);/.test(replySeg) && /（已停止）/.test(replySeg), 'sendIntakeReply aborted 显（已停止）');
   // consult：abort 保留 acc + 尾部（已停止），非 abort 才显连不上
   const consultSeg = FIELD_HTML.slice(FIELD_HTML.indexOf('function sendConsult'), FIELD_HTML.indexOf('function parseSSEChunk'));
-  assert.ok(/if \(isAbort\(e\)\) finishConsult\(bub, acc \? \(acc \+ '\\n\\n（已停止）'\) : '（已停止）', true\)/.test(consultSeg), 'consult abort 保留已生成 acc + 尾部（已停止），传 aborted=true');
+  assert.ok(/if \(isAbort\(e\)\) finishConsult\(bub, acc \? \(acc \+ '\\n\\n（已停止）'\) : '（已停止）', true, usedKb\)/.test(consultSeg), 'consult abort 保留已生成 acc + 尾部（已停止），传 aborted=true 并保留已使用引用');
   assert.ok(/else finishConsult\(bub, acc \|\| '（AI 暂时连不上/.test(consultSeg), 'consult 真错误才显「连不上」');
 });
 
@@ -84,7 +84,7 @@ test('A9 收尾统一复位 abortCtrl（三路径 + finishConsult）', () => {
 
 test('A10 finishConsult(aborted) 主动停止不追加 KB/转工单入口', () => {
   const seg = FIELD_HTML.slice(FIELD_HTML.indexOf('function finishConsult'), FIELD_HTML.indexOf('function finishConsult') + 1200);
-  assert.ok(/function finishConsult\(bub, acc, aborted\)/.test(seg), 'finishConsult 增 aborted 参数');
+  assert.ok(/function finishConsult\(bub, acc, aborted, kbRefs\)/.test(seg), 'finishConsult 保留 aborted 参数并接收本轮引用');
   assert.ok(/if \(aborted\) \{ scrollChatBottom\(\); saveDraft\(\); return; \}/.test(seg), 'aborted → 保留内容 + 存草稿 + return（不追加 appendKbSink/appendConsultToIntake）');
 });
 

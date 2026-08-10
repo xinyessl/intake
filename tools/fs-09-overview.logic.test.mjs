@@ -341,8 +341,8 @@ test('B8 field.html：拉 /api/field/overview + 两维度渲染 + 医院卡点�
   assert.ok(/function gotoHospital/.test(FIELD_HTML) && /setMode\('hosp'\)/.test(FIELD_HTML) && /onHospSelect\(site\)/.test(FIELD_HTML), '医院卡点击→切医院视图+选中该院（复用现有数据流）');
   // 待验证段高亮（CSS .f-ov-st.verify 浅 teal 底 + 渲染时 so.k==='verify' 加 verify 类 + 小圆点）
   assert.ok(/\.f-ov-st\.verify\b/.test(FIELD_HTML) && /so\.k/.test(FIELD_HTML), '待验证阶段高亮');
-  // 响应式卡片网格（minmax 任意 px，重设计后为 330px）
-  assert.ok(/f-ov-grid \{[^}]*repeat\(auto-fill, minmax\(\d+px, 1fr\)\)/.test(FIELD_HTML), '响应式卡片网格');
+  // 响应式卡片网格：auto-fit 会折叠空轨道，卡片少时也能铺满，不在右侧留大块空白。
+  assert.ok(/f-ov-grid \{[^}]*repeat\(auto-fit, minmax\(min\(100%, \d+px\), 1fr\)\)/.test(FIELD_HTML), '响应式 auto-fit 卡片网格');
   // 空态友好占位
   assert.ok(/尚未分配医院/.test(FIELD_HTML) && /尚未分配产品/.test(FIELD_HTML), '空态占位');
 });

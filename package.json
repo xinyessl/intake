@@ -10,7 +10,10 @@
   "scripts": {
     "start": "node server.mjs",
     "smoke": "node tools/smoke.mjs",
-    "test:ui-shell": "node --test tools/ui-shell.test.mjs"
+    "test:ui-shell": "node --test tools/ui-shell.test.mjs",
+    "dev:field-overview": "npm --prefix frontend/field-overview run dev",
+    "build:field-overview": "npm --prefix frontend/field-overview run build",
+    "test:field-overview": "npm --prefix frontend/field-overview run test"
   },
   "dependencies": {
     "mysql2": "^3.22.6"
