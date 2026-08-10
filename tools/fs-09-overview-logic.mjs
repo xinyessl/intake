@@ -98,6 +98,19 @@ export function batchSitesCovered(ticketsForBatch) {
   return [...set];
 }
 
+// 本院是否已「应用」某批（判「下次更新/待下载/待更新」用）——**用工单生命周期判，别用版本字符串相等**。
+//   口径与 bumpSiteVersionForBatch 一致：该批**覆盖本院的工单全部已关闭/已交付**（lifecycle∈{已关闭,已交付}）= 现场已验证应用完。
+//   （版本字符串相等判定不稳：现场版本可能比包版本还高/带尾号，如 2.8.260801-2 vs 2.8.260801-1，会误判成"未应用"。）
+//   mineTickets = 该批 _mineTickets（原始工单，端点侧已附派生 lifecycle）；site = 目标医院名。
+//   本院无覆盖工单 → 不算已应用（返回 false，让它别当"更新已完成"漏提醒）。
+const APPLIED_LC = new Set(['已关闭', '已交付']);
+export function appliedToSite(mineTickets, site) {
+  const nm = String(site || '').trim();
+  const mine = (mineTickets || []).filter(t => String((t && t.site) || '').trim() === nm);
+  if (!mine.length) return false;
+  return mine.every(t => APPLIED_LC.has(String((t && t.lifecycle) || '')));
+}
+
 // ============ 医院维度卡 ============
 // mySites: 我负责医院名数组（收敛后，管理员传全部相关 site）。
 // tickets: 已按 sites+projects 收敛的工单数组（requirement/bug，含 site/subsystem/priority/lifecycle/updatedAt/project）。
@@ -138,7 +151,7 @@ export function buildHospitalCards(mySites, tickets, batches, custByName, myProj
         if (subs.length) versions.push({ product: pid, productName: projNameFn ? projNameFn(pid) : pid, subsystems: subs });
       }
     }
-    // 下次更新 + 待下载：覆盖本院、状态可下载/已交付、我尚未下载（或本院尚未应用）
+    // 下次更新 + 待下载：覆盖本院、状态可下载/已交付、且**本院尚未应用**（用工单生命周期判 applied，见 appliedToSite）
     let pendingDownload = 0; let nextUpdate = null;
     for (const bt of batches) {
       const mine = bt._mineTickets || [];
@@ -147,20 +160,17 @@ export function buildHospitalCards(mySites, tickets, batches, custByName, myProj
       if (myProjects && !myProjects.includes(bt.product)) continue;
       const st = String(bt.status || '');
       if (st !== '可下载' && st !== '已交付') continue;
+      const applied = appliedToSite(mine, site);   // 本批覆盖本院的工单是否全部已关闭/已交付
+      if (applied) continue;                        // 已应用（覆盖单全关闭）→ 不算下次更新/待下载（安吉这条不再冒出来）
       const downloadedByMe = Array.isArray(bt.downloadedBy) && bt.downloadedBy.includes(username || '');
-      // 本院是否已应用该包：本批覆盖本院的子系统里，只要有一个现场版本 != pkgVersion → 视为未应用
-      const siteSubs = [...new Set(mine.filter(t => String((t && t.site) || '').trim() === site).map(t => String((t && t.subsystem) || '').trim()))];
-      let applied = !!siteSubs.length && !!String(bt.pkgVersion || '').trim();
-      for (const sub of siteSubs) { if (subVersionOf(cust, bt.product, sub) !== String(bt.pkgVersion || '').trim()) { applied = false; break; } }
-      if (!downloadedByMe) pendingDownload++;
-      if (!downloadedByMe || !applied) {
-        // 取最近一条待更新（scheduleDate 最早的优先当「下次更新」）
-        const cand = { batchId: bt.id, product: bt.product, productName: projNameFn ? projNameFn(bt.product) : bt.product, pkgVersion: bt.pkgVersion || '', scheduleDate: bt.scheduleDate || '', status: st };
-        if (!nextUpdate) nextUpdate = cand;
-        else {
-          const a = nextUpdate.scheduleDate || '9999-99-99', b = cand.scheduleDate || '9999-99-99';
-          if (b < a) nextUpdate = cand;
-        }
+      // 待下载：只算 status=可下载（不含已交付=已下发完）、我未下载、本院未应用
+      if (st === '可下载' && !downloadedByMe) pendingDownload++;
+      // 下次更新：本院未应用的批次（scheduleDate 最早优先）
+      const cand = { batchId: bt.id, product: bt.product, productName: projNameFn ? projNameFn(bt.product) : bt.product, pkgVersion: bt.pkgVersion || '', scheduleDate: bt.scheduleDate || '', status: st };
+      if (!nextUpdate) nextUpdate = cand;
+      else {
+        const a = nextUpdate.scheduleDate || '9999-99-99', b = cand.scheduleDate || '9999-99-99';
+        if (b < a) nextUpdate = cand;
       }
     }
     const mnt = maintainStatus(cust && cust.maintainEnd, tp);
@@ -233,14 +243,8 @@ export function buildProductCards(productIds, tickets, batches, custByName, mySi
       if (st === '开发中') {
         reminders.push({ kind: 'pending-release', batchId: bt.id, pkgVersion: bt.pkgVersion || '', status: st, scheduleDate: bt.scheduleDate || '', coverSites: coveredSites.length });
       } else if (st === '可下载' || st === '已交付') {
-        // 有院未应用 pkgVersion → 待更新
-        let anyPending = false;
-        for (const site of coveredSites) {
-          const cust = custByName.get(site);
-          const siteSubs = [...new Set(mine.filter(t => String((t && t.site) || '').trim() === site).map(t => String((t && t.subsystem) || '').trim()))];
-          for (const sub of siteSubs) { if (subVersionOf(cust, pid, sub) !== String(bt.pkgVersion || '').trim()) { anyPending = true; break; } }
-          if (anyPending) break;
-        }
+        // 有院未应用（该院覆盖工单未全关闭）→ 待更新；全部覆盖院都 applied → 不提醒（见 appliedToSite，别用版本相等）
+        const anyPending = coveredSites.some(site => !appliedToSite(mine, site));
         if (anyPending) reminders.push({ kind: 'pending-update', batchId: bt.id, pkgVersion: bt.pkgVersion || '', status: st, scheduleDate: bt.scheduleDate || '', coverSites: coveredSites.length });
       }
     }

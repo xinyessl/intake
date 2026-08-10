@@ -11,7 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   stageOf, emptyStages, isUrgentOpen, maintainStatus, siteSubVersions, subVersionOf,
-  buildHospitalCards, buildProductCards, STAGE_LABELS
+  buildHospitalCards, buildProductCards, appliedToSite, STAGE_LABELS
 } from './fs-09-overview-logic.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -98,6 +98,20 @@ test('A4 siteSubVersions / subVersionOf：两形状兼容', () => {
   assert.equal(subVersionOf(custOld, 'hlyy', 'audit'), 'v2.5', '旧形状子系统兜底产品级');
 });
 
+// A4b appliedToSite：用工单生命周期判「本院已应用某批」（覆盖单全已关闭/已交付），别用版本相等
+test('A4b appliedToSite：覆盖单全已关闭/已交付=已应用；有一条未关闭=未应用；无覆盖单=未应用', () => {
+  const mine = [
+    { site: 'A院', subsystem: 'audit', lifecycle: '已关闭' },
+    { site: 'A院', subsystem: 'report', lifecycle: '已交付' },
+    { site: 'B院', subsystem: 'audit', lifecycle: '待验证' },
+  ];
+  assert.equal(appliedToSite(mine, 'A院'), true, 'A院两单全已关闭/已交付=已应用');
+  assert.equal(appliedToSite(mine, 'B院'), false, 'B院有待验证单=未应用');
+  assert.equal(appliedToSite(mine, '幽灵院'), false, '无覆盖单=未应用（不当"更新已完成"）');
+  // 混一条未关闭即未应用
+  assert.equal(appliedToSite([{ site: 'A院', lifecycle: '已关闭' }, { site: 'A院', lifecycle: '开发中' }], 'A院'), false, '有一条未关闭=未应用');
+});
+
 // A5 医院卡：阶段计数 + 紧急 + 版本 + 下次更新 + 待下载 + 最近更新
 test('A5 buildHospitalCards：字段派生正确', () => {
   const mySites = ['安吉医院', 'B院'];
@@ -112,8 +126,8 @@ test('A5 buildHospitalCards：字段派生正确', () => {
     ['B院', { name: 'B院', maintainEnd: '2026-06-01', products: [{ project: 'hlyy', subsystems: [{ name: 'audit', version: 'v2.6' }] }] }],
   ]);
   const batches = [
-    // 覆盖安吉·可下载·我(wanglong)未下载 → 待下载 + 下次更新
-    { id: 'B-01', product: 'hlyy', status: '可下载', pkgVersion: 'v2.9', scheduleDate: '2026-08-15', downloadedBy: [], _mineTickets: [{ site: '安吉医院', subsystem: 'audit' }] },
+    // 覆盖安吉·可下载·我(wanglong)未下载 + 覆盖单未全关闭（有待验证）→ 未应用 → 待下载 + 下次更新
+    { id: 'B-01', product: 'hlyy', status: '可下载', pkgVersion: 'v2.9', scheduleDate: '2026-08-15', downloadedBy: [], _mineTickets: [{ site: '安吉医院', subsystem: 'audit', lifecycle: '待验证' }] },
   ];
   const cards = buildHospitalCards(mySites, tickets, batches, custByName, ['hlyy'], 'wanglong', deps(TODAY));
   const anji = cards.find(c => c.site === '安吉医院');
@@ -126,9 +140,9 @@ test('A5 buildHospitalCards：字段派生正确', () => {
   assert.equal(anji.maintainDaysLeft, 10);
   assert.equal(anji.versions.length, 1);
   assert.deepEqual(anji.versions[0].subsystems.map(s => s.subsystem).sort(), ['audit', 'report']);
-  assert.ok(anji.nextUpdate && anji.nextUpdate.pkgVersion === 'v2.9', '下次更新=可下载批次 v2.9');
+  assert.ok(anji.nextUpdate && anji.nextUpdate.pkgVersion === 'v2.9', '下次更新=可下载批次 v2.9（覆盖单未全关闭=未应用）');
   assert.equal(anji.nextUpdate.scheduleDate, '2026-08-15');
-  assert.equal(anji.pendingDownload, 1, '我未下载 → 待下载 1');
+  assert.equal(anji.pendingDownload, 1, '可下载·我未下载·未应用 → 待下载 1');
   assert.equal(anji.lastUpdated, '2026-08-09 15:30', '最近更新=最大 updatedAt');
   // B 院：无覆盖批次 → 无下次更新/待下载；维保过期
   const b = cards.find(c => c.site === 'B院');
@@ -138,13 +152,38 @@ test('A5 buildHospitalCards：字段派生正确', () => {
   assert.deepEqual(b.stages, { review: 0, dev: 1, verify: 0, closed: 0 });
 });
 
-test('A5b 已下载则不计待下载、已应用则不算下次更新', () => {
+test('A5b 已应用（覆盖单全已关闭/已交付）→ 不算下次更新/待下载（用 lifecycle 判，非版本相等）', () => {
   const custByName = new Map([['安吉医院', { name: '安吉医院', maintainEnd: '2027-01-01', products: [{ project: 'hlyy', subsystems: [{ name: 'audit', version: 'v2.9' }] }] }]]);
-  // 批次 pkgVersion=v2.9，安吉 audit 现场已是 v2.9（已应用）+ 我已下载 → 无下次更新、无待下载
-  const batches = [{ id: 'B-02', product: 'hlyy', status: '已交付', pkgVersion: 'v2.9', scheduleDate: '2026-08-01', downloadedBy: ['wanglong'], _mineTickets: [{ site: '安吉医院', subsystem: 'audit' }] }];
+  // 批次覆盖安吉的单全已关闭 → 已应用 → 无下次更新、无待下载（即便状态可下载/我未下载）
+  const batches = [{ id: 'B-02', product: 'hlyy', status: '可下载', pkgVersion: 'v2.9', scheduleDate: '2026-08-01', downloadedBy: [], _mineTickets: [{ site: '安吉医院', subsystem: 'audit', lifecycle: '已关闭' }] }];
   const cards = buildHospitalCards(['安吉医院'], [], batches, custByName, ['hlyy'], 'wanglong', deps(TODAY));
-  assert.equal(cards[0].pendingDownload, 0, '我已下载不计待下载');
-  assert.equal(cards[0].nextUpdate, null, '已下载且已应用 → 无下次更新');
+  assert.equal(cards[0].pendingDownload, 0, '覆盖单全关闭=已应用 → 不计待下载');
+  assert.equal(cards[0].nextUpdate, null, '已应用 → 无下次更新');
+});
+
+// A5b-2 prod 真实回归（安吉）：现场版本比包版本还高（2.8.260801-2 vs 2.8.260801-1）+ 覆盖 3 单全已关闭
+//   → 早已更完，不应显「下次更新/待更新」。用 lifecycle 判 applied 才对；旧的版本字符串相等判定会误判"未应用"。
+test('A5b-2 安吉回归：现场版本高于包版本 + 覆盖单全关闭 → 不冒下次更新/待更新', () => {
+  const cust = { name: '安吉县人民医院', maintainEnd: '2027-01-01', products: [{ project: 'hlyy', subsystems: [{ name: 'pkb', version: '2.8.260801-2' }] }] };
+  const custByName = new Map([['安吉县人民医院', cust]]);
+  const batches = [{
+    id: 'B-01', product: 'hlyy', status: '已交付', pkgVersion: '2.8.260801-1', scheduleDate: '2026-08-01', downloadedBy: ['wanglong'],
+    _mineTickets: [
+      { site: '安吉县人民医院', subsystem: 'pkb', lifecycle: '已关闭' },
+      { site: '安吉县人民医院', subsystem: 'pkb', lifecycle: '已关闭' },
+      { site: '安吉县人民医院', subsystem: 'pkb', lifecycle: '已交付' },
+    ]
+  }];
+  // 直接验证 appliedToSite 判据
+  assert.equal(appliedToSite(batches[0]._mineTickets, '安吉县人民医院'), true, '覆盖单全已关闭/已交付 → 已应用（不看版本字符串）');
+  // 医院卡：不冒下次更新/待下载
+  const cards = buildHospitalCards(['安吉县人民医院'], [], batches, custByName, ['hlyy'], 'wanglong', deps(TODAY));
+  assert.equal(cards[0].nextUpdate, null, '安吉早已更完 → 无下次更新（旧版本相等判定会误显 2.8.260801-1）');
+  assert.equal(cards[0].pendingDownload, 0, '无待下载');
+  // 产品卡：不冒 pending-update 提醒
+  const prod = buildProductCards(['hlyy'], [], batches, custByName, ['安吉县人民医院'], 'wanglong', deps(TODAY));
+  const upd = prod[0].reminders.find(r => r.kind === 'pending-update');
+  assert.equal(upd, undefined, '全部覆盖院已应用 → 无待更新提醒');
 });
 
 test('A5c 找不到 customer 也出卡（维保/版本空），不崩', () => {
@@ -169,8 +208,8 @@ test('A6 buildProductCards：跨院聚合工单 + 版本分布 + 提醒', () => 
     ['B院', { name: 'B院', products: [{ project: 'hlyy', subsystems: [{ name: 'audit', version: 'v2.7' }, { name: 'report', version: 'v2.8' }] }] }],
   ]);
   const batches = [
-    { id: 'B-10', product: 'hlyy', status: '开发中', pkgVersion: '', scheduleDate: '2026-08-20', _mineTickets: [{ site: '安吉医院', subsystem: 'audit' }] },     // 待发布
-    { id: 'B-11', product: 'hlyy', status: '可下载', pkgVersion: 'v2.9', scheduleDate: '2026-08-18', _mineTickets: [{ site: 'B院', subsystem: 'audit' }] },       // B院 audit 现场 v2.7≠v2.9 → 待更新
+    { id: 'B-10', product: 'hlyy', status: '开发中', pkgVersion: '', scheduleDate: '2026-08-20', _mineTickets: [{ site: '安吉医院', subsystem: 'audit', lifecycle: '开发中' }] },   // 待发布（开发中批次·lifecycle 不影响 pending-release）
+    { id: 'B-11', product: 'hlyy', status: '可下载', pkgVersion: 'v2.9', scheduleDate: '2026-08-18', _mineTickets: [{ site: 'B院', subsystem: 'audit', lifecycle: '待验证' }] },     // B院覆盖单未关闭=未应用 → 待更新
   ];
   const cards = buildProductCards(['hlyy'], tickets, batches, custByName, mySites, 'wanglong', deps(TODAY));
   assert.equal(cards.length, 1);
@@ -259,6 +298,12 @@ test('B4b site↔customer 按医院名匹配（与 customer-version/custWithTick
   const seg = SRC.slice(SRC.indexOf("url.pathname === '/api/field/overview'"), SRC.indexOf("url.pathname === '/api/intake-detail'"));
   // custByName 用 c.name 作键；it.site == 医院名
   assert.ok(/custByName\.set\(nm, c\)/.test(seg) && /c\.name/.test(seg), 'customer 用 name 建索引（it.site=医院名，全库一致按 name 匹配）');
+});
+
+test('B4c _mineTickets 附派生 lifecycle（供纯逻辑用 lifecycle 判「本院已应用」，非版本相等）', () => {
+  const seg = SRC.slice(SRC.indexOf("url.pathname === '/api/field/overview'"), SRC.indexOf("url.pathname === '/api/intake-detail'"));
+  // 端点把 _mineTickets 每条附 lifecycle: e.lifecycle||deriveLifecycle(e)（同 /api/field/batches 口径）
+  assert.ok(/batchTicketsForUser\(bt, proj, mySites\)\.map\(e => Object\.assign\(\{\}, e, \{ lifecycle: e\.lifecycle \|\| deriveLifecycle\(e\) \}\)\)/.test(seg), '_mineTickets 附派生 lifecycle');
 });
 
 test('B5 FIELD_STATUS_MAP 关键映射未漂移（保证测试用的归并口径与 server 一致）', () => {

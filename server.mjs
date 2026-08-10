@@ -3004,7 +3004,9 @@ const server = http.createServer((req, res) => {
     for (const bt of loadBatches()) {
       if (myProjects && !myProjects.includes(bt.product)) continue;   // 产品范围收敛
       const proj = projById(bt.product);
-      const mine = batchTicketsForUser(bt, proj, mySites);   // 越权医院的覆盖单已裁掉
+      // 附派生 lifecycle（e.lifecycle 可能为空，同 /api/field/batches 口径 e.lifecycle||deriveLifecycle(e)）——
+      //   纯逻辑用工单生命周期判「本院已应用某批」（全部覆盖单已关闭/已交付），比版本字符串相等稳（见 appliedToSite）。
+      const mine = batchTicketsForUser(bt, proj, mySites).map(e => Object.assign({}, e, { lifecycle: e.lifecycle || deriveLifecycle(e) }));
       batches.push(Object.assign({}, bt, { _mineTickets: mine }));
     }
     // 客户台账（按医院名匹配，与 custWithTicketCount/customer-version 一致）
