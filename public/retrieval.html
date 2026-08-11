@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI 检索诊断 · 收件 intake</title>
+<link rel="stylesheet" href="/vendor/tabler/tabler-icons.min.css">
+<link rel="stylesheet" href="/assets/theme.css">
+<script src="/assets/ui.js" defer></script>
+<script src="/assets/shell.js" defer></script>
+<style>
+  /* 外壳固定视口：三块内部各自滚动，不出现 body 全局滚动条（配合 body data-content-layout="list"） */
+  .panel-fill{ flex:1; min-height:0; display:flex; flex-direction:column; }
+  .rd-wrap{ flex:1; min-height:0; display:flex; gap:12px; }
+  /* 对话诊断：左列表 + 右详情 */
+  .rd-list{ flex:0 0 320px; min-width:0; min-height:0; overflow:auto; border:1px solid var(--color-border); border-radius:10px; background:var(--color-surface,#fff); padding:6px; }
+  .rd-detail{ flex:1; min-width:0; min-height:0; overflow:auto; border:1px solid var(--color-border); border-radius:10px; background:var(--color-surface,#fff); padding:14px; }
+  .rd-item{ padding:9px 10px; border-radius:8px; cursor:pointer; margin-bottom:4px; border:1px solid transparent; }
+  .rd-item:hover{ background:var(--color-surface-alt,#f4f5f7); }
+  .rd-item.active{ background:rgba(58,76,168,.10); border-color:rgba(58,76,168,.28); }
+  .rd-item .t{ font-size:13px; font-weight:600; color:var(--color-text); line-height:1.4; overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+  .rd-item .m{ font-size:11px; color:var(--color-text-tertiary); margin-top:4px; display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+  /* 逐轮 + 三类检索块 */
+  .rd-turn{ border:1px solid var(--color-border); border-radius:10px; padding:12px; margin-bottom:14px; background:var(--color-bg,#fbfbfc); }
+  .rd-q{ font-size:13.5px; font-weight:600; color:var(--color-text); margin-bottom:6px; }
+  .rd-a{ font-size:12.5px; color:var(--color-text-secondary); line-height:1.6; max-height:180px; overflow:auto; padding:8px 10px; background:var(--color-surface,#fff); border:1px solid var(--color-border); border-radius:8px; }
+  .rd-cat{ margin-top:12px; }
+  .rd-cat-h{ font-size:12px; font-weight:600; color:var(--color-text-secondary); margin-bottom:6px; display:flex; align-items:center; gap:6px; }
+  .rd-hit{ border:1px solid var(--color-border); border-radius:8px; padding:9px 10px; margin-bottom:7px; background:var(--color-surface,#fff); }
+  .rd-hit-h{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12px; }
+  .rd-hit-src{ font-weight:600; color:var(--color-text); min-width:0; word-break:break-all; }
+  .rd-hit-body{ font-size:11.5px; color:var(--color-text-secondary); line-height:1.55; margin-top:6px; max-height:130px; overflow:auto; white-space:pre-wrap; word-break:break-word; background:var(--color-bg,#fafbfc); border-radius:6px; padding:6px 8px; font-family:var(--font-num,monospace); }
+  .rd-mark{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:7px; }
+  .rd-vbtn{ font-size:11px; padding:2px 8px; border-radius:12px; border:1px solid var(--color-border); background:var(--color-surface,#fff); cursor:pointer; color:var(--color-text-secondary); }
+  .rd-vbtn:hover{ border-color:var(--color-text-tertiary); }
+  .rd-vbtn.on-ok{ background:var(--color-success-light); color:var(--color-success); border-color:var(--color-success); }
+  .rd-vbtn.on-offtopic{ background:var(--color-warning-light); color:var(--color-warning); border-color:var(--color-warning); }
+  .rd-vbtn.on-missing{ background:var(--color-danger-light); color:var(--color-danger); border-color:var(--color-danger); }
+  .rd-vbtn.on-should_hit_missed{ background:var(--color-accent-light); color:var(--color-accent); border-color:var(--color-accent); }
+  .rd-note{ flex:1; min-width:120px; height:26px; font-size:11.5px; }
+  .rd-empty{ color:var(--color-text-tertiary); font-size:13px; text-align:center; padding:40px 10px; }
+  .score-pill{ font-family:var(--font-num,monospace); font-weight:600; }
+  .rd-filter{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
+  .rd-filter .select,.rd-filter .input{ height:30px; font-size:12.5px; }
+  .issue-group{ border:1px solid var(--color-border); border-radius:10px; margin-bottom:12px; overflow:hidden; }
+  .issue-group-h{ padding:8px 12px; font-size:12.5px; font-weight:600; background:var(--color-surface-alt,#f4f5f7); display:flex; align-items:center; gap:8px; }
+  .issue-row{ padding:8px 12px; border-top:1px solid var(--color-border); font-size:12px; display:flex; gap:10px; align-items:flex-start; cursor:pointer; }
+  .issue-row:hover{ background:var(--color-surface-alt,#f7f8fa); }
+</style>
+</head>
+<body data-shell="admin" data-nav="retrieval" data-breadcrumb="AI 引擎 > AI 检索诊断" data-content-layout="list">
+
+<div class="alert alert-info mb-16"><i class="ti ti-search"></i><div><b>AI 检索诊断：</b>看实施现场答疑时 AI <b>实际取到了哪块内容</b>（spec 片段 / 经验库 / 深入思考源码，带打分），逐条标记「对 / 跑题 / 缺失 / 该命中没命中」沉淀成检索问题清单。检索内容随<b>新答疑对话</b>落库；历史问题可用「回放」重跑对比。</div></div>
+
+<div class="seg-group" id="rdTabs" style="align-self:flex-start;margin-bottom:12px">
+  <div class="seg-item active" data-tab="log"><i class="ti ti-messages" style="vertical-align:-2px"></i> 对话诊断</div>
+  <div class="seg-item" data-tab="replay"><i class="ti ti-refresh" style="vertical-align:-2px"></i> 回放</div>
+  <div class="seg-item" data-tab="issues"><i class="ti ti-flag" style="vertical-align:-2px"></i> 问题清单</div>
+</div>
+
+<!-- ========== ① 对话诊断 ========== -->
+<div class="card panel-fill" id="panelLog">
+  <div class="rd-filter" style="padding:12px 14px 0">
+    <select class="select" id="lgProject" style="width:180px"><option value="">全部产品</option></select>
+    <input class="input" id="lgSite" placeholder="医院（精确）" style="width:150px">
+    <input class="input" id="lgSub" placeholder="子系统（精确）" style="width:130px">
+    <input class="input" id="lgFrom" type="date" style="width:150px" title="起始日期">
+    <input class="input" id="lgTo" type="date" style="width:150px" title="截止日期">
+    <label style="font-size:12.5px;display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="lgMarked"> 仅看已标记</label>
+    <button class="btn btn-sm" id="lgRefresh"><i class="ti ti-refresh"></i>刷新</button>
+    <span class="text-12 text-tertiary" id="lgCount" style="margin-left:auto"></span>
+  </div>
+  <div class="rd-wrap" style="padding:10px 14px 14px">
+    <div class="rd-list" id="lgList"></div>
+    <div class="rd-detail" id="lgDetail"><div class="rd-empty">选择左侧一条对话查看其检索内容</div></div>
+  </div>
+</div>
+
+<!-- ========== ② 回放 ========== -->
+<div class="card panel-fill" id="panelReplay" style="display:none">
+  <div style="padding:14px 14px 10px;border-bottom:1px solid var(--color-border)">
+    <div class="rd-filter">
+      <select class="select" id="rpProject" style="width:180px"><option value="">选择产品</option></select>
+      <select class="select" id="rpVersion" style="width:170px"><option value="">全部版本</option></select>
+      <select class="select" id="rpSub" style="width:150px"><option value="">全部子系统</option></select>
+      <label style="font-size:12.5px;display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="rpDeep"> 深入思考（搜源码）</label>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <input class="input" id="rpQuery" placeholder="输入要重跑检索的问题（如实施现场答疑的原问题）" style="flex:1">
+      <button class="btn btn-primary" id="rpRun"><i class="ti ti-player-play"></i>重跑检索</button>
+    </div>
+  </div>
+  <div class="rd-detail" id="rpResult" style="border:none;border-radius:0;flex:1"><div class="rd-empty">输入问题并选择产品后点「重跑检索」查看命中</div></div>
+</div>
+
+<!-- ========== ③ 问题清单 ========== -->
+<div class="card panel-fill" id="panelIssues" style="display:none">
+  <div class="rd-filter" style="padding:12px 14px 0">
+    <select class="select" id="isProject" style="width:180px"><option value="">全部产品</option></select>
+    <button class="btn btn-sm" id="isRefresh"><i class="ti ti-refresh"></i>刷新</button>
+    <span class="text-12 text-tertiary" id="isCount" style="margin-left:auto"></span>
+  </div>
+  <div class="rd-detail" id="isBody" style="margin:10px 14px 14px"><div class="rd-empty">按标记聚合的检索问题（跑题 / 缺失 / 该命中没命中）</div></div>
+</div>
+
+<div class="toast-container" id="toastHost"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+function toast(msg,type){ const host=$('#toastHost'); if(!host)return; const el=document.createElement('div'); el.className='toast '+(type||''); const ic=type==='success'?'ti-circle-check':type==='error'?'ti-alert-circle':type==='warning'?'ti-alert-triangle':'ti-info-circle'; el.innerHTML='<i class="ti '+ic+'"></i><span>'+esc(msg)+'</span>'; host.appendChild(el); requestAnimationFrame(()=>el.classList.add('show')); setTimeout(()=>{ el.classList.remove('show'); setTimeout(()=>el.remove(),300); },2800); }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function fmtTime(s){ s=String(s||''); return s?s.slice(0,16):'—'; }
+const VERDICTS=[['ok','对','ti-check'],['offtopic','跑题','ti-arrows-diagonal'],['missing','缺失','ti-minus'],['should_hit_missed','该命中没命中','ti-target-off']];
+const VLABEL={ok:'对',offtopic:'跑题',missing:'缺失',should_hit_missed:'该命中没命中'};
+
+let PROJECTS=[];
+async function loadProjects(){ try{ const r=await (await fetch('/api/projects')).json(); PROJECTS=r.projects||[]; }catch{ PROJECTS=[]; }
+  const opts='<option value="">全部产品</option>'+PROJECTS.map(p=>'<option value="'+esc(p.id)+'">'+esc(p.name||p.id)+'</option>').join('');
+  ['#lgProject','#isProject'].forEach(id=>{ if($(id)) $(id).innerHTML=opts; });
+  if($('#rpProject')) $('#rpProject').innerHTML='<option value="">选择产品</option>'+PROJECTS.map(p=>'<option value="'+esc(p.id)+'">'+esc(p.name||p.id)+'</option>').join('');
+}
+
+/* ---------- Tabs ---------- */
+$('#rdTabs').addEventListener('click',e=>{ const it=e.target.closest('.seg-item'); if(!it)return; $('#rdTabs').querySelectorAll('.seg-item').forEach(x=>x.classList.toggle('active',x===it)); const t=it.getAttribute('data-tab');
+  $('#panelLog').style.display=t==='log'?'':'none'; $('#panelReplay').style.display=t==='replay'?'':'none'; $('#panelIssues').style.display=t==='issues'?'':'none';
+  if(t==='issues') loadIssues();
+});
+
+/* ---------- 三类检索块渲染（对话诊断 & 回放共用）---------- */
+// markable: 传 {recordId,turnIndex,project,subsystem} 时渲染标记控件（对话诊断）；null=只读（回放）
+function renderRetrieval(rt, markable){
+  if(!rt) return '<div class="rd-empty">无检索内容</div>';
+  const marksIdx={}; if(markable && Array.isArray(markable.marks)) markable.marks.forEach(m=>{ marksIdx[m.hitType+'|'+m.hitKey]=m; });
+  let h='';
+  // spec
+  h+='<div class="rd-cat"><div class="rd-cat-h"><i class="ti ti-file-text"></i>spec 片段（'+(rt.spec||[]).length+'）</div>';
+  if(!(rt.spec||[]).length) h+='<div class="rd-empty" style="padding:14px">未取到 spec 片段</div>';
+  (rt.spec||[]).forEach((s,i)=>{ const hk=(s.title||'')+'#'+i; h+=hitBlock('spec',hk,
+    '<span class="rd-hit-src">'+esc((s.subsystem?s.subsystem+'·':'')+(s.module||'')+' ｜ '+(s.title||''))+'</span>'+scorePill(s.score)+termPills(s.matchedTerms),
+    s.text, markable, marksIdx); });
+  h+='</div>';
+  // kb
+  h+='<div class="rd-cat"><div class="rd-cat-h"><i class="ti ti-book"></i>经验库命中（'+(rt.kb||[]).length+'）</div>';
+  if(!(rt.kb||[]).length) h+='<div class="rd-empty" style="padding:14px">未取到经验库条目</div>';
+  (rt.kb||[]).forEach((k,i)=>{ const hk=(k.q||('kb#'+i)).slice(0,120); h+=hitBlock('kb',hk,
+    '<span class="rd-hit-src">'+esc(k.q||'(空)')+'</span>'+scorePill(k.score)+termPills(k.matchedTerms),
+    (k.a?('答：'+k.a):''), markable, marksIdx); });
+  h+='</div>';
+  // code
+  h+='<div class="rd-cat"><div class="rd-cat-h"><i class="ti ti-code"></i>深入思考源码（'+(rt.code||[]).length+'）'+(rt.deep?'':' · <span class="text-tertiary">本轮未开启深入思考</span>')+'</div>';
+  if(!(rt.code||[]).length) h+='<div class="rd-empty" style="padding:14px">'+(rt.deep?'未取到源码片段':'未开启深入思考')+'</div>';
+  (rt.code||[]).forEach((c,i)=>{ const hk=(c.file||('code#'+i)); h+=hitBlock('code',hk,
+    '<span class="rd-hit-src">'+esc(c.file||'(未知文件)')+'</span>',
+    c.text, markable, marksIdx); });
+  h+='</div>';
+  return h;
+}
+function scorePill(sc){ if(sc==null) return ''; return ' <span class="chip chip-accent score-pill" title="检索得分">'+(Math.round(sc*1000)/1000)+'</span>'; }
+function termPills(ts){ if(!ts||!ts.length) return ''; return ' '+ts.slice(0,6).map(t=>'<span class="chip" style="height:16px;font-size:10px">'+esc(t)+'</span>').join(' '); }
+function hitBlock(hitType,hitKey,headHtml,body,markable,marksIdx){
+  let h='<div class="rd-hit"><div class="rd-hit-h">'+headHtml+'</div>';
+  if(body) h+='<div class="rd-hit-body">'+esc(body)+'</div>';
+  if(markable){ const cur=marksIdx[hitType+'|'+hitKey]; const cv=cur?cur.verdict:'';
+    h+='<div class="rd-mark" data-hittype="'+esc(hitType)+'" data-hitkey="'+esc(hitKey)+'">';
+    VERDICTS.forEach(([v,lab,ic])=>{ h+='<span class="rd-vbtn'+(cv===v?' on-'+v:'')+'" data-verdict="'+v+'"><i class="ti '+ic+'"></i> '+lab+'</span>'; });
+    h+='<input class="input rd-note" placeholder="备注（可选）" value="'+esc(cur&&cur.note||'')+'">';
+    h+='</div>';
+  }
+  h+='</div>'; return h;
+}
+
+/* ---------- ① 对话诊断 ---------- */
+let LOG_ITEMS=[], LOG_CUR=null;
+async function loadLog(){
+  const qs=new URLSearchParams(); const p=$('#lgProject').value; if(p)qs.set('project',p);
+  const site=$('#lgSite').value.trim(); if(site)qs.set('site',site);
+  const sub=$('#lgSub').value.trim(); if(sub)qs.set('subsystem',sub);
+  if($('#lgFrom').value)qs.set('from',$('#lgFrom').value); if($('#lgTo').value)qs.set('to',$('#lgTo').value);
+  if($('#lgMarked').checked)qs.set('marked','1'); qs.set('size','50');
+  $('#lgList').innerHTML='<div class="rd-empty">加载中…</div>';
+  try{ const r=await (await fetch('/api/retrieval-log?'+qs.toString())).json(); LOG_ITEMS=r.items||[];
+    $('#lgCount').textContent='共 '+(r.total||0)+' 条对话'+((r.total||0)>50?'（显示前 50）':'');
+    renderLogList();
+  }catch(e){ $('#lgList').innerHTML='<div class="rd-empty">加载失败：'+esc(e.message)+'</div>'; }
+}
+function renderLogList(){
+  if(!LOG_ITEMS.length){ $('#lgList').innerHTML='<div class="rd-empty">暂无带检索内容的答疑对话<br><span style="font-size:11px">（新答疑对话起自动落库）</span></div>'; return; }
+  $('#lgList').innerHTML=LOG_ITEMS.map((it,i)=>'<div class="rd-item'+(LOG_CUR===it.recordId?' active':'')+'" data-i="'+i+'">'+
+    '<div class="t">'+esc(it.title||'(无标题)')+'</div>'+
+    '<div class="m"><span>'+esc(projName(it.project))+'</span>'+(it.site?'<span>· '+esc(it.site)+'</span>':'')+(it.subsystem?'<span>· '+esc(it.subsystem)+'</span>':'')+'</div>'+
+    '<div class="m"><span>'+fmtTime(it.submittedAt)+'</span><span>· '+it.turnCount+' 轮</span>'+(it.markedCount?'<span class="chip chip-accent" style="height:16px">已标记 '+it.markedCount+'</span>':'')+'</div>'+
+    '</div>').join('');
+}
+function projName(id){ const p=PROJECTS.find(x=>x.id===id); return p?(p.name||id):id; }
+$('#lgList').addEventListener('click',e=>{ const it=e.target.closest('.rd-item'); if(!it)return; const idx=+it.getAttribute('data-i'); const rec=LOG_ITEMS[idx]; if(!rec)return; LOG_CUR=rec.recordId; renderLogList(); showLogDetail(rec); });
+function showLogDetail(rec){
+  const sub=rec.subsystem||'';
+  let h='<div style="margin-bottom:12px"><div style="font-size:15px;font-weight:600">'+esc(rec.title||'(无标题)')+'</div>'+
+    '<div class="text-12 text-tertiary" style="margin-top:4px">'+esc(projName(rec.project))+(rec.site?' · '+esc(rec.site):'')+(sub?' · '+esc(sub):'')+' · '+fmtTime(rec.submittedAt)+'</div></div>';
+  (rec.turns||[]).forEach(t=>{
+    h+='<div class="rd-turn" data-turn="'+t.turnIndex+'">';
+    h+='<div class="rd-q"><i class="ti ti-help-circle" style="color:var(--color-primary)"></i> '+esc(t.question||'(无问题文本)')+'</div>';
+    if(t.answer) h+='<div class="rd-a">'+esc(t.answer)+'</div>';
+    h+=renderRetrieval(t.retrieval,{recordId:rec.recordId,project:rec.project,turnIndex:t.turnIndex,subsystem:sub,marks:t.marks});
+    h+='</div>';
+  });
+  $('#lgDetail').innerHTML=h;
+}
+// 标记事件委托（对话诊断详情区）
+$('#lgDetail').addEventListener('click',e=>{ const btn=e.target.closest('.rd-vbtn'); if(!btn)return; const box=btn.closest('.rd-mark'); const turn=btn.closest('.rd-turn'); if(!box||!turn||!LOG_CUR)return;
+  const rec=LOG_ITEMS.find(x=>x.recordId===LOG_CUR); if(!rec)return;
+  const on=btn.classList.contains('on-'+btn.getAttribute('data-verdict'));
+  const verdict=on?'clear':btn.getAttribute('data-verdict');
+  submitMark(rec, +turn.getAttribute('data-turn'), box, verdict);
+});
+// 备注失焦即存（若该条已选了 verdict）
+$('#lgDetail').addEventListener('blur',e=>{ const inp=e.target.closest('.rd-note'); if(!inp)return; const box=inp.closest('.rd-mark'); const turn=box&&box.closest('.rd-turn'); if(!box||!turn||!LOG_CUR)return;
+  const active=box.querySelector('.rd-vbtn[class*="on-"]'); if(!active)return;   // 没选 verdict 不单独存备注
+  const rec=LOG_ITEMS.find(x=>x.recordId===LOG_CUR); if(!rec)return;
+  const verdict=active.getAttribute('data-verdict');
+  submitMark(rec, +turn.getAttribute('data-turn'), box, verdict, true);
+},true);
+async function submitMark(rec,turnIndex,box,verdict,silent){
+  const hitType=box.getAttribute('data-hittype'), hitKey=box.getAttribute('data-hitkey');
+  const note=(box.querySelector('.rd-note')||{}).value||'';
+  try{
+    const r=await (await fetch('/api/retrieval-mark',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({recordId:rec.recordId,project:rec.project,turnIndex,hitType,hitKey,verdict,note,subsystem:rec.subsystem||''})})).json();
+    if(r.ok===false){ toast('标记失败：'+(r.error||''),'error'); return; }
+    // 本地更新该轮 marks，重渲当前对话（保持展开）
+    const turn=(rec.turns||[]).find(t=>t.turnIndex===turnIndex); if(turn){ turn.marks=(turn.marks||[]).filter(m=>!(m.hitType===hitType&&m.hitKey===hitKey)); if(r.mark) turn.marks.push(r.mark); }
+    // 更新左列表徽章计数
+    rec.markedCount=(rec.turns||[]).reduce((s,t)=>s+((t.marks||[]).length),0);
+    // 只更新 verdict 高亮 + 备注保存，避免整块重渲丢焦点
+    box.querySelectorAll('.rd-vbtn').forEach(b=>{ const v=b.getAttribute('data-verdict'); b.className='rd-vbtn'+((!r.cleared && v===verdict)?(' on-'+v):''); });
+    renderLogList();
+    if(!silent) toast(r.cleared?'已撤销标记':('已标记「'+(VLABEL[verdict]||verdict)+'」'),'success');
+  }catch(e){ toast('标记失败：'+e.message,'error'); }
+}
+$('#lgRefresh').addEventListener('click',loadLog);
+['#lgProject','#lgMarked','#lgFrom','#lgTo'].forEach(id=>$(id).addEventListener('change',loadLog));
+['#lgSite','#lgSub'].forEach(id=>$(id).addEventListener('keydown',e=>{ if(e.key==='Enter')loadLog(); }));
+
+/* ---------- ② 回放 ---------- */
+$('#rpProject').addEventListener('change',async()=>{ const pid=$('#rpProject').value;
+  const proj=PROJECTS.find(p=>p.id===pid);
+  $('#rpSub').innerHTML='<option value="">全部子系统</option>'+((proj&&proj.subsystems||[]).map(s=>'<option value="'+esc(s.name||s.key)+'">'+esc(s.desc||s.name||s.key)+'</option>').join(''));
+  $('#rpVersion').innerHTML='<option value="">全部版本</option>';
+  if(pid){ try{ const r=await (await fetch('/api/versions?project='+encodeURIComponent(pid))).json(); $('#rpVersion').innerHTML='<option value="">全部版本</option>'+((r.versions||[]).map(v=>'<option value="'+esc(v)+'">'+esc(v)+'</option>').join('')); }catch{} }
+});
+$('#rpRun').addEventListener('click',async()=>{
+  const pid=$('#rpProject').value; const query=$('#rpQuery').value.trim();
+  if(!pid){ toast('请选择产品','warning'); return; }
+  if(!query){ toast('请输入问题','warning'); return; }
+  $('#rpResult').innerHTML='<div class="rd-empty">检索中…</div>';
+  try{ const r=await (await fetch('/api/retrieval-replay',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({project:pid,version:$('#rpVersion').value,subsystem:$('#rpSub').value,query,deep:$('#rpDeep').checked})})).json();
+    if(r.ok===false){ $('#rpResult').innerHTML='<div class="rd-empty">回放失败：'+esc(r.error||'')+'</div>'; return; }
+    $('#rpResult').innerHTML='<div class="rd-turn"><div class="rd-q"><i class="ti ti-help-circle" style="color:var(--color-primary)"></i> '+esc(query)+'</div>'+renderRetrieval(r.retrieval,null)+'</div>';
+  }catch(e){ $('#rpResult').innerHTML='<div class="rd-empty">回放失败：'+esc(e.message)+'</div>'; }
+});
+
+/* ---------- ③ 问题清单 ---------- */
+async function loadIssues(){
+  const p=$('#isProject').value; $('#isBody').innerHTML='<div class="rd-empty">加载中…</div>';
+  try{ const r=await (await fetch('/api/retrieval-issues'+(p?'?project='+encodeURIComponent(p):''))).json();
+    $('#isCount').textContent='共 '+(r.total||0)+' 条问题';
+    const bv=(r.groups&&r.groups.byVerdict)||{};
+    if(!r.total){ $('#isBody').innerHTML='<div class="rd-empty">暂无检索问题（标记为跑题 / 缺失 / 该命中没命中 的条目会聚合到这里）</div>'; return; }
+    let h='';
+    ['offtopic','missing','should_hit_missed'].forEach(v=>{ const arr=bv[v]||[]; if(!arr.length)return;
+      h+='<div class="issue-group"><div class="issue-group-h"><i class="ti ti-flag"></i>'+esc(VLABEL[v]||v)+'（'+arr.length+'）</div>'+
+        arr.map(m=>'<div class="issue-row" data-record="'+esc(m.recordId)+'" data-project="'+esc(m.project)+'" data-turn="'+m.turnIndex+'">'+
+          '<span class="chip" style="flex:0 0 auto">'+esc(m.hitType)+'</span>'+
+          '<div style="flex:1;min-width:0"><div style="font-weight:600;word-break:break-all">'+esc(m.hitKey)+'</div>'+
+          '<div class="text-11 text-tertiary" style="margin-top:2px">'+esc(projName(m.project))+(m.subsystem?' · '+esc(m.subsystem):'')+(m.note?' · '+esc(m.note):'')+' · '+esc(m.by||'')+' '+fmtTime(m.at)+'</div></div>'+
+          '<i class="ti ti-external-link text-tertiary" style="flex:0 0 auto"></i></div>').join('')+
+        '</div>';
+    });
+    $('#isBody').innerHTML=h;
+  }catch(e){ $('#isBody').innerHTML='<div class="rd-empty">加载失败：'+esc(e.message)+'</div>'; }
+}
+$('#isBody').addEventListener('click',e=>{ const row=e.target.closest('.issue-row'); if(!row)return;
+  // 回链到对话诊断：切 tab + 按 project 拉列表 + 定位该记录
+  const rid=row.getAttribute('data-record'), pid=row.getAttribute('data-project');
+  $('#rdTabs').querySelector('.seg-item[data-tab="log"]').click();
+  if($('#lgProject')) $('#lgProject').value=pid||'';
+  LOG_CUR=rid;
+  loadLog().then(()=>{ const rec=LOG_ITEMS.find(x=>x.recordId===rid); if(rec) showLogDetail(rec); else toast('该对话未在当前列表（可能被日期/筛选排除）','info'); });
+});
+$('#isRefresh').addEventListener('click',loadIssues);
+$('#isProject').addEventListener('change',loadIssues);
+
+/* ---------- init ---------- */
+(async function(){ await loadProjects(); loadLog(); })();
+</script>
+</body>
+</html>

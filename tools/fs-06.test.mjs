@@ -468,18 +468,23 @@ test('B-KB-REL3 逻辑层：kbSearch(minScore=2) 过滤 sc=1、minScore=1（draw
   assert.ok(String(strict[0].q).includes(REL_TOK), '保留的是强相关那条');
 });
 
-test('B-KB-REL4 server.mjs：consult 走 kbRetrieve 语义混合召回并显式收紧 minScore=2（未配 embedding 时退回关键词 minScore=2，等价旧 kbSearch 门槛）', () => {
-  // consult 那处改为 kbRetrieve（语义混合召回），仍传 minScore=2（收紧关键词弱匹配门槛）
-  assert.match(SRC, /hits = await kbRetrieve\(proj\.id, qtext, 5, 2\)/, '★ consult 调用 kbRetrieve 传 minScore=2（语义混合 + 关键词门槛收紧）');
-  // kbRetrieve/_kbScored 签名带 minScore（关键词门槛沿用），默认 1
-  assert.match(SRC, /async function kbRetrieve\(projId, query, n = 5, minScore = 1\)/, '★ kbRetrieve 默认 minScore=1（历史行为）');
+test('B-KB-REL4 server.mjs：consult 走 kbRetrieveScored 语义混合召回并显式收紧 minScore=2（未配 embedding 时退回关键词 minScore=2，等价旧 kbSearch 门槛）', () => {
+  // PD-03：consult 改用带分变体 kbRetrieveScored（同 kbRetrieve 召回口径，额外带 score 供检索诊断），hits 由 .map(x=>x.e) 派生；仍传 minScore=2（收紧关键词弱匹配门槛）
+  assert.match(SRC, /kbScored = await kbRetrieveScored\(proj\.id, qtext, 5, 2\); hits = kbScored\.map\(x => x\.e\)/, '★ consult 调用 kbRetrieveScored 传 minScore=2、hits 由 .e 派生（语义混合 + 关键词门槛收紧）');
+  // kbRetrieveScored 复用 _kbScored/同 minScore/同排序/同 slice（与 kbRetrieve 召回口径一致），额外透出 score
+  assert.match(SRC, /async function kbRetrieveScored\(projId, query, n = 5, minScore = 1\)/, '★ kbRetrieveScored 默认 minScore=1（同 kbRetrieve 历史门槛）');
+  // kbRetrieve/_kbScored 签名带 minScore（关键词门槛沿用），默认 1（保留兼容）
+  assert.match(SRC, /async function kbRetrieve\(projId, query, n = 5, minScore = 1\)/, '★ kbRetrieve 默认 minScore=1（历史行为，保留）');
   assert.match(SRC, /function _kbScored\(projId, query, qtok, qv, minScore = 1\)/, '_kbScored 带 minScore 作关键词门槛');
   // kbSearch 签名仍带 minScore 默认 1（保留、未删）
   assert.match(SRC, /function kbSearch\(projId, query, n = 5, minScore = 1\)/, 'kbSearch 默认 minScore=1（保留兼容）');
-  // 仅 consult 那一处 kbRetrieve 传 minScore=2；kb-search 跨产品用 _kbScored(...,1) 默认门槛不受影响
-  const retrCalls = [...SRC.matchAll(/kbRetrieve\(([^)]*)\)/g)].map(m => m[0]).filter(s => !s.includes('function kbRetrieve'));
+  // 收紧到 minScore=2 的检索恰是「consult 口径」的两处：consult 答题（L2839）+ PD-03 retrieval-replay 回放（刻意复刻 consult 检索口径做对比）。
+  //   kb-search 跨产品用 _kbScored(...,1) 默认门槛不受影响；此断言防「别处 KB 检索误改门槛」。
+  const retrCalls = [...SRC.matchAll(/kbRetrieveScored?\(([^)]*)\)/g)].map(m => m[0]).filter(s => !/function kbRetrieveScored?/.test(s));
   const withMin2 = retrCalls.filter(s => /,\s*2\s*\)/.test(s));
-  assert.equal(withMin2.length, 1, '★ 全仓仅一处 kbRetrieve 传 minScore=2（即 consult），其它检索默认门槛不受影响');
+  assert.equal(withMin2.length, 2, '★ 仅「consult 口径」两处 kbRetrieveScored 传 minScore=2（consult 答题 + retrieval-replay 回放），其它检索默认门槛不受影响');
+  // 两处都是带分变体（回放复刻 consult 口径）
+  assert.ok(withMin2.every(s => /kbRetrieveScored/.test(s)), '两处 minScore=2 均为 kbRetrieveScored');
 });
 
 /* ---- KB-02 · 前端「正在思考中…」等待期动效（field.html）：AI 气泡在首个 token 前显动效，首个 o.v 到达即清 ---- */

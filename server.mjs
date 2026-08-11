@@ -82,6 +82,14 @@ const MAX_BODY = 30 * 1024 * 1024;   // 请求体上限（含 base64 截图，�
 const MODEL_CFG_FILE = path.join(DATA_DIR, 'model-api.json');
 function readModelCfg() { try { return JSON.parse(fs.readFileSync(MODEL_CFG_FILE, 'utf8')) || {}; } catch { return {}; } }
 function writeModelCfg(c) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(MODEL_CFG_FILE, JSON.stringify(c)); } catch {} }
+// PD-03 检索诊断标记：文件存（gitignore 覆盖 /data/），同 model-api.json 范式，非 MySQL。
+//   形状 {marks:{[key]:{key,recordId,project,turnIndex,hitType,hitKey,verdict,note,by,at}}}，key=recordId|turnIndex|hitType|hitKey。
+const RETRIEVAL_MARKS_FILE = path.join(DATA_DIR, 'retrieval-marks.json');
+function readRetrievalMarks() { try { const j = JSON.parse(fs.readFileSync(RETRIEVAL_MARKS_FILE, 'utf8')); return (j && j.marks && typeof j.marks === 'object') ? j.marks : {}; } catch { return {}; } }
+function writeRetrievalMarks(marks) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(RETRIEVAL_MARKS_FILE, JSON.stringify({ marks })); } catch {} }
+const RETRIEVAL_VERDICTS = new Set(['ok', 'offtopic', 'missing', 'should_hit_missed']);   // 对 / 跑题 / 缺失 / 该命中没命中
+const RETRIEVAL_HIT_TYPES = new Set(['spec', 'kb', 'code']);
+function retrievalMarkKey(recordId, turnIndex, hitType, hitKey) { return `${recordId}|${turnIndex}|${hitType}|${hitKey}`; }
 function maskKey(k) { k = String(k || ''); return k.length > 8 ? (k.slice(0, 4) + '……' + k.slice(-4)) : (k ? '已配置' : ''); }
 // 候选模型 = 主 + 备用（只保留配了 key 的），按序试：主挂了自动切备用。
 function modelCandidates(cfg) {
@@ -766,6 +774,53 @@ function codeSearch(proj, ver, query, specHits, n = 4, subKey = '') {
     for (const i of nums) { if (snip.length > 2000) { snip += '\n…'; break; } if (last && i > last + 1) snip += '\n…'; snip += '\n' + (full[i - 1] || ''); last = i; }
     return { file: f.path, text: snip.trim().slice(0, 2200) };
   });
+}
+
+// PD-03（检索诊断）：specSearch 的「带分」变体——同一召回 + 打分逻辑，但额外透出每片段的 IDF 加权得分 score + 命中词 matchedTerms。
+//   ⚠️ 不改 specSearch 原函数（consult 主流程喂模型仍用它）；本函数仅供检索诊断（consult 捕获 / 回放）取带分结果，与原函数召回口径一致。
+function specSearchScored(proj, ver, query, n = 5, subKey = '') {
+  const qset = new Set(kbTokenize(query)); if (!qset.size) return [];
+  let specs = loadSpecTexts(proj, ver); if (!specs.length) return [];
+  if (subKey) { const sc = specs.filter(s => (s.subsystem || '') === subKey); if (sc.length) specs = sc; }
+  const tableQ = TABLE_Q.test(query), apiQ = API_Q.test(query), schemaQ = tableQ || apiQ;
+  const chunks = [];
+  for (const s of specs) {
+    const titleHit = new Set();
+    for (const t of kbTokenize((s.title || '') + ' ' + (s.module || ''))) if (qset.has(t)) titleHit.add(t);
+    for (const ck of chunkSpec(s.text)) chunks.push({ subsystem: s.subsystem, module: s.module, title: s.title, titleHit, text: ck, tset: new Set(kbTokenize(ck)) });
+  }
+  if (!chunks.length) return [];
+  const df = {}; for (const c of chunks) for (const t of c.tset) df[t] = (df[t] || 0) + 1;
+  const N = chunks.length, idf = t => Math.log((N + 1) / ((df[t] || 0) + 0.5));
+  const ranked = chunks.map(c => {
+    let sc = 0; const matched = []; for (const t of qset) if (c.tset.has(t)) { sc += idf(t); matched.push(t); }
+    const boost = (tableQ && DATA_MARK.test(c.text)) || (apiQ && API_MARK.test(c.text));
+    if (boost) { let tm = 0; for (const t of c.titleHit) tm += idf(t); sc += tm * 2.4; }
+    return { c, sc, matched };
+  }).filter(x => x.sc > 0).sort((a, b) => b.sc - a.sc);
+  const cap = schemaQ ? 3 : 2, out = [], perFile = {};
+  for (const { c, sc, matched } of ranked) { if ((perFile[c.title] || 0) >= cap) continue; perFile[c.title] = (perFile[c.title] || 0) + 1; out.push({ subsystem: c.subsystem, module: c.module, title: c.title, text: c.text.slice(0, 800), score: Math.round(sc * 1000) / 1000, matchedTerms: matched.slice(0, 12) }); if (out.length >= n) break; }
+  return out;
+}
+// PD-03：kbRetrieve 的「带分」变体——返回 [{e,rank}] 里的条目 + 其检索得分 score。复用 _kbScored（同 kbRetrieve 打分口径）。
+async function kbRetrieveScored(projId, query, n = 5, minScore = 1) {
+  const qtok = new Set(kbTokenize(query)); if (!qtok.size) return [];
+  let qv = null;
+  if (loadEmbedCfg()) { try { await ensureKbEmbed(projId); const vs = await embedTexts([query]); qv = (vs && vs[0]) || null; } catch { qv = null; } }
+  return _kbScored(projId, query, qtok, qv, minScore).sort((a, b) => b.rank - a.rank).slice(0, n)
+    .map(x => ({ e: x.e, score: Math.round((x.rank || 0) * 1000) / 1000, matchedTerms: [...new Set(kbTokenize([x.e.q, x.e.a, x.e.subsystem, x.e.module].join(' ')))].filter(t => qtok.has(t)).slice(0, 12) }));
+}
+// PD-03：把「实际喂给 AI 的三类检索内容」组装成紧凑、体积可控的 retrieval 对象（consult 落库 / 回放共用）。
+//   传入 specScored（specSearchScored 结果）/ kbScored（kbRetrieveScored 结果）/ codeHits（codeSearch 结果，无分）。
+//   cap：spec≤5、kb≤5、code≤4；截断：spec/code text≤300、kb q≤200、kb a≤300。弱匹配/无命中/未 deep → 对应数组为空（照存，「没取到」本身是排查信息）。
+function buildRetrieval({ query, deep, ver, subsystem }, specScored, kbScored, codeHits) {
+  const clip = (s, n) => String(s == null ? '' : s).slice(0, n);
+  return {
+    query: clip(query, 500), deep: !!deep, ver: clip(ver, 60), subsystem: clip(subsystem, 60), at: nowStamp(),
+    spec: (Array.isArray(specScored) ? specScored : []).slice(0, 5).map(s => ({ subsystem: clip(s.subsystem, 60), module: clip(s.module, 80), title: clip(s.title, 120), score: typeof s.score === 'number' ? s.score : 0, text: clip(s.text, 300), matchedTerms: Array.isArray(s.matchedTerms) ? s.matchedTerms.slice(0, 12) : [] })),
+    kb: (Array.isArray(kbScored) ? kbScored : []).slice(0, 5).map(x => { const e = x.e || x; return { q: clip(e.q, 200), a: clip(e.a, 300), score: typeof x.score === 'number' ? x.score : 0, subsystem: clip(e.subsystem, 60), module: clip(e.module, 80), matchedTerms: Array.isArray(x.matchedTerms) ? x.matchedTerms.slice(0, 12) : [] }; }),
+    code: (Array.isArray(codeHits) ? codeHits : []).slice(0, 4).map(c => ({ file: clip(c.file, 200), text: clip(c.text, 300) })),
+  };
 }
 
 // ===== Git 集成（GitLab）：贴 组/仓 地址 → 自动 id/名称/子系统；服务器 clone 到缓存供读 spec/版本 =====
@@ -2358,6 +2413,100 @@ const server = http.createServer((req, res) => {
     const hits = specSearch(proj, String(url.searchParams.get('ver') || '').trim(), q, 5);
     return send(res, 200, JSON.stringify({ hits: hits.map(h => ({ module: h.module, title: h.title, text: h.text })) }));
   }
+
+  // ---------- PD-03 AI 检索诊断（admin：未进 LINK_OK/FIELD_OK/FS08 → authGate 已对非 admin 返 403/401，无需页内再判） ----------
+  //   数据来源：consult 答题时落库的 retrieval（挂 chat 末条 assistant）+ 回放（重跑检索）；标记文件存 data/retrieval-marks.json。
+  if (url.pathname === '/api/retrieval-replay' && req.method === 'POST') {   // 回放：对任意问题重跑三类检索（带分）做对比
+    return readBody(req, async (b, err) => {
+      if (!b) return send(res, 400, JSON.stringify({ ok: false, error: err }));
+      const proj = projById(b.project); if (!proj) return send(res, 400, JSON.stringify({ ok: false, error: '项目不存在' }));
+      const query = String(b.query || '').trim(); if (!query) return send(res, 400, JSON.stringify({ ok: false, error: '缺少问题' }));
+      const ver = String(b.version || '').trim(), sub = String(b.subsystem || '').trim(), deep = !!b.deep;
+      try { refreshRepos(proj, false); } catch {}   // 同 /api/spec-search：回放前拉最新代码/tag
+      let specScored = [], kbScored = [], codeHits = null;
+      try { specScored = specSearchScored(proj, ver, query, 5, sub); } catch {}
+      try { kbScored = await kbRetrieveScored(proj.id, query, 5, 2); } catch {}
+      if (deep) { try { codeHits = codeSearch(proj, ver, query, specSearch(proj, ver, query, 5, sub), 4, sub); } catch {} }
+      const retrieval = buildRetrieval({ query, deep, ver, subsystem: sub }, specScored, kbScored, codeHits);
+      return send(res, 200, JSON.stringify({ ok: true, retrieval }));
+    });
+  }
+  if (url.pathname === '/api/retrieval-log') {   // 诊断列表：列有 retrieval 的 consult 对话（支持 filter + 分页）
+    const wantProj = String(url.searchParams.get('project') || '').trim();
+    const fSite = String(url.searchParams.get('site') || '').trim();
+    const fSub = String(url.searchParams.get('subsystem') || '').trim();
+    const onlyMarked = url.searchParams.get('marked') === '1';
+    const from = String(url.searchParams.get('from') || '').trim(), to = String(url.searchParams.get('to') || '').trim();
+    let page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10) || 1);
+    let size = Math.min(50, Math.max(1, parseInt(url.searchParams.get('size') || '20', 10) || 20));
+    const marks = readRetrievalMarks();
+    const marksByRecord = {};   // recordId → [mark...]（供 markedCount + 逐轮 marks 注入）
+    for (const m of Object.values(marks)) { (marksByRecord[m.recordId] || (marksByRecord[m.recordId] = [])).push(m); }
+    const pids = wantProj ? [wantProj] : Object.keys(CACHE.intakes);
+    const rows = [];
+    for (const pid of pids) {
+      const store = CACHE.intakes[pid] || {};
+      for (const e of Object.values(store)) {
+        if (!e || e.deleted || e.type !== 'consult') continue;
+        if (fSite && String(e.site || '') !== fSite) continue;
+        if (fSub && String(e.subsystem || '') !== fSub) continue;
+        const day = String(e.submittedAt || '').slice(0, 10);
+        if (from && day && day < from) continue;
+        if (to && day && day > to) continue;
+        // 逐轮：只保留带 retrieval 的 assistant 轮（turnIndex=该 assistant 在 chat 里的下标；question=其前最近的 user 文本）
+        const chat = Array.isArray(e.chat) ? e.chat : [];
+        const turns = [];
+        for (let i = 0; i < chat.length; i++) {
+          const m = chat[i]; if (!m || m.role !== 'assistant' || !m.retrieval) continue;
+          let q = ''; for (let j = i - 1; j >= 0; j--) { if (chat[j] && chat[j].role === 'user') { q = String(chat[j].text || ''); break; } }
+          const tmarks = (marksByRecord[e.id] || []).filter(x => x.turnIndex === i);
+          turns.push({ turnIndex: i, question: q, answer: String(m.text || ''), retrieval: m.retrieval, marks: tmarks });
+        }
+        if (!turns.length) continue;   // 无 retrieval 的老 consult 不列（本功能只诊断有捕获的对话）
+        const markedCount = (marksByRecord[e.id] || []).length;
+        if (onlyMarked && !markedCount) continue;
+        rows.push({ recordId: e.id, project: pid, site: e.site || '', subsystem: e.subsystem || '', title: e.title || '', submittedAt: e.submittedAt || '', turnCount: turns.length, markedCount, turns });
+      }
+    }
+    rows.sort((a, b) => String(b.submittedAt).localeCompare(String(a.submittedAt)));   // 新在前
+    const total = rows.length, start = (page - 1) * size;
+    return send(res, 200, JSON.stringify({ ok: true, total, page, size, items: rows.slice(start, start + size) }));
+  }
+  if (url.pathname === '/api/retrieval-mark' && req.method === 'POST') {   // 标记单条检索（对/跑题/缺失/该命中没命中 + 备注）；verdict=clear/空 → 撤销
+    return readBody(req, (b, err) => {
+      if (!b) return send(res, 400, JSON.stringify({ ok: false, error: err }));
+      const recordId = String(b.recordId || '').trim(); if (!recordId) return send(res, 400, JSON.stringify({ ok: false, error: '缺少 recordId' }));
+      const project = String(b.project || '').trim();
+      const turnIndex = Number.isFinite(+b.turnIndex) ? (+b.turnIndex | 0) : -1; if (turnIndex < 0) return send(res, 400, JSON.stringify({ ok: false, error: 'turnIndex 非法' }));
+      const hitType = String(b.hitType || '').trim(); if (!RETRIEVAL_HIT_TYPES.has(hitType)) return send(res, 400, JSON.stringify({ ok: false, error: 'hitType 非法' }));
+      const hitKey = String(b.hitKey || '').trim(); if (!hitKey) return send(res, 400, JSON.stringify({ ok: false, error: '缺少 hitKey' }));
+      const key = retrievalMarkKey(recordId, turnIndex, hitType, hitKey);
+      const verdict = String(b.verdict || '').trim();
+      const marks = readRetrievalMarks();
+      if (!verdict || verdict === 'clear') { if (marks[key]) { delete marks[key]; writeRetrievalMarks(marks); } return send(res, 200, JSON.stringify({ ok: true, cleared: true, key })); }
+      if (!RETRIEVAL_VERDICTS.has(verdict)) return send(res, 400, JSON.stringify({ ok: false, error: 'verdict 非法' }));
+      const by = user ? (user.name || user.username) : '';
+      const mark = { key, recordId, project, turnIndex, hitType, hitKey, verdict, subsystem: String(b.subsystem || '').slice(0, 60), note: String(b.note || '').slice(0, 500), by, at: nowStamp() };
+      marks[key] = mark; writeRetrievalMarks(marks);
+      return send(res, 200, JSON.stringify({ ok: true, mark }));
+    });
+  }
+  if (url.pathname === '/api/retrieval-issues') {   // 检索问题清单：聚合所有非 ok 标记（按 verdict/产品/子系统分组）
+    const wantProj = String(url.searchParams.get('project') || '').trim();
+    const marks = readRetrievalMarks();
+    const issues = Object.values(marks).filter(m => m && m.verdict && m.verdict !== 'ok' && (!wantProj || m.project === wantProj));
+    issues.sort((a, b) => String(b.at).localeCompare(String(a.at)));
+    const byVerdict = {}, byProject = {}, bySubsystem = {};
+    for (const m of issues) {
+      (byVerdict[m.verdict] || (byVerdict[m.verdict] = [])).push(m);
+      (byProject[m.project || '(未标产品)'] || (byProject[m.project || '(未标产品)'] = [])).push(m);
+      // 子系统未随 mark 存 → 归到 hitKey 无法反推，这里用「(未分组)」占位；前端主要按 verdict/产品看
+      const sub = String(m.subsystem || '(未标子系统)');
+      (bySubsystem[sub] || (bySubsystem[sub] = [])).push(m);
+    }
+    return send(res, 200, JSON.stringify({ ok: true, total: issues.length, groups: { byVerdict, byProject, bySubsystem }, issues }));
+  }
+
   if (url.pathname === '/api/git-refresh' && req.method === 'POST') {   // 手动「同步代码」：立即拉最新 tag + 工作树，返回各仓 HEAD/标签数
     return readBody(req, async (b, err) => {
       const proj = projById(b && b.project); if (!proj) return send(res, 400, JSON.stringify({ ok: false, error: '项目不存在' }));
@@ -2684,11 +2833,20 @@ const server = http.createServer((req, res) => {
       const lastUser = [...msgs].reverse().find(m => m.role === 'user'); const qtext = lastUser ? lastUser.content : '';
       const sub = String(b.subsystem || '').trim();   // 用户指定的子系统（空=全部）
       const imgs = (Array.isArray(b.images) ? b.images : []).slice(0, 6);   // 本轮附的截图（data URL，≤6）→ 多模态并进末条 user，让 AI 结合图答疑；落库见下方 convId 已知处
-      let hits = [];
-      try { hits = await kbRetrieve(proj.id, qtext, 5, 2); } catch {}   // 检索异常不阻断咨询；失败即按无命中处理，不注入、不展示引用
+      // PD-03：改用带分变体 kbRetrieveScored 一次性拿「带分结果」——hits（喂模型 + kbRefs）由它 .map(x=>x.e) 派生（同 kbRetrieve 召回口径：同 _kbScored/同排序/同 slice/同 minScore=2），
+      //   避免为「检索捕获」再对 query 多做一次 embedding 调用（复用同一次计算）。检索异常不阻断咨询：失败即按无命中。
+      let hits = [], kbScored = [];
+      try { kbScored = await kbRetrieveScored(proj.id, qtext, 5, 2); hits = kbScored.map(x => x.e); } catch { hits = []; kbScored = []; }
       const specHits = specSearch(proj, String(b.version || '').trim(), qtext, 5, sub);   // consult：语义混合召回（配了 embedding 时 sim>=SEM_GATE||lex>=2 入选；未配/失败自动退回关键词 minScore=2）。弱匹配（只命中 1 个常见 token 且语义不相关）既不注入 consultSystem 也不发 kb 事件
 
       const codeHits = b.deep ? codeSearch(proj, String(b.version || '').trim(), qtext, specHits, 4, sub) : null;   // 「深入思考」：搜源码
+      // PD-03 检索诊断：把「实际喂给 AI 的三类检索内容」组装成紧凑 retrieval 对象，挂到本轮 assistant 消息（与 kbRefs 同位置、同持久化路径）。
+      //   spec 用 specSearchScored（同 specSearch 召回口径、额外带 score）；kb 复用上面已算的 kbScored；code 无分。捕获不阻断答疑（try 静默）。
+      let retrieval = null;
+      try {
+        const specScored = specSearchScored(proj, String(b.version || '').trim(), qtext, 5, sub);
+        retrieval = buildRetrieval({ query: qtext, deep: !!b.deep, ver: String(b.version || '').trim(), subsystem: sub }, specScored, kbScored, codeHits);
+      } catch {}
       const kbRefs = consultKbRefs(proj.id, hits);
       // 只有模型已收到含 kbBlock 的 system prompt 且真正返回首个有效片段，才对前端声明“已参考经验”。
       // 未配模型、上游在首 token 前失败、检索失败/无命中都不发 kb 事件，避免把“检索到”误报为“模型已参考”。
@@ -2741,6 +2899,13 @@ const server = http.createServer((req, res) => {
           let ai = 0;
           for (let i = 0; i < chat.length - 1; i++) if (chat[i].role === 'assistant') { const refs = prevAiRefs[ai++]; if (refs && refs.length) chat[i].kbRefs = refs; }
           if (kbInjected && kbRefs.length) chat[chat.length - 1].kbRefs = kbRefs;
+        } catch {}
+        // PD-03：retrieval 与 kbRefs 同位置回贴——续聊时按第 K 条 assistant 回贴历史轮 retrieval（前端 payload 不带它），再把本轮 retrieval 挂到最后一条 assistant。
+        try {
+          const prevRetr = (prev && Array.isArray(prev.chat) ? prev.chat : []).filter(m => m && m.role === 'assistant').map(m => (m && m.retrieval) || null);
+          let ri = 0;
+          for (let i = 0; i < chat.length - 1; i++) if (chat[i].role === 'assistant') { const r = prevRetr[ri++]; if (r) chat[i].retrieval = r; }
+          if (retrieval) chat[chat.length - 1].retrieval = retrieval;
         } catch {}
         const rec = { id: convId, type: 'consult', project: proj.id, version: String(b.version || '').trim() || (link ? link.ver : ''), site: String(b.site || '').trim() || (link ? link.site : ''), subsystem: sub, module: '', title, priority: '', reporter, role: user ? user.role : 'field', contact: '', media, status: '沟通中', lifecycle: '已答复', assignee: '', analysis: null, resolution: {}, chat, submittedAt: (prev && prev.submittedAt) || nowStamp(), updatedAt: nowStamp() };
         await saveIntake(proj, rec);

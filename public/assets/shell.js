@@ -39,7 +39,8 @@
     ]},
     { section: "AI 引擎", items: [
       { id: "model-config", label: "模型配置", icon: "ti-cpu", href: "/model-config.html" },
-      { id: "prompts", label: "提示词配置", icon: "ti-message-code", href: "/prompts.html" }
+      { id: "prompts", label: "提示词配置", icon: "ti-message-code", href: "/prompts.html" },
+      { id: "retrieval", label: "AI 检索诊断", icon: "ti-search", href: "/retrieval.html" }
     ]},
     { section: "系统", items: [
       { id: "accounts", label: "账号管理", icon: "ti-users", href: "/accounts.html" }

@@ -82,7 +82,9 @@ test('/api/consult 在首个有效模型片段内才发引用，失败/无模型
   assert.match(route, /if \(!kbInjected && kbRefs\.length\)/, '仅首次且非空时发送');
   assert.match(route, /kbHits: kbInjected \? kbRefs\.length : 0/, '完成计数按实际注入门控');
   assert.match(route, /chat\[chat\.length - 1\]\.kbRefs = kbRefs/, '实际引用随本轮助手消息持久化');
-  assert.match(route, /try \{ hits = await kbRetrieve[\s\S]*?\} catch \{\}/, '检索失败降级为空命中，不误显示也不阻断咨询');
+  // PD-03：consult 改用带分变体 kbRetrieveScored 一次拿带分结果，hits 由 .map(x=>x.e) 派生（同 kbRetrieve 召回口径）；
+  //   检索失败仍 catch 降级为空 hits（不误显示、不阻断咨询）——结构变、行为不变。
+  assert.match(route, /try \{ kbScored = await kbRetrieveScored\(proj\.id, qtext, 5, 2\); hits = kbScored\.map\(x => x\.e\); \} catch \{ hits = \[\]; kbScored = \[\]; \}/, '检索失败降级为空命中，不误显示也不阻断咨询（PD-03：kbRetrieveScored 派生 hits）');
 });
 
 test('field 请求不回传引用声明，实时/草稿/系统快照/历史 reopen 都按助手消息恢复', () => {
