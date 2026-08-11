@@ -143,6 +143,20 @@ function renderEditor(){
       <span class="pmeta right" id="curLen"></span>
     </div>`;
   updateWarn();
+  // 预览/编辑切换：直接给按钮绑事件（每次重渲都重绑，不靠委托——彻底排除委托边界问题）
+  document.querySelectorAll('#curMode [data-mode]').forEach(b=>{ b.type='button'; b.onclick=()=>setPromptView(b.getAttribute('data-mode')); });
+}
+// 编辑/预览切换：预览用 mdToHtml 渲染当前文本，{{占位}}高亮；纯文本(无markdown)加一行说明
+function setPromptView(mode){
+  const ta=$('#curText'), pv=$('#curPreview'); if(!ta||!pv) return;
+  document.querySelectorAll('#curMode [data-mode]').forEach(x=>x.classList.toggle('on', x.getAttribute('data-mode')===mode));
+  if(mode==='preview'){
+    const raw=ta.value||'';
+    const hasMd=/\*\*|`|(^|\n)\s*#{1,6}\s|(^|\n)\s*[-*+]\s|(^|\n)\s*\d+[.、)]\s/.test(raw);
+    let html=(window.mdToHtml?window.mdToHtml(raw):esc(raw).replace(/\n/g,'<br>')).replace(/\{\{\s*(\w+)\s*\}\}/g,'<span class="ph-tok">{{$1}}</span>');
+    if(!hasMd) html='<div class="ppreview-note"><i class="ti ti-info-circle"></i> 此提示词是纯文本（没用 **加粗**/`代码`/列表等 markdown），预览与原文基本一致——不是没生效。</div>'+html;
+    pv.innerHTML=html; pv.style.display=''; ta.style.display='none';
+  } else { ta.style.display=''; pv.style.display='none'; }
 }
 
 /* 占位缺失检查（前端即时提示，与后端 checkRequiredPlaceholders 同口径） */
@@ -165,20 +179,6 @@ $('#editHost')?.addEventListener('click', e=>{
     const s=ta.selectionStart||0, en=ta.selectionEnd||0, ins='{{'+ph+'}}';
     ta.value=ta.value.slice(0,s)+ins+ta.value.slice(en); ta.focus(); ta.selectionStart=ta.selectionEnd=s+ins.length;
     updateWarn(); return;
-  }
-  const mb=e.target.closest('#curMode [data-mode]');
-  if(mb){
-    const mode=mb.getAttribute('data-mode'), ta=$('#curText'), pv=$('#curPreview');
-    $$('#curMode [data-mode]').forEach(x=>x.classList.toggle('on', x===mb));
-    if(mode==='preview'){
-      // 渲染当前编辑内容为 markdown 预览；{{占位}}高亮成 chip（占位不是 md，单独标出来方便看）
-      const raw=ta?ta.value:'';
-      const hasMd=/\*\*|`|^\s*#{1,6}\s|^\s*[-*+]\s|^\s*\d+[.、)]\s/m.test(raw);   // 有没有 markdown 可渲染
-      let html=(window.mdToHtml?window.mdToHtml(raw):esc(raw)).replace(/\{\{\s*(\w+)\s*\}\}/g,'<span class="ph-tok">{{$1}}</span>');
-      if(!hasMd) html='<div class="ppreview-note"><i class="ti ti-info-circle"></i> 此提示词是纯文本（没用 **加粗**/`代码`/列表等 markdown），预览与原文基本一致——不是没生效。</div>'+html;
-      if(pv){ pv.innerHTML=html; pv.style.display=''; } if(ta) ta.style.display='none';
-    } else { if(ta) ta.style.display=''; if(pv) pv.style.display='none'; }
-    return;
   }
   const btn=e.target.closest('[data-act]'); if(!btn) return;
   const act=btn.getAttribute('data-act');
