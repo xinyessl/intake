@@ -91,7 +91,7 @@ test('field 请求不回传引用声明，实时/草稿/系统快照/历史 reop
   const send = extractBalancedFunction(FIELD, 'function sendConsult(');
   assert.match(send, /messages: chat\.messages\.map\(function \(m\) \{ return \{ role: m\.role, content: m\.content \}; \}\)/, '请求只传 role/content');
   assert.match(send, /consultKbFromEvent\(o\)/, '流式事件经过真实注入门控');
-  assert.match(FIELD, /m\.role === 'assistant' && normalizeKbRefs\(m\.kbRefs\)\.length\) renderKbCite/, '草稿/系统快照重放助手引用');
+  assert.match(FIELD, /m\.role === 'assistant' && normalizeKbRefs\(m\.kbRefs\)\.length && !isNonSubstantiveReply\(m\.content\)\) renderKbCite/, '草稿/系统快照重放助手引用（没覆盖/无相关的非实质答复不显引用）');
   assert.match(FIELD, /kbRefs: normalizeKbRefs\(m\.kbRefs\)/, '历史 reopen 读取服务端持久化引用');
   assert.match(FIELD, /已参考经验（' \+ kb\.length \+ '条）/, '用户文案准确且不再写“参考经验库”');
 });
