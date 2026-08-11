@@ -1306,7 +1306,23 @@ function kbSearch(projId, query, n = 5, minScore = 1) {   // 零依赖关键词�
    embedding 配置存 data/model-api.json 的 `embed` 字段 {provider,model,baseUrl,apiKey}（与 models 并存、互不覆盖）。
    核心 kbRetrieve = 关键词 + 语义混合召回：语义可用时 sim>=SEM_GATE || lex>=minScore 入选（rank=sim+微量 lex 加权）；
    语义不可用（未配置/调用/embed 任一步失败）时**完全退回旧关键词行为**（kbSearch 同口径）。绝不报错、绝不空结果——见 §安全兜底。 */
-const SEM_GATE = 0.42;                                               // 语义相关门槛（余弦 · 不相关文本实测约 0.23）
+const SEM_GATE = 0.42;                                               // 语义相关门槛（余弦 · 不相关文本实测约 0.23）·全局默认（kb-search drawer / _kbScored 入选门槛）
+// consult 专用二次注入门槛（不改全局 SEM_GATE，避免影响 kb-search drawer / intake-chat）：
+//   kbRetrieveScored 已按全局 SEM_GATE 召回，但 sim=0.42 的边缘条目（与提问相关度很弱）也会被召回。
+//   consult 拿到 kbScored 后再过一遍 consultKbGate：语义命中要 sim≥CONSULT_KB_MIN_SIM，纯词命中要够强（matchedTerms≥CONSULT_KB_MIN_LEX），
+//   弱于此的不注入 consultSystem、不发 kb 事件、不落 kbRefs（=「本次无相关经验库」），避免答疑引用与提问无关的经验（如 sim=0.42 卡边缘的条目）。
+const CONSULT_KB_MIN_SIM = 0.5;                                      // 语义命中最低余弦（>SEM_GATE 0.42：宁可少引也别引 0.42 边缘的无关条目）
+const CONSULT_KB_MIN_LEX = 3;                                        // 纯词命中（语义不可用时）最少不同 query token 数（>consult 现召回门槛 2：弱词匹配也不引）
+// 判定单条 kbScored 是否够强、可注入 consult。kbScored 元素 {e,score,matchedTerms}：
+//   score(rank) 语义可用时 = sim + 微量 lex 加权(≤~0.012)，取值 [0.42, ~1.01]；语义不可用时 = lex(整数 ≥2，consult minScore=2)。
+//   故 score<1.1 ⇒ 语义分（判 sim≥CONSULT_KB_MIN_SIM）；score≥1.1 ⇒ 纯词计数（判 matchedTerms≥CONSULT_KB_MIN_LEX）。
+function consultKbStrong(x) {
+  const score = typeof x.score === 'number' ? x.score : 0;
+  const lex = Array.isArray(x.matchedTerms) ? x.matchedTerms.length : 0;
+  if (score >= 1.1) return lex >= CONSULT_KB_MIN_LEX;                 // 语义不可用：纯词计数，要够多不同 token 命中
+  return score >= CONSULT_KB_MIN_SIM;                                // 语义可用：余弦要过 consult 收紧门槛
+}
+function consultKbFilter(kbScored) { return (Array.isArray(kbScored) ? kbScored : []).filter(consultKbStrong); }
 function loadEmbedCfg() { const e = (readModelCfg() || {}).embed; return (e && e.apiKey && e.baseUrl && e.model) ? e : null; }   // 三要素齐全才算配置好，否则 null（=语义不可用，退回关键词）
 async function embedTexts(texts) {                                   // 批量取向量：POST {baseUrl}/embeddings，返回 [[...],[...]] 与 input 顺序对齐
   const cfg = loadEmbedCfg(); if (!cfg) throw new Error('未配置 embedding 模型');
@@ -3035,6 +3051,10 @@ const server = http.createServer((req, res) => {
       //   避免为「检索捕获」再对 query 多做一次 embedding 调用（复用同一次计算）。检索异常不阻断咨询：失败即按无命中。
       let hits = [], kbScored = [];
       try { kbScored = await kbRetrieveScored(proj.id, qtext, 5, 2); hits = kbScored.map(x => x.e); } catch { hits = []; kbScored = []; }
+      // consult 专用二次门槛：全局 SEM_GATE(0.42) 召回口径下 sim=0.42 的边缘条目也会进 kbScored（与提问相关度很弱、易误引）。
+      //   这里过一遍 consultKbFilter（语义 sim≥CONSULT_KB_MIN_SIM=0.5 / 纯词 matchedTerms≥CONSULT_KB_MIN_LEX=3），只让「够强相关」的条目进注入(consultSystem)+kb 事件+kbRefs。
+      //   kbScored（全召回）保留原样给 buildRetrieval 检索诊断（「召回了但太弱没注入」本身是有用的排查信息）；仅 hits（喂模型+kbRefs 的口径）收敛为强相关子集。
+      hits = consultKbFilter(kbScored).map(x => x.e);
       const cver = String(b.version || '').trim();
       // PD-04：先按提问路由到功能模块（仅对有「功能模块地图」的产品生效）。无地图 → map=null → 完全走原 specSearch（向后兼容）。
       let route = null; try { const map = loadModuleMap(proj, cver); if (map) route = routeQuestion(map, qtext, sub); } catch { route = null; }
