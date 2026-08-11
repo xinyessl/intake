@@ -4091,6 +4091,14 @@ button.f-ov-card { width: 100%; appearance: none; }
     scrollChatBottom();
   }
 
+  // 咨询答复是否「非实质」——「说明书没覆盖/无相关」这类只说"没料"的答复：无价值沉淀经验库，不提示沉淀（据回复内容判定）。
+  //   新提示词下此类答复本就是简短一句"当前说明书摘录里没有覆盖…/没有找到相关描述…"，命中这些信号即视为非实质。
+  function isNonSubstantiveReply(text) {
+    var t = String(text || '').trim();
+    if (!t) return true;
+    return /没有覆盖|未覆盖|没有找到相关|没找到相关|没有相关(说明书|描述|规则)|说明书.{0,6}没有(覆盖|相关)/.test(t);
+  }
+
   // aborted=true 表示用户主动「停止」：保留已流式生成的部分文本，但不追加「沉淀经验库 / 转工单」入口（答复不完整，无价值沉淀）。
   function finishConsult(bub, acc, aborted, kbRefs) {
     chat.abortCtrl = null;   // 「停止」：本轮收尾统一复位中断控制器（done/停止/错误都经这里）
@@ -4099,8 +4107,9 @@ button.f-ov-card { width: 100%; appearance: none; }
     var replyText = acc || (bub && bub.textContent) || '';
     if (replyText) { var m = { role: 'assistant', content: replyText }; var refs = normalizeKbRefs(kbRefs); if (refs.length) m.kbRefs = refs; chat.messages.push(m); chat.lastA = replyText; }
     if (aborted) { scrollChatBottom(); saveDraft(); return; }   // 主动停止：不追加 KB/转工单入口，仅保留已生成内容 + 存草稿
-    // 咨询「已解决 → 沉淀经验库」入口（AC-19-KB）：结束后在气泡下追加一枚小按钮
-    if (replyText && chat.lastQ) appendKbSink();
+    // 咨询「已解决 → 沉淀经验库」入口（AC-19-KB）：结束后在气泡下追加一枚小按钮。
+    //   仅当答复是「实质答复」时才提示沉淀——「说明书没覆盖/无相关」这类非实质答复无价值沉淀，不提示（据回复内容判定）。
+    if (replyText && chat.lastQ && !isNonSubstantiveReply(replyText)) appendKbSink();
     // 咨询「转工单」入口（CT-3）：AI 答复结束且已有咨询会话（chat.convId）→ 追加一枚转工单按钮，实施判断该升级时点它 → 弹确认弹窗 → 直接建单（不再靠 AI 生成工单模板续聊）。
     if (replyText && chat.convId) appendConsultToIntake();
     scrollChatBottom();
