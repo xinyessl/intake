@@ -621,7 +621,7 @@ function specEntries(proj, ver) {   // → [{subsystem,module,title}]，跨子�
   const out = [], ref = safeRef(ver);
   for (const src of specSources(proj)) {
     if (src.repoPath && fs.existsSync(src.repoPath)) {
-      for (const f of specFilesAt(src.repoPath, ref).slice(0, 30)) { const t = specFileText(src.repoPath, ref, f).slice(0, 800); if (!t) continue; const m = parseSpecText(t, path.basename(f)); out.push({ subsystem: src.sub, module: m.module, title: m.title }); }
+      for (const f of specFilesAt(src.repoPath, ref).slice(0, 300)) { const t = specFileText(src.repoPath, ref, f).slice(0, 800); if (!t) continue; const m = parseSpecText(t, path.basename(f)); out.push({ subsystem: src.sub, module: m.module, title: m.title }); }
     } else if (src.specsPath) { try { for (const f of fs.readdirSync(src.specsPath)) { if (!f.endsWith('.md') || f.startsWith('_') || f.toLowerCase() === 'readme.md') continue; const m = parseSpecText(fs.readFileSync(path.join(src.specsPath, f), 'utf8').slice(0, 800), f); out.push({ subsystem: src.sub, module: m.module, title: m.title }); } } catch {} }
     if (out.length >= 90) break;
   }
@@ -637,11 +637,11 @@ function loadSpecTexts(proj, ver) {
   const specs = [];
   for (const src of specSources(proj)) {
     if (src.repoPath && fs.existsSync(src.repoPath)) {
-      for (const f of specFilesAt(src.repoPath, ref).slice(0, 60)) { const full = specFileText(src.repoPath, ref, f); if (!full) continue; const m = parseSpecText(full.slice(0, 800), path.basename(f)); specs.push({ subsystem: src.sub, module: m.module, title: m.title, text: full }); }
+      for (const f of specFilesAt(src.repoPath, ref).slice(0, 400)) { const full = specFileText(src.repoPath, ref, f); if (!full) continue; const m = parseSpecText(full.slice(0, 800), path.basename(f)); specs.push({ subsystem: src.sub, module: m.module, title: m.title, text: full }); }
     } else if (src.specsPath) {
       try { for (const f of fs.readdirSync(src.specsPath)) { if (!f.endsWith('.md') || f.startsWith('_') || f.toLowerCase() === 'readme.md') continue; const full = fs.readFileSync(path.join(src.specsPath, f), 'utf8'); const m = parseSpecText(full.slice(0, 800), f); specs.push({ subsystem: src.sub, module: m.module, title: m.title, text: full }); } } catch {}
     }
-    if (specs.length >= 150) break;
+    if (specs.length >= 1000) break;   // 每子系统≤400 + 总≤1000（原 60/150 太低——pwrs 有 86 份 spec，前 60 之后的被漏掉导致误判「没覆盖」）
   }
   SPEC_TEXT_CACHE.set(key, { at: now, specs });
   return specs;
