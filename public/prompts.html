@@ -36,6 +36,14 @@
   .ptext{ width:100%; box-sizing:border-box; font-family:var(--font-mono,ui-monospace,Menlo,Consolas,monospace); font-size:12.5px; line-height:1.6; min-height:calc(100vh - 380px); resize:vertical; padding:10px 12px; border:1px solid var(--color-border); border-radius:8px; background:var(--color-bg-input,#fff); color:var(--color-text); tab-size:2; }
   .ptext:focus{ outline:none; border-color:var(--color-primary); box-shadow:0 0 0 3px rgba(58,76,168,.12); }
   .ptext.warn{ border-color:var(--color-warning,#e6a23c); }
+  .pmode{ display:inline-flex; gap:2px; background:var(--color-bg,#eef1f5); border-radius:8px; padding:2px; margin-bottom:8px; }
+  .pmode button{ border:none; background:transparent; font-size:12.5px; padding:4px 13px; border-radius:6px; cursor:pointer; color:var(--color-text-secondary); display:inline-flex; align-items:center; gap:5px; }
+  .pmode button.on{ background:var(--color-surface,#fff); color:var(--color-text); font-weight:600; box-shadow:0 1px 2px rgba(0,0,0,.06); }
+  .ppreview{ min-height:calc(100vh - 380px); overflow:auto; padding:14px 16px; border:1px solid var(--color-border); border-radius:8px; background:var(--color-surface,#fff); font-size:13px; line-height:1.7; color:var(--color-text); }
+  .ppreview p{ margin:8px 0; } .ppreview p:first-child{ margin-top:0; }
+  .ppreview strong{ color:var(--color-text); font-weight:600; } .ppreview ul,.ppreview ol{ margin:8px 0; padding-left:22px; } .ppreview li{ margin:3px 0; }
+  .ppreview code{ background:var(--color-bg,#eef1f5); padding:1px 5px; border-radius:4px; font-family:var(--font-mono,monospace); font-size:12px; }
+  .ppreview .ph-tok{ background:var(--color-accent-light,#e1f3f1); color:var(--color-accent,#0e8f86); border-radius:4px; padding:0 4px; font-family:var(--font-mono,monospace); font-size:12px; white-space:nowrap; }
   .pcard-foot{ display:flex; align-items:center; gap:10px; margin-top:10px; }
   .pwarn{ font-size:12px; color:var(--color-danger,#d9534f); display:none; align-items:center; gap:5px; }
   .pwarn.show{ display:inline-flex; }
@@ -124,7 +132,9 @@ function renderEditor(){
     </div>
     <div class="pcard-desc">${esc(it.desc||'')}</div>
     <div class="ph-list">${chips||noph}</div>
+    <div class="pmode" id="curMode"><button data-mode="edit" class="on"><i class="ti ti-pencil"></i>编辑</button><button data-mode="preview"><i class="ti ti-eye"></i>预览</button></div>
     <textarea class="ptext" id="curText" spellcheck="false" maxlength="${it.maxLen||20000}">${esc(it.template||'')}</textarea>
+    <div class="ppreview" id="curPreview" style="display:none"></div>
     <div class="pcard-foot">
       <button class="btn btn-primary btn-sm" data-act="save"><i class="ti ti-check"></i>保存</button>
       <button class="btn btn-sm" data-act="reset"><i class="ti ti-rotate"></i>恢复默认</button>
@@ -154,6 +164,18 @@ $('#editHost')?.addEventListener('click', e=>{
     const s=ta.selectionStart||0, en=ta.selectionEnd||0, ins='{{'+ph+'}}';
     ta.value=ta.value.slice(0,s)+ins+ta.value.slice(en); ta.focus(); ta.selectionStart=ta.selectionEnd=s+ins.length;
     updateWarn(); return;
+  }
+  const mb=e.target.closest('#curMode [data-mode]');
+  if(mb){
+    const mode=mb.getAttribute('data-mode'), ta=$('#curText'), pv=$('#curPreview');
+    $$('#curMode [data-mode]').forEach(x=>x.classList.toggle('on', x===mb));
+    if(mode==='preview'){
+      // 渲染当前编辑内容为 markdown 预览；{{占位}}高亮成 chip（占位不是 md，单独标出来方便看）
+      const raw=ta?ta.value:'';
+      const html=(window.mdToHtml?window.mdToHtml(raw):esc(raw)).replace(/\{\{\s*(\w+)\s*\}\}/g,'<span class="ph-tok">{{$1}}</span>');
+      if(pv){ pv.innerHTML=html; pv.style.display=''; } if(ta) ta.style.display='none';
+    } else { if(ta) ta.style.display=''; if(pv) pv.style.display='none'; }
+    return;
   }
   const btn=e.target.closest('[data-act]'); if(!btn) return;
   const act=btn.getAttribute('data-act');
