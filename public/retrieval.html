@@ -31,7 +31,11 @@
   .rd-a.md-body pre{ background:var(--color-bg); padding:8px 10px; border-radius:6px; overflow:auto; margin:6px 0; } .rd-a.md-body pre code{ background:none; padding:0; color:var(--color-text); }
   .rd-a.md-body h1,.rd-a.md-body h2,.rd-a.md-body h3,.rd-a.md-body h4{ font-size:13px; margin:8px 0 4px; color:var(--color-text); }
   .rd-cat{ margin-top:12px; }
-  .rd-cat-h{ font-size:12px; font-weight:600; color:var(--color-text-secondary); margin-bottom:6px; display:flex; align-items:center; gap:6px; }
+  .rd-cat-h{ font-size:12px; font-weight:600; color:var(--color-text-secondary); margin-bottom:6px; display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none; }
+  .rd-cat-h .cat-chev{ margin-left:auto; font-size:14px; transition:transform .15s; opacity:.7; }
+  .rd-cat.collapsed .rd-cat-h .cat-chev{ transform:rotate(-90deg); }
+  .rd-cat.collapsed .rd-cat-h{ margin-bottom:0; }
+  .rd-cat.collapsed .rd-cat-body{ display:none; }
   .rd-hit{ border:1px solid var(--color-border); border-radius:8px; padding:9px 10px; margin-bottom:7px; background:var(--color-surface,#fff); }
   .rd-hit-h{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12px; }
   .rd-hit-src{ font-weight:600; color:var(--color-text); min-width:0; word-break:break-all; }
@@ -137,30 +141,30 @@ $('#rdTabs').addEventListener('click',e=>{ const it=e.target.closest('.seg-item'
 function renderRetrieval(rt, markable){
   if(!rt) return '<div class="rd-empty">无检索内容</div>';
   const marksIdx={}; if(markable && Array.isArray(markable.marks)) markable.marks.forEach(m=>{ marksIdx[m.hitType+'|'+m.hitKey]=m; });
+  const chev='<i class="ti ti-chevron-down cat-chev"></i>';
   let h='';
-  // spec
-  h+='<div class="rd-cat"><div class="rd-cat-h"><i class="ti ti-file-text"></i>spec 片段（'+(rt.spec||[]).length+'）</div>';
-  if(!(rt.spec||[]).length) h+='<div class="rd-empty" style="padding:14px">未取到 spec 片段</div>';
-  (rt.spec||[]).forEach((s,i)=>{ const hk=(s.title||'')+'#'+i; h+=hitBlock('spec',hk,
+  // spec（默认折叠，点头展开）
+  let sb=''; if(!(rt.spec||[]).length) sb+='<div class="rd-empty" style="padding:14px">未取到 spec 片段</div>';
+  (rt.spec||[]).forEach((s,i)=>{ const hk=(s.title||'')+'#'+i; sb+=hitBlock('spec',hk,
     '<span class="rd-hit-src">'+esc((s.subsystem?s.subsystem+'·':'')+(s.module||'')+' ｜ '+(s.title||''))+'</span>'+scorePill(s.score)+termPills(s.matchedTerms),
     s.text, markable, marksIdx); });
-  h+='</div>';
+  h+='<div class="rd-cat collapsed"><div class="rd-cat-h"><i class="ti ti-file-text"></i>spec 片段（'+(rt.spec||[]).length+'）'+chev+'</div><div class="rd-cat-body">'+sb+'</div></div>';
   // kb
-  h+='<div class="rd-cat"><div class="rd-cat-h"><i class="ti ti-book"></i>经验库命中（'+(rt.kb||[]).length+'）</div>';
-  if(!(rt.kb||[]).length) h+='<div class="rd-empty" style="padding:14px">未取到经验库条目</div>';
-  (rt.kb||[]).forEach((k,i)=>{ const hk=(k.q||('kb#'+i)).slice(0,120); h+=hitBlock('kb',hk,
+  let kbb=''; if(!(rt.kb||[]).length) kbb+='<div class="rd-empty" style="padding:14px">未取到经验库条目</div>';
+  (rt.kb||[]).forEach((k,i)=>{ const hk=(k.q||('kb#'+i)).slice(0,120); kbb+=hitBlock('kb',hk,
     '<span class="rd-hit-src">'+esc(k.q||'(空)')+'</span>'+scorePill(k.score)+termPills(k.matchedTerms),
     (k.a?('答：'+k.a):''), markable, marksIdx); });
-  h+='</div>';
+  h+='<div class="rd-cat collapsed"><div class="rd-cat-h"><i class="ti ti-book"></i>经验库命中（'+(rt.kb||[]).length+'）'+chev+'</div><div class="rd-cat-body">'+kbb+'</div></div>';
   // code
-  h+='<div class="rd-cat"><div class="rd-cat-h"><i class="ti ti-code"></i>深入思考源码（'+(rt.code||[]).length+'）'+(rt.deep?'':' · <span class="text-tertiary">本轮未开启深入思考</span>')+'</div>';
-  if(!(rt.code||[]).length) h+='<div class="rd-empty" style="padding:14px">'+(rt.deep?'未取到源码片段':'未开启深入思考')+'</div>';
-  (rt.code||[]).forEach((c,i)=>{ const hk=(c.file||('code#'+i)); h+=hitBlock('code',hk,
+  let cb=''; if(!(rt.code||[]).length) cb+='<div class="rd-empty" style="padding:14px">'+(rt.deep?'未取到源码片段':'未开启深入思考')+'</div>';
+  (rt.code||[]).forEach((c,i)=>{ const hk=(c.file||('code#'+i)); cb+=hitBlock('code',hk,
     '<span class="rd-hit-src">'+esc(c.file||'(未知文件)')+'</span>',
     c.text, markable, marksIdx); });
-  h+='</div>';
+  h+='<div class="rd-cat collapsed"><div class="rd-cat-h"><i class="ti ti-code"></i>深入思考源码（'+(rt.code||[]).length+'）'+(rt.deep?'':' · <span class="text-tertiary">本轮未开启深入思考</span>')+chev+'</div><div class="rd-cat-body">'+cb+'</div></div>';
   return h;
 }
+// 检索分类块（spec/经验库/源码）折叠展开：点分类头切换，默认收起（对话诊断 + 回放共用）。mark 按钮/备注在 .rd-cat-body 内，点它们不命中 .rd-cat-h、不误折叠。
+document.addEventListener('click',function(e){ const hd=e.target.closest('.rd-cat-h'); if(!hd) return; const cat=hd.closest('.rd-cat'); if(cat) cat.classList.toggle('collapsed'); });
 function scorePill(sc){ if(sc==null) return ''; return ' <span class="chip chip-accent score-pill" title="检索得分">'+(Math.round(sc*1000)/1000)+'</span>'; }
 function termPills(ts){ if(!ts||!ts.length) return ''; return ' '+ts.slice(0,6).map(t=>'<span class="chip" style="height:16px;font-size:10px">'+esc(t)+'</span>').join(' '); }
 function hitBlock(hitType,hitKey,headHtml,body,markable,marksIdx){
