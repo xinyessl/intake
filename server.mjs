@@ -802,6 +802,198 @@ function specSearchScored(proj, ver, query, n = 5, subKey = '') {
   for (const { c, sc, matched } of ranked) { if ((perFile[c.title] || 0) >= cap) continue; perFile[c.title] = (perFile[c.title] || 0) + 1; out.push({ subsystem: c.subsystem, module: c.module, title: c.title, text: c.text.slice(0, 800), score: Math.round(sc * 1000) / 1000, matchedTerms: matched.slice(0, 12) }); if (out.length >= n) break; }
   return out;
 }
+
+// ===== PD-04：答疑「先路由到功能模块、命中才检索」（纯代码打分 + 阈值·确定性；仅对有「功能模块地图」的产品生效，无地图产品保持原 specSearch 行为不变） =====
+// 阈值常量（部署后在 pwrs 上用回放调准）：路由最高分 ≥ 阈值 → 命中；否则 miss。
+const ROUTE_MATCH_MIN = 3.0;        // tier-1 questionRoutes / tier-2 specs 命中阈值（IDF 加权重叠得分）
+const ROUTE_ALIAS_BONUS = 6.0;      // query 整串命中某 alias 子串 → 强 bonus（别名是人工整理的高判别短语）
+const ROUTE_EXACT_TIER3 = 8.0;      // tier-3 精确名（config/table/api）命中 → 直接强命中（远超阈值）
+const MAP_TEXT_CACHE = new Map();   // projId@ref -> { at, map|null, repoPath }（同 loadSpecTexts 10min 缓存）
+const MAP_REL = 'docs/specs/00-功能模块地图.json';
+// 读产品仓的功能模块地图；解析失败/不存在 → null（该产品即走原 specSearch，向后兼容）。
+function loadModuleMap(proj, ver) {
+  const ref = safeRef(ver), key = (proj && proj.id) + '@' + ref, now = Date.now();
+  const c = MAP_TEXT_CACHE.get(key); if (c && now - c.at < 600000) return c.map;
+  let map = null, repoPath = '';
+  for (const src of specSources(proj)) {
+    if (!src.repoPath) continue;
+    const txt = specFileText(src.repoPath, ref, MAP_REL);   // 走现有 git/工作树读法（带 ref 走 git show，否则读工作树）
+    if (!txt || !txt.trim()) continue;
+    try { const j = JSON.parse(txt); if (j && (Array.isArray(j.questionRoutes) || Array.isArray(j.specs))) { map = j; repoPath = src.repoPath; break; } } catch {}
+  }
+  MAP_TEXT_CACHE.set(key, { at: now, map, repoPath });
+  return map;
+}
+// 找出装地图的那个仓（读被引 spec 文件用它的 repoPath；缓存里已记）
+function moduleMapRepo(proj, ver) { const ref = safeRef(ver), c = MAP_TEXT_CACHE.get((proj && proj.id) + '@' + ref); return (c && c.repoPath) || ''; }
+// IDF 加权重叠打分：query 分词 vs 目标文本分词，稀有词权重高、压通用词（复用 kbTokenize + specSearch 的 IDF 思路）。
+//   df 由「本次候选集合」内每词的文档频率算（候选=所有 route 的 searchText / 所有 spec 的索引文本）。
+function routeScorer(candTexts) {
+  const tsets = candTexts.map(t => new Set(kbTokenize(t)));
+  const df = {}; for (const s of tsets) for (const t of s) df[t] = (df[t] || 0) + 1;
+  const N = tsets.length || 1;
+  const idf = t => Math.log((N + 1) / ((df[t] || 0) + 0.5));   // 稀有词高权重
+  return (qset, i) => { let sc = 0; for (const t of qset) if (tsets[i].has(t)) sc += idf(t); return sc; };
+}
+// 路由匹配（纯代码打分 + 阈值·确定性，不调 AI）：tier-3 精确反查 > tier-1 questionRoutes > tier-2 specs 兜底。
+function routeQuestion(map, query, subKey = '') {
+  const q = String(query || '');
+  const qLower = q.toLowerCase();
+  const qset = new Set(kbTokenize(q));
+  const routes = Array.isArray(map && map.questionRoutes) ? map.questionRoutes : [];
+  const specs = Array.isArray(map && map.specs) ? map.specs : [];
+  const miss = () => ({ matched: false, tier: 0, score: 0, topN: [] });
+  if (!qset.size) return miss();
+
+  // —— Tier-1（优先）：questionRoutes 打分（searchText IDF 重叠 + 别名整串命中强 bonus）——
+  //    ⚠️ tier-1 先跑：questionRoute 命中即带出人工整理的 answerFacts/mustNotConfuse（高价值），
+  //       tier-3 精确反查只作 tier-1 未过阈值时的兜底增强（否则「order_instruction 怎么配」会被 tier-3 抢走、丢掉 answerFacts）。
+  if (routes.length) {
+    const scoreAt = routeScorer(routes.map(r => String((r && r.searchText) || [(r && r.title), ...((r && r.aliases) || []), ...((r && r.keywords) || [])].filter(Boolean).join(' '))));
+    let best = null;
+    const scored = routes.map((r, i) => {
+      let sc = scoreAt(qset, i);
+      // 别名整串命中：query 含某 alias 作为子串（或 alias 含 query）→ 强 bonus（别名是人工短语，判别性高）
+      let aliasHit = false;
+      for (const a of ((r && r.aliases) || [])) { const al = String(a || '').toLowerCase().trim(); if (al.length >= 3 && (qLower.includes(al) || (al.length >= 4 && al.includes(qLower) && qLower.length >= 4))) { aliasHit = true; break; } }
+      if (aliasHit) sc += ROUTE_ALIAS_BONUS;
+      return { r, sc: Math.round(sc * 1000) / 1000, aliasHit };
+    }).sort((a, b) => b.sc - a.sc);
+    best = scored[0];
+    if (best && best.sc >= ROUTE_MATCH_MIN) {
+      const r = best.r;
+      return {
+        matched: true, tier: 1, route: { id: r.id, title: r.title }, score: best.sc,
+        primaryRefs: Array.isArray(r.primaryRefs) ? r.primaryRefs : [],
+        contextRefs: Array.isArray(r.contextRefs) ? r.contextRefs : [],
+        answerFacts: Array.isArray(r.answerFacts) ? r.answerFacts : [],
+        mustNotConfuse: Array.isArray(r.mustNotConfuse) ? r.mustNotConfuse : [],
+        topN: scored.slice(0, 5).map(x => ({ id: x.r.id, title: x.r.title, score: x.sc })),
+      };
+    }
+    // tier-1 未过阈值 → 记 topN 供诊断，继续 tier-3/tier-2 兜底
+    var tier1TopN = scored.slice(0, 5).map(x => ({ id: x.r.id, title: x.r.title, score: x.sc }));
+  }
+
+  // —— Tier-3（兜底增强）：tier-1 没过阈值时，query 里若出现 indexes 精确名（config key / table 名 / api 路径）→ 强命中所属 spec ——
+  const idx = (map && map.indexes) || {};
+  const tier3Hits = [];   // {name,specIds[],kind,needle}
+  const scanExact = (arr, nameField, kind) => {
+    for (const it of (Array.isArray(arr) ? arr : [])) {
+      const name = String((it && it[nameField]) || '').trim(); if (name.length < 3) continue;   // 太短的名（如单字段）不做精确路由，避免误命中
+      const nLower = name.toLowerCase();
+      const needle = kind === 'api' ? (nLower.split(/\s+/).pop() || nLower) : nLower;   // api 形如 "GET /api/xxx"：取路径段做子串判定
+      if (needle.length >= 4 && qLower.includes(needle)) {
+        const specIds = kind === 'api' ? [it.specId].filter(Boolean) : (Array.isArray(it.specs) ? it.specs : []);
+        tier3Hits.push({ name, specIds, kind, needle });
+      }
+    }
+  };
+  scanExact(idx.configs, 'key', 'config');
+  scanExact(idx.tables, 'table', 'table');
+  scanExact(idx.apis, 'api', 'api');
+  if (tier3Hits.length) {
+    tier3Hits.sort((a, b) => b.needle.length - a.needle.length);   // 取「最长精确名」命中（最具体）
+    const hit = tier3Hits[0];
+    const specRefs = hit.specIds.map(id => specs.find(s => s && s.id === id)).filter(Boolean)
+      .map(s => ({ specId: s.id, section: '', title: s.title, path: s.path, anchor: '' }));
+    if (specRefs.length) return { matched: true, tier: 3, score: ROUTE_EXACT_TIER3, exactName: hit.name, specRefs, topN: specRefs.slice(0, 5).map(r => ({ id: r.specId, title: r.title, score: ROUTE_EXACT_TIER3 })) };
+  }
+
+  // —— Tier-2：specs 兜底（title + module + summary + headings 打分）——
+  if (specs.length) {
+    let pool = specs;
+    if (subKey) { const sc = specs.filter(s => (s.module || s.domain || '') === subKey || (s.subsystem || '') === subKey); if (sc.length) pool = sc; }
+    const specText = s => [s.title, s.module, s.domain, s.summary, ...((s.headings || []).map(h => h.title))].filter(Boolean).join(' ');
+    const scoreAt = routeScorer(pool.map(specText));
+    const scored = pool.map((s, i) => ({ s, sc: Math.round(scoreAt(qset, i) * 1000) / 1000 })).sort((a, b) => b.sc - a.sc);
+    const best = scored[0];
+    if (best && best.sc >= ROUTE_MATCH_MIN) {
+      const s = best.s;
+      return {
+        matched: true, tier: 2, score: best.sc,
+        specRefs: [{ specId: s.id, section: '', title: s.title, path: s.path, anchor: '' }],
+        topN: scored.slice(0, 5).map(x => ({ id: x.s.id, title: x.s.title, score: x.sc })),
+      };
+    }
+    return { matched: false, tier: 0, score: (best && best.sc) || 0, topN: (typeof tier1TopN !== 'undefined' && tier1TopN.length) ? tier1TopN : scored.slice(0, 5).map(x => ({ id: x.s.id, title: x.s.title, score: x.sc })) };
+  }
+  return { matched: false, tier: 0, score: (typeof tier1TopN !== 'undefined' ? (tier1TopN[0] && tier1TopN[0].score) : 0) || 0, topN: (typeof tier1TopN !== 'undefined') ? tier1TopN : [] };
+}
+// 从 spec 正文按标题/锚点定位截取「指定章节」；定位不到 → 退回该 spec 前段。返回截取文本（≤900）。
+function extractSection(fullText, ref) {
+  const body = String(fullText || '');
+  if (!body) return '';
+  const lines = body.split('\n');
+  const wantTitle = String((ref && ref.section) || (ref && ref.title) || '').trim();
+  const wantAnchor = String((ref && ref.anchor) || '').trim().toLowerCase();
+  // 归一：markdown 标题行 → slug（近似 map 的 anchor 生成：去 markdown 记号、空白/标点转连字符、小写）
+  const slugify = s => String(s || '').toLowerCase().replace(/[`*_~]/g, '').replace(/[^\w一-龥]+/g, '-').replace(/^-+|-+$/g, '');
+  const normTitle = s => String(s || '').replace(/^#+\s*/, '').replace(/[`*_~]/g, '').replace(/\s+/g, '').toLowerCase();
+  let startIdx = -1, startLevel = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const hm = lines[i].match(/^(#{1,6})\s+(.+?)\s*$/); if (!hm) continue;
+    const htext = hm[2], hslug = slugify(htext);
+    const bySlug = wantAnchor && (hslug === wantAnchor || hslug.startsWith(wantAnchor) || wantAnchor.startsWith(hslug) && hslug.length >= 6);
+    const byTitle = wantTitle && (normTitle('#' + htext).includes(normTitle(wantTitle).slice(0, 12)) || normTitle(wantTitle).includes(normTitle('#' + htext)) && normTitle(htext).length >= 4);
+    if (bySlug || byTitle) { startIdx = i; startLevel = hm[1].length; break; }
+  }
+  if (startIdx < 0) {   // 定位不到 → 退回该 spec 去掉 front-matter 后的前段
+    return body.replace(/^---[\s\S]*?---\s*/, '').trim().slice(0, 900);
+  }
+  const out = [lines[startIdx]];
+  for (let i = startIdx + 1; i < lines.length; i++) {
+    const hm = lines[i].match(/^(#{1,6})\s+/);
+    if (hm && hm[1].length <= startLevel) break;   // 遇到同级/更高级标题 → 章节结束
+    out.push(lines[i]);
+    if (out.join('\n').length > 1200) break;
+  }
+  return out.join('\n').trim().slice(0, 900);
+}
+// 命中后取内容：读 primaryRefs(+contextRefs) 指定章节组装 specHits；answerFacts 作最高优段注入、mustNotConfuse 作负向提示。
+//   返回 { specHits:[{subsystem,module,title,section,text}], mustNotConfuse:[...] }。specHits 结构与 specSearch 输出兼容（喂 consultSystem）。
+function loadRouteContext(proj, ver, routeResult) {
+  const ref = safeRef(ver), repoPath = moduleMapRepo(proj, ver);
+  const specHits = [];
+  // answerFacts 置顶：作为「模块地图·经确认事实」段（consultSystem 里点明"优先据此作答"由注入文本自带，不改模板）
+  const facts = (routeResult && routeResult.answerFacts) || [];
+  if (facts.length) {
+    specHits.push({ subsystem: '', module: '模块地图', title: '经确认事实（最高优先，据此作答）', section: 'answerFacts',
+      text: '以下为该产品模块地图人工整理的经确认事实，回答请优先据此，不要臆造：\n' + facts.map((f, i) => `${i + 1}. ${f}`).join('\n') });
+  }
+  // 读被引 spec 章节
+  const refs = []
+    .concat((routeResult && routeResult.primaryRefs) || [])
+    .concat((routeResult && routeResult.contextRefs) || [])
+    .concat((routeResult && routeResult.specRefs) || []);   // tier-2/3 用 specRefs
+  const seen = new Set();
+  for (const r of refs) {
+    if (specHits.filter(h => h.section !== 'answerFacts').length >= 6) break;
+    const rel = String((r && r.path) || '').trim(); if (!rel) continue;
+    const dk = rel + '#' + String((r && r.anchor) || (r && r.section) || '');
+    if (seen.has(dk)) continue; seen.add(dk);
+    let full = repoPath ? specFileText(repoPath, ref, rel) : '';
+    if (!full || !full.trim()) continue;   // 读不到该 spec 文件 → 跳过（不臆造）
+    const sec = extractSection(full, r);
+    if (!sec) continue;
+    specHits.push({ subsystem: '', module: String((r && r.specId) || ''), title: String((r && (r.section || r.title)) || ''), section: String((r && r.section) || ''), text: sec.slice(0, 800) });
+  }
+  return { specHits, mustNotConfuse: (routeResult && routeResult.mustNotConfuse) || [] };
+}
+// PD-04：路由决策 → 进 PD-03 的 retrieval.routing（诊断页可看「路由到哪个模块 / 或未命中」）。无地图产品 → enabled:false。
+function routingDiag(hasMap, route) {
+  if (!hasMap || !route) return { enabled: false };
+  return {
+    enabled: true,
+    matched: !!route.matched,
+    tier: route.tier || 0,
+    score: typeof route.score === 'number' ? route.score : 0,
+    routeId: (route.route && route.route.id) || '',
+    routeTitle: (route.route && route.route.title) || (route.exactName ? ('精确名:' + route.exactName) : ''),
+    threshold: ROUTE_MATCH_MIN,
+    topN: (Array.isArray(route.topN) ? route.topN : []).slice(0, 5).map(t => ({ id: String((t && t.id) || '').slice(0, 80), title: String((t && t.title) || '').slice(0, 120), score: typeof (t && t.score) === 'number' ? t.score : 0 })),
+  };
+}
 // PD-03：kbRetrieve 的「带分」变体——返回 [{e,rank}] 里的条目 + 其检索得分 score。复用 _kbScored（同 kbRetrieve 打分口径）。
 async function kbRetrieveScored(projId, query, n = 5, minScore = 1) {
   const qtok = new Set(kbTokenize(query)); if (!qtok.size) return [];
@@ -2424,11 +2616,17 @@ const server = http.createServer((req, res) => {
       const ver = String(b.version || '').trim(), sub = String(b.subsystem || '').trim(), deep = !!b.deep;
       try { refreshRepos(proj, false); } catch {}   // 同 /api/spec-search：回放前拉最新代码/tag
       let specScored = [], kbScored = [], codeHits = null;
+      // PD-04：回放也跑路由——有地图产品先路由，命中/miss 一并透出（方便调阈值）。deep 源码单独走同 consult 口径。
+      let route = null; try { const map = loadModuleMap(proj, ver); if (map) route = routeQuestion(map, query, sub); } catch { route = null; }
+      const hasMap = !!route;
       try { specScored = specSearchScored(proj, ver, query, 5, sub); } catch {}
       try { kbScored = await kbRetrieveScored(proj.id, query, 5, 2); } catch {}
       if (deep) { try { codeHits = codeSearch(proj, ver, query, specSearch(proj, ver, query, 5, sub), 4, sub); } catch {} }
       const retrieval = buildRetrieval({ query, deep, ver, subsystem: sub }, specScored, kbScored, codeHits);
-      return send(res, 200, JSON.stringify({ ok: true, retrieval }));
+      retrieval.routing = routingDiag(hasMap, route);
+      // 命中时附上路由取到的 specHits（章节内容），方便对照阈值/命中质量
+      let routeContext = null; if (hasMap && route.matched) { try { routeContext = loadRouteContext(proj, ver, route); } catch {} }
+      return send(res, 200, JSON.stringify({ ok: true, retrieval, routeContext }));
     });
   }
   if (url.pathname === '/api/retrieval-log') {   // 诊断列表：列有 retrieval 的 consult 对话（支持 filter + 分页）
@@ -2837,23 +3035,44 @@ const server = http.createServer((req, res) => {
       //   避免为「检索捕获」再对 query 多做一次 embedding 调用（复用同一次计算）。检索异常不阻断咨询：失败即按无命中。
       let hits = [], kbScored = [];
       try { kbScored = await kbRetrieveScored(proj.id, qtext, 5, 2); hits = kbScored.map(x => x.e); } catch { hits = []; kbScored = []; }
-      const specHits = specSearch(proj, String(b.version || '').trim(), qtext, 5, sub);   // consult：语义混合召回（配了 embedding 时 sim>=SEM_GATE||lex>=2 入选；未配/失败自动退回关键词 minScore=2）。弱匹配（只命中 1 个常见 token 且语义不相关）既不注入 consultSystem 也不发 kb 事件
-
-      const codeHits = b.deep ? codeSearch(proj, String(b.version || '').trim(), qtext, specHits, 4, sub) : null;   // 「深入思考」：搜源码
+      const cver = String(b.version || '').trim();
+      // PD-04：先按提问路由到功能模块（仅对有「功能模块地图」的产品生效）。无地图 → map=null → 完全走原 specSearch（向后兼容）。
+      let route = null; try { const map = loadModuleMap(proj, cver); if (map) route = routeQuestion(map, qtext, sub); } catch { route = null; }
+      const hasMap = !!route;   // 有地图且已跑路由
+      const routeMiss = hasMap && !route.matched;   // 路由未命中任何功能模块
+      let specHits, routeMnc = [];
+      if (hasMap && route.matched) {
+        // PD-04 命中：读 route 的 primaryRefs(+contextRefs) 指定章节 + 注入 answerFacts；替代原 specSearch 的 specHits。
+        try { const ctx = loadRouteContext(proj, cver, route); specHits = ctx.specHits; routeMnc = ctx.mustNotConfuse || []; } catch { specHits = []; }
+      } else if (hasMap) {
+        specHits = [];   // PD-04 miss：不注入任何 spec 片段（不让 AI 据跑题内容编）
+      } else {
+        specHits = specSearch(proj, cver, qtext, 5, sub);   // 无地图产品：原语义混合召回（sim>=SEM_GATE||lex>=2 入选，弱匹配不注入不发 kb 事件），行为不变
+      }
+      // 深入思考(源码)单独走：spec 模块没命中，deep 仍可 codeSearch 查源码；命中时 codeSearch 也照常搜（用命中的 route specHits 当桥）。
+      const codeHits = b.deep ? codeSearch(proj, cver, qtext, (hasMap && route.matched) ? specHits : (hasMap ? [] : specHits), 4, sub) : null;
+      // PD-04 miss 判定：路由未命中，且（非 deep，或 deep 但源码也无命中）→ 不调模型答实质、返回固定话术。
+      const noAnswer = routeMiss && !(b.deep && codeHits && codeHits.length);
       // PD-03 检索诊断：把「实际喂给 AI 的三类检索内容」组装成紧凑 retrieval 对象，挂到本轮 assistant 消息（与 kbRefs 同位置、同持久化路径）。
       //   spec 用 specSearchScored（同 specSearch 召回口径、额外带 score）；kb 复用上面已算的 kbScored；code 无分。捕获不阻断答疑（try 静默）。
+      //   PD-04：把「路由决策」并进 retrieval.routing，检索诊断页可看到路由到哪个模块 / 或未命中。
       let retrieval = null;
       try {
-        const specScored = specSearchScored(proj, String(b.version || '').trim(), qtext, 5, sub);
-        retrieval = buildRetrieval({ query: qtext, deep: !!b.deep, ver: String(b.version || '').trim(), subsystem: sub }, specScored, kbScored, codeHits);
+        const specScored = specSearchScored(proj, cver, qtext, 5, sub);
+        retrieval = buildRetrieval({ query: qtext, deep: !!b.deep, ver: cver, subsystem: sub }, specScored, kbScored, codeHits);
+        retrieval.routing = routingDiag(hasMap, route);
       } catch {}
       const kbRefs = consultKbRefs(proj.id, hits);
       // 只有模型已收到含 kbBlock 的 system prompt 且真正返回首个有效片段，才对前端声明“已参考经验”。
       // 未配模型、上游在首 token 前失败、检索失败/无命中都不发 kb 事件，避免把“检索到”误报为“模型已参考”。
       let reply = '', stopped = false, kbInjected = false;
-      if (!cfg.apiKey) { reply = '（管理员还没配置模型 API，暂时不能答疑。）'; sse({ v: reply }); }
+      if (noAnswer) {   // PD-04 miss：不调模型答实质内容，直接返回固定话术（正常收尾、可落库该轮）。
+        reply = '该问题在《' + proj.name + '》说明书里没有找到相关描述，建议转成工单或联系开发确认。'; sse({ v: reply });
+      } else if (!cfg.apiKey) { reply = '（管理员还没配置模型 API，暂时不能答疑。）'; sse({ v: reply }); }
       else {
-        try { await callModelStream(cfg, { system: consultSystem(proj, String(b.version || '').trim(), hits, specHits, codeHits) + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
+        // PD-04：命中 mustNotConfuse → 作负向提示注入 system（易混淆项，勿臆造）。answerFacts 已在 specHits 顶段（consultSystem 走 specExcerpts）。
+        const mncNote = routeMnc.length ? '\n【以下为该问题的易混淆项，请勿臆造、勿张冠李戴】' + routeMnc.map(x => '\n· ' + x).join('') : '';
+        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
           piece = String(piece == null ? '' : piece); if (!piece) return;
           if (!kbInjected && kbRefs.length) { kbInjected = true; sse({ kb: kbRefs, kbInjected: true }); }
           reply += piece; sse({ v: piece });
