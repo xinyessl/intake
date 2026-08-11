@@ -2688,7 +2688,7 @@ button.f-ov-card { width: 100%; appearance: none; }
         var urls = (m.media && m.media.length) ? mediaUrls(proj0, m.media) : [];
         if (urls.length) anyMsgMedia = true;
         var bub = appendBubble(m.role === 'user' ? 'me' : 'ai', m.content, false, urls);   // urls 非空 → 气泡内附该轮截图缩略图
-        if (m.role === 'assistant' && m.kbRefs.length) renderKbCite(bub, m.kbRefs);
+        if (m.role === 'assistant' && m.kbRefs.length && !isNonSubstantiveReply(m.content)) renderKbCite(bub, m.kbRefs);   // 没覆盖/无相关的答复：不显「已参考经验」（都没符合的经验，展示误导）
       });
       if (!anyMsgMedia) appendMediaBubble(proj0, item.media);   // 旧记录兜底：消息级无 media（老 consult 只有记录级 e.media）→ 仍把图贴末尾，别让老记录图丢失
       markLeftActive('consult', chat.convId);                       // Bug B：左侧对应条标为选中
@@ -3799,7 +3799,7 @@ button.f-ov-card { width: 100%; appearance: none; }
     appendCards(0);
     messages.forEach(function (m, index) {
       var bub = appendBubble(m.role === 'user' ? 'me' : 'ai', m.content);
-      if (m.role === 'assistant' && normalizeKbRefs(m.kbRefs).length) renderKbCite(bub, m.kbRefs);
+      if (m.role === 'assistant' && normalizeKbRefs(m.kbRefs).length && !isNonSubstantiveReply(m.content)) renderKbCite(bub, m.kbRefs);   // 没覆盖/无相关：不显「已参考经验」
       appendCards(index + 1);
     });
   }
@@ -4105,11 +4105,13 @@ button.f-ov-card { width: 100%; appearance: none; }
     setSending(false);
     if (bub) { setThinking(bub, false); bub.classList.remove('streaming'); if (acc) bub.innerHTML = md(acc); }   // done/停止/错误兜底清思考动效（首个 token 未到就结束时也清）
     var replyText = acc || (bub && bub.textContent) || '';
-    if (replyText) { var m = { role: 'assistant', content: replyText }; var refs = normalizeKbRefs(kbRefs); if (refs.length) m.kbRefs = refs; chat.messages.push(m); chat.lastA = replyText; }
+    var nonSub = replyText ? isNonSubstantiveReply(replyText) : true;   // 非实质答复（说明书没覆盖/无相关）：不沉淀、不留引用
+    // 非实质答复：答案说了"没覆盖/无相关"，就别再显/存「已参考经验」——都没符合的经验，展示反而误导（据回复内容判定）。
+    if (nonSub && bub && bub._kbCite) { try { bub._kbCite.remove(); } catch (e) {} bub._kbCite = null; }
+    if (replyText) { var m = { role: 'assistant', content: replyText }; var refs = normalizeKbRefs(kbRefs); if (refs.length && !nonSub) m.kbRefs = refs; chat.messages.push(m); chat.lastA = replyText; }
     if (aborted) { scrollChatBottom(); saveDraft(); return; }   // 主动停止：不追加 KB/转工单入口，仅保留已生成内容 + 存草稿
-    // 咨询「已解决 → 沉淀经验库」入口（AC-19-KB）：结束后在气泡下追加一枚小按钮。
-    //   仅当答复是「实质答复」时才提示沉淀——「说明书没覆盖/无相关」这类非实质答复无价值沉淀，不提示（据回复内容判定）。
-    if (replyText && chat.lastQ && !isNonSubstantiveReply(replyText)) appendKbSink();
+    // 咨询「已解决 → 沉淀经验库」入口（AC-19-KB）：结束后在气泡下追加一枚小按钮。仅「实质答复」才提示沉淀（非实质无价值）。
+    if (replyText && chat.lastQ && !nonSub) appendKbSink();
     // 咨询「转工单」入口（CT-3）：AI 答复结束且已有咨询会话（chat.convId）→ 追加一枚转工单按钮，实施判断该升级时点它 → 弹确认弹窗 → 直接建单（不再靠 AI 生成工单模板续聊）。
     if (replyText && chat.convId) appendConsultToIntake();
     scrollChatBottom();
