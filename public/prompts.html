@@ -26,6 +26,12 @@
   /* 右侧编辑区 */
   .pedit{ flex:1; min-width:0; min-height:0; overflow:auto; border:1px solid var(--color-border); border-radius:10px; background:var(--color-bg-card,#fff); padding:16px 18px; }
   .pcard-head{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .tip-ic{ position:relative; display:inline-flex; align-items:center; margin-left:6px; color:var(--color-text-tertiary); cursor:help; font-size:15px; font-weight:400; }
+  .tip-ic:hover,.tip-ic:focus{ color:var(--color-primary); outline:none; }
+  .tip-pop{ display:none; position:absolute; top:24px; left:0; z-index:60; width:min(580px,82vw); background:var(--color-surface,#fff); border:1px solid var(--color-border); border-radius:10px; box-shadow:0 8px 28px rgba(0,0,0,.14); padding:12px 15px; font-size:12.5px; line-height:1.8; font-weight:400; color:var(--color-text-secondary); white-space:normal; text-align:left; }
+  .tip-ic:hover .tip-pop,.tip-ic:focus .tip-pop{ display:block; }
+  .tip-pop b{ color:var(--color-text); }
+  .tip-pop code{ background:var(--color-bg,#eef1f5); padding:1px 5px; border-radius:4px; font-size:11.5px; }
   .pcard-title{ font-size:15px; font-weight:600; }
   .pcard-desc{ font-size:12.5px; color:var(--color-text-tertiary); margin:8px 0 10px; line-height:1.55; }
   .ph-list{ display:flex; flex-wrap:wrap; gap:6px; margin:8px 0; }
@@ -60,11 +66,9 @@
 </head>
 <body data-shell="admin" data-nav="prompts" data-breadcrumb="AI 引擎 > 提示词配置" data-content-layout="list">
 
-<div class="alert alert-warning mb-16"><i class="ti ti-shield-lock"></i><div><b>整段模板编辑：</b>下面每个提示词都是 AI 的完整「系统提示词」，可直接整段改写。花括号 <code class="mono">{{占位变量}}</code> 由系统运行时替换成实际值（产品名 / 版本 / spec 索引 / 子系统清单等），<b>请保留你需要的占位</b>。<b>标「系统注入·不可编辑」的占位（如建单结构块）改动无效</b>——它与确定性建单/解析死耦合，由系统强制注入以防解析崩坏。配置存服务本机 <code class="mono">data/prompts.json</code>、<b>不入库</b>；未改的走内置默认，<b>改了才生效</b>。</div></div>
-
 <div class="card panel-fill">
   <div class="card-header">
-    <div class="card-title"><i class="ti ti-message-code"></i>AI 系统提示词<span class="text-12 text-tertiary" id="cntTag" style="margin-left:6px;font-weight:400"></span></div>
+    <div class="card-title"><i class="ti ti-message-code"></i>AI 系统提示词<span class="text-12 text-tertiary" id="cntTag" style="margin-left:6px;font-weight:400"></span><span class="tip-ic" tabindex="0"><i class="ti ti-info-circle"></i><span class="tip-pop"><b>整段模板编辑：</b>下面每个提示词都是 AI 的完整「系统提示词」，可直接整段改写。花括号 <code class="mono">{{占位变量}}</code> 由系统运行时替换成实际值（产品名 / 版本 / spec 索引 / 子系统清单等），<b>请保留你需要的占位</b>。<b>标「系统注入·不可编辑」的占位（如建单结构块）改动无效</b>——它与确定性建单/解析死耦合，由系统强制注入以防解析崩坏。配置存服务本机 <code class="mono">data/prompts.json</code>、<b>不入库</b>；未改的走内置默认，<b>改了才生效</b>。</span></span></div>
     <div class="text-12 text-tertiary">左选标题 · 右编辑单条 · 改了才生效 · 缺占位仅警告不拦截</div>
   </div>
   <div class="pwrap">
