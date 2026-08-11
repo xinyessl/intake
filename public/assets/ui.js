@@ -138,7 +138,7 @@ window.mdToHtml = function (src) {
     const hm = ln.match(/^\s*(#{1,4})\s+(.*)$/); if (hm) { const lv = hm[1].length; h += '<h' + lv + '>' + inline(hm[2]) + '</h' + lv + '>'; i++; continue; }
     if (/^\s*>\s?/.test(ln)) { const b = []; while (i < L.length && /^\s*>\s?/.test(L[i])) { b.push(L[i].replace(/^\s*>\s?/, '')); i++; } h += '<blockquote>' + b.map(inline).join('<br>') + '</blockquote>'; continue; }
     if (ulRe.test(ln)) { h += '<ul>'; while (i < L.length && ulRe.test(L[i])) { h += '<li>' + inline(L[i].replace(ulRe, '')) + '</li>'; i++; } h += '</ul>'; continue; }
-    if (olRe.test(ln)) { h += '<ol>'; while (i < L.length && olRe.test(L[i])) { h += '<li>' + inline(L[i].replace(olRe, '')) + '</li>'; i++; } h += '</ol>'; continue; }
+    if (olRe.test(ln)) { const om = ln.match(/^\s*(\d+)/); const ost = om ? +om[1] : 1; h += '<ol start="' + ost + '">'; while (i < L.length && olRe.test(L[i])) { h += '<li>' + inline(L[i].replace(olRe, '')) + '</li>'; i++; } h += '</ol>'; continue; }   // 带真实起始序号：被子bullet打断的多段有序列表(1./2./3.)不再各自从1重排（排查步骤 1/1/1 → 1/2/3）
     const b = []; while (i < L.length && !isBreak(L[i], i)) { b.push(L[i]); i++; } h += '<p>' + b.map(inline).join('<br>') + '</p>';
   }
   return h;
