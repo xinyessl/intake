@@ -44,6 +44,7 @@
   .ppreview strong{ color:var(--color-text); font-weight:600; } .ppreview ul,.ppreview ol{ margin:8px 0; padding-left:22px; } .ppreview li{ margin:3px 0; }
   .ppreview code{ background:var(--color-bg,#eef1f5); padding:1px 5px; border-radius:4px; font-family:var(--font-mono,monospace); font-size:12px; }
   .ppreview .ph-tok{ background:var(--color-accent-light,#e1f3f1); color:var(--color-accent,#0e8f86); border-radius:4px; padding:0 4px; font-family:var(--font-mono,monospace); font-size:12px; white-space:nowrap; }
+  .ppreview-note{ font-size:12px; color:var(--color-text-tertiary); background:var(--color-bg,#f5f7fa); border-radius:6px; padding:7px 10px; margin-bottom:10px; display:flex; align-items:center; gap:6px; }
   .pcard-foot{ display:flex; align-items:center; gap:10px; margin-top:10px; }
   .pwarn{ font-size:12px; color:var(--color-danger,#d9534f); display:none; align-items:center; gap:5px; }
   .pwarn.show{ display:inline-flex; }
@@ -172,7 +173,9 @@ $('#editHost')?.addEventListener('click', e=>{
     if(mode==='preview'){
       // 渲染当前编辑内容为 markdown 预览；{{占位}}高亮成 chip（占位不是 md，单独标出来方便看）
       const raw=ta?ta.value:'';
-      const html=(window.mdToHtml?window.mdToHtml(raw):esc(raw)).replace(/\{\{\s*(\w+)\s*\}\}/g,'<span class="ph-tok">{{$1}}</span>');
+      const hasMd=/\*\*|`|^\s*#{1,6}\s|^\s*[-*+]\s|^\s*\d+[.、)]\s/m.test(raw);   // 有没有 markdown 可渲染
+      let html=(window.mdToHtml?window.mdToHtml(raw):esc(raw)).replace(/\{\{\s*(\w+)\s*\}\}/g,'<span class="ph-tok">{{$1}}</span>');
+      if(!hasMd) html='<div class="ppreview-note"><i class="ti ti-info-circle"></i> 此提示词是纯文本（没用 **加粗**/`代码`/列表等 markdown），预览与原文基本一致——不是没生效。</div>'+html;
       if(pv){ pv.innerHTML=html; pv.style.display=''; } if(ta) ta.style.display='none';
     } else { if(ta) ta.style.display=''; if(pv) pv.style.display='none'; }
     return;
