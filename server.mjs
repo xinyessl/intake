@@ -808,6 +808,10 @@ function specSearchScored(proj, ver, query, n = 5, subKey = '') {
 const ROUTE_MATCH_MIN = 3.0;        // tier-1 questionRoutes / tier-2 specs 命中阈值（IDF 加权重叠得分）
 const ROUTE_ALIAS_BONUS = 6.0;      // query 整串命中某 alias 子串 → 强 bonus（别名是人工整理的高判别短语）
 const ROUTE_EXACT_TIER3 = 8.0;      // tier-3 精确名（config/table/api）命中 → 直接强命中（远超阈值）
+// PD-04 修复：specSearch 始终作底座，路由作「精选事实」加成——路由未命中时，只要 specSearch 首条 IDF 得分 ≥ 本阈值，
+//   仍把 specSearch 强匹配喂给模型（由提示词的功能级覆盖判定决定答/说没覆盖），只有 specSearch 也弱/空才走 miss 固定话术。
+//   保守初值 8（specSearchScored 的 score = IDF 加权重叠得分，强相关章节通常十几到几十）；部署后在 pwrs 回放调准。
+const SPEC_MIN_RELEVANT = 8.0;
 const MAP_TEXT_CACHE = new Map();   // projId@ref -> { at, map|null, repoPath }（同 loadSpecTexts 10min 缓存）
 const MAP_REL = 'docs/specs/00-功能模块地图.json';
 // 读产品仓的功能模块地图；解析失败/不存在 → null（该产品即走原 specSearch，向后兼容）。
@@ -979,6 +983,25 @@ function loadRouteContext(proj, ver, routeResult) {
     specHits.push({ subsystem: '', module: String((r && r.specId) || ''), title: String((r && (r.section || r.title)) || ''), section: String((r && r.section) || ''), text: sec.slice(0, 800) });
   }
   return { specHits, mustNotConfuse: (routeResult && routeResult.mustNotConfuse) || [] };
+}
+// PD-04 修复：把路由内容与 specSearch 底座合成「实际喂模型的 specHits」——纯函数、可单测。
+//   routeHits = loadRouteContext 的 specHits（含 answerFacts 顶段，路由命中时）；searchHits = specSearchScored 结果（specSearch 底座）。
+//   ① 路由命中（matched=true）：route 精选事实置前 + specSearch 底座补后（去重、cap≤7）→ answerFacts 仍最高优，但 specSearch 强匹配也一起喂（防路由错配盖掉强 specSearch）。
+//   ② 路由未命中（matched=false）：specSearch 首条 ≥ minRelevant → 用 specSearch（据 spec 底座作答）；否则空（走 miss 固定话术）。
+//   返回 { specHits, usedSpecSearch, searchTop, noSpec }（noSpec=true 表示既无路由也无够强 specSearch → 上层可判 miss 话术）。
+function assembleConsultSpecHits(matched, routeHits, searchHits, minRelevant, cap = 7) {
+  const base = Array.isArray(searchHits) ? searchHits : [];
+  const searchTop = (base[0] && typeof base[0].score === 'number') ? base[0].score : 0;
+  const searchOK = searchTop >= minRelevant;
+  const keyOf = h => (String((h && h.module) || '') + '|' + String((h && h.title) || '') + '|' + String((h && h.text) || '').slice(0, 120));
+  if (matched) {
+    const out = [], seen = new Set();
+    for (const h of [].concat(Array.isArray(routeHits) ? routeHits : [], base)) { if (!h) continue; const k = keyOf(h); if (seen.has(k)) continue; seen.add(k); out.push(h); if (out.length >= cap) break; }
+    return { specHits: out, usedSpecSearch: base.length > 0, searchTop, noSpec: false };
+  }
+  // 路由未命中
+  if (searchOK) return { specHits: base.slice(0, 6), usedSpecSearch: true, searchTop, noSpec: false };
+  return { specHits: [], usedSpecSearch: false, searchTop, noSpec: true };
 }
 // PD-04：路由决策 → 进 PD-03 的 retrieval.routing（诊断页可看「路由到哪个模块 / 或未命中」）。无地图产品 → enabled:false。
 function routingDiag(hasMap, route) {
@@ -2640,6 +2663,13 @@ const server = http.createServer((req, res) => {
       if (deep) { try { codeHits = codeSearch(proj, ver, query, specSearch(proj, ver, query, 5, sub), 4, sub); } catch {} }
       const retrieval = buildRetrieval({ query, deep, ver, subsystem: sub }, specScored, kbScored, codeHits);
       retrieval.routing = routingDiag(hasMap, route);
+      // PD-04 修复：回放也带上 specSearch 底座首条分 + 阈值，方便调 SPEC_MIN_RELEVANT（路由未命中但 specSearch 强 → consult 现会据 spec 底座作答，不再固定话术）。
+      if (retrieval.routing && retrieval.routing.enabled) {
+        const specTop = (specScored[0] && typeof specScored[0].score === 'number') ? specScored[0].score : 0;
+        retrieval.routing.specTop = Math.round(specTop * 1000) / 1000;
+        retrieval.routing.specMinRelevant = SPEC_MIN_RELEVANT;
+        retrieval.routing.usedSpecSearch = !route.matched ? (specTop >= SPEC_MIN_RELEVANT) : (specScored.length > 0);
+      }
       // 命中时附上路由取到的 specHits（章节内容），方便对照阈值/命中质量
       let routeContext = null; if (hasMap && route.matched) { try { routeContext = loadRouteContext(proj, ver, route); } catch {} }
       return send(res, 200, JSON.stringify({ ok: true, retrieval, routeContext }));
@@ -3060,27 +3090,34 @@ const server = http.createServer((req, res) => {
       let route = null; try { const map = loadModuleMap(proj, cver); if (map) route = routeQuestion(map, qtext, sub); } catch { route = null; }
       const hasMap = !!route;   // 有地图且已跑路由
       const routeMiss = hasMap && !route.matched;   // 路由未命中任何功能模块
-      let specHits, routeMnc = [];
-      if (hasMap && route.matched) {
-        // PD-04 命中：读 route 的 primaryRefs(+contextRefs) 指定章节 + 注入 answerFacts；替代原 specSearch 的 specHits。
-        try { const ctx = loadRouteContext(proj, cver, route); specHits = ctx.specHits; routeMnc = ctx.mustNotConfuse || []; } catch { specHits = []; }
-      } else if (hasMap) {
-        specHits = [];   // PD-04 miss：不注入任何 spec 片段（不让 AI 据跑题内容编）
+      // PD-04 修复：specSearch 始终作底座（有地图也跑）——用带分变体 specSearchScored（同 specSearch 召回口径 + 额外带 score），
+      //   一次计算两用：既做喂模型的 spec 底座，又直接喂 buildRetrieval 检索诊断（避免重复检索）。检索异常不阻断答疑。
+      let searchScored = []; try { searchScored = specSearchScored(proj, cver, qtext, 5, sub); } catch { searchScored = []; }
+      const searchTop = (searchScored[0] && typeof searchScored[0].score === 'number') ? searchScored[0].score : 0;
+      let specHits, routeMnc = [], usedSpecSearch = false, specNoSpec = false;
+      if (hasMap) {
+        // PD-04 修复：specSearch 作底座、路由作「精选事实」加成（不再排他替换）。命中→读章节 + answerFacts 顶段作 routeHits；
+        //   assembleConsultSpecHits 负责「命中=route置前+specSearch去重合并 / 未命中=specSearch 够强则用、否则空」。
+        let routeHits = [];
+        if (route.matched) { try { const ctx = loadRouteContext(proj, cver, route); routeHits = ctx.specHits || []; routeMnc = ctx.mustNotConfuse || []; } catch { routeHits = []; } }
+        const asm = assembleConsultSpecHits(!!route.matched, routeHits, searchScored, SPEC_MIN_RELEVANT);
+        specHits = asm.specHits; usedSpecSearch = asm.usedSpecSearch; specNoSpec = asm.noSpec;
       } else {
         specHits = specSearch(proj, cver, qtext, 5, sub);   // 无地图产品：原语义混合召回（sim>=SEM_GATE||lex>=2 入选，弱匹配不注入不发 kb 事件），行为不变
       }
-      // 深入思考(源码)单独走：spec 模块没命中，deep 仍可 codeSearch 查源码；命中时 codeSearch 也照常搜（用命中的 route specHits 当桥）。
-      const codeHits = b.deep ? codeSearch(proj, cver, qtext, (hasMap && route.matched) ? specHits : (hasMap ? [] : specHits), 4, sub) : null;
-      // PD-04 miss 判定：路由未命中，且（非 deep，或 deep 但源码也无命中）→ 不调模型答实质、返回固定话术。
-      const noAnswer = routeMiss && !(b.deep && codeHits && codeHits.length);
+      // 深入思考(源码)单独走：codeSearch 用当前 specHits 当桥（命中=路由+specSearch 合集，miss+specSearch 强=specSearch，无地图=specSearch）。
+      const codeHits = b.deep ? codeSearch(proj, cver, qtext, hasMap ? (specHits || []) : specHits, 4, sub) : null;
+      // PD-04 miss 判定（修复）：路由未命中 且 specSearch 底座也弱/空（specNoSpec），且（非 deep，或 deep 但源码也无命中）→ 不调模型、返回固定话术。
+      //   即：specSearch 强匹配时，即便路由未命中也不再走固定话术——由提示词功能级覆盖判定据 spec 底座答/说没覆盖。
+      const noAnswer = routeMiss && specNoSpec && !(b.deep && codeHits && codeHits.length);
       // PD-03 检索诊断：把「实际喂给 AI 的三类检索内容」组装成紧凑 retrieval 对象，挂到本轮 assistant 消息（与 kbRefs 同位置、同持久化路径）。
-      //   spec 用 specSearchScored（同 specSearch 召回口径、额外带 score）；kb 复用上面已算的 kbScored；code 无分。捕获不阻断答疑（try 静默）。
-      //   PD-04：把「路由决策」并进 retrieval.routing，检索诊断页可看到路由到哪个模块 / 或未命中。
+      //   spec 复用上面已算的 searchScored（同 specSearch 召回口径、带 score）；kb 复用 kbScored；code 无分。捕获不阻断答疑（try 静默）。
+      //   PD-04：把「路由决策」并进 retrieval.routing，并带上「是否用了 specSearch 底座 + specSearch 首条分」方便回放判断。
       let retrieval = null;
       try {
-        const specScored = specSearchScored(proj, cver, qtext, 5, sub);
-        retrieval = buildRetrieval({ query: qtext, deep: !!b.deep, ver: cver, subsystem: sub }, specScored, kbScored, codeHits);
+        retrieval = buildRetrieval({ query: qtext, deep: !!b.deep, ver: cver, subsystem: sub }, searchScored, kbScored, codeHits);
         retrieval.routing = routingDiag(hasMap, route);
+        if (retrieval.routing && retrieval.routing.enabled) { retrieval.routing.usedSpecSearch = usedSpecSearch; retrieval.routing.specTop = Math.round(searchTop * 1000) / 1000; retrieval.routing.specMinRelevant = SPEC_MIN_RELEVANT; }
       } catch {}
       const kbRefs = consultKbRefs(proj.id, hits);
       // 只有模型已收到含 kbBlock 的 system prompt 且真正返回首个有效片段，才对前端声明“已参考经验”。
