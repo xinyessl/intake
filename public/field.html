@@ -439,7 +439,7 @@ button.f-ov-card { width: 100%; appearance: none; }
 .f-splitter { flex: 0 0 auto; width: 7px; cursor: col-resize; background: transparent; position: relative; z-index: 5; align-self: stretch; }
 .f-splitter::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: var(--color-border); transition: background .12s, width .12s, left .12s; }
 .f-splitter:hover::after, .f-splitter.dragging::after { background: var(--color-primary); width: 2px; left: 2px; }
-/* 子控件条 .f-ph：标题 + 按批次/按类型 f-tabs2 + 全部子项目下拉触发器 .prod */
+/* 子控件条 .f-ph：标题 + 工单/版本更新 f-tabs2 + 全部子项目下拉触发器 .prod */
 .f-ph { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--color-border); }
 .f-ph-title { font-size: 14px; font-weight: 700; color: var(--color-text); flex: 0 0 auto; }
 .f-tabs2 { display: inline-flex; align-items: center; background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius-pill); padding: 2px; }
@@ -972,12 +972,12 @@ button.f-ov-card { width: 100%; appearance: none; }
   <main class="f-workspace" id="fWorkspace">
     <!-- 左：提交清单（FS-02） -->
     <section class="f-submit-pane" id="fSubmitPane">
-      <!-- 子控件条 .f-ph：提交清单标题 + 按批次/按类型 + 全部子项目下拉 -->
+      <!-- 子控件条 .f-ph：提交清单标题 + 工单/版本更新 + 全部子项目下拉 -->
       <div class="f-ph">
         <span class="f-ph-title">提交清单</span>
         <div class="f-tabs2" id="fTabs2">
-          <button class="f-tab2" type="button" data-g="batch">按批次</button>
-          <button class="f-tab2 on" type="button" data-g="type">按类型</button>
+          <button class="f-tab2 on" type="button" data-g="type">工单</button>
+          <button class="f-tab2" type="button" data-g="batch">版本更新</button>
         </div>
         <div class="f-proddd-wrap" id="fProdWrap">
           <button class="prod" type="button" id="fProdCur">
@@ -1347,13 +1347,13 @@ button.f-ov-card { width: 100%; appearance: none; }
     if (ov) ov.style.display = 'none';
     if (htabs) htabs.style.display = '';
     if (state.mode === 'sys') {
-      // AC-1：切系统视图 → 默认「全部系统」；AC-15：换视图重置 ctxVer；AC-11：隐藏「按批次/按类型」+「全部子项目」下拉
+      // AC-1：切系统视图 → 默认「全部系统」；AC-15：换视图重置 ctxVer；AC-11：隐藏「工单/版本更新」+「全部子项目」下拉
       state.curSys = null; state.ctxVer = null; state.verOpen = false;
       intakeShowSystem(null);        // 隐藏医院视图控件 + 显示系统聚合容器
       renderTabs();                  // 系统平铺 tab（全部系统 + 各子系统）
       loadSystemView();              // 跨医院聚合清单
     } else {
-      // AC-12：切回医院视图 → 恢复「按批次/按类型」+「全部子项目」下拉，回到按类型；FS-02 主场
+      // AC-12：切回医院视图 → 恢复「工单/版本更新」+「全部子项目」下拉，回到工单(默认)；FS-02 主场
       intakeShowHospitalMode();
       renderTabs();
       onHospitalChange();   // 内部末尾已调 syncConversationToSystem
@@ -1363,7 +1363,7 @@ button.f-ov-card { width: 100%; appearance: none; }
     saveDraft();
   }
 
-  // AC-11：系统视图隐藏「按批次/按类型」切换（.f-tabs2）与「全部子项目」下拉（.prod）；只显示系统聚合容器
+  // AC-11：系统视图隐藏「工单/版本更新」切换（.f-tabs2）与「全部子项目」下拉（.prod）；只显示系统聚合容器
   function intakeShowSystem(only) {
     var tabs2 = $('fTabs2'), prodWrap = $('fProdWrap');
     if (tabs2) tabs2.style.display = 'none';
@@ -1959,7 +1959,7 @@ button.f-ov-card { width: 100%; appearance: none; }
     // 维保项：点进去打开同一个维保编辑（改该院维保）
     if (row.getAttribute('data-kind') === 'maintain') { openMaintainEdit(row.getAttribute('data-site')); return; }
     var lc = row.getAttribute('data-lc');
-    if (lc === '待验证') { setGroupBy('batch'); showToast('已切到「按批次」，可在对应批次逐单验证', 'info'); }
+    if (lc === '待验证') { setGroupBy('batch'); showToast('已切到「版本更新」，可在对应批次逐单验证', 'info'); }
     else { setGroupBy('type'); showToast('已回到清单，点对应记录可查看 / 续聊', 'info'); }
   }
   function setTodoCount(n) {
@@ -2154,7 +2154,7 @@ button.f-ov-card { width: 100%; appearance: none; }
     saveDraft();
   }
 
-  // AC-9/15：按批次/按类型切换（选择即刷新）。点「按批次」按钮就切过去、不回弹；批次未上线 → 空态提示（见 loadSubmissions 降级分支）
+  // AC-9/15：工单/版本更新切换（选择即刷新）。点「版本更新」按钮就切过去、不回弹；批次未上线 → 空态提示（见 loadSubmissions 降级分支）
   function setGroupBy(g) {
     state.groupBy = (g === 'batch') ? 'batch' : 'type';
     var tabs = $('fTabs2').querySelectorAll('.f-tab2');
@@ -4946,7 +4946,7 @@ button.f-ov-card { width: 100%; appearance: none; }
     });
     $('fLogoutBtn').addEventListener('click', function (e) { e.stopPropagation(); doLogout(); });
 
-    // FS-02 提交清单：按批次/按类型 tab（选择即刷新，即选即查）
+    // FS-02 提交清单：工单/版本更新 tab（选择即刷新，即选即查）
     var tabs2 = $('fTabs2').querySelectorAll('.f-tab2');
     for (var t = 0; t < tabs2.length; t++) {
       tabs2[t].addEventListener('click', function () { setGroupBy(this.getAttribute('data-g')); });
