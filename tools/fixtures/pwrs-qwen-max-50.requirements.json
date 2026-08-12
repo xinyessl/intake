@@ -8,7 +8,7 @@
     "A03": "菜单可见性不能推出接口一定拒绝或一定可用；方法授权、owner、院区是独立层",
     "A04": "当前 Controller 基本无方法级权限注解，但业务 owner/院区校验仍会拒绝或过滤",
     "A05": "当前 JwtFilter 用 startsWith；匿名前缀 /comm/、/external、/swagger、/v3/api-docs；路径中间仅包含 comm 不放行，旧 contains 不是当前事实",
-    "A06": "跨院区同一次患者就诊至少依赖 hospitalId/districtCode + patientId + visitId 的复合身份，不能只用患者号",
+  "A06": "正式产品身份键为 hospitalId + patientId + visitId，跨院区不能只用患者号去重或定位；进入 Proxy/ETL 内部时再使用经可信患者记录解析的真实 districtCode 做上游路由，districtCode 不是要求产品身份键额外加入的第四字段",
     "A07": "关注状态来自 pwrs_patient_focus 的 p_id+user_code，不是 pwrs_patient.focus 全局共享",
     "A08": "p_id、patient_id、visit_id、district_code 均为 varchar(50)，p_id 值虽像 UUID 但不是原生 uuid 列",
     "A09": "患者主页异常检验当前默认近 5 天；旧 Pad 近两天注释不代表当前 Proxy 语义",
