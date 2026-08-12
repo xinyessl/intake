@@ -12,7 +12,7 @@
     "A07": "关注状态来自 pwrs_patient_focus 的 p_id+user_code，不是 pwrs_patient.focus 全局共享",
     "A08": "p_id、patient_id、visit_id、district_code 均为 varchar(50)，p_id 值虽像 UUID 但不是原生 uuid 列",
     "A09": "患者主页异常检验当前默认近 5 天；旧 Pad 近两天注释不代表当前 Proxy 语义",
-    "A10": "体温单默认 7 天，入院不足 7 天时窗口受入院日期下限约束",
+    "A10": "体温单默认窗口：住院不足7天时从入院日连续取7天；满7天时取今天往前6天至今天。翻页或显式换范围时传 startDate；startDate 支持 yyyy-MM-dd 或13位毫秒时间戳，服务端当前不校验其是否早于入院或晚于今天",
     "A11": "体温单手工指标未知 type 静默结束：不报错且不落库",
     "A12": "体温单编辑携 recordId 不校验 owner；删除仅创建人，非创建人静默不删也不报错",
     "A13": "入院评估编辑已有 resultId 和删除都校验创建者；非本人返回 CREATOR 且数据不变；更新保留原 owner",
