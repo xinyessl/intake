@@ -216,6 +216,24 @@ test('真实PWRS地图回归：患者产品身份键与Proxy路由字段不混�
   }
 });
 
+test('真实PWRS地图回归：体温单七天窗口四种问法命中且不足七天不截到今天', {
+  skip: !process.env.PWRS_REAL_MAP,
+}, () => {
+  const S = buildRoutingSandbox(makeDeps());
+  const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
+  for (const question of [
+    '体温单不传 startDate 默认看几天？',
+    '体温单翻页或换范围时什么时候必须显式传 startDate？',
+    '刚入院三天的患者打开体温单，默认窗口怎么受入院日期影响？',
+    '患者主页异常检验是 5 天，所以体温单也应是 5 天，对吗？',
+  ]) {
+    const hit = S.routeQuestion(map, question, '');
+    assert.equal(hit.route.id, 'QR-LINE-CHART-SEVEN-DAY-WINDOW', `${question}，topN=${JSON.stringify(hit.topN)}`);
+    assert.match(hit.answerFacts.join('\n'), /不足 7 天仍从入院日起连续生成 7 个日期槽/);
+    assert.match(hit.mustNotConfuse.join('\n'), /不得.*只到今天/);
+  }
+});
+
 test('AC-2 tier-1 关键词 IDF 打分命中（无整串别名，纯关键词重叠）', () => {
   const S = buildRoutingSandbox(makeDeps());
   const r = S.routeQuestion(FIXTURE_MAP, '医嘱干预的时候说明书地址在哪里配置', '');
