@@ -35,6 +35,8 @@ import { renderPrompt as renderPromptTpl, readPromptsCfg, writePromptsCfg, effec
 // FS-09 实施端「个人全览图」纯聚合逻辑（医院卡 + 产品卡；可脱 DB/server 单测：tools/fs-09-overview.logic.test.mjs）
 import { buildHospitalCards as ovBuildHospitalCards, buildProductCards as ovBuildProductCards, todayParts as ovTodayParts } from './tools/fs-09-overview-logic.mjs';
 import { sortVersions as vpSortVersions } from './tools/version-plan-logic.mjs';
+// FS-04 答疑 Spec 两阶段召回：完整目录/元数据路由候选文件，再只搜候选正文；纯逻辑见专项测试。
+import { buildSpecDocument, searchSpecDocuments, currentTurnEvidenceGuard } from './spec-retrieval.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));           // 收件项目根目录
 const PORT = process.env.PORT || 5180;
@@ -616,72 +618,32 @@ function specSources(proj) {
   if (proj && proj.specsPath) out.push({ sub: '', specsPath: proj.specsPath });
   return out;
 }
-function parseSpecText(t, f) { const mod = ((t.match(/^module:\s*(.+)$/m) || [])[1] || '').trim(); const ti = ((t.match(/^title:\s*(.+)$/m) || [])[1] || String(f).replace(/\.md$/, '')).trim(); return { module: mod, title: ti }; }
-function specEntries(proj, ver) {   // → [{subsystem,module,title}]，跨子系统仓聚合
-  const out = [], ref = safeRef(ver);
-  for (const src of specSources(proj)) {
-    if (src.repoPath && fs.existsSync(src.repoPath)) {
-      for (const f of specFilesAt(src.repoPath, ref).slice(0, 300)) { const t = specFileText(src.repoPath, ref, f).slice(0, 800); if (!t) continue; const m = parseSpecText(t, path.basename(f)); out.push({ subsystem: src.sub, module: m.module, title: m.title }); }
-    } else if (src.specsPath) { try { for (const f of fs.readdirSync(src.specsPath)) { if (!f.endsWith('.md') || f.startsWith('_') || f.toLowerCase() === 'readme.md') continue; const m = parseSpecText(fs.readFileSync(path.join(src.specsPath, f), 'utf8').slice(0, 800), f); out.push({ subsystem: src.sub, module: m.module, title: m.title }); } } catch {} }
-    if (out.length >= 90) break;
-  }
-  return out.slice(0, 90);
+function specEntries(proj, ver) {   // 完整目录：不再按每仓前 30 份/全局 90 份截断；目录只用于路由与导航，不作事实证据
+  return loadSpecTexts(proj, ver).map(s => ({ file: s.file, id: s.id, subsystem: s.subsystem, module: s.module, title: s.title, headings: s.headings, identifiers: s.identifiers }));
 }
 function specIndex(proj, ver) { return specEntries(proj, ver).map(e => `[${e.subsystem ? e.subsystem + '·' : ''}${e.module}] ${e.title}`).join('\n'); }
 function specModules(proj, ver) { const set = new Set(); for (const e of specEntries(proj, ver)) if (e.module) set.add((e.subsystem ? e.subsystem + '/' : '') + e.module); return [...set]; }
 // 答疑召回：把 spec 正文读进来（缓存 10 分钟，避免每条消息都重读几十份仓文件），再按问题检索最相关的几份
-const SPEC_TEXT_CACHE = new Map();   // projId@ref -> { at, specs:[{subsystem,module,title,text}] }
+const SPEC_TEXT_CACHE = new Map();   // projId@ref -> { at, specs:[buildSpecDocument 结果] }
 function loadSpecTexts(proj, ver) {
   const ref = safeRef(ver), key = proj.id + '@' + ref, now = Date.now();
   const c = SPEC_TEXT_CACHE.get(key); if (c && now - c.at < 600000) return c.specs;
   const specs = [];
   for (const src of specSources(proj)) {
     if (src.repoPath && fs.existsSync(src.repoPath)) {
-      for (const f of specFilesAt(src.repoPath, ref).slice(0, 400)) { const full = specFileText(src.repoPath, ref, f); if (!full) continue; const m = parseSpecText(full.slice(0, 800), path.basename(f)); specs.push({ subsystem: src.sub, module: m.module, title: m.title, text: full }); }
+      for (const f of specFilesAt(src.repoPath, ref)) {
+        const full = specFileText(src.repoPath, ref, f); if (!full) continue;
+        specs.push(buildSpecDocument({ file: f, subsystem: src.sub, text: full }));
+      }
     } else if (src.specsPath) {
-      try { for (const f of fs.readdirSync(src.specsPath)) { if (!f.endsWith('.md') || f.startsWith('_') || f.toLowerCase() === 'readme.md') continue; const full = fs.readFileSync(path.join(src.specsPath, f), 'utf8'); const m = parseSpecText(full.slice(0, 800), f); specs.push({ subsystem: src.sub, module: m.module, title: m.title, text: full }); } } catch {}
+      try { for (const f of fs.readdirSync(src.specsPath)) { if (!f.endsWith('.md') || f.startsWith('_') || f.toLowerCase() === 'readme.md') continue; const full = fs.readFileSync(path.join(src.specsPath, f), 'utf8'); specs.push(buildSpecDocument({ file: path.join(src.specsPath, f), subsystem: src.sub, text: full })); } } catch {}
     }
-    if (specs.length >= 1000) break;   // 每子系统≤400 + 总≤1000（原 60/150 太低——pwrs 有 86 份 spec，前 60 之后的被漏掉导致误判「没覆盖」）
   }
   SPEC_TEXT_CACHE.set(key, { at: now, specs });
   return specs;
 }
-function chunkSpec(text) {   // spec 正文切段：先把"表格段"并入其上一段（表名/说明常在表格上一行，别让表名和表体分家），再按 ~560 字聚合
-  const body = String(text || '').replace(/^---[\s\S]*?---\s*/, '');
-  const paras = body.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
-  const merged = [];
-  for (const p of paras) { const isTable = /^\|.*\|/.test(p) || /\n\s*\|/.test(p); if (isTable && merged.length) merged[merged.length - 1] += '\n\n' + p; else merged.push(p); }
-  const chunks = []; let cur = '';
-  for (const p of merged) { if ((cur + '\n\n' + p).length > 560 && cur) { chunks.push(cur); cur = p; } else cur = cur ? cur + '\n\n' + p : p; }
-  if (cur) chunks.push(cur); return chunks;
-}
-const TABLE_Q = /表|字段|库|数据库|入库|存哪|哪张|落库|column|schema|table|field/i;   // "看哪张表/什么字段"这类问库表
-const API_Q = /接口|api|调用|请求|端点|endpoint|url/i;                                  // "调哪个接口"这类问接口
-const DATA_MARK = /数据契约|主表|列名|varchar|char\(|bigint|\bPK\b|表结构/;              // spec 里「数据契约」段特征
-const API_MARK = /接口契约|GET \/|POST \/|PUT \/|DELETE \//;                            // 「接口契约」段特征
-function specSearch(proj, ver, query, n = 5, subKey = '') {   // chunk 级检索：返回最相关的 spec 片段 [{subsystem,module,title,text}]；subKey 收窄到该子系统
-  const qset = new Set(kbTokenize(query)); if (!qset.size) return [];
-  let specs = loadSpecTexts(proj, ver); if (!specs.length) return [];
-  if (subKey) { const sc = specs.filter(s => (s.subsystem || '') === subKey); if (sc.length) specs = sc; }   // 用户指定了子系统 → 只在该子系统的 spec 里检索（该子系统无 spec 才回退全部）
-  const tableQ = TABLE_Q.test(query), apiQ = API_Q.test(query), schemaQ = tableQ || apiQ;
-  const chunks = [];
-  for (const s of specs) {
-    const titleHit = new Set();   // 该 spec 标题/模块命中的问题词（问表/接口时用它把"对的那份 spec"的契约段顶上来）
-    for (const t of kbTokenize((s.title || '') + ' ' + (s.module || ''))) if (qset.has(t)) titleHit.add(t);
-    for (const ck of chunkSpec(s.text)) chunks.push({ subsystem: s.subsystem, module: s.module, title: s.title, titleHit, text: ck, tset: new Set(kbTokenize(ck)) });
-  }
-  if (!chunks.length) return [];
-  const df = {}; for (const c of chunks) for (const t of c.tset) df[t] = (df[t] || 0) + 1;
-  const N = chunks.length, idf = t => Math.log((N + 1) / ((df[t] || 0) + 0.5));   // 稀有词权重更高，压掉"处方/审核/通过"这类通用词噪声
-  const ranked = chunks.map(c => {
-    let sc = 0; for (const t of qset) if (c.tset.has(t)) sc += idf(t);
-    const boost = (tableQ && DATA_MARK.test(c.text)) || (apiQ && API_MARK.test(c.text));   // 问表→顶数据契约段；问接口→顶接口契约段（且所属 spec 标题命中问题）
-    if (boost) { let tm = 0; for (const t of c.titleHit) tm += idf(t); sc += tm * 2.4; }
-    return { c, sc };
-  }).filter(x => x.sc > 0).sort((a, b) => b.sc - a.sc);
-  const cap = schemaQ ? 3 : 2, out = [], perFile = {};   // 问表/接口时多带该 spec 一段契约
-  for (const { c } of ranked) { if ((perFile[c.title] || 0) >= cap) continue; perFile[c.title] = (perFile[c.title] || 0) + 1; out.push({ subsystem: c.subsystem, module: c.module, title: c.title, text: c.text.slice(0, 800) }); if (out.length >= n) break; }
-  return out;
+function specSearch(proj, ver, query, n = 5, subKey = '') {   // 真两阶段：完整目录路由候选文件 → 仅候选正文检索 TopN
+  return specSearchScored(proj, ver, query, n, subKey).map(({ score, matchedTerms, ...hit }) => hit);
 }
 // 「深入思考」：spec 不够时直接 git grep 克隆的源码，把最相关的几段代码喂给 AI。用问题里的中文长词 + 英文标识 + spec 里的表名/接口路径当搜索词。
 function codeSearch(proj, ver, query, specHits, n = 4, subKey = '') {
@@ -776,31 +738,15 @@ function codeSearch(proj, ver, query, specHits, n = 4, subKey = '') {
   });
 }
 
-// PD-03（检索诊断）：specSearch 的「带分」变体——同一召回 + 打分逻辑，但额外透出每片段的 IDF 加权得分 score + 命中词 matchedTerms。
-//   ⚠️ 不改 specSearch 原函数（consult 主流程喂模型仍用它）；本函数仅供检索诊断（consult 捕获 / 回放）取带分结果，与原函数召回口径一致。
+// PD-03（检索诊断）+ FS-04：带分结果与普通召回共用同一套真两阶段实现，防两个入口的排序口径漂移。
 function specSearchScored(proj, ver, query, n = 5, subKey = '') {
-  const qset = new Set(kbTokenize(query)); if (!qset.size) return [];
-  let specs = loadSpecTexts(proj, ver); if (!specs.length) return [];
-  if (subKey) { const sc = specs.filter(s => (s.subsystem || '') === subKey); if (sc.length) specs = sc; }
-  const tableQ = TABLE_Q.test(query), apiQ = API_Q.test(query), schemaQ = tableQ || apiQ;
-  const chunks = [];
-  for (const s of specs) {
-    const titleHit = new Set();
-    for (const t of kbTokenize((s.title || '') + ' ' + (s.module || ''))) if (qset.has(t)) titleHit.add(t);
-    for (const ck of chunkSpec(s.text)) chunks.push({ subsystem: s.subsystem, module: s.module, title: s.title, titleHit, text: ck, tset: new Set(kbTokenize(ck)) });
-  }
-  if (!chunks.length) return [];
-  const df = {}; for (const c of chunks) for (const t of c.tset) df[t] = (df[t] || 0) + 1;
-  const N = chunks.length, idf = t => Math.log((N + 1) / ((df[t] || 0) + 0.5));
-  const ranked = chunks.map(c => {
-    let sc = 0; const matched = []; for (const t of qset) if (c.tset.has(t)) { sc += idf(t); matched.push(t); }
-    const boost = (tableQ && DATA_MARK.test(c.text)) || (apiQ && API_MARK.test(c.text));
-    if (boost) { let tm = 0; for (const t of c.titleHit) tm += idf(t); sc += tm * 2.4; }
-    return { c, sc, matched };
-  }).filter(x => x.sc > 0).sort((a, b) => b.sc - a.sc);
-  const cap = schemaQ ? 3 : 2, out = [], perFile = {};
-  for (const { c, sc, matched } of ranked) { if ((perFile[c.title] || 0) >= cap) continue; perFile[c.title] = (perFile[c.title] || 0) + 1; out.push({ subsystem: c.subsystem, module: c.module, title: c.title, text: c.text.slice(0, 800), score: Math.round(sc * 1000) / 1000, matchedTerms: matched.slice(0, 12) }); if (out.length >= n) break; }
-  return out;
+  const result = searchSpecDocuments(loadSpecTexts(proj, ver), query, { n, subKey, maxCandidates: 12 });
+  return result.hits.map(h => ({
+    file: h.file, id: h.id, subsystem: h.subsystem, module: h.module, title: h.title,
+    heading: h.heading, text: h.text, evidence: 'body',
+    score: Math.round((h.relevanceScore ?? h.score) * 1000) / 1000,
+    matchedTerms: (h.matchedTerms || []).slice(0, 12),
+  }));
 }
 
 // ===== PD-04：答疑「先路由到功能模块、命中才检索」（纯代码打分 + 阈值·确定性；仅对有「功能模块地图」的产品生效，无地图产品保持原 specSearch 行为不变） =====
@@ -1442,8 +1388,14 @@ function kbFromOf(source, fromRef) {
   if (s === 'auto') return 'auto';
   return '';   // 无来源信息 → 调用方默认 manual
 }
-function consultSystem(proj, ver, hits, specs, code) {   // 答疑助手系统提示（code 有值=用户点了「深入思考」，附源码片段）
-  const idx = specIndex(proj, ver), subs = subsystemNames(proj);
+function consultSystem(proj, ver, hits, specs, code, currentQuestion = '') {   // 答疑助手系统提示（code 有值=用户点了「深入思考」，附源码片段）
+  // 两阶段路由已由服务端完成：普通事实问答只把本轮命中的精简目录给模型，避免完整 80+ 份目录造成实体污染。
+  // 只有用户明确询问“有哪些模块/功能/规格目录”时才给完整目录；目录始终只作导航、不能当事实证据。
+  const asksCatalog = /(?:系统|产品)?(?:有|包含|支持)?哪些(?:模块|功能)|模块清单|功能清单|规格目录|spec\s*(?:目录|列表)|系统模块/i.test(String(currentQuestion || ''));
+  const idx = asksCatalog
+    ? specIndex(proj, ver)
+    : [...new Map((Array.isArray(specs) ? specs : []).map(s => [`${s.file || ''}|${s.title || ''}`, s])).values()].map(e => `[${e.subsystem ? e.subsystem + '·' : ''}${e.module || ''}] ${e.title || ''}`).join('\n');
+  const subs = subsystemNames(proj);
   const kb = hits.length
     ? '下面是从经验库检索到的相关条目（历史「问题→解法」），引用时请基于它们的真实内容、别改写走样：\n' + hits.map((h, i) => `【${i + 1}】问：${h.q}\n答：${h.a}`).join('\n\n')
     : '本次未检索到相关经验库条目。请依据上面的规格摘录 / 常识作答，不要声称「根据历史经验库 / 根据经验库」（可如实说明经验库暂无相关条目）。';
@@ -1454,7 +1406,7 @@ function consultSystem(proj, ver, hits, specs, code) {   // 答疑助手系统�
   const vars = {
     projectName: proj.name,
     subsSentence: subs.length ? `产品含子系统：${subs.join('、')}。` : '',
-    specIndexBlock: idx ? `系统模块清单：\n${idx}\n` : '',
+    specIndexBlock: idx ? `${asksCatalog ? '系统完整规格目录' : '本轮候选/命中规格目录'}（仅用于导航，目录标题不能作为事实证据）：\n${idx}\n` : '',
     specExcerpts: specTxt ? '\n' + specTxt + '\n' : '',
     kbBlock: kb ? '\n' + kb + '\n' : '',
   };
@@ -3129,7 +3081,7 @@ const server = http.createServer((req, res) => {
       else {
         // PD-04：命中 mustNotConfuse → 作负向提示注入 system（易混淆项，勿臆造）。answerFacts 已在 specHits 顶段（consultSystem 走 specExcerpts）。
         const mncNote = routeMnc.length ? '\n【以下为该问题的易混淆项，请勿臆造、勿张冠李戴】' + routeMnc.map(x => '\n· ' + x).join('') : '';
-        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
+        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
           piece = String(piece == null ? '' : piece); if (!piece) return;
           if (!kbInjected && kbRefs.length) { kbInjected = true; sse({ kb: kbRefs, kbInjected: true }); }
           reply += piece; sse({ v: piece });

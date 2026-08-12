@@ -8,7 +8,7 @@ prd: docs/实施端PRD.md §4.3（AI 对话提交）,§4.6（版本模型 · 归
 contract: 复用 POST /api/intake-submit · POST /api/consult(SSE) · POST /api/intake-analyze · POST /api/intake-chat + 本 spec §4（逐个对齐入参/返回，需微调项标 🔧）
 prototype: Desktop/Prototype/intake/redesign.html（① 实施端右侧对话：f-right/f-rtool、归档上下文 f-ctx + updateCtx 版本感知、提交类型切换 f-toggle、新对话 newc、对话流 f-msg、输入回车发送 f-chat-f）
 priority: Must
-status: accepted
+status: in-dev
 owner_human: <验收人 · NEEDS-HUMAN>
 depends_on: [FS-01]
 ---
@@ -123,7 +123,10 @@ depends_on: [FS-01]
 - **AC-42【历史多单会话刷新完整恢复】** Given 现场从「对话记录」打开一条已建多张工单的会话 When 异步详情加载并渲染完成后同标签刷新 Then 完整消息仍在，且 `builtTickets` 中全部已建单卡按保存顺序、原消息时间线锚点逐张恢复，同一工单 id 不重复；不能只凭 `savedId` 恢复首张卡，也不能把原本穿插在消息之间的卡片统一堆到末尾。每张卡继续保留工单号、类型、医院、子系统、版本、紧急程度和产品上下文；老草稿缺少 `builtTickets` 时才以 `savedId` 兜底一张。咨询会话刷新恢复不得串入上一段提单会话的卡片。
 - **AC-43【系统视图当前系统刷新保持】** Given 现场切到「系统视图」并在顶部选中某个实时可见系统（例如显示「药师工作站」、稳定值为该项 `name`），右侧已有当前会话 When 同标签 F5 Then 顶部仍显示原系统、清单仍按该系统加载，右侧会话不变。只有保存的 `name` 已不在当次 `/api/field/systems` 返回列表时才安全回退「全部系统」。
 
-> **AC 计数**：共 **42** 条（AC-1..42，其中 AC-19-KB 计为第 19 条）。AC-1..37 沿用既有优先级；AC-38..42 均为 P1。
+### N. 咨询 Spec 两阶段召回与本轮事实边界（2026-08-12）
+- **AC-44【完整目录路由 → 候选正文检索】** Given 产品仓有超过 60 份 Spec，且正确规则可能位于第 61 份之后或某文件后部的接口/字段表格 When `/api/consult` 检索当前最后一条 user 问题 Then 服务端必须执行真实两阶段召回：① 基于**完整** Spec 目录的文件路径、frontmatter `id/title/module`、Markdown 标题层级和机器抽取的精确标识符（API 路径、`snake_case`、`camelCase`、状态/接口码等）路由有限候选文件，移除每仓前 30/60 份等不可达截断；② **只在候选文件正文内**按标题层级切片、排序 Top5，长表格/长章节后部不得因固定前 800 字截断而丢失。目录/标题/机器标识符索引只用于路由，**不能作为事实证据**；普通事实问答只把本轮命中规格的精简目录给模型，只有明确询问“有哪些模块/功能/规格目录”时才给完整目录。精确路径/字段/状态值须强匹配，中文自然问法与相邻模块（如监护/反馈）须按当前问题实体消歧，`word` 参数不得被 Word 导出抢占、SQL 数据库连接不得被 WebSocket 连接抢占；显式 `subsystem` 有可用 Spec 时优先收窄。Top5 每文件最多 3 段并兼顾文件多样性。多轮仍保留最近 24 条正常追问上下文，但**检索查询只取当前最后一条 user 问题**，提示中固定“当前问题/当前召回实体优先；历史其它模块不能作为当前事实证据”；本轮无正文证据时继续安全说明当前资料无法确认，不得靠放松证据闸门或目录标题猜答案。
+
+> **AC 编号**：现编号至 **AC-44**（保留既有历史编号与 AC-19-KB）。AC-44 为 P1。
 
 ## 4. 接口契约
 > 统一前缀 `/api`；除 `consult`（SSE）外返回 `{...}` JSON。**本条 100% 复用现有端点，不新增端点**；提交人 `reporter`、归档医院 `site` 服务端按当前登录用户收敛（忽略越权传参）。契约锚点见 `docs/specs/00-实施端-spec清单.md §4` 对照表。
@@ -133,7 +136,7 @@ depends_on: [FS-01]
 |---|---|---|---|---|---|
 | POST | `/api/intake-chat` | **对话式建单（核心）**：AI 边聊边补，够了输出 `intake-record` → 自动建单 | `project`（产品 id）、`type`（`intake`=合并让 AI 判 / `requirement` / `bug`）、`version`、`site`、`subsystem`、`messages:[{role,content}]`、`images?` | `{ok:true, reply, savedId}`（`savedId` 非空=已建单）；AI 未配 → `{ok:true, reply:'（未配模型…）'}` | 在 `FIELD_OK`；`site`/`version`/`subsystem` 取自入参（🔧 见 4.3） |
 | POST | `/api/intake-submit` | **表单直提（兜底/人工路径）**：建需求/BUG 工单 + AI 首轮沟通 | `project`、`type`（→ `bug` 或 `requirement`）、`version`（BUG 必填）、`site`、`subsystem`、`title`、`desc`、`errorInfo`、`steps`、`expectResult`、`bg`、`reqDesc`、`accept`、`priority`、`images?` | `{ok:true, id, no, reply, configured, status}`；BUG 缺版本 → 400 | 在 `FIELD_OK`；`reporter` 服务端取登录用户（L884）；`site` 缺省取 link（🔧 见 4.3） |
-| POST | `/api/consult` | **咨询答疑（SSE 流式）**：spec + 经验库检索直接答、不进批次 | `project`、`version`、`site`、`subsystem`、`messages:[{role,content}]`、`convId?`、`deep?` | SSE：`data:{v:片段}` … `data:{done:true, convId, kbHits, stopped}`；落 `type='consult'`（`lifecycle='已答复'`） | 在 `FIELD_OK`；`reporter` 服务端取登录用户（L963） |
+| POST | `/api/consult` | **咨询答疑（SSE 流式）**：Spec 两阶段召回 + 经验库检索直接答、不进批次 | `project`、`version`、`site`、`subsystem`、`messages:[{role,content}]`、`convId?`、`deep?`；Spec/KB/源码检索 query 均取最后一条 user `content`，历史消息仍随模型请求保留 | SSE：`data:{v:片段}` … `data:{done:true, convId, kbHits, stopped}`；落 `type='consult'`（`lifecycle='已答复'`）。Spec 证据仅来自候选文件正文 Top5，目录索引不作证据 | 在 `FIELD_OK`；`reporter` 服务端取登录用户（L963） |
 | POST | `/api/intake-analyze` | **版本感知初判**（对**已建工单**做 AI 分类/结论/建议） | `project`、`id`（**已存在的工单 id**） | `{ok:true, analysis:{category:'非bug\|bug\|该版本已修\|需求', verdict, suggestion:'reply\|file', detail}, lifecycle}`；工单转「分析中」 | ⚠️ **需已建单**（先 `intake-submit`/`intake-chat` 拿到 id 再 analyze）；未在 `FIELD_OK`（当前仅管理员/后台调用，见 §4.4 NEEDS-HUMAN） |
 | POST | `/api/kb-from-consult` | 咨询"解决了"→沉淀经验库（带 `convId` 时取整段 chat 经 AI 整理成核心问题 Q + 全脉络 A；`subsystem` 取 src） | `project`、`convId`（兼容旧 `q`/`a`） | `{ok:true}`；条目 `from='consult'`。convId 无效/非 consult→400；越权 site→403 | 在 `FIELD_OK`；按 `user.sites` 收敛 |
 | GET | `/api/me` | 当前用户 + role + `sites`（归档医院边界数据源） | — | `{me:{role, name, sites, projects, …}}` | 公开自身 |
@@ -251,6 +254,7 @@ depends_on: [FS-01]
   - `tools/pd-02-prompts.logic.test.mjs` 精确基线 + 回答风格契约：普通/深入模板均锁定「结论→现场步骤→补充信息」、技术依据后置、证据/不臆造（AC-38）。
   - `tools/markdown-table.logic.test.mjs` 直接抽取并执行三处真实渲染器，覆盖有/无首尾管道、对齐、粗体/代码、XSS、普通段落、滚动包装与字号（AC-39）；不得退化为仅查源码字符串。
   - `tools/fs-04-narrow-layout.test.mjs` 锁定 legacy 工作区/右栏/气泡/输入区的可收缩边界，以及三处 Markdown 对长文本、代码与宽表的统一防溢出约束；浏览器夹具 `tools/fixtures/fs-04-narrow-layout.html` 直接加载 `field.html` 的真实样式，在 980px 与 760px 视口断言页面无整体横向溢出、宽表只在自身容器滚动（AC-41）。
+  - `tools/spec-retrieval-two-stage.logic.test.mjs` 直接执行生产纯逻辑，覆盖目录路由真实生效、第 61 份以后可达、后部接口/字段进入 Top5、精确 API/`snake_case`/`camelCase`/状态强匹配、word≠Word、SQL 连接≠WebSocket、监护/反馈不串、显式 subsystem、本轮事实边界，以及普通事实问答不向模型注入全量目录；并以 PWRS 真实 86 份 Spec 回归 git 目录第 79 份 `PWRS-SYS-07a`、第 82 份 `PWRS-SYS-10` 的候选与正文 Top5（AC-44）。
 - **接口（B 组 · 连真库冒烟）**：
   - `POST /api/intake-chat`（真实现场账号会话，`type='intake'` + `project=hlyy` + `messages`）→ 断言 `{ok:true}` 且（AI 配置时）产出 record 建单后 `savedId` 非空、`SELECT type,lifecycle,site,reporter FROM intakes WHERE id=savedId` 为 `requirement|bug` / `待处理` / `reporter`=登录用户；AI 未配时 `savedId` 空、返回降级文案不 500（AC-9/11/14）。
   - `POST /api/intake-submit`（`type=bug` 缺 version）→ 400「请填/选产品版本」（AC-15）；带 version → `{ok:true,id}`，`SELECT` 断言 `type=bug`/`lifecycle=待处理`/`reporter`=登录用户/`site` ∈ 账号 sites（AC-16/21）。
@@ -269,4 +273,5 @@ depends_on: [FS-01]
 - [x] 数据权限验收：`reporter` 服务端取登录用户、`site` ∈ 账号 sites（越权不落非负责医院）、三端点 FIELD_OK 登录可调、`intake-analyze` **现场可调但按 sites 收敛**（自己工单 200 / 越权 403，NH-3 已放开）、留痕 `history` 落 `data`。
 - [x] NH-1~3 已于 2026-07-22 裁决（§4.4：后端统一调模型 / 不做转需求 / intake-analyze 放开现场按 sites 收敛）；§4.3 🔧 `site` 服务端收敛本条实现。
 - [x] AC-38..41 的回答结构、Markdown 表格/分隔线与窄视口长内容回归通过；980px、760px 浏览器夹具均无页面级横向溢出，宽表只在自身容器横滚。
+- [x] AC-44 两阶段召回脱库专项通过：完整目录路由、候选正文 Top5、精确标识符/相邻模块消歧、本轮事实边界，以及 PWRS 真实 86 份 Spec 中 git 目录第 79 份 SYS-07a、第 82 份 SYS-10 锚点均有自动化证据；普通事实问答不再向模型注入全量目录。
 - [ ] 人类验收通过。
