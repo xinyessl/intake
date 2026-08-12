@@ -22,7 +22,7 @@
     "A17": "Pad 我的反馈分页接口为 GET /pwrsapi/applet/pharmacist/feedback/list/mine，不是 Web 路径或 Pad 工作任务列表",
     "A18": "药师反馈发送后正文锁定且不能删除；未发送时才可编辑/删除，并受创建人约束",
     "A19": "药师反馈同一药师 1 秒内重复提交由Redis防重拦截，返回 SUBMIT_IS_BUSY 且第二次不落库",
-    "A20": "Pad 我的监护列表页为 tablet/pages/ucenter/info/custody.vue；点击记录后打开详情前端路由 tablet/pages/patient/info/custody.vue?careTypeId=；后端 /care/order 是数据接口，不是页面路由",
+    "A20": "Pad 我的监护列表页为 tablet/pages/ucenter/info/custody.vue；点击记录后先同步患者上下文，再打开详情前端路由 tablet/pages/patient/info/custody.vue?careTypeId=；详情数据接口为 GET /pwrsapi/applet/follow/care?careTypeId=，它和后端 /care/order 都是数据接口而不是页面路由",
     "A21": "患教保存/暂存令 eduState=false；完成令 eduState=true 并写 completeTime；二者状态不能混为一谈",
     "A22": "业务保存、IM 消息送达、患者完成和签名是分离链路/状态，不能互相推出",
     "A23": "患教推荐按命中项数升序，命中少的排前；无医嘱也无诊断时返回空列表",
