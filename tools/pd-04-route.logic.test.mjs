@@ -275,11 +275,27 @@ test('真实PWRS地图回归：Pad API封装无Controller的自然问法命中�
     '前端定义了接口，但后端没有对应路由，能直接写成已实现吗？',
     '客户端有消费者，服务端端点缺失时规格如何标注？',
     'Web 能调通但 Pad 只有 API 封装，这算数据库数据丢了吗？',
+    '共享数据库与跨端功能一致性为什么不是一回事？',
+    '共用同一张表或 Service 是否代表 Web 和 Pad 的入口、字段与能力完全相同？',
   ]) {
     const hit = S.routeQuestion(map, question, '');
     assert.equal(hit.route.id, 'DQ-007', `${question}，topN=${JSON.stringify(hit.topN)}`);
     assert.match(hit.answerFacts.join('\n'), /接口断链.*调用无法命中/);
     assert.match(hit.mustNotConfuse.join('\n'), /封装存在不等于服务端契约存在/);
+  }
+});
+
+test('真实PWRS地图回归：跨端共享数据消歧不抢患教模板私有/共享可见性', { skip: !process.env.PWRS_REAL_MAP }, () => {
+  const S = buildRoutingSandbox(makeDeps());
+  const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
+  for (const question of [
+    '只要模板匹配患者，是否共享都能被所有药师看到，对吧？',
+    '一个模板 shared=false，但正好匹配患者，我不是创建人能不能进推荐？',
+    '别人没共享的个人患教模板我能看到吗？',
+    '推荐结果对共享模板和本人私有模板的可见规则是什么？',
+  ]) {
+    const hit = S.routeQuestion(map, question, '');
+    assert.equal(hit.route.id, 'QR-EDU-TEMPLATE-VISIBILITY', `${question}，topN=${JSON.stringify(hit.topN)}`);
   }
 });
 
