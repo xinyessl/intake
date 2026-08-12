@@ -36,7 +36,7 @@ import { renderPrompt as renderPromptTpl, readPromptsCfg, writePromptsCfg, effec
 import { buildHospitalCards as ovBuildHospitalCards, buildProductCards as ovBuildProductCards, todayParts as ovTodayParts } from './tools/fs-09-overview-logic.mjs';
 import { sortVersions as vpSortVersions } from './tools/version-plan-logic.mjs';
 // FS-04 答疑 Spec 两阶段召回：完整目录/元数据路由候选文件，再只搜候选正文；纯逻辑见专项测试。
-import { buildSpecDocument, searchSpecDocuments, currentTurnEvidenceGuard } from './spec-retrieval.mjs';
+import { buildSpecDocument, searchSpecDocuments, currentTurnEvidenceGuard, expandRetrievalQuery } from './spec-retrieval.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));           // 收件项目根目录
 const PORT = process.env.PORT || 5180;
@@ -932,7 +932,8 @@ function loadRouteContext(proj, ver, routeResult) {
 }
 // PD-04 修复：把路由内容与 specSearch 底座合成「实际喂模型的 specHits」——纯函数、可单测。
 //   routeHits = loadRouteContext 的 specHits（含 answerFacts 顶段，路由命中时）；searchHits = specSearchScored 结果（specSearch 底座）。
-//   ① 路由命中（matched=true）：route 精选事实置前 + specSearch 底座补后（去重、cap≤7）→ answerFacts 仍最高优，但 specSearch 强匹配也一起喂（防路由错配盖掉强 specSearch）。
+//   ① 路由命中（matched=true）：answerFacts 最高优 + specSearch 底座置前 + 其余 route 章节补后（去重、cap≤7）。
+//      搜索正文比宽泛模块章节更贴近本轮自然语言问题，避免正确片段虽召回却被 route 章节挤到末尾而被便宜模型忽略。
 //   ② 路由未命中（matched=false）：specSearch 首条 ≥ minRelevant → 用 specSearch（据 spec 底座作答）；否则空（走 miss 固定话术）。
 //   返回 { specHits, usedSpecSearch, searchTop, noSpec }（noSpec=true 表示既无路由也无够强 specSearch → 上层可判 miss 话术）。
 function assembleConsultSpecHits(matched, routeHits, searchHits, minRelevant, cap = 7) {
@@ -942,7 +943,10 @@ function assembleConsultSpecHits(matched, routeHits, searchHits, minRelevant, ca
   const keyOf = h => (String((h && h.module) || '') + '|' + String((h && h.title) || '') + '|' + String((h && h.text) || '').slice(0, 120));
   if (matched) {
     const out = [], seen = new Set();
-    for (const h of [].concat(Array.isArray(routeHits) ? routeHits : [], base)) { if (!h) continue; const k = keyOf(h); if (seen.has(k)) continue; seen.add(k); out.push(h); if (out.length >= cap) break; }
+    const route = Array.isArray(routeHits) ? routeHits : [];
+    const facts = route.filter(h => h && h.section === 'answerFacts');
+    const rest = route.filter(h => !h || h.section !== 'answerFacts');
+    for (const h of [].concat(facts, base, rest)) { if (!h) continue; const k = keyOf(h); if (seen.has(k)) continue; seen.add(k); out.push(h); if (out.length >= cap) break; }
     return { specHits: out, usedSpecSearch: base.length > 0, searchTop, noSpec: false };
   }
   // 路由未命中
@@ -3027,24 +3031,25 @@ const server = http.createServer((req, res) => {
       const cfg = readModelCfg();
       try { refreshRepos(proj, false); } catch {}
       const lastUser = [...msgs].reverse().find(m => m.role === 'user'); const qtext = lastUser ? lastUser.content : '';
+      const retrievalQuery = expandRetrievalQuery(msgs, qtext);   // “它/这个/那…”短追问用上一条 user 问题补实体；只影响检索，不把旧答案当事实
       const sub = String(b.subsystem || '').trim();   // 用户指定的子系统（空=全部）
       const imgs = (Array.isArray(b.images) ? b.images : []).slice(0, 6);   // 本轮附的截图（data URL，≤6）→ 多模态并进末条 user，让 AI 结合图答疑；落库见下方 convId 已知处
       // PD-03：改用带分变体 kbRetrieveScored 一次性拿「带分结果」——hits（喂模型 + kbRefs）由它 .map(x=>x.e) 派生（同 kbRetrieve 召回口径：同 _kbScored/同排序/同 slice/同 minScore=2），
       //   避免为「检索捕获」再对 query 多做一次 embedding 调用（复用同一次计算）。检索异常不阻断咨询：失败即按无命中。
       let hits = [], kbScored = [];
-      try { kbScored = await kbRetrieveScored(proj.id, qtext, 5, 2); hits = kbScored.map(x => x.e); } catch { hits = []; kbScored = []; }
+      try { kbScored = await kbRetrieveScored(proj.id, retrievalQuery, 5, 2); hits = kbScored.map(x => x.e); } catch { hits = []; kbScored = []; }
       // consult 专用二次门槛：全局 SEM_GATE(0.42) 召回口径下 sim=0.42 的边缘条目也会进 kbScored（与提问相关度很弱、易误引）。
       //   这里过一遍 consultKbFilter（语义 sim≥CONSULT_KB_MIN_SIM=0.5 / 纯词 matchedTerms≥CONSULT_KB_MIN_LEX=3），只让「够强相关」的条目进注入(consultSystem)+kb 事件+kbRefs。
       //   kbScored（全召回）保留原样给 buildRetrieval 检索诊断（「召回了但太弱没注入」本身是有用的排查信息）；仅 hits（喂模型+kbRefs 的口径）收敛为强相关子集。
       hits = consultKbFilter(kbScored).map(x => x.e);
       const cver = String(b.version || '').trim();
       // PD-04：先按提问路由到功能模块（仅对有「功能模块地图」的产品生效）。无地图 → map=null → 完全走原 specSearch（向后兼容）。
-      let route = null; try { const map = loadModuleMap(proj, cver); if (map) route = routeQuestion(map, qtext, sub); } catch { route = null; }
+      let route = null; try { const map = loadModuleMap(proj, cver); if (map) route = routeQuestion(map, retrievalQuery, sub); } catch { route = null; }
       const hasMap = !!route;   // 有地图且已跑路由
       const routeMiss = hasMap && !route.matched;   // 路由未命中任何功能模块
       // PD-04 修复：specSearch 始终作底座（有地图也跑）——用带分变体 specSearchScored（同 specSearch 召回口径 + 额外带 score），
       //   一次计算两用：既做喂模型的 spec 底座，又直接喂 buildRetrieval 检索诊断（避免重复检索）。检索异常不阻断答疑。
-      let searchScored = []; try { searchScored = specSearchScored(proj, cver, qtext, 5, sub); } catch { searchScored = []; }
+      let searchScored = []; try { searchScored = specSearchScored(proj, cver, retrievalQuery, 5, sub); } catch { searchScored = []; }
       const searchTop = (searchScored[0] && typeof searchScored[0].score === 'number') ? searchScored[0].score : 0;
       let specHits, routeMnc = [], usedSpecSearch = false, specNoSpec = false;
       if (hasMap) {
@@ -3055,10 +3060,10 @@ const server = http.createServer((req, res) => {
         const asm = assembleConsultSpecHits(!!route.matched, routeHits, searchScored, SPEC_MIN_RELEVANT);
         specHits = asm.specHits; usedSpecSearch = asm.usedSpecSearch; specNoSpec = asm.noSpec;
       } else {
-        specHits = specSearch(proj, cver, qtext, 5, sub);   // 无地图产品：原语义混合召回（sim>=SEM_GATE||lex>=2 入选，弱匹配不注入不发 kb 事件），行为不变
+        specHits = specSearch(proj, cver, retrievalQuery, 5, sub);   // 无地图产品：同样用已补实体的检索问题；正文证据边界仍由 qtext 控制
       }
       // 深入思考(源码)单独走：codeSearch 用当前 specHits 当桥（命中=路由+specSearch 合集，miss+specSearch 强=specSearch，无地图=specSearch）。
-      const codeHits = b.deep ? codeSearch(proj, cver, qtext, hasMap ? (specHits || []) : specHits, 4, sub) : null;
+      const codeHits = b.deep ? codeSearch(proj, cver, retrievalQuery, hasMap ? (specHits || []) : specHits, 4, sub) : null;
       // PD-04 miss 判定（修复）：路由未命中 且 specSearch 底座也弱/空（specNoSpec），且（非 deep，或 deep 但源码也无命中）→ 不调模型、返回固定话术。
       //   即：specSearch 强匹配时，即便路由未命中也不再走固定话术——由提示词功能级覆盖判定据 spec 底座答/说没覆盖。
       const noAnswer = routeMiss && specNoSpec && !(b.deep && codeHits && codeHits.length);

@@ -222,8 +222,8 @@ test('AC-6 无地图产品：loadModuleMap 返 null（consult 回落 specSearch�
 
 test('AC-6 无地图产品：consult 源码分支——map=null 才走 specSearch（源码级断言）', () => {
   // 有地图 → route 命中/miss 走新分支；无地图（map falsy）→ specHits = specSearch(...)（原行为）
-  assert.match(SRC, /const map = loadModuleMap\(proj, cver\); if \(map\) route = routeQuestion\(map, qtext, sub\)/, 'consult 先加载地图再路由');
-  assert.match(SRC, /specHits = specSearch\(proj, cver, qtext, 5, sub\);\s+\/\/ 无地图产品/, '无地图分支仍用 specSearch');
+  assert.match(SRC, /const map = loadModuleMap\(proj, cver\); if \(map\) route = routeQuestion\(map, retrievalQuery, sub\)/, 'consult 先加载地图再路由');
+  assert.match(SRC, /specHits = specSearch\(proj, cver, retrievalQuery, 5, sub\);\s+\/\/ 无地图产品/, '无地图分支仍用 specSearch');
   // PD-04 修复：miss 固定话术条件多了 specNoSpec（specSearch 底座也弱/空）——specSearch 强匹配时即便路由 miss 也不再走固定话术。
   assert.match(SRC, /const noAnswer = routeMiss && specNoSpec && !\(b\.deep && codeHits && codeHits\.length\)/, 'miss 且 specSearch 弱/空 且（非 deep 或 deep 无源码）→ noAnswer');
 });
@@ -234,10 +234,11 @@ const SH = (m, t, score, x = '') => ({ subsystem: '', module: m, title: t, text:
 
 test('PD-04修复 路由命中：specHits = 路由内容(置前) + specSearch 底座（去重合并），answerFacts 仍最高优', () => {
   const S = buildRoutingSandbox(makeDeps());
-  const routeHits = [RH('模块地图', '经确认事实（最高优先，据此作答）', 'answerFacts 内容'), RH('PWRS-SYS-06', '收费配置', '收费章节正文')];
+  const routeHits = [{ ...RH('模块地图', '经确认事实（最高优先，据此作答）', 'answerFacts 内容'), section: 'answerFacts' }, RH('PWRS-SYS-06', '收费配置', '收费章节正文')];
   const searchHits = [SH('PWRS-ACT-01', '系统激活注册', 16.5, '激活包上传、激活状态门禁'), SH('PWRS-SYS-06', '收费配置', 4.3, '收费章节正文')];   // 末条与 route 重复
   const asm = S.assembleConsultSpecHits(true, routeHits, searchHits, S.SPEC_MIN_RELEVANT);
   assert.equal(asm.specHits[0].title, '经确认事实（最高优先，据此作答）', 'answerFacts 顶段置前（最高优）');
+  assert.equal(asm.specHits[1].title, '系统激活注册', 'answerFacts 后应先放本轮 specSearch 强匹配，再放宽泛 route 章节');
   const joined = asm.specHits.map(h => h.text).join('\n');
   assert.match(joined, /激活包上传/, 'specSearch 强匹配「激活注册」也进 specHits（路由错配不再盖掉强 specSearch）');
   // 去重：route 的「收费配置」与 specSearch 的「收费配置」同 module|title|text → 只保留一条
@@ -253,7 +254,7 @@ test('PD-04修复 路由命中：cap≤7（route+specSearch 合并不超上限�
   const searchHits = Array.from({ length: 6 }, (_, i) => SH('E' + i, '搜索' + i, 10 - i, '搜索正文' + i));
   const asm = S.assembleConsultSpecHits(true, routeHits, searchHits, S.SPEC_MIN_RELEVANT);
   assert.ok(asm.specHits.length <= 7, 'cap≤7');
-  assert.equal(asm.specHits[0].title, '路由0', 'route 内容仍置前');
+  assert.equal(asm.specHits[0].title, '搜索0', '没有 answerFacts 时，当前问题的精准 specSearch 结果置前');
 });
 
 test('PD-04修复 路由未命中但 specSearch 强（首条≥阈值）→ 用 specSearch，不 miss', () => {
@@ -283,7 +284,7 @@ test('PD-04修复 路由未命中且 specSearch 空 → noSpec（miss 固定话�
 
 test('PD-04修复 consult 端组装接线（源码级）：assembleConsultSpecHits + specSearch 始终作底座 + specTop 进诊断', () => {
   // specSearch 底座（specSearchScored）在有地图时也跑一次，一处两用（喂模型 + 诊断）
-  assert.match(SRC, /searchScored = specSearchScored\(proj, cver, qtext, 5, sub\)/, 'consult 始终跑 specSearchScored 作底座');
+  assert.match(SRC, /searchScored = specSearchScored\(proj, cver, retrievalQuery, 5, sub\)/, 'consult 始终跑 specSearchScored 作底座');
   assert.match(SRC, /assembleConsultSpecHits\(!!route\.matched, routeHits, searchScored, SPEC_MIN_RELEVANT\)/, '有地图分支用 assembleConsultSpecHits 合成 specHits');
   // buildRetrieval 复用同一 searchScored（不再单独重算 specScored）
   assert.match(SRC, /buildRetrieval\(\{ query: qtext, deep: !!b\.deep, ver: cver, subsystem: sub \}, searchScored, kbScored, codeHits\)/, '诊断复用同一 searchScored');

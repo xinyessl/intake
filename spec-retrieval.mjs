@@ -69,6 +69,22 @@ function headingCatalog(text) {
   return headings;
 }
 
+function structuredRouteHints(text) {
+  const out = [];
+  for (const raw of String(text || '').split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || /^\|?\s*:?-{3,}/.test(line)) continue;
+    // 接口摘要、AC 标题和短表格行是机器路由提示：它们补足“标题看不出正文能力”的场景，
+    // 例如「Pad 反馈对象下拉」实际写在患者列表 spec 的接口清单里。
+    const contract = /^\*\*(?:GET|POST|PUT|DELETE|PATCH)\s+\//i.test(line);
+    const ac = /^[-*]\s+\*\*AC-[^*]+\*\*/i.test(line);
+    const table = line.startsWith('|') && line.endsWith('|') && line.length <= 600;
+    if (contract || ac || table) out.push(line.slice(0, 600));
+    if (out.length >= 180) break;
+  }
+  return uniq(out);
+}
+
 export function buildSpecDocument(input) {
   const text = String((input && input.text) || '');
   const fm = frontmatter(text);
@@ -78,11 +94,12 @@ export function buildSpecDocument(input) {
   const id = String((input && input.id) || fm.id || '').trim();
   const subsystem = String((input && input.subsystem) || '').trim();
   const headings = headingCatalog(text);
+  const routeHints = structuredRouteHints(text);
   // identifiers 可从正文抽取，但只进入“机器路由索引”：它们帮助把精确 API/字段路由到文件，
   // 从不直接返回模型；模型事实证据仍只能来自第二阶段命中的正文片段。
   const identifiers = identifiersFrom(text, false);
-  const routeText = [id, title, module, subsystem, file, ...headings, ...identifiers].join('\n');
-  return { file, id, title, module, subsystem, headings, identifiers, routeText, text };
+  const routeText = [id, title, module, subsystem, file, ...headings, ...routeHints, ...identifiers].join('\n');
+  return { file, id, title, module, subsystem, headings, routeHints, identifiers, routeText, text };
 }
 
 function ensureDoc(raw, i) {
@@ -266,4 +283,18 @@ export function currentTurnEvidenceGuard(query, hits) {
     '回答当前问题时，只能把本轮“相关规格摘录”和经验/源码片段中的正文当作事实证据；规格目录标题只用于导航，不能据此补写规则。',
     '历史对话只用于理解追问和代词，不能把历史中其它模块的事实迁移成当前问题的事实证据。若本轮正文没有证据，继续安全说明当前资料无法确认。',
   ].join('\n');
+}
+
+export function expandRetrievalQuery(messages, currentQuestion) {
+  const current = String(currentQuestion || '').trim();
+  if (!current) return '';
+  const contextual = /^(?:那|那么|所以|然后|还有|这个|那个|它|其中|上面|前面|刚才)|(?:它|这个|那个|上述|前面|刚才|该接口|该功能|这些|分别)/i.test(current);
+  if (!contextual || current.length > 80) return current;
+  const users = (Array.isArray(messages) ? messages : []).filter(m => m && m.role === 'user' && String(m.content || '').trim());
+  let previous = '';
+  for (let i = users.length - 1; i >= 0; i--) {
+    const value = String(users[i].content || '').trim();
+    if (value && value !== current) { previous = value; break; }
+  }
+  return previous ? `${previous.slice(0, 1200)}\n追问：${current}` : current;
 }

@@ -11,6 +11,7 @@ import {
   routeSpecCandidates,
   searchSpecDocuments,
   currentTurnEvidenceGuard,
+  expandRetrievalQuery,
 } from '../spec-retrieval.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -124,6 +125,19 @@ test('多轮事实边界：当前问题/当前召回实体优先，旧轮其它�
   assert.match(route, /currentTurnEvidenceGuard\(qtext, specHits\)/, '模型仍收历史消息，但接入本轮事实边界');
 });
 
+test('多轮代词追问只补上一条 user 实体做检索，不把 assistant 旧答案当事实', () => {
+  const messages = [
+    { role: 'user', content: 'SQL 监视诊断客户端能连哪些数据库？' },
+    { role: 'assistant', content: '这里即便写了错误端口，也不能成为检索事实。' },
+    { role: 'user', content: '那它会不会调用 PWRS 的 HTTP 接口？' },
+  ];
+  const expanded = expandRetrievalQuery(messages, messages[2].content);
+  assert.match(expanded, /SQL 监视诊断客户端/);
+  assert.match(expanded, /追问：那它会不会调用/);
+  assert.doesNotMatch(expanded, /错误端口/);
+  assert.equal(expandRetrievalQuery(messages, '患者主页异常检验默认看几天？'), '患者主页异常检验默认看几天？');
+});
+
 test('普通事实问答不把完整 Spec 目录塞给模型；明确询问模块清单时仍可见完整目录', () => {
   const server = fs.readFileSync(path.join(ROOT, 'server.mjs'), 'utf8');
   let fullCatalogCalls = 0;
@@ -171,6 +185,8 @@ test('PWRS 真实 86 份 Spec 全量可达：git 目录第 79 份 SYS-07a 与第
     ['ETL 真正统一入口和 interfaceCode 请求体是什么？', 'PWRS-SYS-07a-', /comm\/proxy\/request/],
     ['SQL 监视诊断客户端支持哪些数据库连接类型？', 'PWRS-SYS-10-', /MySQL\/MariaDB.*PostgreSQL/s],
     ['SQL 监视工具会调用 PWRS 的 HTTP 接口吗？', 'PWRS-SYS-10-', /(?:无 HTTP 业务接口|不依赖 PWRS\/usercenter 登录或 HTTP 接口)/],
+    ['Pad 上药师反馈对象下拉调哪个接口？', 'PWRS-CARE-01a-', /\/pwrsapi\/applet\/patient\/feedback\/objects/],
+    ['患者主页那个异常检验，默认看最近几天？', 'PWRS-CARE-01b-', /近 5 天异常指标/],
   ];
   for (const [q, fileNeedle, bodyNeedle] of cases) {
     const result = searchSpecDocuments(specs, q, { n: 5 });
