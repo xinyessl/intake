@@ -154,6 +154,50 @@ test('专用 QR 与泛化 DQ 小分差竞争时优先 QR；明显更相关的 DQ
   assert.equal(diagnostic.route.id, 'DQ-001');
 });
 
+test('接口权限自然问法族优先专用QR，并同时保留功能授权缺口与业务数据边界', () => {
+  const S = buildRoutingSandbox(makeDeps());
+  const map = {
+    questionRoutes: [
+      { id: 'DQ-002', title: '菜单按钮或功能入口看不到', aliases: ['菜单权限异常'], keywords: ['服务端', '权限', '接口', '菜单'], answerFacts: ['泛化权限排查'] },
+      {
+        id: 'QR-INTERFACE-AUTH-BOUNDARY', title: '接口级功能授权缺口与业务数据边界',
+        aliases: ['服务端现在有没有方法级权限校验', '方法级接口授权是否已经落地', '没有权限注解是否等于没有任何权限控制', '接口侧是不是只做认证不做任何校验'],
+        keywords: ['@RequiresPermissions', '@RequiresRoles', '权限注解', '方法级', '权限校验', 'token', '接口级授权', 'owner', '院区', '数据作用域'],
+        answerFacts: ['当前基本没有方法级权限注解', '具体业务仍可能执行 owner 与院区数据作用域校验'],
+        mustNotConfuse: ['不得把缺少权限注解表述为接口侧仅认证或所有业务接口都会成功'],
+      },
+    ],
+    specs: [], indexes: {},
+  };
+  for (const question of [
+    'PWRS 服务端现在有方法级权限校验吗？',
+    '服务端是否有方法级授权？',
+    '权限注解有没有落地？',
+    '没有注解是不是接口只做认证？',
+  ]) {
+    const hit = S.routeQuestion(map, question, '');
+    assert.equal(hit.route.id, 'QR-INTERFACE-AUTH-BOUNDARY', question);
+    assert.match(hit.answerFacts.join('\n'), /owner.*院区/);
+    assert.match(hit.mustNotConfuse.join('\n'), /仅认证/);
+  }
+});
+
+test('真实PWRS地图回归：接口权限问法族不再被泛化DQ抢路由', {
+  skip: !process.env.PWRS_REAL_MAP,
+}, () => {
+  const S = buildRoutingSandbox(makeDeps());
+  const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
+  for (const question of [
+    'PWRS 服务端现在有方法级权限校验吗？',
+    '服务端是否有方法级授权？',
+    '权限注解有没有落地？',
+    '没有注解是不是接口只做认证？',
+  ]) {
+    const hit = S.routeQuestion(map, question, '');
+    assert.equal(hit.route.id, 'QR-INTERFACE-AUTH-BOUNDARY', `${question}，topN=${JSON.stringify(hit.topN)}`);
+  }
+});
+
 test('AC-2 tier-1 关键词 IDF 打分命中（无整串别名，纯关键词重叠）', () => {
   const S = buildRoutingSandbox(makeDeps());
   const r = S.routeQuestion(FIXTURE_MAP, '医嘱干预的时候说明书地址在哪里配置', '');
