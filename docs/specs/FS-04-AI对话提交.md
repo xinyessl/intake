@@ -254,7 +254,7 @@ depends_on: [FS-01]
   - `tools/pd-02-prompts.logic.test.mjs` 精确基线 + 回答风格契约：普通/深入模板均锁定「结论→现场步骤→补充信息」、技术依据后置、证据/不臆造（AC-38）。
   - `tools/markdown-table.logic.test.mjs` 直接抽取并执行三处真实渲染器，覆盖有/无首尾管道、对齐、粗体/代码、XSS、普通段落、滚动包装与字号（AC-39）；不得退化为仅查源码字符串。
   - `tools/fs-04-narrow-layout.test.mjs` 锁定 legacy 工作区/右栏/气泡/输入区的可收缩边界，以及三处 Markdown 对长文本、代码与宽表的统一防溢出约束；浏览器夹具 `tools/fixtures/fs-04-narrow-layout.html` 直接加载 `field.html` 的真实样式，在 980px 与 760px 视口断言页面无整体横向溢出、宽表只在自身容器滚动（AC-41）。
-  - `tools/spec-retrieval-two-stage.logic.test.mjs` 直接执行生产纯逻辑，覆盖目录路由真实生效、第 61 份以后可达、后部接口/字段进入 Top5、精确 API/`snake_case`/`camelCase`/状态强匹配、word≠Word、SQL 连接≠WebSocket、监护/反馈不串、显式 subsystem、本轮事实边界，以及普通事实问答不向模型注入全量目录；并以 PWRS 真实 86 份 Spec 回归 git 目录第 79 份 `PWRS-SYS-07a`、第 82 份 `PWRS-SYS-10` 的候选与正文 Top5（AC-44）。
+  - `tools/spec-retrieval-two-stage.logic.test.mjs` 直接执行生产纯逻辑，覆盖目录路由真实生效、第 61 份以后可达、后部接口/字段进入 Top5、精确 API/`snake_case`/`camelCase`/状态强匹配、word≠Word、SQL 连接≠WebSocket、监护/反馈不串、显式 subsystem、本轮事实边界、短代词追问和自然问法概念归一，以及普通事实问答不向模型注入全量目录；并以 PWRS 真实 86 份 Spec 回归 git 目录第 79 份 `PWRS-SYS-07a`、第 82 份 `PWRS-SYS-10`、Pad 反馈对象接口、异常检验近 5 天和跨院区复合身份正文 Top5（AC-44）。
 - **接口（B 组 · 连真库冒烟）**：
   - `POST /api/intake-chat`（真实现场账号会话，`type='intake'` + `project=hlyy` + `messages`）→ 断言 `{ok:true}` 且（AI 配置时）产出 record 建单后 `savedId` 非空、`SELECT type,lifecycle,site,reporter FROM intakes WHERE id=savedId` 为 `requirement|bug` / `待处理` / `reporter`=登录用户；AI 未配时 `savedId` 空、返回降级文案不 500（AC-9/11/14）。
   - `POST /api/intake-submit`（`type=bug` 缺 version）→ 400「请填/选产品版本」（AC-15）；带 version → `{ok:true,id}`，`SELECT` 断言 `type=bug`/`lifecycle=待处理`/`reporter`=登录用户/`site` ∈ 账号 sites（AC-16/21）。
@@ -273,5 +273,5 @@ depends_on: [FS-01]
 - [x] 数据权限验收：`reporter` 服务端取登录用户、`site` ∈ 账号 sites（越权不落非负责医院）、三端点 FIELD_OK 登录可调、`intake-analyze` **现场可调但按 sites 收敛**（自己工单 200 / 越权 403，NH-3 已放开）、留痕 `history` 落 `data`。
 - [x] NH-1~3 已于 2026-07-22 裁决（§4.4：后端统一调模型 / 不做转需求 / intake-analyze 放开现场按 sites 收敛）；§4.3 🔧 `site` 服务端收敛本条实现。
 - [x] AC-38..41 的回答结构、Markdown 表格/分隔线与窄视口长内容回归通过；980px、760px 浏览器夹具均无页面级横向溢出，宽表只在自身容器横滚。
-- [x] AC-44 两阶段召回脱库专项通过：完整目录路由、候选正文 Top5、精确标识符/相邻模块消歧、本轮事实边界，以及 PWRS 真实 86 份 Spec 中 git 目录第 79 份 SYS-07a、第 82 份 SYS-10 锚点均有自动化证据；普通事实问答不再向模型注入全量目录。
+- [x] AC-44 两阶段召回专项通过：完整目录路由、候选正文 Top5、精确标识符/相邻模块消歧、短代词追问、自然问法概念归一和本轮事实边界均有自动化证据；生产正确 tag 上 Qwen-Max 代表性检查点 12/12，普通事实问答不再向模型注入全量目录。
 - [ ] 人类验收通过。
