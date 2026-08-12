@@ -31,7 +31,7 @@
     "A26": "同 groupNo 医嘱审核仅创建人可覆盖；非创建人返回 ORDER_NOT_USER 且原数据不变",
     "A27": "药物重整原始医嘱来自 HIS/Proxy，药品字典和规则来自 PKB，PWRS 保存重整业务快照/结果；历史不随 PKB 自动改名",
     "A28": "检验大项/小项/微生物为 V_IPT_EXAM、V_IPT_EXAM_ITEM、V_IPT_MICROBE；统一入口 comm/proxy/request；word 在 Proxy 本地处理",
-    "A29": "病历概要/总览/文书列表/详情为 V_IPT_EMR_PATIENT、V_IPT_EMR、V_IPT_EMR_ITEM、V_IPT_EMR_DETAIL；word 不送 ETL 全文检索而由 Proxy 本地匹配",
+    "A29": "病历患者概要为 V_IPT_EMR_PATIENT，病程总览为 V_IPT_EMR；病程分类分组列表同时调用 V_IPT_EMR 与 V_IPT_EMR_PATIENT（入院记录叠加概要），某类型文书列表才用 V_IPT_EMR_ITEM，文书详情用 V_IPT_EMR_DETAIL；word 不送 ETL 全文检索而由 Proxy 按 bcName 本地匹配",
     "A30": "Proxy 空数组不能直接证明 HIS 无数据，要区分 HIS/ETL 上游、Proxy 请求/缓存/本地过滤、PWRS 页面过滤",
     "A31": "收费报错/超时可能出现 HIS 成功而本地失败的半成功，不能盲目重试；需按 HIS 明确失败、HIS 成功本地失败、未知结果分层",
     "A32": "待收费可删除；已收费应撤销，撤销置 charge_status=-1 并保留原记录可查，但不产生负金额冲正记录；删除不等同撤销",
