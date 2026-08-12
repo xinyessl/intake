@@ -198,6 +198,24 @@ test('真实PWRS地图回归：接口权限问法族不再被泛化DQ抢路由',
   }
 });
 
+test('真实PWRS地图回归：患者产品身份键与Proxy路由字段不混写', {
+  skip: !process.env.PWRS_REAL_MAP,
+}, () => {
+  const S = buildRoutingSandbox(makeDeps());
+  const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
+  for (const question of [
+    '跨院区时一名患者靠哪几个字段才算唯一？',
+    '历史深链只有 patientId+visitId，还能不能自动认院区？',
+    '两个院区有相同 patientId 和 visitId，页面该怎么避免串人？',
+    '少了 hospitalId 时直接拿 token 当前院区补上就行吧？',
+  ]) {
+    const hit = S.routeQuestion(map, question, '');
+    assert.equal(hit.route.id, 'DQ-003', `${question}，topN=${JSON.stringify(hit.topN)}`);
+    assert.match(hit.answerFacts.join('\n'), /固定使用 hospitalId \+ patientId \+ visitId/);
+    assert.match(hit.mustNotConfuse.join('\n'), /districtCode 仅限内部上游路由/);
+  }
+});
+
 test('AC-2 tier-1 关键词 IDF 打分命中（无整串别名，纯关键词重叠）', () => {
   const S = buildRoutingSandbox(makeDeps());
   const r = S.routeQuestion(FIXTURE_MAP, '医嘱干预的时候说明书地址在哪里配置', '');
