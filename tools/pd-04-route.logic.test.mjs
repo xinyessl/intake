@@ -267,6 +267,22 @@ test('真实PWRS地图回归：同组医嘱owner、待收费共享例外、配�
   }
 });
 
+test('真实PWRS地图回归：Pad API封装无Controller的自然问法命中跨端断链而非菜单入口', { skip: !process.env.PWRS_REAL_MAP }, () => {
+  const S = buildRoutingSandbox(makeDeps());
+  const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
+  for (const question of [
+    'Pad API 封装找得到、服务端 Controller 找不到，说明书应该怎么写？',
+    '前端定义了接口，但后端没有对应路由，能直接写成已实现吗？',
+    '客户端有消费者，服务端端点缺失时规格如何标注？',
+    'Web 能调通但 Pad 只有 API 封装，这算数据库数据丢了吗？',
+  ]) {
+    const hit = S.routeQuestion(map, question, '');
+    assert.equal(hit.route.id, 'DQ-007', `${question}，topN=${JSON.stringify(hit.topN)}`);
+    assert.match(hit.answerFacts.join('\n'), /接口断链.*调用无法命中/);
+    assert.match(hit.mustNotConfuse.join('\n'), /封装存在不等于服务端契约存在/);
+  }
+});
+
 test('AC-2 tier-1 关键词 IDF 打分命中（无整串别名，纯关键词重叠）', () => {
   const S = buildRoutingSandbox(makeDeps());
   const r = S.routeQuestion(FIXTURE_MAP, '医嘱干预的时候说明书地址在哪里配置', '');
