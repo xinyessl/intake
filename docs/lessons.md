@@ -13,6 +13,7 @@
 ---
 
 ## ✅ 本项目自检清单（每次交付前逐条过）
+- [ ] **【大型 Git Spec 文件通过 `spawnSync(git show)` 读取时显式提高 `maxBuffer` 并对生产 tag 真文件回归】**：PWRS 功能地图约 22.4MB，Node `spawnSync` 默认缓冲会返回错误；若调用方吞掉异常，表象只是 `retrieval.routing.enabled=false`，很容易误判为 alias/路由分数问题。读取这类文件须设置足够的 `maxBuffer`（当前 32MiB）与超时，并用真实 tag 的大地图验证 JSON 可解析、routes 数量非零及生产持久记录 routing 已启用。
 - [ ]（在此追加本项目专属检查点，如：改了主题色记得同步深色态 / 本项目列表空数据有占位）
 - [ ] **【2026-08-11 逻辑测试 `extractFn(SRC,name)` 抽带解构参数的函数体，必须先配平参数括号 `(...)` 再找函数体 `{`】**：本项目多个 `*.logic.test.mjs` 用 `extractFn` 从 `server.mjs` 抠函数体沙箱 eval。老实现 `const braceOpen=src.indexOf('{',start)`——若函数**参数是解构** `function buildRetrieval({ query, deep, ver, subsystem }){...}`，第一个 `{` 是**参数解构**，配平立刻在参数的 `}` 停下，抽出的"函数体"只有 `function foo({ ... }`（半截），`new Function(body+'return foo;')` 报 `Unexpected token 'return'`。修法：先从 `(` 起配平参数括号到匹配 `)`，再 `src.indexOf('{', parenClose)` 取真正函数体开括号。抽解构参数函数（`buildRetrieval` 等）前先确认测试里的 `extractFn` 已跳参数列表。（来源：PD-03 抽 buildRetrieval，参数 `{query,deep,ver,subsystem}` 让 extractFn 截半。）
 - [ ] **【2026-08-11 给 consult 对话记录叠加新捕获字段（retrieval/新元数据），落点=chat 末条 assistant 消息、与 kbRefs 同位置同回贴路径，续聊要按第 K 条 assistant 回贴历史】**：本项目 consult（`type='consult'`）每轮用请求 `messages` **整段重建 `chat`**（前端只回传 `{role,content}`），故任何"服务端算出、要随对话留存"的东西（kbRefs 引用、PD-03 的 retrieval 检索捕获）都必须①挂到**本轮末条 assistant** 消息（`chat[chat.length-1].retrieval=...`），②续聊时从 `prev.chat` **按第 K 条 assistant 顺序回贴历史轮**的同名字段（否则整段重建会把历史轮的捕获抹掉）——完全照抄现成的 kbRefs 回贴块（`prevAiRefs` 那段）加一段并列 try 即可，别少了"回贴历史"这半。捕获体积要 bound（每类 cap+text 截断，PD-03：spec≤5/kb≤5/code≤4、text≤300、kb q≤200），因为它进 `intakes.chat` JSON，不控会撑爆。retrieval 挂 chat JSON 走 `saveIntake`，**不新增库列**（同 kbRefs/media 范式，JSON 列附加字段读出自带、老记录 undefined 天然兼容）。（来源：PD-03 AI 检索诊断，retrieval 与 kbRefs 并列挂末条 assistant + 续聊回贴历史。）
@@ -377,3 +378,10 @@
 - 解法：第一阶段对**完整**目录用路径、frontmatter `id/title/module`、subsystem、Markdown 标题层级、接口摘要/AC 标题/短表格行和正文机器抽取的 API/字段/状态标识符路由候选；这些只是机器索引，不直接给模型当证据。第二阶段仅在候选正文中按标题层级分段、强匹配精确标识符并做文件多样性 Top5。模型上下文按 `answerFacts → 当前查询正文 Top5 → 其它宽泛 route 章节` 排序，避免正确片段虽已召回却被便宜模型忽略。普通问答的 system 只带本轮命中精简目录；显式模块清单问题才带完整目录。最近 24 条消息仍保留做追问语境；完整问题按当前 user 问题检索，短代词追问仅用上一条 **user** 问题补实体，绝不把 assistant 旧答案变成检索事实。
 - 防复发：见自检清单新增项；回归不只造小型 fixture，还要用 PWRS 真实 86 份 Spec 断言 SYS-07a/SYS-10、Pad 反馈对象接口、异常检验近 5 天均进候选且正文进 Top5，并覆盖“先问完整问题→再问它/这个”的追问，以及不带字段提示的“跨医院同一次就诊最少用哪些身份字段”自然问法。概念同义词只能补“跨院区/本次住院/复合身份”等路由词，测试须反向断言扩展 query 里没有 `hospitalId/patientId/visitId` 答案字段。目录标题、route hints/identifiers 只能决定“搜哪些文件”，最终业务断言必须可在 `evidence='body'` 的命中正文里找到。
 - 通用性提示：“目录路由与正文证据分层”对其它文档 RAG 也适用；本环境 `$STEWARD_LESSONS` 未配置，故先记入本项目经验库，待全局库可用时再分流。
+
+### L-026 `spawnSync(git show)` 默认缓冲会让大型功能地图静默失效
+- 范围/模块：intake · Spec 路由 · `spec-retrieval.mjs`。
+- 现象：生产容器可直接 `git show <tag>:docs/specs/00-功能模块地图.json` 并解析 43 条 routes，但持久记录一直是 `retrieval.routing.enabled=false`。继续加 alias 或调路由分数不会生效。
+- 根因：该 JSON 约 22.4MB，超过 Node `spawnSync` 默认 `maxBuffer`；上层把读取失败降级成 `null`，于是表象与“地图不存在”完全相同。
+- 解法：读取 git 文件显式设置 32MiB `maxBuffer` 与 8 秒超时；用真实生产 tag 大地图回归解析结果和 routes 数，并以一条生产持久记录证明 `routing.enabled=true` 后才继续调路由。
+- 防复发：见自检清单新增项。诊断“配置文件本地存在但功能 disabled”时先检查加载器错误/缓冲/cache/refresh，不要先扩大 alias。

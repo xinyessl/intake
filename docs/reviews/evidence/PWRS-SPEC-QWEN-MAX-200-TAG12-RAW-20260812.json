@@ -1,0 +1,3451 @@
+{
+  "runnerSchema": 2,
+  "version": "2.7.260812-12",
+  "createdAt": "2026-08-12T13:40:49.205Z",
+  "conversationBlocks": 40,
+  "concurrentConversations": 2,
+  "blocks": [
+    {
+      "sourceBlock": 1,
+      "convId": "ZX-20260812-470",
+      "results": [
+        {
+          "id": "Q001",
+          "question": "这个系统登录以后，token 到底是谁签出来的？",
+          "sourceBlock": 1,
+          "turn": 1,
+          "convId": "ZX-20260812-470",
+          "answer": "**Token 是由统一用户中心（usercenter）签发的，PWRS 自己不签发。**\n\n登录成功后，Web 端拿到的 token 来自统一用户中心；PWRS 只负责用它去校验（通过 JwtRealm 调 usercenter 的 verifyToken），不自己生成 token，也不在本系统会话里存 token。Pad 端同样走这套登录鉴权，token 来源一致。"
+        },
+        {
+          "id": "Q002",
+          "question": "PWRS Web 退出后应该跳 /pwrs/login 还是根路径 /login？",
+          "sourceBlock": 1,
+          "turn": 2,
+          "convId": "ZX-20260812-470",
+          "answer": "**应该跳门户根路径的 `/login` 或 `/home`，绝不能跳 `/pwrs/login`。**\n\nPWRS Web 不提供自己的业务登录页，本地 `/login`、`/register` 路由被注释掉了。退出（包括 Navbar 下拉“首页”实际走的登出）时，必须用门户域名整页跳转到 main-admin 根路径：`getPortalDomain() + '/home'`（或未登录/未激活时回 `/login`）。  \n开发环境指向 `hostname:9999`，生产指向当前域名，禁止拼出 `/pwrs/login`。这是已确认的 SSO 门户边界设计。"
+        },
+        {
+          "id": "Q003",
+          "question": "我没有这个菜单，后端接口是不是一定 403？",
+          "sourceBlock": 1,
+          "turn": 3,
+          "convId": "ZX-20260812-470",
+          "answer": "**不是，菜单没有绝不等于后端接口一定 403。**\n\n菜单由 usercenter 按角色动态下发，前端看不到菜单，只说明当前账号没有这个入口，推不出后端会返回 403。  \n方法级授权、业务 owner 校验、院区/业务作用域是独立层，必须拿真实接口 + 当前账号动态授权一起判断；知道地址也不代表一定能调通。"
+        },
+        {
+          "id": "Q004",
+          "question": "PWRS 服务端现在有方法级权限校验吗？",
+          "sourceBlock": 1,
+          "turn": 4,
+          "convId": "ZX-20260812-470",
+          "answer": "**没有。PWRS 服务端当前没有任何方法级权限校验。**\n\n全仓库 Controller 源码里，`@RequiresPermissions`、`@RequiresRoles`、`@PreAuthorize` 这类方法级注解零使用。Shiro 权限采集和异常出口都装好了，但没真正启用到接口拦截上——token 校验通过后，不会因为角色权限码不够就被统一拦住。\n\n这只是方法级功能授权缺口，不代表服务端完全没控制：业务里可能还有独立的 owner 校验、医院/院区/病区/科室、患者归属或单据状态判断，照样会拒绝写入或过滤数据。菜单可见性、方法级授权、业务数据范围是不同层，必须按具体接口单独核对。"
+        },
+        {
+          "id": "Q005",
+          "question": "PWRS 哪些 URL 前缀现在免 JWT？",
+          "sourceBlock": 1,
+          "turn": 5,
+          "convId": "ZX-20260812-470",
+          "answer": "**现在免 JWT 的 URL 前缀就是这 4 个：`/comm/`、`/external`、`/swagger`、`/v3/api-docs`。**\n\nJwtFilter 用 `startsWith` 前缀匹配（不是中间包含），路径以它们开头的接口不用带 token 就能过。路径中间夹着 `comm` 或文档相关词的，不会被放行。\n\n这是当前已确认的实现规则。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 2,
+      "convId": "ZX-20260812-471",
+      "results": [
+        {
+          "id": "Q006",
+          "question": "实施说 PWRS 登录后还会自己再生成一枚 token，这个说法对吗？",
+          "sourceBlock": 2,
+          "turn": 1,
+          "convId": "ZX-20260812-471",
+          "answer": "**不对，这个说法不符合规格。**\n\n登录后账号、角色、菜单和 token 都归 usercenter 维护。PWRS 不提供业务登录页，也不会在主库创建本地用户/会话记录，更不会自己再生成一枚 token。它只是把 usercenter 下发的 token 里的用户/医院上下文带进后续业务表（owner/院区字段）使用。\n\n排查时：登录失败看 usercenter；登录后看不到业务数据再查各业务的 owner/院区关联，别当成 PWRS 自己发 token 的问题。"
+        },
+        {
+          "id": "Q007",
+          "question": "开发机上点首页却落到 8083 的 /login，为什么不对？",
+          "sourceBlock": 2,
+          "turn": 2,
+          "convId": "ZX-20260812-471",
+          "answer": "**不对。** 开发机上点 Navbar「首页」，正确应整页跳到门户域名（开发环境是 `hostname:9999`）的 `/home`，不能落到 8083 的 `/login`。\n\n原因很直接：\n- PWRS 本身不提供业务登录页，本地 `/login`、`/register` 路由是注释掉的，符合 SSO，必须回 main-admin 门户根路径。\n- 点「首页」实际走的是本地登出（清 token、清动态路由），然后用 `getPortalDomain()` 拼 `/home` 跳过去；开发环境 `getPortalDomain()` 固定指向门户 `hostname:9999`，生产才是当前域名。\n- 绝对不能用会在开发时指回 8083 的普通 `getUrlDomain()`，也不能拼 `/pwrs/login` 或落到 PWRS 自己的 8083 端口登录页。\n\n如果你那边点完确实进了 `8083/login`，说明跳转没用 `getPortalDomain()`，或者走成了错误域名拼接，需要按上面规则改回门户跳转。\n\n**技术依据（研发参考）**  \nAC-8 / AC-9：开发环境 `getPortalDomain()` → `hostname:9999`；登出后跳 `getPortalDomain() + '/home'`；禁止用 `getUrlDomain()` 指回 8083。"
+        },
+        {
+          "id": "Q008",
+          "question": "同事菜单里没有入口，但拿到请求地址后能不能直接说肯定可用？",
+          "sourceBlock": 2,
+          "turn": 3,
+          "convId": "ZX-20260812-471",
+          "answer": "**不能。** 菜单里没入口，只能说明当前前端没有下发导航入口；拿到请求地址也绝不能直接说“肯定可用”。\n\n菜单由 usercenter 按角色动态下发，前端可见性跟后端授权是两回事、不能互相推导。即使知道地址、手动拼请求，后面还有方法级授权、业务 owner 校验、院区/业务作用域这些独立层；必须拿真实账号+真实接口去验证动态授权，才能判断能不能用。\n\n简单说：没菜单 ≠ 后端一定 403，有地址 ≠ 一定能调通。"
+        },
+        {
+          "id": "Q009",
+          "question": "为什么登录验签正常，仍然可能改不了别人的业务单？",
+          "sourceBlock": 2,
+          "turn": 4,
+          "convId": "ZX-20260812-471",
+          "answer": "**登录验签正常（token 有效）只过了身份校验，不等于一定能改别人的业务单。**\n\nToken 由统一用户中心签发、PWRS 只负责 verifyToken，验签通过只说明你是合法用户。后续业务接口还会做业务 owner 与院区作用域校验：单据归属人或所属院区不匹配时，仍会直接拒绝或过滤掉，所以你改不了别人的单。  \n菜单/角色来自 usercenter，Controller 基本没方法级权限注解，但这些业务层校验独立存在，不会因为 token 有效就放行。\n\n简单记：token 对 ≠ 所有业务接口都能成功处理。"
+        },
+        {
+          "id": "Q010",
+          "question": "一个业务路径中间带了 /comm，会不会也可能被当成免鉴权？",
+          "sourceBlock": 2,
+          "turn": 5,
+          "convId": "ZX-20260812-471",
+          "answer": "**不会。** 业务路径中间带了 `/comm`，不会被当成免鉴权。\n\n当前 JwtFilter 对免鉴权 URL 用的是 **startsWith 前缀匹配**，只认路径**开头**是这些：`/comm/`、`/external`、`/swagger`、`/v3/api-docs`。  \n中间包含 `comm`、或者路径像 `/xxx/comm/yyy` 这种，都**不会**命中白名单，照样要带合法 token，否则拦截。\n\n补充边界：`/comm/` 带尾斜杠，避免 `/community` 之类误命中；以前那种 `contains` 子串匹配已经不是现在的实现。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 3,
+      "convId": "ZX-20260812-472",
+      "results": [
+        {
+          "id": "Q011",
+          "question": "把 token、菜单、角色三件事的 owner 和调用方法说清楚。",
+          "sourceBlock": 3,
+          "turn": 1,
+          "convId": "ZX-20260812-472",
+          "answer": "**Token、菜单、角色这三样都归统一用户中心（usercenter）管，不归 PWRS 本地。**\n\n具体是这样：\n\n1. **Token**  \n   - Owner：usercenter  \n   - 签发：统一用户中心签发，PWRS 不提供业务登录，也不自己生成或存 token/会话。  \n   - 校验调用：PWRS 的 JwtRealm 通过 usercenter 的 Dubbo 接口 `verifyToken(token)` 做验证。\n\n2. **菜单**  \n   - Owner：usercenter  \n   - 调用：通过 `getUserMenu(userCode)` 从 usercenter 获取。\n\n3. **角色**  \n   - Owner：usercenter  \n   - 调用：通过 `getUserRole(userCode)` 从 usercenter 获取。\n\nPWRS 登录后不会在自己主库建本地用户/会话记录，只是把 token 里的用户/医院上下文带进后续业务表的 owner/院区字段。排查登录失败看 usercenter；登录后看不到业务数据再看各业务的 owner/院区校验。"
+        },
+        {
+          "id": "Q012",
+          "question": "Web 回门户时该用哪个域名封装，开发环境门户在哪个端口？",
+          "sourceBlock": 3,
+          "turn": 2,
+          "convId": "ZX-20260812-472",
+          "answer": "**Web 回门户时必须用 `LcUtils.getPortalDomain()` 封装域名整页跳转，开发环境指向 `hostname:9999`。**\n\n具体规则：\n- 未登录、未激活、登出或回首页时，一律通过 `LcUtils.getPortalDomain()` 跳到 main-admin 根路径（`/login`、`/register` 或 `/home`）。\n- 开发环境：`getPortalDomain()` 固定指向当前 hostname 的 9999 端口。\n- 生产环境：指向当前域名本身。\n- 禁止用普通 `getUrlDomain()`（开发时会错指回 8083），也禁止自己拼 `/pwrs/login` 这类路径。\n\n这是已确认的 SSO 门户边界设计，保证始终回到门户而不是 PWRS 本地路由。"
+        },
+        {
+          "id": "Q013",
+          "question": "菜单权限、方法级授权、业务 owner 和院区校验分别是哪一层？",
+          "sourceBlock": 3,
+          "turn": 3,
+          "convId": "ZX-20260812-472",
+          "answer": "**菜单权限、方法级授权、业务 owner 和院区校验是四个独立的层，不能互相推导。**\n\n- **菜单权限**：只是前端入口层。菜单由 usercenter 根据角色动态下发，控制页面/按钮看不看得见；看不见只说明前端没入口，推不出后端接口会 403，也推不出知道地址就能用。\n- **方法级授权**：接口功能授权层。当前 PWRS 的 Controller 基本没有 `@RequiresPermissions`/`@RequiresRoles`，所以 token 通过后通常不会因角色权限码不足被统一拦截。这只是接口级功能授权缺口，不等于服务端只做认证。\n- **业务 owner**：业务数据归属层。具体业务会单独校验记录的 owner（谁创建/归属）、患者一致性、单据状态等，不通过就拒绝写入或过滤数据。\n- **院区校验**：机构数据作用域层。会独立校验医院/院区/病区/科室范围，过滤或拒绝不符合作用域的数据。\n\n这四层必须按具体接口分别核对。菜单不可见不等于方法级授权已落地，也更不等于业务 owner 或院区校验会失效；token 有效也不等于所有业务请求都能成功。"
+        },
+        {
+          "id": "Q014",
+          "question": "接口级授权现状和现存的数据隔离手段分别是什么？",
+          "sourceBlock": 3,
+          "turn": 4,
+          "convId": "ZX-20260812-472",
+          "answer": "**接口级授权现在基本没做统一拦截；数据隔离主要靠业务里的 owner、院区/病区/科室、患者归属和单据状态校验。**\n\n接口级授权现状：当前 PWRS 的 Controller 基本没有方法级 `@RequiresPermissions`/`@RequiresRoles`，token 过了通常不会因角色权限码不够被统一的方法级授权拦住。这只是接口级功能授权缺口，不等于服务端只做认证，也不等于带 token 就能随便调所有业务接口。\n\n现存的数据隔离手段：具体业务仍会独立做这些校验——owner（谁创建/归属）、医院/院区/病区/科室范围、患者归属、单据状态——不通过就拒绝写入或过滤数据。菜单/按钮只管前端看得见看不见，不新增 Controller 的菜单权限校验；写操作（比如关注、编辑）还是按 owner、状态和患者/记录一致性执行。搜索患者时任意已认证药师都能按院区/病区/科室查，账号在 usercenter 的位置绑定不作为接口放行条件；但位置不限制不能解释成可以跨记录越权。\n\n这几层（菜单可见性、方法级功能授权、业务 owner、机构数据作用域）是分开的，必须按具体接口分别核对，不能互相推导。"
+        },
+        {
+          "id": "Q015",
+          "question": "JwtFilter 的放行方式有什么安全风险，不能把它说成什么？",
+          "sourceBlock": 3,
+          "turn": 5,
+          "convId": "ZX-20260812-472",
+          "answer": "**JwtFilter 对 `/comm/`、`/external` 等路径用 `startsWith` 前缀直接放行，这些接口无需 token 就能调，存在“知道 URL 就能触发”的风险；不能把它说成服务端只做认证、token 有效就能处理所有业务，也不能说还在用历史的 `contains` 子串绕过。**\n\n当前 as-built 是这样：\n- 放行方式：`JwtFilter` 已用 `startsWith` 前缀匹配放行 `/comm/`、`/external`、`/swagger`、`/v3/api-docs`。路径命中这些前缀时，无 token 也返回 true，直接过。\n- 安全风险：例如 `GET /comm/sync/charge`（及同前缀手动同步接口）事实上无需登录鉴权，任何知道 URL 的调用方都能触发 HIS 收费同步；`/external/charge`、`/external/pharm/medication` 等 SOAP 端点同样无应用层鉴权、无 IP 白名单代码。这属于认证绕过的结构性缺口。\n- 不能说成什么：\n  - 不能说成“接口侧仅认证”或“token 有效即可正常处理所有业务接口”——这只是白名单放行 + 方法级功能授权缺口，具体业务仍会独立做 owner、医院/院区/病区/科室、患者归属和单据状态校验，可能拒绝或过滤。\n  - 不能说成还在用历史 `contains` 子串匹配（那是旧风险，当前已不属于 as-built，后续测试要防回退）。\n\n菜单/按钮可见性、方法级授权、业务 owner 与机构作用域是不同层，必须按具体接口分别核对。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 4,
+      "convId": "ZX-20260812-473",
+      "results": [
+        {
+          "id": "Q016",
+          "question": "usercenter 已经登录成功了，PWRS 后端接到 token 后具体做什么？",
+          "sourceBlock": 4,
+          "turn": 1,
+          "convId": "ZX-20260812-473",
+          "answer": "**PWRS 后端不签发 token，只负责验证并建立认证会话。**\n\nusercenter 登录成功、签发 token 后，PWRS 收到带 token 的请求时会做这些事：\n\n1. 用 JwtRealm 调用 usercenter 的 Dubbo 接口 `verifyToken(token)` 校验 token 是否有效。  \n2. 校验通过后，再分别调用 `getUserMenu(userCode)` 和 `getUserRole(userCode)` 拉取该用户的菜单树和角色信息。  \n3. 当前仓库里没有任何 Controller 方法挂了权限注解，所以服务端目前等价于“只做认证、不做接口级授权拦截”——只要 token 验过，请求一般能进业务逻辑。  \n4. 菜单是否可见只影响前端路由展示，不等于服务端拒绝；但业务里仍可能按院区作用域、数据归属等再做过滤或拒绝。\n\n登录成功只建立用户认证会话，院区/病区/科室等业务上下文是登录后才作为搜索条件加载的。"
+        },
+        {
+          "id": "Q017",
+          "question": "既然 pwrs-admin 的 base 是 /pwrs/，登录地址也应该带 /pwrs/ 吧？",
+          "sourceBlock": 4,
+          "turn": 2,
+          "convId": "ZX-20260812-473",
+          "answer": "**不应该。** 登录地址不能带 `/pwrs/`。\n\n虽然 `pwrs-admin` 的 Vite base 是 `/pwrs/`，但 PWRS **不提供业务登录页**，本地 `/login`、`/register` 路由也被注释掉了。未登录、未激活、登出或要回首页时，必须用 `LcUtils.getPortalDomain()` **整页跳到门户（main-admin）根路径**的 `/login`、`/register` 或 `/home`。\n\n明确禁止拼成 `/pwrs/login`，也禁止用会指回开发端口的普通域名工具。这是 SSO 架构：登录页在门户，不是 PWRS 自己的路由。"
+        },
+        {
+          "id": "Q018",
+          "question": "PWRS 没写多少权限注解，所以有 token 就能调所有业务接口，对不对？",
+          "sourceBlock": 4,
+          "turn": 3,
+          "convId": "ZX-20260812-473",
+          "answer": "**不对。**\n\n虽然 PWRS 的 Controller 基本没有方法级权限注解，token 校验通过后通常不会因为角色权限码不足而被统一拦截，但这只是接口级功能授权缺口，**不等于**服务端只做认证，也**不等于**所有带 token 的业务请求都能成功。\n\n具体业务里仍可能单独校验单据归属（owner）、医院/院区/病区/科室、患者归属或单据状态，从而拒绝写入或过滤数据。菜单/按钮可见性、方法级授权、业务数据作用域是不同层，不能混为一谈。"
+        },
+        {
+          "id": "Q019",
+          "question": "没有 @RequiresPermissions 就等于系统没有任何权限控制，对吗？",
+          "sourceBlock": 4,
+          "turn": 4,
+          "convId": "ZX-20260812-473",
+          "answer": "**不对。**\n\n没有 `@RequiresPermissions` 只说明当前 PWRS 服务端**缺少统一的方法级接口功能授权**，token 校验通过后通常不会因角色权限码不足被统一拦截。这是接口级授权缺口，**不等于**系统完全没有任何权限控制。\n\n系统仍有多层控制，不能混为一谈：\n- 菜单/按钮可见性靠前端动态路由和（Pad 端）动作过滤。\n- 具体业务接口仍可能独立校验 owner、医院/院区/病区/科室、患者归属、单据状态等，从而拒绝写入或过滤数据。\n- 认证通过 ≠ 业务数据作用域全部放行。\n\n所以：缺注解 ≠ 无任何权限控制，也 ≠ 带 token 就能随便调所有业务接口。"
+        },
+        {
+          "id": "Q020",
+          "question": "免鉴权判断是严格 startsWith，所以路径里出现 comm 没关系，对吧？",
+          "sourceBlock": 4,
+          "turn": 5,
+          "convId": "ZX-20260812-473",
+          "answer": "**对。** 路径中间出现 `comm` 不会免鉴权。\n\n当前免鉴权用的是严格的 `startsWith` 前缀匹配，不是以前那种任意位置包含子串的判断。只有请求路径**以**这些前缀开头才会放行：\n\n- `/comm/`（带尾斜杠）\n- `/external`\n- `/swagger`\n- `/v3/api-docs`\n\n所以像路径中间夹着 `comm`、或者 `/community` 这类相似路径，都不会命中白名单，照样要 token。只有真正以 `/comm/` 开头的才会无 token 放行。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 5,
+      "convId": "ZX-20260812-474",
+      "results": [
+        {
+          "id": "Q021",
+          "question": "跨院区时一名患者靠哪几个字段才算唯一？",
+          "sourceBlock": 5,
+          "turn": 1,
+          "convId": "ZX-20260812-474",
+          "answer": "跨院区时，一名患者靠 **hospitalId + patientId + visitId** 这三个字段组合才算唯一。\n\n产品页面定位、详情跳转、列表去重、客户端缓存，正式身份键都固定用这三个字段。哪怕两个院区的 patientId 和 visitId 完全一样，也必须靠 hospitalId 区分开，绝不能混成同一个人。\n\n注意：districtCode 只在系统内部做 HIS 上游路由用，不是产品身份键的第四个字段，页面和缓存里也不能拿它来替代 hospitalId。"
+        },
+        {
+          "id": "Q022",
+          "question": "患者关注是全院药师共用一个状态吗？",
+          "sourceBlock": 5,
+          "turn": 2,
+          "convId": "ZX-20260812-474",
+          "answer": "不是，患者关注不是全院药师共用一个状态，而是每个药师各自独立的。\n\n当前用户有没有关注某个患者，只看他自己的记录，别的药师关注了不代表你也关注了，取消关注也只影响自己。系统是按“患者 + 当前药师工号”分开存的，不是所有人共享一份。\n\n主表上如果有遗留的 focus 字段，那不是现在在用的全局状态，别拿它当当前关注来判断。\n\n技术依据（研发参考）：\n关注状态来自 pwrs_patient_focus 表，按 p_id + user_code 区分药师，库里有 (p_id, user_code) 唯一索引；不是 pwrs_patient 主表上所有人共享的 focus 字段。"
+        },
+        {
+          "id": "Q023",
+          "question": "pwrs_patient.patient_id 在 PostgreSQL 里是什么类型和长度？",
+          "sourceBlock": 5,
+          "turn": 3,
+          "convId": "ZX-20260812-474",
+          "answer": "**character varying(50)**，也就是 `varchar(50)`，长度固定按 50 来。\n\nPostgreSQL 的 `psp.pwrs_patient` 表里，`patient_id` 和 `p_id`、`visit_id`、`district_code` 一样，都是 `character varying(50)`。别看名字像编号就当成 bigint、integer，也不是原生 uuid 类型（哪怕里面存的可能是 UUID 字符串，列本身仍是 varchar(50)）。\n\n技术依据（研发参考）：经确认事实与患者主表数据契约直接写明：`patient_id` (`character varying(50)`) - 患者ID。"
+        },
+        {
+          "id": "Q024",
+          "question": "患者主页的异常检验默认查最近几天？",
+          "sourceBlock": 5,
+          "turn": 4,
+          "convId": "ZX-20260812-474",
+          "answer": "患者主页风险预警区的异常检验，未选日期时默认查最近 **5 天**。\n\n旧 Pad 注释里的近 2 天不代表现在实际语义；也别和体温单默认 7 天搞混。"
+        },
+        {
+          "id": "Q025",
+          "question": "体温单不传 startDate 默认看几天？",
+          "sourceBlock": 5,
+          "turn": 5,
+          "convId": "ZX-20260812-474",
+          "answer": "**默认看 7 天。**\n\n不传 `startDate` 时，体温单固定返回连续 7 个日期槽，不是按实际住院天数截断：\n\n- 住院还没满 7 天：从入院日开始连续排 7 天（哪怕今天只是入院第 3 天，也是 7 个槽，不是只显示到今天）。\n- 住院已经满 7 天及以上：默认窗口是「今天往前 6 天」到「今天」。\n\n翻页或自己换范围时才需要显式传 `startDate`。别和患者主页异常检验默认近 5 天搞混，体温单就是 7 天。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 6,
+      "convId": "ZX-20260812-475",
+      "results": [
+        {
+          "id": "Q026",
+          "question": "历史深链只有 patientId+visitId，还能不能自动认院区？",
+          "sourceBlock": 6,
+          "turn": 1,
+          "convId": "ZX-20260812-475",
+          "answer": "**不能。** 历史深链只有 patientId+visitId、没有 hospitalId 时，系统不再自动用 token 当前院区去认/回退，必须提示用户从患者列表重新进入。\n\n依据已确认的实施边界：产品页面、详情定位、列表去重和客户端缓存的正式患者身份键必须固定使用 hospitalId + patientId + visitId（两个院区即使 patientId 与 visitId 相同也要靠 hospitalId 区分）。患者缓存/路由 pid 必须纳入 hospitalId；不含院区的历史深链不再回退 token 当前院区，须提示用户从患者列表重新进入，避免跨院区同号患者串线。districtCode 只用于内部上游路由，不能替代 hospitalId 当页面身份键。"
+        },
+        {
+          "id": "Q027",
+          "question": "真正判断当前用户是否关注，看哪张表和哪两个维度？",
+          "sourceBlock": 6,
+          "turn": 2,
+          "convId": "ZX-20260812-475",
+          "answer": "**看 `pwrs_patient_focus` 这张表，按 `p_id` + `user_code` 这两个维度。**\n\n当前用户有没有关注某患者，是看他自己在这张表里的记录，不是看患者主表 `pwrs_patient` 上那个所有人共用的 `focus` 字段。库里有 `(p_id, user_code)` 唯一索引，所以同一患者对不同药师可以有各自独立的关注状态。"
+        },
+        {
+          "id": "Q028",
+          "question": "患者主表四个身份字段 p_id、patient_id、visit_id、district_code 的类型一致吗？",
+          "sourceBlock": 6,
+          "turn": 3,
+          "convId": "ZX-20260812-475",
+          "answer": "**是的，一致。**  \n患者主表 `pwrs_patient` 里这四个身份字段 `p_id`、`patient_id`、`visit_id`、`district_code` 的类型全部都是 `character varying(50)`（varchar(50)）。  \n\n`p_id` 业务代码里虽然写的是 UUID 字符串，但数据库列类型并不是 PostgreSQL 原生 `uuid`，和其他三个一样统一按 varchar(50) 存。不要按名字猜成 bigint、integer 或原生 uuid。"
+        },
+        {
+          "id": "Q029",
+          "question": "旧 Pad 注释写近两天，当前 Proxy 语义到底按几天？",
+          "sourceBlock": 6,
+          "turn": 4,
+          "convId": "ZX-20260812-475",
+          "answer": "**当前默认按近 5 天。**\n\n患者主页风险预警区/异常检验在未选日期时，当前 Proxy 语义默认查询近 5 天；旧 Pad 代码里的“近两天”注释不代表当前 Proxy 语义，不能再按 2 天理解。"
+        },
+        {
+          "id": "Q030",
+          "question": "体温单翻页或换范围时什么时候必须显式传 startDate？",
+          "sourceBlock": 6,
+          "turn": 5,
+          "convId": "ZX-20260812-475",
+          "answer": "**体温单翻页或显式换范围时，必须显式传 startDate。**\n\n默认（不传 startDate）时固定走 7 天窗口：住院不足 7 天就从入院日起连续 7 个日期槽，住院满 7 天就用“今天往前 6 天到今天”。只有翻页或主动换时间范围时才要传 startDate（支持 yyyy-MM-dd 或 13 位毫秒时间戳），服务端目前不校验它是否早于入院日或晚于今天。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 7,
+      "convId": "ZX-20260812-476",
+      "results": [
+        {
+          "id": "Q031",
+          "question": "两个院区有相同 patientId 和 visitId，页面该怎么避免串人？",
+          "sourceBlock": 7,
+          "turn": 1,
+          "convId": "ZX-20260812-476",
+          "answer": "页面正式身份键必须固定用 **hospitalId + patientId + visitId**，两个院区即使 patientId、visitId 完全相同，也按 hospitalId 区分，就不会串人。\n\n产品侧的页面定位、详情、列表去重、客户端缓存、页签、关注等，一律走这个三字段复合键；缺任一项都不能自行合并同号患者。districtCode 只在内部从可信患者记录解析真实院区后，用于 Proxy/ETL 上游路由，不能写进页面/缓存身份键，也不能替代 hospitalId。病区名称或编码不一定全局唯一，更不能拿来猜 hospitalId。"
+        },
+        {
+          "id": "Q032",
+          "question": "我关注的病人换另一个药师账号会自动显示吗？",
+          "sourceBlock": 7,
+          "turn": 2,
+          "convId": "ZX-20260812-476",
+          "answer": "**不会。**\n\n关注的病人是按**当前登录的药师账号**单独记录的。  \n换另一个药师账号登录后，只会显示这个新账号自己关注过的病人，不会自动带出上一个账号的关注列表。\n\n服务端写入和查询关注时都是“按当前用户”处理（表是 `pwrs_patient_focus`），不同账号互不影响。"
+        },
+        {
+          "id": "Q033",
+          "question": "接口传很长的患者号时，patient_id 这一列最多按什么契约理解？",
+          "sourceBlock": 7,
+          "turn": 3,
+          "convId": "ZX-20260812-476",
+          "answer": "**按 `varchar(50)`（character varying(50)）理解。**\n\n`pwrs_patient` 表里的 `patient_id` 列类型是 **character varying(50)**，和 `p_id`、`visit_id`、`district_code` 一样，最多存 50 个字符。  \n接口传再长的患者号，也不能按 bigint、integer 或 PostgreSQL 原生 uuid 来理解，必须按这个长度契约来。"
+        },
+        {
+          "id": "Q034",
+          "question": "实施看到风险预警区没选日期，系统默认时间窗是多少？",
+          "sourceBlock": 7,
+          "turn": 4,
+          "convId": "ZX-20260812-476",
+          "answer": "**近 5 天。**\n\n患者主页风险预警区的异常检验，在未选日期时，系统当前默认查询近 5 天。  \n不要和体温单默认 7 天、旧 Pad 注释里的近 2 天混在一起——那是另一套规则，不适用于风险预警区异常检验。"
+        },
+        {
+          "id": "Q035",
+          "question": "刚入院三天的患者打开体温单，默认窗口怎么受入院日期影响？",
+          "sourceBlock": 7,
+          "turn": 5,
+          "convId": "ZX-20260812-476",
+          "answer": "**刚入院三天打开体温单，默认窗口仍从入院日起连续生成 7 个日期槽，不是只显示实际住院的 3 天。**\n\n未显式传 startDate 时，系统以入院日期为起点，强制铺满 7 天连续日期（即使今天只是入院第 3 天，也会往后补日期槽）。住院满 7 天后，默认才改成“今天往前 6 天至今天”。翻页或手动换范围时才需要传 startDate。  \n\n这跟患者主页风险预警区异常检验的默认近 5 天无关，别混。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 8,
+      "convId": "ZX-20260812-477",
+      "results": [
+        {
+          "id": "Q036",
+          "question": "少了 hospitalId 时直接拿 token 当前院区补上就行吧？",
+          "sourceBlock": 8,
+          "turn": 1,
+          "convId": "ZX-20260812-477",
+          "answer": "**不行，少了 hospitalId 时不能直接拿 token 当前院区补上。**\n\n正式患者身份键必须固定用 hospitalId + patientId + visitId。历史深链或缺院区时，不再回退 token 当前院区，必须提示用户从患者列表重新进入，避免跨院区同号患者串线。列表请求缺院区时也要明确提示重新选择或刷新，不能回退。收费等业务的 hospitalId 要从患者真实院区或页面搜索上下文派生，不固定读 token。"
+        },
+        {
+          "id": "Q037",
+          "question": "pwrs_patient 表里有 focus 字段，所以关注肯定是全局的，对吧？",
+          "sourceBlock": 8,
+          "turn": 2,
+          "convId": "ZX-20260812-477",
+          "answer": "**不对，关注不是全局的。**\n\n当前用户自己的关注状态看的是 `pwrs_patient_focus` 表，不是 `pwrs_patient` 主表上的 `focus` 字段。主表那个 `focus` 是遗留字段，不能当成所有人共用的全局关注标记。`pwrs_patient_focus` 用 `p_id + user_code` 区分药师，库里有唯一索引，所以不同药师关注同一患者互不影响。\n\n**技术依据（研发参考）**  \n关注状态来源：`pwrs_patient_focus`（`p_id` 关联患者 + `user_code` 药师工号 + `focus_time`），真实库 `(p_id, user_code)` 唯一索引。禁止把 `pwrs_patient.focus` 解释成当前关注状态。"
+        },
+        {
+          "id": "Q038",
+          "question": "patient_id 看着像编号，所以数据库应该是 bigint 吧？",
+          "sourceBlock": 8,
+          "turn": 3,
+          "convId": "ZX-20260812-477",
+          "answer": "**不对，不是 bigint。**\n\n`pwrs_patient` 表里的 `patient_id`（还有 `p_id`、`visit_id`、`district_code`）在 PostgreSQL 里都是 `character varying(50)`，也就是 varchar(50)。虽然看起来像编号，类型是字符串，不能当成数字类型用。`p_id` 存的是 UUID 字符串，但列本身也不是原生 uuid 类型。\n\n**技术依据（研发参考）**  \n经确认事实：PostgreSQL `psp.pwrs_patient` 的 `patient_id` 等为 `character varying(50)`。"
+        },
+        {
+          "id": "Q039",
+          "question": "异常检验和体温单一样，默认都是 7 天吧？",
+          "sourceBlock": 8,
+          "turn": 4,
+          "convId": "ZX-20260812-477",
+          "answer": "**不是，两样不一样。**\n\n异常检验（患者主页风险预警区）在没选日期时，默认查近 **5 天**；体温单默认是 **7 天**窗口（未传 startDate 时）。  \n不能把体温单的 7 天套到异常检验上，也不能反过来。\n\n**技术依据（研发参考）**  \n经确认事实 + 模块地图 QR-ABNORMAL-EXAM-DAYS：异常检验未选日期默认近 5 天。  \nQR-LINE-CHART-SEVEN-DAY-WINDOW 及接口 `GET /pwrsapi/line/chart/hl`：体温单默认最近 7 天。"
+        },
+        {
+          "id": "Q040",
+          "question": "患者主页异常检验是 5 天，所以体温单也应是 5 天，对吗？",
+          "sourceBlock": 8,
+          "turn": 5,
+          "convId": "ZX-20260812-477",
+          "answer": "**不对。**\n\n患者主页异常检验（风险预警区）没选日期时默认近 **5 天**；体温单默认是 **7 天**窗口（未传 startDate 时，住院不足 7 天也从入院日起生成 7 个日期槽；满 7 天则是今天往前 6 天至今天）。两者规则独立，不能因为异常检验是 5 天就推断体温单也是 5 天，也不能反过来套用。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 9,
+      "convId": "ZX-20260812-478",
+      "results": [
+        {
+          "id": "Q041",
+          "question": "手工录体温单时传了系统不认识的 type，会怎样？",
+          "sourceBlock": 9,
+          "turn": 1,
+          "convId": "ZX-20260812-478",
+          "answer": "**未识别的 type 会静默结束：不报错、也不落库。**\n\n手工录体温单（对应相关接口）时，如果传了系统不认识的 type，按当前已确认实现：直接静默处理完，不会返回错误提示，也不会往库里写记录。这和“type 认识但 value 校验不过”的情况不同——后者会返回 `LINE_VALUE_ERROR` 且同样不落库。"
+        },
+        {
+          "id": "Q042",
+          "question": "别人录的体温单手工指标，我拿到 recordId 能编辑吗？",
+          "sourceBlock": 9,
+          "turn": 2,
+          "convId": "ZX-20260812-478",
+          "answer": "**能。** 别人录的体温单手工指标，只要你拿到它的 recordId 去编辑，当前实现**不校验创建人**，任意登录用户都可以改。\n\n编辑时会按主键整条更新，并把归属人覆盖成当前操作的你；这和删除不一样——删除只允许创建人，非创建人点删会静默无效（不删也不报错）。"
+        },
+        {
+          "id": "Q043",
+          "question": "别人的入院评估，我带 resultId 保存会被拦吗？",
+          "sourceBlock": 9,
+          "turn": 3,
+          "convId": "ZX-20260812-478",
+          "answer": "**会被拦。**\n\n别人创建的入院评估，你带已有 `resultId` 去保存（更新），系统会校验创建人。  \n不是创建人就直接返回 `CREATOR`，记录**不会被改**。  \n\n带教老师能看到学员的记录，也不等于可以代填/代改。  \n\n（不带 `resultId` 会新增一条，那是另一回事。）"
+        },
+        {
+          "id": "Q044",
+          "question": "入院评估保存时 resultId 决定新增还是更新吗？",
+          "sourceBlock": 9,
+          "turn": 4,
+          "convId": "ZX-20260812-478",
+          "answer": "**是。**\n\n入院评估保存时：\n- **不带 resultId** → 新增一条\n- **带已有 resultId** → 更新同一条评估结果，不会再新增\n\n更新时还会校验创建者：不是创建人会返回 `CREATOR`，记录不改。更新会保留原 owner。"
+        },
+        {
+          "id": "Q045",
+          "question": "药学监护医嘱不是我建的，我能保存修改吗？",
+          "sourceBlock": 9,
+          "turn": 5,
+          "convId": "ZX-20260812-478",
+          "answer": "**能。**\n\n药学监护医嘱不是你建的，只要带着已有 `careOrderId` 去保存/修改，当前实现**不校验创建人**，可以正常保存，还可能直接覆盖别人的监护单。\n\n这和“完成”“删除”不一样：完成和删除会校验创建人，非创建人会返回 `CREATOR`（“不是创建者无法修改”），记录不动。  \n保存和完成/删除的归属规则目前是不对称的。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 10,
+      "convId": "ZX-20260812-479",
+      "results": [
+        {
+          "id": "Q046",
+          "question": "未知 type 会抛参数错误并回滚，对吧？",
+          "sourceBlock": 10,
+          "turn": 1,
+          "convId": "ZX-20260812-479",
+          "answer": "不是的。未知 type 会静默不写，不会抛参数错误，也不会回滚。\n\n系统已实现的 type 只有 `1/2/3/6/7/8/9/10/11/12/13/16/17/18/19`，遇到不在这个列表里的 type 就直接跳过、不写入；参数校验只针对缺少必填项（走统一校验），值格式不对才报 `LINE_VALUE_ERROR` 业务异常。"
+        },
+        {
+          "id": "Q047",
+          "question": "体温单指标的编辑和删除都严格校验创建人，对不对？",
+          "sourceBlock": 10,
+          "turn": 2,
+          "convId": "ZX-20260812-479",
+          "answer": "**不对。**\n\n体温单指标这边，编辑和删除对创建人的规则不一样：\n\n- **编辑**（带 `recordId`）：当前实现**不校验创建人**，任何人都能改。\n- **删除**：只允许创建人删；非创建人删除时**静默无效**（不删、也不报错）。\n\n所以不能说“编辑和删除都严格校验创建人”。"
+        },
+        {
+          "id": "Q048",
+          "question": "入院评估和监护记录单一样，写操作都只允许创建人，对吧？",
+          "sourceBlock": 10,
+          "turn": 3,
+          "convId": "ZX-20260812-479",
+          "answer": "**对一半：入院评估这边，编辑和删除确实只允许创建人；监护记录单这轮资料里没有对应规则，不能据此说“一样”。**\n\n入院评估（自定义表单 `formType=2`）写操作规则是：\n\n- **新增**（不带已有 `resultId`）：谁都能保存成自己的新记录，归属记到当前操作人。\n- **编辑已有记录**（带已有 `resultId`）：会先校验创建人；非创建人直接报 `CREATOR`，记录不动。\n- **删除**：同样先校验创建人；非创建人报 `CREATOR`，不删。\n- 校验优先比 `user_id`，历史记录没 `user_id` 再回退比 `user_code`。\n- 更新成功也**不会**把归属改成当前操作人。\n- 带教老师能看见、或记录已共享，**都不等于**可以代填、代改、代删。\n\n**监护记录单**本轮规格摘录没写创建人校验规则，当前资料无法确认它是否和入院评估完全一致，不能拿入院评估的规则外推。\n\n若要确认监护记录单，请补充：监护记录单对应的规格/功能章节名，或该单编辑、删除时的实际报错/页面提示。"
+        },
+        {
+          "id": "Q049",
+          "question": "带已有 resultId 也会再插一条新评估，对吧？",
+          "sourceBlock": 10,
+          "turn": 4,
+          "convId": "ZX-20260812-479",
+          "answer": "**不对。**\n\n带已有 `resultId` 保存时，是**更新同一条**入院评估结果，**不会**再插一条新记录。\n\n规则很清楚：\n- 保存时**不带** `resultId` → 新增\n- 保存时**带已有** `resultId` → 更新同一条（`content`/`status`/`complete_time` 等会被更新），原 `create_time` 和创建者归属都保留\n- 更新前会先校验创建人；非创建人直接返回 `CREATOR`，记录不动\n\n所以“带已有 resultId 也会再插一条”这个说法是错的。"
+        },
+        {
+          "id": "Q050",
+          "question": "药学监护医嘱的保存、完成、删除都严格只允许创建人，对吧？",
+          "sourceBlock": 10,
+          "turn": 5,
+          "convId": "ZX-20260812-479",
+          "answer": "**不对。**\n\n药学监护医嘱这边，保存、完成、删除对创建人的规则**不对称**：\n\n- **保存/编辑已有** `careOrderId`：当前**不校验创建人**，可能直接覆盖别人的监护单。\n- **完成**、**删除**：会校验创建人；非创建人返回 `CREATOR`，操作不生效。\n\n所以不能说“保存、完成、删除都严格只允许创建人”。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 11,
+      "convId": "ZX-20260812-480",
+      "results": [
+        {
+          "id": "Q051",
+          "question": "未知 type 和已知 type 但 value 不合法的结果有什么不同？",
+          "sourceBlock": 11,
+          "turn": 1,
+          "convId": "ZX-20260812-480",
+          "answer": "未知 type 会静默结束（不报错、不落库）；已知 type 但 value 不合法时返回 LINE_VALUE_ERROR（也不落库），两者处理明显不同。\n\n具体区别如下：  \n- 未识别 type：直接静默无效，既不报错也不写入库。  \n- 已识别 type，但 value 不符合该类型校验规则：明确返回 LINE_VALUE_ERROR，同样不落库。  \n\n这是当前已确认的实现规则。"
+        },
+        {
+          "id": "Q052",
+          "question": "把编辑、删除两条 owner 规则和非创建人表现分别说明。",
+          "sourceBlock": 11,
+          "turn": 2,
+          "convId": "ZX-20260812-480",
+          "answer": "编辑和删除的 owner 规则不一样，非创建人表现也不同。\n\n**编辑**：带着 recordId 编辑时，当前实现**不校验创建人**。也就是说，非创建人也能编辑，不会拦。\n\n**删除**：只允许创建人操作。非创建人去删时，**静默无效**——既不删除记录，也不报错。"
+        },
+        {
+          "id": "Q053",
+          "question": "当前入院评估保存与删除的 owner 校验现状是什么？",
+          "sourceBlock": 11,
+          "turn": 3,
+          "convId": "ZX-20260812-480",
+          "answer": "入院评估保存（更新）和删除前都会校验创建者，非创建人直接返回 CREATOR 且不改记录。\n\n保存时：不带 resultId 就是新增，直接记当前登录人为 owner，不校验；带着已有 resultId 就是更新同一条，会先验创建者（优先看 user_id，历史记录为空才回退 user_code），非创建人返回 CREATOR 不改内容，创建人能更新但保留原来的 owner 不覆盖。\n\n删除时：同样先验创建者（规则同上），非创建人返回 CREATOR 且数据完全不变，只有创建人才能软删除。\n\n注意：记录能看见或者属于带教学员，也不等于可以代编辑、代删除。"
+        },
+        {
+          "id": "Q054",
+          "question": "新增和覆盖同一条评估分别该怎么传 resultId？",
+          "sourceBlock": 11,
+          "turn": 4,
+          "convId": "ZX-20260812-480",
+          "answer": "新增不带（或空）resultId，覆盖同一条就传已有 resultId。\n\n保存入院评估时：  \n- 不带 resultId（为空）→ 直接新增一条新评估结果。  \n- 带上已有 resultId → 更新/覆盖同一条评估结果，不会再新增。  \n\n更新时还会先验创建者，非创建人会返回 CREATOR 且不改记录；创建人更新会保留原 owner。"
+        },
+        {
+          "id": "Q055",
+          "question": "CareOrder 的 save、finish、delete 三条 owner 规则分别是什么？",
+          "sourceBlock": 11,
+          "turn": 5,
+          "convId": "ZX-20260812-480",
+          "answer": "CareOrder 的 save、finish、delete 三条 owner 规则不对称：保存编辑不校验创建人，完成和删除都会校验。\n\n- **save（保存/编辑）**：带着已有 careOrderId 去编辑时，当前不校验创建人，非创建人也能保存成功，可能直接覆盖别人的监护单。\n- **finish（完成）**：会校验创建人，非创建人直接返回 CREATOR，完成不生效。\n- **delete（删除）**：同样校验创建人，非创建人返回 CREATOR，删除不生效。\n\n这就是当前已确认的实现现状，别把三条都当成必须校验 owner。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 12,
+      "convId": "ZX-20260812-481",
+      "results": [
+        {
+          "id": "Q056",
+          "question": "接口返回没报错，但新指标也没出现，可能是 type 未识别吗？",
+          "sourceBlock": 12,
+          "turn": 1,
+          "convId": "ZX-20260812-481",
+          "answer": "**是的，很有可能就是 type 未识别。**\n\n按当前实现，体温单指标录入接口（新增记录时）如果传的 type 不在系统内置枚举里，会直接静默结束：接口正常返回、不报错，但也不会落库，所以页面上新指标不会出现。\n\n这和“type 认识但 value 校验不过”的情况不一样：那种会返回 LINE_VALUE_ERROR 且不落库；而未知 type 是完全静默无效。\n\n编辑已有记录时会更新（不校验创建人），但你描述的是“新指标没出现”，更符合新增时 type 未识别的行为。"
+        },
+        {
+          "id": "Q057",
+          "question": "非创建人点删除后既没报错也没删掉，这是当前实现吗？",
+          "sourceBlock": 12,
+          "turn": 2,
+          "convId": "ZX-20260812-481",
+          "answer": "**是的，这是当前实现。**\n\n删除只允许创建人操作。非创建人点删除时，会静默无效：既不报错，也不会真正删掉记录（不改任何数据）。\n\n这和编辑不同——编辑时带 recordId 目前不校验创建人。"
+        },
+        {
+          "id": "Q058",
+          "question": "列表里看不到某条入院评估，但知道 resultId 后直接保存，服务端安全吗？",
+          "sourceBlock": 12,
+          "turn": 3,
+          "convId": "ZX-20260812-481",
+          "answer": "**服务端是安全的。**\n\n列表里看不到某条入院评估，不等于可以绕过写权限。即使你知道 `resultId` 直接调保存（带已有 resultId 走更新），服务端仍会强制校验创建人：\n\n- 当前用户是创建人：正常更新同一条记录（保留原创建者，不新增）。\n- 当前用户不是创建人：直接返回 `CREATOR` 错误，**不修改任何数据**。\n\n列表不可见通常只是带教可见性过滤（本人创建 / 学员待审 / 已通过等规则）或其它查询过滤造成的，和保存时的 owner 校验是两回事。owner 优先按 `user_id`，历史空时回退 `user_code`。记录即使可见或属于带教学员，也不等于可以代填/代改。\n\n所以“列表看不到但知道 resultId 硬保存”在服务端不会静默成功，非创建人改不了。"
+        },
+        {
+          "id": "Q059",
+          "question": "编辑已有评估却没带 resultId，会发生什么语义？",
+          "sourceBlock": 12,
+          "turn": 4,
+          "convId": "ZX-20260812-481",
+          "answer": "**会当成新增一条评估，而不是更新已有那条。**\n\n保存时不带 `resultId`，服务端语义固定为“新增”：会新插入一条评估结果，不会去覆盖或更新你本想编辑的那条。只有携带已有的 `resultId` 才会走更新同一条（并校验创建者；非创建人返回 CREATOR，不改数据）。\n\n所以前端编辑已有评估时，必须把原 `resultId` 带上；漏了就会多出一条新记录，原记录还在。"
+        },
+        {
+          "id": "Q060",
+          "question": "我能改别人监护医嘱，但完成时报非创建人，这符合当前代码吗？",
+          "sourceBlock": 12,
+          "turn": 5,
+          "convId": "ZX-20260812-481",
+          "answer": "**是的，符合当前实现。**\n\n保存/编辑已有监护医嘱（带已有 careOrderId）目前**不校验创建人**，所以可以改别人的，甚至可能覆盖他人监护单。完成和删除都会校验创建人：非创建人直接返回 CREATOR，改不了。\n\n也就是说，保存 和 完成/删除 的 owner 规则本身就不对称——这是当前代码的既有行为，不是偶发异常。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 13,
+      "convId": "ZX-20260812-482",
+      "results": [
+        {
+          "id": "Q061",
+          "question": "带教老师能看学员查房记录，也能替他完成吗？",
+          "sourceBlock": 13,
+          "turn": 1,
+          "convId": "ZX-20260812-482",
+          "answer": "**不能。**带教老师能看学员的查房记录，但不能替他完成。\n\n带教老师可查看学员创建、且带教状态为待审核或已通过的查房记录。  \n但编辑、完成、删除只允许记录创建人操作；非创建人会返回 CREATOR 错误。  \n可见范围不会授予代写权限，带教老师能看不等于能代为完成。"
+        },
+        {
+          "id": "Q062",
+          "question": "Pad 里“我的反馈”列表调哪个接口？",
+          "sourceBlock": 13,
+          "turn": 2,
+          "convId": "ZX-20260812-482",
+          "answer": "**Pad 里“我的反馈”列表调的是：`GET /pwrsapi/applet/pharmacist/feedback/list/mine`。**\n\n它用 `PharmacistFeedBackPageDTO` 做分页，返回分页结果，且不返回 `unViewReply` 字段。  \n注意：这和工作任务里的反馈列表不是同一个接口，工作任务那条是 `GET /pwrsapi/applet/pharmacist/feedback/list`，别混了。也别写成 Web 端的路径，必须带 `/applet` 前缀。"
+        },
+        {
+          "id": "Q063",
+          "question": "药师反馈发出去以后还能改正文或删除吗？",
+          "sourceBlock": 13,
+          "turn": 3,
+          "convId": "ZX-20260812-482",
+          "answer": "**不能。**反馈发送后正文就锁定了，不能再编辑或删除。\n\n只有未发送的反馈才能编辑、删除，而且还要校验是创建人本人才能操作。  \n发送之后正文被锁死，不允许改内容，也不允许删掉。"
+        },
+        {
+          "id": "Q064",
+          "question": "药师反馈连续点两次保存会不会落两条？",
+          "sourceBlock": 13,
+          "turn": 4,
+          "convId": "ZX-20260812-482",
+          "answer": "**不会。**同一药师1秒内连续点两次保存，会被防重拦截，不会落成两条反馈。"
+        },
+        {
+          "id": "Q065",
+          "question": "Pad 个人中心点一条监护记录后打开哪个页面？",
+          "sourceBlock": 13,
+          "turn": 5,
+          "convId": "ZX-20260812-482",
+          "answer": "**点一条监护记录后，打开的是前端详情页 `tablet/pages/patient/info/custody.vue?careTypeId=<监护ID>`。**\n\n必须带上 `careTypeId` 参数；进入前会同步这条记录对应的患者上下文。  \n个人中心“我的监护”列表本身是 `tablet/pages/ucenter/info/custody.vue`，点进去后就跳到上面的详情页。  \n注意：详情页加载时才会调后端接口 `GET /pwrsapi/applet/follow/care?careTypeId=`，这个接口不是页面路由，别把它当成打开的页面。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 14,
+      "convId": "ZX-20260812-483",
+      "results": [
+        {
+          "id": "Q066",
+          "question": "老师列表里看得到学员记录，但编辑按钮不能用，是否符合规则？",
+          "sourceBlock": 14,
+          "turn": 1,
+          "convId": "ZX-20260812-483",
+          "answer": "**符合规则。**\n\n带教老师能在列表里看到学员创建的、待审核或已通过的查房记录（可见范围会扩大），但编辑、完成、删除这三类写操作仍只允许记录创建人本人。  \n非创建人操作会返回 CREATOR 错误，前端也会按创建人校验隐藏/禁用编辑按钮。  \n**可见范围不会授予代写权限**，老师能看 ≠ 能代学员编辑。这是产品已确认的设计边界，不是故障。"
+        },
+        {
+          "id": "Q067",
+          "question": "实施抓包时要定位 Pad 当前药师自己的反馈分页，路径是什么？",
+          "sourceBlock": 14,
+          "turn": 2,
+          "convId": "ZX-20260812-483",
+          "answer": "**路径是：`GET /pwrsapi/applet/pharmacist/feedback/list/mine`**\n\n实施抓包定位 Pad 端「当前药师自己的反馈分页」（也就是“我的反馈”列表）时，就看这个接口。它和 Pad 工作任务里的反馈列表不是同一个：工作任务用的是 `GET /pwrsapi/applet/pharmacist/feedback/list`，不要混。\n\n注意两点：\n- 必须带 `/applet` 前缀，别抓成 Web 端的 `/pwrsapi/pharmacist/feedback/list/mine`。\n- 这个“我的”分页用 `PharmacistFeedBackPageDTO`，且不返回 `unViewReply` 字段。\n\n抓到这个路径且带当前药师身份参数，就是定位对了。"
+        },
+        {
+          "id": "Q068",
+          "question": "一条反馈 push_status=true 后，产品还想让药师改主体，当前规则允许吗？",
+          "sourceBlock": 14,
+          "turn": 3,
+          "convId": "ZX-20260812-483",
+          "answer": "**不允许。**\n\n当前规则下，药师反馈一旦发送成功（`push_status=true`），主体就不能再更新、也不能删除了。状态机写得很清楚：新建/暂存（`push_status` 空或 false）→ 发送后，主体只允许回复、标记、评价、查看。\n\n本人尝试改主体时，接口会直接抛 `PHARMACIST_FEEDBACK_TYPE_NOT_UPDATE`，主表和反馈对象都不会变。这是已落地的业务规则，不是可配置项。\n\n产品如果还想让已发送的反馈能改主体，属于改规则/新需求，得走需求变更，不能按现网实现放开。"
+        },
+        {
+          "id": "Q069",
+          "question": "同一药师一秒内重复提交反馈，第二次系统怎么处理？",
+          "sourceBlock": 14,
+          "turn": 4,
+          "convId": "ZX-20260812-483",
+          "answer": "**第二次会被防重拦截，不会落成两条反馈。**\n\n同一药师在 1 秒内重复提交保存请求时，系统直接拦截第二次，接口返回 `SUBMIT_IS_BUSY`，不落库。这是已确认的防重机制（针对保存操作），不会生成重复记录。"
+        },
+        {
+          "id": "Q070",
+          "question": "我要区分“我的监护列表页”和具体监护详情页，两个路径是什么？",
+          "sourceBlock": 14,
+          "turn": 5,
+          "convId": "ZX-20260812-483",
+          "answer": "**列表页路径是 `tablet/pages/ucenter/info/custody.vue`；详情页路径是 `tablet/pages/patient/info/custody.vue?careTypeId=<监护ID>`（必带 careTypeId）。**\n\nPad 个人中心“我的监护”列表就是上面那个列表页。点进某一条监护记录后，打开的是详情页，必须带上该监护的 careTypeId 参数。  \n注意：`/care/order` 只是后端数据接口，不是页面路由，别当成详情页地址。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 15,
+      "convId": "ZX-20260812-484",
+      "results": [
+        {
+          "id": "Q071",
+          "question": "只要是带教老师，就拥有学员查房单全部写权限，对吗？",
+          "sourceBlock": 15,
+          "turn": 1,
+          "convId": "ZX-20260812-484",
+          "answer": "不对。带教老师只能查看学员创建且待审核或已通过的查房记录，编辑、完成、删除仍只允许记录创建人操作；非创建人会返回 CREATOR，可见范围不会授予代写权限。"
+        },
+        {
+          "id": "Q072",
+          "question": "Pad 我的反馈直接复用 Web 路径 /pharmacist/feedback/list，对吧？",
+          "sourceBlock": 15,
+          "turn": 2,
+          "convId": "ZX-20260812-484",
+          "answer": "**不对。**\n\nPad 端「我的反馈」分页列表走的是 `GET /pwrsapi/applet/pharmacist/feedback/list/mine`，用 `PharmacistFeedBackPageDTO` 做分页，返回 `PageResultDO<PharmacistFeedBackPageVO>`，且**不返回** `unViewReply`。\n\n它和 Web 端 `/pwrsapi/pharmacist/feedback/list` 不是同一条路径，也没有直接复用。  \nPad 上「工作任务反馈列表」才是 `GET /pwrsapi/applet/pharmacist/feedback/list`（不带 `/mine`），两个接口是分开的，别混。\n\n技术依据（研发参考）：经确认事实 + 接口契约 + AC-23 明确区分了 Pad·我的（`/list/mine`）与 Pad·工作任务（`/list`），且禁止省略 `/applet` 前缀或答成 Web 路径。"
+        },
+        {
+          "id": "Q073",
+          "question": "发送后的反馈只是多了消息，主体照样可以编辑，对吧？",
+          "sourceBlock": 15,
+          "turn": 3,
+          "convId": "ZX-20260812-484",
+          "answer": "**不对。**\n\n发送后的反馈主体会锁定：正文不能再编辑，也不能删除。只有未发送（暂存）的反馈，创建人自己才能改、才能删。\n\n发送只是把状态推成已发送，并会触发 IM 会话消息通知对方；主体内容本身不会继续开放编辑。"
+        },
+        {
+          "id": "Q074",
+          "question": "反馈保存没有防重复，只能靠前端禁按钮，对吧？",
+          "sourceBlock": 15,
+          "turn": 4,
+          "convId": "ZX-20260812-484",
+          "answer": "**不对。**\n\n后端有防重复：同一药师在 1 秒内再次点保存，接口会直接拦截（返回 `SUBMIT_IS_BUSY`），不会落成两条反馈。不只是靠前端禁按钮。"
+        },
+        {
+          "id": "Q075",
+          "question": "点记录后打开的是后端 /care/order 接口页面，对吧？",
+          "sourceBlock": 15,
+          "turn": 5,
+          "convId": "ZX-20260812-484",
+          "answer": "**不对。**\n\n点记录后打开的是前端详情页 `tablet/pages/patient/info/custody.vue?careTypeId=<监护ID>`，必须带上 careTypeId。  \n`/care/order` 只是后端数据接口，不是页面路由，也不是点击后打开的页面地址。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 16,
+      "convId": "ZX-20260812-485",
+      "results": [
+        {
+          "id": "Q076",
+          "question": "查房的可见范围和写操作 owner 边界分别怎样？",
+          "sourceBlock": 16,
+          "turn": 1,
+          "convId": "ZX-20260812-485",
+          "answer": "**可见范围和写操作 owner 边界很清晰：老师能看不等于能改。**\n\n**可见范围：**  \n带教老师可以查看学员创建、且状态为「待审核」或「已通过」的查房记录。\n\n**写操作 owner 边界：**  \n编辑、完成、删除这三类写操作，**只允许记录创建人本人**操作。  \n非创建人调用时直接返回 `CREATOR` 错误。  \n可见范围**不会**授予任何代写权限，老师不能帮学员改、完成或删查房单。\n\n这是系统已确认的现网规则，现场按这个边界处理即可。"
+        },
+        {
+          "id": "Q077",
+          "question": "给出 Pad 我的反馈的 HTTP 方法和完整 /pwrsapi 路径。",
+          "sourceBlock": 16,
+          "turn": 2,
+          "convId": "ZX-20260812-485",
+          "answer": "**Pad「我的反馈」用的是：GET `/pwrsapi/applet/pharmacist/feedback/list/mine`。**\n\n这是 Pad 端分页列表专用接口，和「工作任务反馈列表」不是同一个（后者是 GET `/pwrsapi/applet/pharmacist/feedback/list`）。  \n注意：必须带 `/applet` 前缀，不能写成 Web 端的 `/pwrsapi/pharmacist/feedback/list/mine`。"
+        },
+        {
+          "id": "Q078",
+          "question": "反馈从暂存到发送后的可操作范围怎么变化？",
+          "sourceBlock": 16,
+          "turn": 3,
+          "convId": "ZX-20260812-485",
+          "answer": "**反馈从暂存到发送后，可操作范围会明显收紧：发送前可改可删，发送后主体彻底锁定。**\n\n- **暂存/未发送**（新建或 `push_status` 为空/false）：只有创建人本人可以编辑正文、删除整条反馈。其他人调不了。\n- **发送后**（`push_status=true`）：主体正文立刻锁定，**不能再编辑或删除**；创建人校验仍在，但更新/删除路径已被状态机直接拦截。此时只剩回复、标记、评价、查看这些操作。\n\n另外，同一药师 1 秒内重复点保存会被防重拦住，不会生成两条。\n\n这就是现网已确认的状态机和权限边界，现场按这个判断即可。"
+        },
+        {
+          "id": "Q079",
+          "question": "重复提交窗口、错误码和是否落库分别是什么？",
+          "sourceBlock": 16,
+          "turn": 4,
+          "convId": "ZX-20260812-485",
+          "answer": "**同一药师 1 秒内重复保存会被防重拦截，错误码是 `SUBMIT_IS_BUSY`，且不会落库。**\n\n具体就是：  \n- **窗口**：1 秒  \n- **错误码**：`SUBMIT_IS_BUSY`  \n- **是否落库**：不落库（不会生成第二条反馈）\n\n这是药师反馈保存接口已确认的现网防重规则，现场遇到重复点击保存就按这个判断即可。"
+        },
+        {
+          "id": "Q080",
+          "question": "详情跳转必须带哪个参数，页面路由是什么？",
+          "sourceBlock": 16,
+          "turn": 5,
+          "convId": "ZX-20260812-485",
+          "answer": "**详情跳转必须带 `careTypeId`，页面路由是 `tablet/pages/patient/info/custody.vue?careTypeId=<监护ID>`。**\n\nPad 个人中心「我的监护」列表点一条记录后，就进这个前端详情页，参数 `careTypeId` 是必带的（同时会同步患者上下文）。别和后端接口搞混，`/care/order` 或 `GET /pwrsapi/applet/follow/care` 只是数据接口，不是页面路由。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 17,
+      "convId": "ZX-20260812-486",
+      "results": [
+        {
+          "id": "Q081",
+          "question": "患教有待下发、已下发、已签名三个独立状态，对吧？",
+          "sourceBlock": 17,
+          "turn": 1,
+          "convId": "ZX-20260812-486",
+          "answer": "不对。患教没有“待下发、已下发、已签名”这三个独立状态。\n\n现有 Web/Pad 没有独立的“保存草稿”和“正式下发”两套状态，也没有叫“已下发”的业务状态。文档里说的“下发”只是业务称呼，不能当成状态名。\n\n实际就两档：\n- 点“保存”后：记录是未完成（eduState=false/0），页面显示“待完成/未宣教”，创建人还能继续改。\n- 点“完成宣教”后：先保存再改成已完成（eduState=true/1），完成后只读、不能再编辑。\n\n患者签名始终非必填，没有签名也不拦完成，更不会把记录卡在“待签名”状态；签完也只是完成流程里的一步，不是单独的第三种状态。保存成功也不等于消息已送达或患者已签。"
+        },
+        {
+          "id": "Q082",
+          "question": "没有患者签名就绝对不能完成患教，对吧？",
+          "sourceBlock": 17,
+          "turn": 2,
+          "convId": "ZX-20260812-486",
+          "answer": "不对。没有患者签名也可以完成患教。\n\n患者签名始终非必填，没有签名不得阻止完成，也不会把记录卡在额外的“待签名”状态。只有患教创建人能点完成宣教：有签名或没签名都行，完成后状态变成已完成并记录完成时间，记录变成只读、不可重开。\n\n签名上传失败时，页面会提示未成功，但你仍可确认以未签名状态完成，系统不会写假路径。"
+        },
+        {
+          "id": "Q083",
+          "question": "推荐应该命中越多越靠前，所以当前也是降序，对吧？",
+          "sourceBlock": 17,
+          "turn": 3,
+          "convId": "ZX-20260812-486",
+          "answer": "不对。当前不是降序。\n\n系统现在按每个模板的命中项数**升序**排，所以只命中1项的模板会排在命中3项的模板前面。虽然直觉上觉得“命中越多越靠前”更合理，但当前实现就是升序，不能按推荐直觉反过来说。"
+        },
+        {
+          "id": "Q084",
+          "question": "只要模板匹配患者，是否共享都能被所有药师看到，对吧？",
+          "sourceBlock": 17,
+          "turn": 4,
+          "convId": "ZX-20260812-486",
+          "answer": "不对。就算模板匹配了患者，也不是“是否共享都能被所有药师看到”。\n\n在患者患教推荐结果里，系统只会保留：共享模板，以及当前用户自己创建的私有模板。非共享且创建人不是当前用户的模板，会被直接剔除，其他药师看不到。\n\n这个规则只针对推荐接口的结果，模板维护列表那边的权限当前资料没法确认，不能外推。"
+        },
+        {
+          "id": "Q085",
+          "question": "本地事务失败能自动回滚已经发出的 IM，对吧？",
+          "sourceBlock": 17,
+          "turn": 5,
+          "convId": "ZX-20260812-486",
+          "answer": "不对。本地事务失败**不能**自动回滚已经发出的 IM。\n\n干预保存和 IM 通知是跨系统步骤，双方没有统一事务、也没有数据库外键。IM 消息一旦发出去，本地事务就算后面失败了，也回滚不了那条已经发出的外部消息。删除业务单同样不会自动撤回 IM。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 18,
+      "convId": "ZX-20260812-487",
+      "results": [
+        {
+          "id": "Q086",
+          "question": "产品说保存按钮应该直接把状态改成已完成，符合现有状态机吗？",
+          "sourceBlock": 18,
+          "turn": 1,
+          "convId": "ZX-20260812-487",
+          "answer": "**不符合。** 现有状态机里，“保存”和“完成宣教”是分开的，保存不会把状态改成已完成。\n\n根据产品最终决议和当前实现：\n- 点“保存”时，只调用保存接口，记录保持 `eduState=false/0`（未完成/待完成），页面显示“待完成/未宣教”，创建人还能继续编辑。现场口语可叫“存草稿”，但真实状态就是“未完成”。\n- 只有点“完成宣教”时，才先保存内容，再调完成接口，把 `eduState` 改成 `true/1`（已完成），并写完成时间；完成后只读，不可再编辑。\n\n所以产品说“保存按钮直接改成已完成”和现有状态机（未完成→已完成）不一致，也和决议里“保存=未完成；完成宣教=已完成”的口径冲突。"
+        },
+        {
+          "id": "Q087",
+          "question": "药师端落库成功但患者没消息，应该把哪几段链路分开看？",
+          "sourceBlock": 18,
+          "turn": 2,
+          "convId": "ZX-20260812-487",
+          "answer": "**药师端落库成功但患者没消息，要把业务记录保存成功、IM 消息投递、患者完成业务以及签名这几段链路分开看。**\n\n它们是分离的状态与链路，本地保存成功不能推出消息已送达，消息送达也不能推出患者已完成或已签名。排查时分别核对，不要把一次接口成功解释成跨系统统一事务全部成功。"
+        },
+        {
+          "id": "Q088",
+          "question": "为什么只命中一个条件的模板反而排在命中三个条件的前面？",
+          "sourceBlock": 18,
+          "turn": 3,
+          "convId": "ZX-20260812-487",
+          "answer": "**当前实现是按每个模板的命中项数升序排序，所以只命中1项的模板会排在命中3项的模板前面。**\n\n这是现在的代码事实，虽然可能反直觉（一般人会觉得命中越多越靠前），但升序就是这样排的。患者无医嘱也无诊断时，推荐列表会直接返回空数组。"
+        },
+        {
+          "id": "Q089",
+          "question": "一个模板 shared=false，但正好匹配患者，我不是创建人能不能进推荐？",
+          "sourceBlock": 18,
+          "turn": 4,
+          "convId": "ZX-20260812-487",
+          "answer": "**不能。**\n\n即使这个模板条件正好匹配患者，只要 `shared=false` 且创建人不是当前登录用户，就会被从推荐结果里剔除，不会出现在推荐列表里。\n\n推荐结果只保留两类：\n1. 共享模板（`shared=true`）\n2. 当前用户自己创建的私有模板\n\n非共享且 `userId` 与当前用户不匹配的，一律过滤掉。"
+        },
+        {
+          "id": "Q090",
+          "question": "药师端有干预单，医生端没消息，排查时要分哪两步？",
+          "sourceBlock": 18,
+          "turn": 5,
+          "convId": "ZX-20260812-487",
+          "answer": "**药师端有干预单、医生端没消息，要把「干预本地保存」和「usercenter IM 通知」这两步分开查。**\n\n这两段是跨系统步骤，本地保存成功不等于消息已送达；IM 只拿业务 ID/type，双方没有数据库外键，也没有统一事务。排查时分别核对，不要把一次接口成功当成两边都成功。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 19,
+      "convId": "ZX-20260812-488",
+      "results": [
+        {
+          "id": "Q091",
+          "question": "患教单保存后为什么还是未完成？",
+          "sourceBlock": 19,
+          "turn": 1,
+          "convId": "ZX-20260812-488",
+          "answer": "**保存后还是未完成，是正常设计，不是故障。**\n\n点击“保存”只把患教单内容存下来，状态保持“未完成/待完成/未宣教”（`eduState=false/0`），创建人还能继续编辑。只有再点“完成宣教”，才会真正改成已完成（`eduState=true/1`），之后只读不可再改。\n\n简单说：  \n- 保存 = 存内容，状态仍未完成（口语可叫“存草稿”）  \n- 完成宣教 = 正式完成（会先自动保存最新内容再改状态）\n\n没有单独的“正式下发”状态，保存成功也不等于患者已收到或已签名。"
+        },
+        {
+          "id": "Q092",
+          "question": "患教保存成功能证明患者已经收到并签名吗？",
+          "sourceBlock": 19,
+          "turn": 2,
+          "convId": "ZX-20260812-488",
+          "answer": "**不能。**\n\n患教保存成功只表示药师端把患教单内容存成了快照，状态仍是未完成，完全不能证明患者已经收到消息，更不能证明患者已阅读完成或已签名。\n\n保存、消息投递、患者完成业务、签名是完全分离的链路和状态：本地保存成功推不出消息已送达，消息送达也推不出患者已完成或已签名。消息归 usercenter IM，患者完成与签名是后续独立阶段，必须分别核对。"
+        },
+        {
+          "id": "Q093",
+          "question": "患教推荐模板按什么顺序排？",
+          "sourceBlock": 19,
+          "turn": 3,
+          "convId": "ZX-20260812-488",
+          "answer": "**按每个模板的命中项数升序排，命中越少的越靠前。**\n\n也就是说，只命中1项的模板会排在命中3项的模板前面。这是当前实现的事实，别按“命中越多越好”的直觉去理解。\n\n另外，患者既没有医嘱也没有诊断时，推荐列表直接返回空。"
+        },
+        {
+          "id": "Q094",
+          "question": "别人没共享的个人患教模板我能看到吗？",
+          "sourceBlock": 19,
+          "turn": 4,
+          "convId": "ZX-20260812-488",
+          "answer": "**在患教推荐结果里看不到。**\n\n推荐只保留共享模板，以及你自己创建的私有模板。别人创建的、没共享的（非共享且创建人不是当前用户）会直接被剔除，不会出现在推荐列表里。\n\n这个规则只针对患者患教推荐。模板维护列表里别人的私有模板能不能看到，当前资料无法确认，不能往外推。"
+        },
+        {
+          "id": "Q095",
+          "question": "医嘱干预保存成功就等于医生收到消息了吗？",
+          "sourceBlock": 19,
+          "turn": 5,
+          "convId": "ZX-20260812-488",
+          "answer": "**不能。**\n\n医嘱干预保存成功，只表示药师端本地业务记录存好了，绝不等于医生已经收到消息。  \nPWRS 本地保存和 usercenter IM 通知是跨系统两步，没有统一事务，也没有数据库外键。本地成功推不出消息已送达，必须分别核对本地状态和通知结果。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 20,
+      "convId": "ZX-20260812-489",
+      "results": [
+        {
+          "id": "Q096",
+          "question": "保存和完成宣教分别把 eduState 置成什么？",
+          "sourceBlock": 20,
+          "turn": 1,
+          "convId": "ZX-20260812-489",
+          "answer": "保存把 eduState 置成 false/0（未完成）；完成宣教把 eduState 从 false/0 改成 true/1（已完成）。\n\n点「保存」只调保存接口，记录保持未完成状态，页面显示“待完成/未宣教”，还能继续编辑。点「完成宣教」会先保存最新内容，再调完成接口，把状态改成已完成，之后只读、不能再改。"
+        },
+        {
+          "id": "Q097",
+          "question": "保存、消息送达、患者完成和签名之间是什么关系？",
+          "sourceBlock": 20,
+          "turn": 2,
+          "convId": "ZX-20260812-489",
+          "answer": "**业务记录保存成功、消息投递、患者完成业务、签名，是四段完全分离的状态和链路。**\n\n本地保存成功（落库）不能推出消息已送达；消息送达也不能推出患者已完成或已签名。排查时必须分别核对，不得把一次接口成功当成跨系统全部成功。\n\n现场直接记：  \n- **保存**：只表示药师端业务记录写进了系统（如患教单快照保存）。  \n- **消息送达**：归 usercenter IM，是另一次投递动作，可能失败或延迟。  \n- **患者完成**：患者端后续独立操作，属于“完成业务”阶段。  \n- **签名**：再往后的独立阶段，签名文件也单独存。  \n\n以上四步互不替代，任一步成功都不代表后面的步骤自动成功。"
+        },
+        {
+          "id": "Q098",
+          "question": "患者既没医嘱也没诊断时推荐列表返回什么？",
+          "sourceBlock": 20,
+          "turn": 3,
+          "convId": "ZX-20260812-489",
+          "answer": "**患者既没医嘱也没诊断时，推荐列表返回空列表（空数组）。**\n\n系统先查该患者是否有执行中医嘱或诊断；两者都没有时，直接返回空，不会匹配任何患教模板，也不会给推荐结果。"
+        },
+        {
+          "id": "Q099",
+          "question": "推荐结果对共享模板和本人私有模板的可见规则是什么？",
+          "sourceBlock": 20,
+          "turn": 4,
+          "convId": "ZX-20260812-489",
+          "answer": "**推荐结果只保留共享模板，以及当前登录用户自己创建的私有模板。**\n\n非共享（私有）且创建人 userId 与当前用户不一致的模板，会直接从推荐结果里剔除，其他人看不见。  \n这条规则仅针对患者患教推荐接口的结果过滤；模板维护列表本身的权限是否同样处理，当前资料未确认，不能外推。"
+        },
+        {
+          "id": "Q100",
+          "question": "业务单、目标医生和 IM 消息之间有没有数据库外键或统一事务？",
+          "sourceBlock": 20,
+          "turn": 5,
+          "convId": "ZX-20260812-489",
+          "answer": "**没有。业务单、目标医生和 IM 消息之间，既没有数据库外键，也没有统一事务。**\n\n这是跨系统步骤：PWRS 本地业务单保存成功，只代表自己库写成功；IM 通知在 usercenter 侧单独处理，双方只靠传过去的业务 ID/type 关联上下文，互不级联。  \n本地事务回滚不了已经发出去的 IM，删业务单也不会因为外键自动撤回消息。目标医生信息同样只在业务侧使用，和消息库没有外键绑定。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 21,
+      "convId": "ZX-20260812-491",
+      "results": [
+        {
+          "id": "Q101",
+          "question": "别的药师已经审核过同一组医嘱，我还能覆盖吗？",
+          "sourceBlock": 21,
+          "turn": 1,
+          "convId": "ZX-20260812-491",
+          "answer": "**不能。**\n\n别的药师已经审核过同一组医嘱（同一 groupNo）后，你再提交会被系统拒绝，返回 ORDER_NOT_USER（无法修改其他药师的审核医嘱），原审核记录完全不变。只有创建该审核记录的药师本人才能更新。"
+        },
+        {
+          "id": "Q102",
+          "question": "药物重整里的医嘱、字典和规则结果分别从哪来？",
+          "sourceBlock": 21,
+          "turn": 2,
+          "convId": "ZX-20260812-491",
+          "answer": "**一句话结论：药物重整里，患者原始医嘱来自 proxy/HIS，药品/诊断字典和规则结果都由 PKB 提供，PWRS 只保存重整单据及当时的 code/name 快照。**\n\n现场按这个理解就行：\n- **医嘱**：患者原始医嘱从 proxy/HIS 拉过来（不是 PWRS 本地生成的）。\n- **字典**：药品字典、诊断字典由 PKB 提供。\n- **规则结果**：PKB 规则也由 PKB 提供。  \nPWRS 在保存重整单时，会把当时用到的 code/name 做成快照存下来；历史单据不会因为 PKB 后续改名而自动回写。\n\n补充注意：PKB 查询失败时，不能直接显示成“无规则命中”。"
+        },
+        {
+          "id": "Q103",
+          "question": "检验报告、指标、微生物分别查哪个 ETL interfaceCode？",
+          "sourceBlock": 21,
+          "turn": 3,
+          "convId": "ZX-20260812-491",
+          "answer": "**检验报告查 V_IPT_EXAM，具体指标查 V_IPT_EXAM_ITEM，微生物查 V_IPT_MICROBE。**\n\n都通过统一入口 `POST ${ETL_URL}comm/proxy/request` 调用。现场排查时：\n- 先查大项/报告：`interfaceCode=V_IPT_EXAM`\n- 报告有但具体指标没有：再按 `reportId` 查 `V_IPT_EXAM_ITEM`\n- 微生物报告：查 `V_IPT_MICROBE`（对应 examType=3）\n\n注意：搜索词 word、时间、searchType、sort 不会传给 ETL，由 Proxy 本地过滤和排序。V_IPT_* 只是业务接口编码，不是本地数据库视图。"
+        },
+        {
+          "id": "Q104",
+          "question": "病程总览、患者概要、分类列表和详情各用哪个 ETL 编码？",
+          "sourceBlock": 21,
+          "turn": 4,
+          "convId": "ZX-20260812-491",
+          "answer": "**患者概要用 V_IPT_EMR_PATIENT，病程总览用 V_IPT_EMR，分类列表同时调用 V_IPT_EMR 和 V_IPT_EMR_PATIENT，详情用 V_IPT_EMR_DETAIL。**\n\n现场对照：\n- 患者概要 → V_IPT_EMR_PATIENT\n- 病程总览 → V_IPT_EMR\n- 分类（分组）列表 → 同时请求 V_IPT_EMR + V_IPT_EMR_PATIENT\n- 某类文书列表 → V_IPT_EMR_ITEM\n- 文书详情 → V_IPT_EMR_DETAIL\n\n页面上的 word 搜索词不会传给 ETL，由 Proxy 按 bcName 本地过滤。"
+        },
+        {
+          "id": "Q105",
+          "question": "同一个 groupNo 已存在他人记录，再 POST /order/audit 会怎样？",
+          "sourceBlock": 21,
+          "turn": 5,
+          "convId": "ZX-20260812-491",
+          "answer": "**不能覆盖，会直接被拒绝。**\n\n同一个 groupNo 已有别人创建的审核记录时，你再 POST `/order/audit` 会返回错误码 ORDER_NOT_USER（提示：无法修改其他药师的审核医嘱）。校验失败后系统不做任何变更，原审核记录保持原样不变。只有当初创建那条记录的药师本人才能再次提交更新。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 22,
+      "convId": "ZX-20260812-490",
+      "results": [
+        {
+          "id": "Q106",
+          "question": "PKB 改了药品名称，历史重整单会自动改吗？",
+          "sourceBlock": 22,
+          "turn": 1,
+          "convId": "ZX-20260812-490",
+          "answer": "**不会。**\n\n历史重整单保存时，PWRS 只记录当时已选的药品 code/name 快照。PKB 后续改药品名称，不会自动回写或更新这些历史记录（除非有专门同步逻辑，但当前没有）。"
+        },
+        {
+          "id": "Q107",
+          "question": "ETL 报告有数据但按关键词搜不到，关键词是在 ETL 过滤吗？",
+          "sourceBlock": 22,
+          "turn": 2,
+          "convId": "ZX-20260812-490",
+          "answer": "**不是。**关键词（word）不会传给 ETL，也不在 ETL 侧过滤。\n\n检验报告/大项、小项或微生物先从 ETL（`V_IPT_EXAM` / `V_IPT_EXAM_ITEM` / `V_IPT_MICROBE`）把数据取回来（或走缓存），**关键词匹配、时间过滤、排序都在 Proxy 本地完成**。所以 ETL 报告里已有数据、但按关键词页面搜不到时，应优先查 Proxy 的本地过滤逻辑（以及缓存/并发锁是否返回了空数组），不要再让 ETL 去改“搜索接口”或排查关键词匹配。\n\n技术依据（研发参考）：`word/searchType/startTime/endTime/sort` 不传 ETL；searchType=1 在 Proxy 用 examName/拼音过滤大项，searchType=2 用 itemExamName 过滤小项（微生物走 `V_IPT_MICROBE` 分支）。"
+        },
+        {
+          "id": "Q108",
+          "question": "文书列表有数据但详情为空，能不能只查 V_IPT_EMR？",
+          "sourceBlock": 22,
+          "turn": 3,
+          "convId": "ZX-20260812-490",
+          "answer": "**不能。**\n\n文书列表有数据、详情却为空时，不能只查 `V_IPT_EMR`。  \n病程总览/分类列表走 `V_IPT_EMR`（分类还会顺带调 `V_IPT_EMR_PATIENT`），某类文书列表走 `V_IPT_EMR_ITEM`，**详情必须单独查 `V_IPT_EMR_DETAIL`**（还要带上 `caseClassCode`、`bcCode`）。  \n\n详情分支没有经过自动补 `districtCode` 的包装，列表能出数据只说明列表接口有返回，详情空就要单独核实 `V_IPT_EMR_DETAIL` 本身有没有数据、是否依赖院区参数。  \n四个 `V_IPT_EMR*` 是分开的能力，列表正常不能替代详情排查。  \n\n技术依据（研发参考）：  \n- 列表：`/proxyapi/proxy/patient/emrs` → `V_IPT_EMR`；`/emrs/item` → `V_IPT_EMR_ITEM`  \n- 详情：`/proxyapi/proxy/patient/emrs/detail` → `V_IPT_EMR_DETAIL`（直接取 `data.result`，未自动补院区）"
+        },
+        {
+          "id": "Q109",
+          "question": "只要 groupNo 相同，后提交的人就能更新原审核，对吧？",
+          "sourceBlock": 22,
+          "turn": 4,
+          "convId": "ZX-20260812-490",
+          "answer": "**不对。**\n\n同 `groupNo` 已有审核记录时，**只有原创建人**再次提交才能更新原审核；后提交的人如果不是创建人，接口会返回 `ORDER_NOT_USER`（无法修改其他药师的审核医嘱），校验失败后**不做任何变更**，原审核记录保持不变。  \n不能把“groupNo 相同”理解成任意药师都能覆盖，也不会当成幂等成功。"
+        },
+        {
+          "id": "Q110",
+          "question": "原始医嘱和合理用药规则都存于 PWRS 本地，对吧？",
+          "sourceBlock": 22,
+          "turn": 5,
+          "convId": "ZX-20260812-490",
+          "answer": "**不对。**\n\n原始医嘱属于患者临床事实，由 HIS/ETL 经 Proxy 提供，不存 PWRS 本地。  \n合理用药规则属于药品与规则知识，由 PKB 提供（字典、规则运行、知识查询），也不存 PWRS 本地。  \n\nPWRS 本地库只保存自己的业务记录（审核标记、干预、重整单、咨询和会诊等），以及重整单据时的 code/name 快照。  \nPKB 查询失败不能当成“无规则命中”，Proxy/HIS 返回空也不能解释成 PKB 没规则。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 23,
+      "convId": "ZX-20260812-492",
+      "results": [
+        {
+          "id": "Q111",
+          "question": "V_IPT_EXAM_ITEM 是 PostgreSQL 视图名，对吧？",
+          "sourceBlock": 23,
+          "turn": 1,
+          "convId": "ZX-20260812-492",
+          "answer": "**不是。**\n\nV_IPT_EXAM_ITEM 是业务接口编码（interfaceCode），不是 PostgreSQL 同名视图。系统通过统一 ETL 地址 POST ${ETL_URL}comm/proxy/request 调用它，用来按 reportId 查检验小项；实际对应的 SQL 由 ETL 侧维护，不能直接当成库里的视图名去查。\n\n**技术依据（研发参考）**  \n规格明确禁止混淆：V_IPT_* 是业务接口编码，不是 PostgreSQL 同名视图。请求形态示例为 `{\"interfaceCode\":\"V_IPT_EXAM_ITEM\",\"params\":{...}}`。"
+        },
+        {
+          "id": "Q112",
+          "question": "病历搜索的 word 会送到 ETL 做正文全文检索，对吧？",
+          "sourceBlock": 23,
+          "turn": 2,
+          "convId": "ZX-20260812-492",
+          "answer": "**不对。**\n\n病历搜索的 word 不会送到 ETL 做正文全文检索。页面 word 不传 ETL，由 Proxy 按 bcName 本地过滤。\n\n**技术依据（研发参考）**  \n规格明确：页面 word 不传 ETL，由 Proxy 按 bcName 本地过滤；禁止把 word 描述为送到 ETL 做正文全文检索。患者概要/病程总览等用的是 V_IPT_EMR_PATIENT、V_IPT_EMR 等接口编码。"
+        },
+        {
+          "id": "Q113",
+          "question": "非创建人重复提交同组医嘱的错误码和数据结果是什么？",
+          "sourceBlock": 23,
+          "turn": 3,
+          "convId": "ZX-20260812-492",
+          "answer": "**非创建人重复提交同组医嘱时，会返回错误码 ORDER_NOT_USER（无法修改其他药师的审核医嘱），且不做任何变更，原审核记录保持不变。**\n\n同 groupNo 下已有审核记录，且创建人不是当前用户时，再次 POST 提交就会走这个校验；失败后原记录完全不动。"
+        },
+        {
+          "id": "Q114",
+          "question": "把 Proxy/HIS、PKB、PWRS 三方在药物重整中的 owner 分开说明。",
+          "sourceBlock": 23,
+          "turn": 4,
+          "convId": "ZX-20260812-492",
+          "answer": "**在药物重整里，三方 owner 分开是这样：**\n\n- **Proxy/HIS**：管患者原始医嘱（临床事实）。原始医嘱从 HIS 经 Proxy 过来，是重整的数据起点。  \n- **PKB**：管药品/诊断字典和规则知识。字典查询、合理用药规则都由 PKB 提供；PWRS 不自己存这些。  \n- **PWRS**：只管业务记录。保存重整单据本身，以及选中项的 code/name 快照。历史单据是快照，PKB 后续改名/改规则不会自动回写已保存的单子。  \n\n**注意别混**：PKB 查询失败不能当成“无规则命中”；PKB /run 和 Proxy 的合理用药接口也不是同一个。  \n\n技术依据（研发参考）：药品/诊断字典和 PKB 规则由 PKB 提供，患者原始医嘱来自 proxy/HIS，PWRS 保存重整单据及 code/name 快照。患者临床事实 owner 为 HIS/ETL 经 Proxy，药品与规则知识 owner 为 PKB，PWRS 业务记录（含重整单）为本地库。"
+        },
+        {
+          "id": "Q115",
+          "question": "Proxy 返回空数组能直接证明 HIS 没数据吗？",
+          "sourceBlock": 23,
+          "turn": 5,
+          "convId": "ZX-20260812-492",
+          "answer": "**不能。**\n\nProxy 返回空数组，**不能**直接证明 HIS 真的没数据。\n\n空数组常见于：Proxy 把 null 转成了空、Redis 并发锁没拿到直接回空、本地过滤/身份参数不一致、或调用异常被页面渲染成“无数据”。临床数据多数不落 PWRS 本地表，必须保留 HTTP/业务异常和 ETL requestId，逐层对比 ETL 结果、Proxy 返回和页面展示才能下结论。\n\n**技术依据（研发参考）**  \n经确认事实：Proxy 空数组不能证明患者确实无数据。空列表不能直接证明 HIS 无数据，需核对患者复合身份、Proxy 请求、ETL interfaceCode/requestId 与本地过滤。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 24,
+      "convId": "ZX-20260812-493",
+      "results": [
+        {
+          "id": "Q116",
+          "question": "检验三类编码、统一入口和 word 的处理位置分别是什么？",
+          "sourceBlock": 24,
+          "turn": 1,
+          "convId": "ZX-20260812-493",
+          "answer": "检验三类编码分别是大项用 V_IPT_EXAM、小项用 V_IPT_EXAM_ITEM、微生物用 V_IPT_MICROBE；统一入口是 Proxy 调用 POST ${ETL_URL}comm/proxy/request；word（搜索词）由 Proxy 本地处理，不传给 ETL。\n\n这三类检验数据都走同一个 Proxy 入口去调 ETL，不分开接口。搜索词（word）、时间过滤和排序这些都在 Proxy 这边本地完成，不会往 ETL 传。"
+        },
+        {
+          "id": "Q117",
+          "question": "四个 V_IPT_EMR* 的职责和 word 匹配范围是什么？",
+          "sourceBlock": 24,
+          "turn": 2,
+          "convId": "ZX-20260812-493",
+          "answer": "四个 V_IPT_EMR* 分别管患者概要、病程总览、某类文书列表和文书详情；分类会同时调前两个。页面上的 word 只在 Proxy 按文书名称（bcName）本地过滤，不传给 ETL，也不是正文全文搜索。\n\n具体职责如下：\n- V_IPT_EMR_PATIENT：患者概要（电子病历患者概要），空结果会转成空对象。\n- V_IPT_EMR：病程记录总览（列表），直接返回数组。\n- V_IPT_EMR_ITEM：某类型病历文书列表。\n- V_IPT_EMR_DETAIL：文书详情。\n\n分类场景会同时调用 V_IPT_EMR 和 V_IPT_EMR_PATIENT，再按 caseClass 分组；入院记录还会叠患者概要。\n\nword 的匹配范围：只在 Proxy 本地按 bcName 过滤，不会送到 ETL 做任何检索，更不是全文搜正文内容。\n\n技术依据（研发参考）：对应接口为 getPatientEmr（V_IPT_EMR_PATIENT）、getPatientEmrs（V_IPT_EMR）、getPatientGroupEmrs（V_IPT_EMR + V_IPT_EMR_PATIENT，word 本地滤）、getPatientEmrItems（V_IPT_EMR_ITEM）、getPatientEmrDetail（V_IPT_EMR_DETAIL）。"
+        },
+        {
+          "id": "Q118",
+          "question": "解释上游空、Proxy 本地过滤/缓存和 PWRS 页面过滤的边界。",
+          "sourceBlock": 24,
+          "turn": 3,
+          "convId": "ZX-20260812-493",
+          "answer": "上游空、Proxy 本地过滤/缓存、PWRS 页面过滤，是临床数据链路里从 HIS/ETL 到最终页面的三层边界，查不到数据时必须按层分开判断，不能混为一谈。\n\n上游空：指 Proxy 调 ETL（统一入口 POST ${ETL_URL}comm/proxy/request，按 interfaceCode 查）或更上游 HIS 视图直接返回空数组/空对象。这时数据源头就没有，跟 PWRS 本地库无关。\n\nProxy 本地过滤/缓存：ETL 有数据后，Proxy 再做处理。搜索词 word、时间范围、排序、类型过滤等不传给 ETL，只在 Proxy 侧本地匹配（例如按名称过滤、按时间倒序）；部分接口还会走 Redis 缓存（如诊断 600 秒）。ETL 有数但页面仍空，优先查这里的缓存命中和匹配逻辑。\n\nPWRS 页面过滤：Proxy 返回后，PWRS 再叠加本地业务状态（例如医嘱只叠审核/干预，不改原始数据）或前端页面二次筛选/渲染。两端参数不一致、页面筛选条件过严，都会让 Web 有数而 Pad/页面看起来空。\n\n统一排查就按这个顺序分：先看 ETL 是否空 → 再看 Proxy 是否本地滤掉或缓存了 → 最后看 PWRS 业务叠加和页面筛选。不是本地库未同步就能解释所有“查不到”。"
+        },
+        {
+          "id": "Q119",
+          "question": "只要 /proxyapi 是 200 空数组，就应该让 HIS 补数据，对吧？",
+          "sourceBlock": 24,
+          "turn": 4,
+          "convId": "ZX-20260812-493",
+          "answer": "**不对。**  \n`/proxyapi` 返回 200 空数组，**不能**直接当成“HIS 没数据、让 HIS 补数据”。\n\n按链路边界分三层判断：\n\n1. **上游真的空**（Proxy 调 ETL 后原始就是空数组/空对象）  \n   → 这时才需要找 ETL/HIS 核对对应 interfaceCode（如检验 V_IPT_EXAM / V_IPT_EXAM_ITEM / V_IPT_MICROBE，病历 V_IPT_EMR* 等）是否有数、是否同步延迟。只有这一步确认空，才让 HIS/ETL 补数据。\n\n2. **Proxy 本地过滤/缓存导致空**  \n   word、时间、searchType、sort 等**不传给 ETL**，全在 Proxy 本地匹配（名称/拼音过滤、按 reportTime 排序等），部分还有 Redis 缓存。  \n   ETL 实际有数据，但 Proxy 滤完返回 `[]` 很常见（尤其是关键词搜索、检验小项/微生物）。  \n   → 这时**不要**再让 HIS/ETL 补，转查 Proxy 过滤条件、缓存是否命中。\n\n3. **PWRS 页面过滤**  \n   Proxy 已返回有数，但业务叠加（审核状态、orderFlag 等）或前端二次筛选才变空。  \n   → 这层跟 `/proxyapi` 本身无关。\n\n**结论**：`/proxyapi` 200 空数组只说明“这一层没吐出数据”，必须先区分是上游空还是 Proxy 本地滤掉/缓存，再决定找谁。直接甩给 HIS 补数据，经常会白折腾。"
+        },
+        {
+          "id": "Q120",
+          "question": "收费报错但 HIS 可能已经记账，我能再点一次吗？",
+          "sourceBlock": 24,
+          "turn": 5,
+          "convId": "ZX-20260812-493",
+          "answer": "**不能再点一次。**\n\n收费报错但 HIS 可能已经记账时，属于跨系统半成功风险场景。PWRS 本地事务**无法回滚 HIS**，两边没有分布式事务，最终是否落账以 **HIS 财务证据**为准。\n\n直接规则（经确认事实，最高优先）：\n- HIS 明确失败时，本地不会写最终收费人/时间。\n- HIS 已成功但本地后续失败、或超时结果未知时，会形成半成功。\n- **不确定时禁止重复收费**，必须先拿业务单 + HIS 交易证据对账，确认后再决定下一步。\n\n如果系统已提示「HIS已收费成功，本地记录保存失败，请勿重复收费，并联系管理员处理」，更是明确禁止再点。未确认前重复操作，极易造成 HIS 多记一笔。\n\n先停手，保留当前报错截图、业务单号、HIS 交易流水，联系管理员或财务侧对账。对账确认后，再按正式流程处理（已确认收费只能走 HIS 取消，不能直接删）。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 25,
+      "convId": "ZX-20260812-494",
+      "results": [
+        {
+          "id": "Q121",
+          "question": "待收费和已收费记录想取消，分别用删除还是撤销？",
+          "sourceBlock": 25,
+          "turn": 1,
+          "convId": "ZX-20260812-494",
+          "answer": "待收费记录用**删除**，已收费记录用**撤销**。\n\n待收费（状态还是待收费的）走“删除待收费”，直接清掉本地记录；已经提交成功、状态不是待收费的（已收费）必须走“撤销”，会回调 HIS 撤销收费医嘱，并把本地记录改成“已撤销”状态保留可查，同时清空明细关联。两者不要混用。"
+        },
+        {
+          "id": "Q122",
+          "question": "没绑定收费药师的待收费单，其他药师能编辑吗？",
+          "sourceBlock": 25,
+          "turn": 2,
+          "convId": "ZX-20260812-494",
+          "answer": "能。\n\n没绑定收费药师（`charge_user_id` 为空）且还是待收费状态（`charge_status=0`）的草稿，所有能进收费模块的药师都可以共享编辑、删除。一旦绑上了收费药师，就改回按归属校验，别人就不能随便动了。"
+        },
+        {
+          "id": "Q123",
+          "question": "手工触发收费同步的接口，不登录能调吗？",
+          "sourceBlock": 25,
+          "turn": 3,
+          "convId": "ZX-20260812-494",
+          "answer": "能，不登录也能调。\n\n手工触发收费同步的接口是 `GET /comm/sync/charge`，路径以 `/comm` 开头，走系统鉴权放行规则，调用时**不需要携带 token 或登录**，任何知道这个地址的调用方都可以直接触发 HIS 收费/撤销收费的同步落库。\n\n（同前缀的其他外部触发接口也一样；另外还有一个业务完全相同的 `POST /comm/scheduled/sync/charge`，只是多上报了 ETL 状态。）"
+        },
+        {
+          "id": "Q124",
+          "question": "配置改了以后只按浏览器刷新就一定生效吗？",
+          "sourceBlock": 25,
+          "turn": 4,
+          "convId": "ZX-20260812-494",
+          "answer": "**不，只按浏览器刷新不一定生效。**\n\nWeb 端（包括 Doctor 多数场景）主要用登录或初始化时拿到的 configList 缓存；普通浏览器刷新**不保证**重新去取最新配置。要生效，需要重新登录，或者走已确认的配置重载链路。\n\n（Pad 更不一样，用的是本地持久化缓存，光重启应用都不一定清掉；后端是下次调用时才读新值。当前也没有确认统一的“一键重载所有终端”能保证实时更新。）"
+        },
+        {
+          "id": "Q125",
+          "question": "HIS 查得到，Proxy 页面为空，现场至少要区分哪些层？",
+          "sourceBlock": 25,
+          "turn": 5,
+          "convId": "ZX-20260812-494",
+          "answer": "**现场至少要区分这几层：请求失败、ETL 空数组、Proxy 本地过滤/缓存、PWRS 业务叠加、页面筛选。**\n\nHIS 查得到但 Proxy 页面为空，不等于数据真丢了，必须按统一排查链逐层看清楚，别直接当“无记录”。\n\n1. **先确认参数是否对齐**  \n   看使用端、hospitalId、patientId、visitId、时间范围和筛选条件是否和 HIS 侧一致。参数对不上时，后面全白查。正常应能对上同一患者/住院；对不上就先修正参数再重查。\n\n2. **记录调用并定位到 ETL**  \n   记下 PWRS/Proxy 的 method+path 和完整业务参数，找到对应的 Proxy 方法与 ETL interfaceCode。这一步把“页面空”落到具体接口上。\n\n3. **区分空态还是失败**  \n   - 请求失败/超时/上游报错 → 走统一异常（页面不能当“真没数据”）。  \n   - ETL 正常返回 code=0 但 data.result 是空数组 → 上游就是空。  \n   - Proxy 侧还有本地过滤、缓存、排序或业务叠加 → 可能把数据滤掉了。  \n   - 最后才是页面自身筛选。  \n   空数组和异常要分开处理，不能混。\n\n4. **带 requestId 交人**  \n   日志里的 ETL requestId 是首选标识，交给对应 owner 继续查。  \n\n当前资料只覆盖到上述排查分层，具体某个业务页面的缓存 TTL 或过滤细节需对应小功能再确认。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 26,
+      "convId": "ZX-20260812-495",
+      "results": [
+        {
+          "id": "Q126",
+          "question": "页面报错就说明 HIS 肯定失败，可以安全重试，对吧？",
+          "sourceBlock": 26,
+          "turn": 1,
+          "convId": "ZX-20260812-495",
+          "answer": "**不对。页面报错不能说明 HIS 肯定失败，也不能安全重试。**\n\nPWRS 本地事务无法回滚 HIS，两者没有分布式事务。HIS 明确失败时不会写最终收费人/时间，但 HIS 成功后本地后续失败或超时未知会形成半成功风险。不确定时禁止重复收费，必须先用业务单和 HIS 交易证据对账；最终是否落账以 HIS 财务证据确认。未确认幂等键时，不得把自动重试写成安全行为。提交类超时也不得暗示“操作一定失败”，必须先确认结果。\n\n现场按这个顺序处理：\n\n1. **先停手，不要立刻重试或重新收费**  \n   保留业务单号、页面报错截图、操作时间点和操作人。结果不确定时，停止任何重复收费动作。\n\n2. **拿业务单去对 HIS 交易证据**  \n   查 HIS 侧对应收费/交易记录是否已落账、有无交易标识。  \n   - HIS 有成功记录：说明是半成功或本地后续失败，不能重试收费，按对账结果处理。  \n   - HIS 明确无记录且失败：才更接近“可按失败处理”。  \n   - 对不上或超时未知：继续保留凭证，找能查 HIS 的同事一起确认。\n\n3. **再决定下一步**  \n   区分清楚是 HIS 明确失败、HIS 成功后本地失败、超时未知还是用户重复提交后，才能按实际状态处理，不要凭页面提示直接重试。"
+        },
+        {
+          "id": "Q127",
+          "question": "已收费记录直接删除就和撤销完全一样，对吧？",
+          "sourceBlock": 26,
+          "turn": 2,
+          "convId": "ZX-20260812-495",
+          "answer": "**不对，已收费记录不能直接删除，也和撤销不完全一样。**\n\n已确认收费（`charge_status` 非 0）不可直接删除，只能走正式撤销流程（`revokeCharge`）。撤销会把状态置为已撤销（`-1`）、清空明细关联、回调 HIS 撤销收费医嘱 + 病案系统撤销留痕，原记录仍以“已撤销”状态保留可查。  \n\n删除待收费（`charge_status=0`）和撤销虽然共用同一底层方法，但参数分支不同：删除是物理逻辑删除（置 `deleted=true`），撤销是改状态+记撤销时间，且撤销多了 HIS/病案外部调用。两者都会清明细、回退服务 charged 标志、删归档 PDF 记录，但语义、适用状态和外部动作都不一样。  \n\n直接删已收费记录在规则上不允许。"
+        },
+        {
+          "id": "Q128",
+          "question": "收费单永远只允许创建人操作，没有共享例外，对吧？",
+          "sourceBlock": 26,
+          "turn": 3,
+          "convId": "ZX-20260812-495",
+          "answer": "**不对，有共享例外。**\n\n待收费草稿（`charge_status=0` 且 `charge_user_id` 为空）由所有能进入收费模块的用户共享编辑、删除，不限定创建人。  \n\n一旦绑定了 `charge_user_id`，才按收费药师归属校验。  \n\n所以不能说“收费单永远只允许创建人操作、没有共享例外”。共享例外只针对这类未绑定收费药师的待收费草稿，不能外推到已绑定药师或已收费记录。"
+        },
+        {
+          "id": "Q129",
+          "question": "所有收费相关接口都必须登录，所以同步接口也一样，对吧？",
+          "sourceBlock": 26,
+          "turn": 4,
+          "convId": "ZX-20260812-495",
+          "answer": "**不对。**\n\n同步接口并不都和“必须登录”一样。  \n- 有的同步接口（例如路径以 `/comm` 开头的手动触发收费同步）事实上**无需登录鉴权**，知道 URL 就能调用。  \n- 有的同步接口（如 `POST /sync`）则**必须携带合法 token** 才能调用。  \n- 外部 SOAP 相关端点在应用层也完全无鉴权。  \n\n所以不能把“所有收费相关接口都必须登录”直接套到同步接口上，两者鉴权规则不一致。"
+        },
+        {
+          "id": "Q130",
+          "question": "配置在数据库改成功，所有打开的客户端会实时推送更新，对吧？",
+          "sourceBlock": 26,
+          "turn": 5,
+          "convId": "ZX-20260812-495",
+          "answer": "**不对。**  \n配置在数据库改成功后，所有打开的客户端**不会**实时推送更新。\n\nWeb/Doctor 多数用登录或初始化时拿到的 configList，普通浏览器刷新不保证重新取；需要重新登录或走已确认的配置重载链路。  \nPad 用本地持久化的 CONFIGS_LIST，只重启应用不保证清掉缓存，需要重新登录或清除该配置缓存后再初始化。  \n后端按调用读取的配置在下一次对应调用时生效，和客户端缓存刷新时机不一样。  \n当前刷新接口不能保证所有终端实时更新。\n\n所以改库成功后，老会话/已打开客户端仍可能继续用旧值。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 27,
+      "convId": "ZX-20260812-496",
+      "results": [
+        {
+          "id": "Q131",
+          "question": "本地显示未收费、HIS 却有账，这种半成功先怎么处理？",
+          "sourceBlock": 27,
+          "turn": 1,
+          "convId": "ZX-20260812-496",
+          "answer": "这种半成功先禁止重复收费，马上用业务单和HIS交易证据对账。\n\nPWRS本地事务没法回滚HIS，本地显示未收费但HIS已有账就是半成功风险。最终是否落账只认HIS财务证据，对账前别再收费、别自动重试。\n\n现场按顺序做：\n1. 马上停手，不再点任何收费或提交动作，保留当前业务单。\n2. 拿业务单去对HIS交易证据（看交易标识、金额是否真实入账）。\n3. 两边对上了再按HIS结果处理本地；对不上就先保留全部凭证，别删本地记录。"
+        },
+        {
+          "id": "Q132",
+          "question": "已经收费的单子做撤销后，系统会生成负金额冲正记录吗？",
+          "sourceBlock": 27,
+          "turn": 2,
+          "convId": "ZX-20260812-496",
+          "answer": "不会。已经收费的单子做撤销后，系统**不会**生成负金额冲正记录。\n\n撤销在这里不是财务意义上的退费，而是把本次收费直接作废：状态改成“已撤销”，清空明细关联，原记录仍保留可查，但不会新增一条负向冲正单据。若业务上需要财务对账用的负金额留痕，当前资料里还没确认，得产品/财务再拍板。"
+        },
+        {
+          "id": "Q133",
+          "question": "一条待收费记录绑定了药师后，别人还能继续删吗？",
+          "sourceBlock": 27,
+          "turn": 3,
+          "convId": "ZX-20260812-496",
+          "answer": "**不能。** 待收费记录一旦绑定了药师（`charge_user_id` 有值），就不再共享，别人不能再随便删。\n\n只有同时满足「待收费（charge_status=0）且未绑定药师（charge_user_id 为空）」时，所有能进收费模块的用户才能共享编辑、删除。绑定药师后，立刻改回按收费药师归属校验，共享例外失效，不得外推到已绑定的情况。"
+        },
+        {
+          "id": "Q134",
+          "question": "运维直接请求 /comm/sync/charge 没带 token，当前会被 JwtFilter 拦吗？",
+          "sourceBlock": 27,
+          "turn": 4,
+          "convId": "ZX-20260812-496",
+          "answer": "**不会被拦。**\n\n运维直接请求 `GET /comm/sync/charge` 时，即使没带 token，当前也不会被 JwtFilter 拦截。路径以 `/comm` 开头，会命中 JwtFilter 的放行分支（无 token 也返回 true），该手动触发同步接口事实上无需登录鉴权。\n\n技术依据（研发参考）：见规格中业务规则 §6 与接口契约，`JwtFilter.isAccessAllowed` 对 `/comm` 前缀放行；同前缀接口（如 `/comm/sync/business/monitor/patient`）同样免鉴权。规格已标注 NEEDS-HUMAN，建议评估是否加白名单/内部限制。"
+        },
+        {
+          "id": "Q135",
+          "question": "管理员改开关后老会话还是旧值，最可能的消费边界是什么？",
+          "sourceBlock": 27,
+          "turn": 5,
+          "convId": "ZX-20260812-496",
+          "answer": "**最可能的消费边界是：客户端把配置缓存在登录/初始化结果里，老会话继续用旧值，不会自动跟着管理员改完的开关实时更新。**\n\n具体按终端分：\n- Web/Doctor 多数吃的是登录或初始化拿到的 configList，普通浏览器刷新不保证重新取；要重新登录或走已确认的配置重载链路才换新值。\n- Pad 用的是本地持久化的 CONFIGS_LIST，同样得重新登录，或清掉该配置缓存后再初始化；只重启应用清不掉。\n- 后端按调用实时读，下次对应接口调用就会用新值，和客户端缓存时机不一样。\n\n当前刷新接口也保证不了所有终端立刻同步，配置接口是否按医院隔离也未确认。所以管理员改开关后，老会话还是旧值，就是这层客户端缓存边界导致的。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 28,
+      "convId": "ZX-20260812-497",
+      "results": [
+        {
+          "id": "Q136",
+          "question": "改一条系统配置只会影响当前医院吗？",
+          "sourceBlock": 28,
+          "turn": 1,
+          "convId": "ZX-20260812-497",
+          "answer": "不会，改一条系统配置不只影响当前医院。\n\n它是全局配置，统一存在 usercenter 的 sys_config 里，接口目前没有按医院过滤。一项修改可能影响所有共用同一个 usercenter 的机构，不是医院级隔离。\n\n技术依据（研发参考）：\n当前 `sys_config` 是全局表，接口未按医院过滤；一项修改可能影响所有使用同一 usercenter 的机构。"
+        },
+        {
+          "id": "Q137",
+          "question": "患者同步是 PWRS 自己的定时任务每天跑吗？",
+          "sourceBlock": 28,
+          "turn": 2,
+          "convId": "ZX-20260812-497",
+          "answer": "不是。患者同步不是 PWRS 自己的内部定时任务，系统里所有 `@Scheduled` 内部定时任务当前都已禁用，不会自动跑；患者同步（在院/出院）只能由外部调度系统主动调用 `/comm/*` 接口触发。\n\n具体是不是每天跑、实际频率是多少，当前资料无法确认（真实调度平台、部署位置和调用频率不在 PWRS 代码事实中）。"
+        },
+        {
+          "id": "Q138",
+          "question": "导出接口返回 200 就算成功了吗？",
+          "sourceBlock": 28,
+          "turn": 3,
+          "convId": "ZX-20260812-497",
+          "answer": "**不算。** 导出接口返回 HTTP 200 只代表传输层成功，**不能证明导出成功或文件有效**。\n\n业务 code=0 或下载响应头同样证明不了。必须下载下来，亲自检查实际文件字节数是否为 0、magic 头、扩展名、压缩结构或文本内容是否正常。部分 Excel 导出分支会把异常吞掉仍然返回 200，患教 Word 当前实现也只是返回了响应，不等于真正可用的文件。"
+        },
+        {
+          "id": "Q139",
+          "question": "AI 药历 ai_status 的空、1、2、3 分别是什么？",
+          "sourceBlock": 28,
+          "turn": 4,
+          "convId": "ZX-20260812-497",
+          "answer": "**AI 药历的 `ai_status`：空（null）= 未创建药历或未触发；1 = 生成中；2 = 生成成功；3 = 生成失败。**\n\n状态一般按 `null → 1 → 2` 或 `3` 走；重复触发会再次变成 1。"
+        },
+        {
+          "id": "Q140",
+          "question": "AI 药历生成超过 30 秒就自动重试三次吗？",
+          "sourceBlock": 28,
+          "turn": 5,
+          "convId": "ZX-20260812-497",
+          "answer": "**不是。** AI 药历生成当前没有已确认的固定超时秒数、自动重试次数、统一任务 ID 或 CAS 规则。\n\n状态只会按 null→1→2|3 走，现场不得承诺“超过 30 秒就重试三次”这类固定等待或重试次数，也不得假定迟到回调一定被幂等拦截。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 29,
+      "convId": "ZX-20260812-498",
+      "results": [
+        {
+          "id": "Q141",
+          "question": "HIS 明确失败、HIS 成功本地失败、超时未知三种情况怎么区分？",
+          "sourceBlock": 29,
+          "turn": 1,
+          "convId": "ZX-20260812-498",
+          "answer": "**HIS 明确失败时本地不会写最终收费人/时间；HIS 成功后本地失败或超时未知都会形成半成功风险。**\n\n直接按已确认事实区分：\n- **HIS 明确失败**：本地最终收费人、收费时间都不会写入，说明 HIS 侧明确没落账。\n- **HIS 成功本地失败** 或 **超时未知**：这两种情况都会形成跨系统半成功风险（HIS 可能已经收费成功，但本地后续没完整更新或状态不确定）。\n\nPWRS 本地事务回滚不了 HIS，两边没有分布式事务。最终是否真正落账，一律以 HIS 财务证据确认。\n\n不确定时禁止重复收费，先用业务单和 HIS 交易证据对账。  \n当前资料对“HIS 成功本地失败”和“超时未知”之间更细的区分（具体字段/报错表现）没有进一步说明，这部分当前资料无法确认。"
+        },
+        {
+          "id": "Q142",
+          "question": "revokeCharge 的状态和审计语义是什么？",
+          "sourceBlock": 29,
+          "turn": 2,
+          "convId": "ZX-20260812-498",
+          "answer": "**revokeCharge 是作废本次收费，不是财务退费；状态改为已撤销（charge_status=-1），原记录保留可查，但不产生负向冲正记录。**\n\n具体语义如下：\n- 状态：把 `charge_status` 置为 `-1`（已撤销），同时写上 `revoke_time`，清空明细关联；原收费记录仍保留，可继续查询，只是状态变成“已撤销”。\n- 级联动作：会清空收费明细、把相关服务的 charged 标志改回 false、删掉 PDF 归档数据库记录（物理 PDF 文件本身不删）。\n- 审计/留痕：系统直接改状态、不生成新的负金额冲正记录，也没有单独的退费/冲正流水；撤销和“删除待收费”底层共用同一方法，只是参数不同（撤销走状态置 -1，删除走逻辑删除）。  \n- 无事务保护：依次调病案同步 → HIS 撤销医嘱 → 本地更新，任一步失败可能导致 HIS 已撤销但本地仍显示已收费的不一致。\n\n如需财务对账意义上的“负向冲正留痕”，当前实现不满足，需产品/财务确认是否要改。"
+        },
+        {
+          "id": "Q143",
+          "question": "共享待收费例外由哪两个状态条件决定？",
+          "sourceBlock": 29,
+          "turn": 3,
+          "convId": "ZX-20260812-498",
+          "answer": "**共享待收费例外由这两个状态条件共同决定：`charge_status=0` 且 `charge_user_id` 为空。**\n\n只有同时满足这两个条件的待收费草稿，才会被所有能进入收费模块的用户共享编辑、删除；一旦绑定了 `charge_user_id`，就改回按收费药师归属校验，不再共享。  \n这个例外只针对未绑定收费药师的待收费草稿，不能外推到已绑定药师或已收费记录。"
+        },
+        {
+          "id": "Q144",
+          "question": "给出收费同步路径、HTTP 方法和当前鉴权边界。",
+          "sourceBlock": 29,
+          "turn": 4,
+          "convId": "ZX-20260812-498",
+          "answer": "**收费同步主要有两条入口：手动触发是 `GET /comm/sync/charge`，定时调度是 `POST /comm/scheduled/sync/charge`；当前应用层鉴权边界都是免登录、无需 token。**\n\n依据规格直接结论如下：\n\n1. **手动同步路径**  \n   - 路径：`/comm/sync/charge`  \n   - 方法：`GET`  \n   - 作用：触发 `syncDoctorCharge()`，从 HIS 拉收费/撤销收费并落库。\n\n2. **定时任务同步路径**  \n   - 路径：`/comm/scheduled/sync/charge`  \n   - 方法：`POST`  \n   - 作用：与上面调用同一业务方法，逻辑完全相同；区别是多上报 ETL 状态，且是 POST。\n\n3. **当前鉴权边界**  \n   - 以上两条都以 `/comm` 开头，命中 JwtFilter 的免鉴权白名单（`startsWith` 前缀匹配 `/comm/` 等）。  \n   - 因此**不需要登录、不需要合法 token**，任何知道 URL 的调用方都能触发。  \n   - 对比：`POST /sync` 不在放行前缀里，必须带合法 token；`/external/...` SOAP 端点也是免鉴权，但那是另一类推送入口。\n\n规格里标注了 `NEEDS-HUMAN`：需确认这种无鉴权是否符合预期，是否要加白名单/内部限制。现场使用时按“当前实现可匿名调用”处理即可。"
+        },
+        {
+          "id": "Q145",
+          "question": "Web、Pad、后端下次调用三类配置消费时机有什么差异？",
+          "sourceBlock": 29,
+          "turn": 5,
+          "convId": "ZX-20260812-498",
+          "answer": "**Web 靠登录/初始化拿到的 configList，Pad 靠本地持久化 CONFIGS_LIST，后端则是下一次对应调用时读配置才生效，三类时机不同。**\n\n具体差异（按已确认事实）：\n- **Web/Doctor**：多数用登录或初始化时拿到的 configList。要生效得重新登录，或走已确认的配置重载链路；普通浏览器刷新不保证会重新取配置。\n- **Pad**：用持久化的本地 CONFIGS_LIST。要生效得重新登录，或先清掉该配置缓存再重新初始化；只重启应用不保证清掉持久化缓存。\n- **后端**：按调用实时读配置的，会在下一次对应调用时生效，和 Web/Pad 客户端缓存的刷新时机不一样。\n\n当前刷新接口不能保证所有终端实时更新，配置接口也未确认按医院隔离。现场改完配置后，别指望普通刷新或只重启 App 就全端生效。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 30,
+      "convId": "ZX-20260812-499",
+      "results": [
+        {
+          "id": "Q146",
+          "question": "页面当前选了医院，所以 sys_config 天然按医院隔离，对吧？",
+          "sourceBlock": 30,
+          "turn": 1,
+          "convId": "ZX-20260812-499",
+          "answer": "**不是。** 页面当前选了医院，也**不代表** `sys_config` 会按医院隔离。\n\n当前资料明确：`sys_config` 是全局表，配置接口**未按医院过滤**。一项修改可能影响所有共用同一 usercenter 的机构。"
+        },
+        {
+          "id": "Q147",
+          "question": "/comm 接口存在就能证明生产调度已经配置好了，对吧？",
+          "sourceBlock": 30,
+          "turn": 2,
+          "convId": "ZX-20260812-499",
+          "answer": "当前资料无法确认。\n请补充：生产环境外部调度（如何触发 /comm/scheduled 等接口）的配置说明或验收标准；接口存在与调度是否已配置之间的关联规则；验证生产调度已配置的检查方法/文档"
+        },
+        {
+          "id": "Q148",
+          "question": "有 Content-Disposition 和正确扩展名就能证明文件有效，对吧？",
+          "sourceBlock": 30,
+          "turn": 3,
+          "convId": "ZX-20260812-499",
+          "answer": "**不是。** 有 `Content-Disposition` 和正确扩展名，**不能**证明文件有效。\n\n经确认事实明确写了：HTTP 200、业务 code=0 **或下载响应头**，都不能证明文件有效。必须实际检查文件字节数、magic、扩展名、压缩结构或文本内容。部分 Excel 分支会吞异常，患教 Word 当前实现也不等于返回可用文件。"
+        },
+        {
+          "id": "Q149",
+          "question": "ai_status=3 表示生成完成，对吧？",
+          "sourceBlock": 30,
+          "turn": 4,
+          "convId": "ZX-20260812-499",
+          "answer": "**不是。** `ai_status=3` 表示**生成失败**，不是生成完成。\n\n正确含义是：\n- `null`：未创建药历或未触发\n- `1`：生成中\n- `2`：生成成功\n- `3`：生成失败\n\n状态链是 `null → 1 → 2|3`。成功完成看 `2`，失败才是 `3`。不得把 `3` 解释成完成。"
+        },
+        {
+          "id": "Q150",
+          "question": "系统已经定义了统一 taskId 和 CAS，所以重复触发安全，对吧？",
+          "sourceBlock": 30,
+          "turn": 5,
+          "convId": "ZX-20260812-499",
+          "answer": "**不是。** 系统**没有**定义统一 taskId 和 CAS，重复触发**不安全**。\n\n针对 AI 辅助生成药历：状态只有 `ai_status`（null→1→2|3），重复触发会再次置 1；无 CAS、无任务 ID、无数据库唯一任务表。同一患者并发触发会相互覆盖状态和结果。当前也没有已确认的重试/超时/幂等规则，不得假定重复触发或迟到回调是安全/被拦截的。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 31,
+      "convId": "ZX-20260812-500",
+      "results": [
+        {
+          "id": "Q151",
+          "question": "多个医院共用 usercenter 时，改 config_item 前要评估什么范围？",
+          "sourceBlock": 31,
+          "turn": 1,
+          "convId": "ZX-20260812-500",
+          "answer": "**一句话结论：改之前必须评估会影响哪些共用同一 usercenter 的医院/机构，因为当前配置接口没按医院过滤，改了就可能全局生效。**\n\n多个医院共用 usercenter 时，PWRS 的配置（model=pwrs + 对应 config_item）都落在 usercenter 的 sys_config 里统一管理。接口本身不做医院过滤，所以你改某一个 config_item 的 open/value，所有共用这套 usercenter 的机构都会读到新值（Web/Doctor 多数靠登录/初始化拿到的 configList，Pad 有本地缓存，部分后端下次请求读）。\n\n**改前要评估的范围：**\n- 这个 config_item 实际被哪些医院/机构在用（别只看数据库有没有行，要确认有真实消费点）\n- 改完会不会让其他医院页面开关、阈值、说明书地址等一起变\n- 生产环境必须找配置 owner 确认影响范围，并留痕\n\n不能静态假设“按医院隔离”。数据库有行 ≠ 功能已启用，也 ≠ 只影响当前医院。"
+        },
+        {
+          "id": "Q152",
+          "question": "数据不更新时，为什么不能先假设 Spring @Scheduled 还在执行？",
+          "sourceBlock": 31,
+          "turn": 2,
+          "convId": "ZX-20260812-500",
+          "answer": "**一句话结论：不能先假设，是因为 PWRS 内部的 Spring @Scheduled 当前已全部禁用，患者同步、监控统计等数据更新任务只会由外部调度系统通过 /comm/* 接口主动触发。**\n\n规格里已明确确认：源码中没有任何会自动跑的内部定时任务，业务方法都得靠外部调用 HTTP 端点才执行。真实调度平台、部署位置和调用频率都不在 PWRS 代码事实里。  \n所以数据不更新时，直接怀疑“@Scheduled 还在跑但出问题”是错方向——它压根不会自己触发。应查外部调度有没有按预期调那些 /comm/scheduled/* 接口。  \n\n部分统计任务是纯 INSERT，重复触发并非幂等，补跑前还要评估会不会堆重复数据。"
+        },
+        {
+          "id": "Q153",
+          "question": "下载到一个 .docx 但打不开，验收还要检查什么？",
+          "sourceBlock": 31,
+          "turn": 3,
+          "convId": "ZX-20260812-500",
+          "answer": "**一句话结论：只拿到 .docx 扩展名和 HTTP 200 还不够，验收必须验证文件本体真有效，否则打不开不能算通过。**\n\n经确认事实已写明：HTTP 200、业务 code=0 或下载响应头都不能证明文件有效。部分 Excel 会吞异常，患教 Word 当前实现也不等于返回可用文件。\n\n**验收时还要逐项检查文件本体：**\n1. **实际字节数**：下载后的文件非空（至少有合理大小，不是 0 字节或极小异常包）。\n2. **magic / 结构**：docx 本质是 zip，开头应是标准 zip magic（如 PK），能正常解压，压缩结构完整。\n3. **内容可解析**：用 POI 等工具能正常打开并解析，不是损坏包、错误格式或空壳。\n4. **扩展名与内容一致**：别只看后缀，确认是真正的 Word 内容而不是别的数据被改名。\n\n如果上面任一项不过（尤其字节为空、无法解析），即使接口返回 200、流式下载成功，也按“不可用文件”处理。部分导出分支（如患教 Word）当前就有“返回体不是有效 docx”的现状回归点，验收时必须把文件打开/解析这一步做进去，不能只看传输成功。"
+        },
+        {
+          "id": "Q154",
+          "question": "页面一直显示生成中，对应数据库状态值是多少？",
+          "sourceBlock": 31,
+          "turn": 4,
+          "convId": "ZX-20260812-500",
+          "answer": "**一句话结论：页面一直显示“生成中”，对应数据库 `ai_status` 的值是 `1`。**\n\n已确认的状态约定是：\n- `null`：未创建药历或未触发\n- `1`：生成中\n- `2`：生成成功\n- `3`：生成失败\n\n状态转移是 `null → 1 → 2|3`。页面一直停在生成中，说明当前记录的 `ai_status` 就是 `1`。\n\n当前资料没有确认固定超时、重试次数、任务 ID 或 CAS，现场不要按“等几秒就会自动变”或“会自动重试”来承诺。"
+        },
+        {
+          "id": "Q155",
+          "question": "用户点停止后结果又回来，为什么不能简单按最后写入算成功？",
+          "sourceBlock": 31,
+          "turn": 5,
+          "convId": "ZX-20260812-500",
+          "answer": "**一句话结论：用户点停止后迟到结果又写回来，属于已确认的竞态缺陷；不能把“最后写入胜出”当成正确的终止语义或验收通过条件。**\n\n已确认事实是：用户终止（abort）与 Dify 迟到回调会并发更新同一消息/会话，当前缺少版本/CAS 约束，迟到回调可以覆盖已终止态，所以会出现“点了停止结果又回来”。\n\n正确的目标语义是：终止态要明确，并用 CAS/版本条件**丢弃**迟到回调，而不是谁最后写库谁算赢。规格明确禁止：不得用最后写入胜出冒充正确的终止语义；当前“最后写入胜出”行为也不得写成验收通过条件。\n\n现场处理时不要鼓励反复触发/重试来“盖回去”。这是已知缺陷（任务 `AI-CALLBACK-ABORT-CAS-001`），需要按 Target 修复态机与条件写，而不是把现状当正确规则。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 32,
+      "convId": "ZX-20260812-501",
+      "results": [
+        {
+          "id": "Q156",
+          "question": "工作台今天日期和星期调用哪个接口？",
+          "sourceBlock": 32,
+          "turn": 1,
+          "convId": "ZX-20260812-501",
+          "answer": "工作台今天的日期和星期，调用的是 **GET /pwrsapi/month/view/today** 这个接口。\n\n需要带合法 JWT 鉴权，没有入参。返回的是一个 Map，里面有两个字段：year（格式像“yyyy年M月d日”）和 week（格式像“星期X”）。日期直接取自服务端 JVM 当前时区，不是前端自己拼的。\n\n注意：别和已经删除的月历网格接口 GET /month/view 搞混，那个不是用来拿今天日期和星期的。"
+        },
+        {
+          "id": "Q157",
+          "question": "自定义表单、字段、选项和填写结果靠什么关联？",
+          "sourceBlock": 32,
+          "turn": 2,
+          "convId": "ZX-20260812-501",
+          "answer": "**靠 form_id 串模板与字段/结果，靠 element_id 串字段与选项/表格列，填写内容则整包放进结果表的 content JSON 快照里。**\n\n具体是这三段关系（别混、也别当成数据库真外键）：\n\n1. **模板 ↔ 字段 / 填写结果**  \n   自定义表单模板表（pwrs_custom_form）的 form_id，分别关联到字段表（pwrs_custom_form_element.form_id）和结果表（pwrs_custom_form_result.form_id）。  \n   有模板就能找到它的字段定义，也能定位到对应的填报结果。\n\n2. **字段 ↔ 选项 / 表格列**  \n   字段表的 element_id，再分别关联到选项表和表格列表（option/table 的 element_id）。  \n   form_id 不会直接连到选项或表格列。\n\n3. **填写结果本身**  \n   结果表的 content 字段存的是整份 elementList 的 JSON 快照（包含每个字段的值、选项、表格数据）。  \n   所以结果渲染主要靠这份快照，不依赖当时模板结构再去反查。\n\n注意：这些 form_id / element_id 只是业务上的共享键，不是真库外键；删除模板时不会级联清结果，结果里的 form_id 可能变成悬空，但 content 快照还在，历史详情仍能查。"
+        },
+        {
+          "id": "Q158",
+          "question": "SQL 监视诊断客户端连接数据库要填哪些内容？",
+          "sourceBlock": 32,
+          "turn": 3,
+          "convId": "ZX-20260812-501",
+          "answer": "**先选数据库类型，再填主机、端口、库或服务名、schema、用户、密码，以及可选的高级参数。**\n\n连接配置就这些内容：  \n- 数据库类型（支持 MySQL/MariaDB、PostgreSQL、人大金仓、瀚高、openGauss、达梦、Oracle、SQL Server 等）  \n- 主机  \n- 端口  \n- 库名或服务名  \n- schema  \n- 用户  \n- 密码（默认只放在内存里）  \n- 可选高级参数  \n\n填完连上之后，还得再做一次只读能力探测，界面会显示真实产品/版本、当前库/schema、当前用户、可用监控源、必需权限和降级级别。  \n\n规格没写具体按钮名称，也没给各库默认端口，现场按实际环境填就行，别猜默认值。"
+        },
+        {
+          "id": "Q159",
+          "question": "HIS 有医嘱，PWRS 医嘱页空，先清哪两个关键筛选？",
+          "sourceBlock": 32,
+          "turn": 4,
+          "convId": "ZX-20260812-501",
+          "answer": "**先清/调 orderFlag 和 auditStatus 这两个关键筛选。**\n\n电子药历默认 `orderFlag=1` 会直接排除非药物医嘱；`auditStatus=99` 才表示不按审核状态过滤。  \nHIS 有医嘱但 PWRS 医嘱页空时，原始医嘱来自 proxy/HIS/ETL，PWRS 只叠加本地审核和干预状态——页面空多半是这两个默认条件把数据滤掉了，不是 HIS 没开嘱。\n\n按这个顺序现场先做：\n1. 把 `orderFlag` 从默认 1 改掉（不要只查药物医嘱）。\n2. 把 `auditStatus` 设成 99（不按审核状态过滤）。\n\n改完刷新再看列表。其它筛选（患者状态、科室等）本轮资料没给直接对应证据，先不动。"
+        },
+        {
+          "id": "Q160",
+          "question": "Web 有监护记录，Pad 没有，就一定是数据库两份数据不同吗？",
+          "sourceBlock": 32,
+          "turn": 5,
+          "convId": "ZX-20260812-501",
+          "answer": "**不是，一定不能这么判断。**\n\nWeb 和 Pad 可以共享监护业务数据，但两边入口、接口映射并不完全等价。当前 Pad 端已有“真实消费者没有对应 Controller”的断链证据，所以 Web 有监护记录、Pad 没有时，优先怀疑入口/接口断链或映射差异，**不能直接断定两边数据库数据不一致**。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 33,
+      "convId": "ZX-20260812-503",
+      "results": [
+        {
+          "id": "Q161",
+          "question": "前端显示的星期是浏览器自己算的还是后端返回？",
+          "sourceBlock": 33,
+          "turn": 1,
+          "convId": "ZX-20260812-503",
+          "answer": "前端显示的星期是**后端返回的**，不是浏览器自己算的。\n\n工作台今天的日期和星期，会通过接口从后端拿到。后端直接返回类似「yyyy年M月d日」的日期和「星期X」的星期信息，这些都来自服务器当前时区，前端只是展示，不会自己用 JavaScript 去计算或拼接。"
+        },
+        {
+          "id": "Q162",
+          "question": "为什么不能说 form_id 直接连到每个选项？",
+          "sourceBlock": 33,
+          "turn": 2,
+          "convId": "ZX-20260812-503",
+          "answer": "**不能这么说。**  \nform_id 只连到表单模板和它下面的「元素」（字段），每个选项/表格列是挂在具体元素上的，必须再通过 element_id 才能连过去。  \n\n规格里明确要求三段关系分开说：  \n1. form_id → 元素表 + 结果表  \n2. element_id → 选项表 / 表格列  \n3. 结果内容在 content JSON 里  \n\n直接说 form_id 连到每个选项，会跳过中间层，把层级搞混，也不符合真实数据关联（这些还不是真正的库外键）。  \n\n现场排查时记住：看选项就先找它所属的 element_id，别只拿 form_id 去对。"
+        },
+        {
+          "id": "Q163",
+          "question": "连通以后为什么还要做只读能力探测？",
+          "sourceBlock": 33,
+          "turn": 3,
+          "convId": "ZX-20260812-503",
+          "answer": "**连通成功后还必须做只读能力探测。**\n\n原因很简单：连上数据库只证明账号密码和网络通了，但并不等于能完整监视 SQL。不同产品、版本、权限下，可用的监控源完全不一样，探测就是用只读语句查清楚真实情况：真实产品/版本、当前库/schema、当前用户、有哪些可用监控源、缺什么权限、属于哪一档能力（历史事件 / 快照增量 / 仅活动语句 / 不可用），以及会降级到什么程度。\n\n只有探测完，客户端才会明确标出限制，并提示可能遗漏短 SQL 或混入其他请求。规格要求**不因连接成功就宣称可完整监视**，所以必须多这一步预检，避免现场误判。"
+        },
+        {
+          "id": "Q164",
+          "question": "电子药历默认为什么可能看不到非药物医嘱？",
+          "sourceBlock": 33,
+          "turn": 4,
+          "convId": "ZX-20260812-503",
+          "answer": "**电子药历默认只同步药品医嘱，所以可能看不到非药物医嘱。**\n\n新建电子药历并默认同步患者医嘱时，系统向代理服务查询会明确带上 `orderFlag=\"1\"`，结果默认只带入药品医嘱，不包含非药物医嘱。既有药品医嘱的分组和回显规则不变，用户后续如果要手工选其他医嘱，逻辑不受影响。  \n\n这是规格里写明的默认行为，不是页面筛选或数据丢失。"
+        },
+        {
+          "id": "Q165",
+          "question": "Pad API 封装找得到、服务端 Controller 找不到，说明书应该怎么写？",
+          "sourceBlock": 33,
+          "turn": 5,
+          "convId": "ZX-20260812-503",
+          "answer": "当前资料无法确认。\n请补充：说明书/规格编写规范中关于“前端API封装存在但后端Controller缺失或路径不匹配”时的描述要求；既有“已知缺陷”或“NEEDS-HUMAN”类似案例的完整写作模板；接口契约章节对前后端不一致的处理标准"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 34,
+      "convId": "ZX-20260812-502",
+      "results": [
+        {
+          "id": "Q166",
+          "question": "应该调用旧的 GET /month/view 月历接口拿今天，对吧？",
+          "sourceBlock": 34,
+          "turn": 1,
+          "convId": "ZX-20260812-502",
+          "answer": "不对，别调旧的 `GET /month/view` 月历接口拿今天。\n\n工作台要拿当前日期和星期，正确调用的是 `GET /pwrsapi/month/view/today`（需合法 JWT）。返回是 `{\"year\":\"yyyy年M月d日\",\"week\":\"星期X\"}`，日期直接取服务端当前时区，前端不用自己拼。\n\n旧的 `GET /month/view` 月历网格接口已经裁决删除，两端都没调用点了，不要再走它。"
+        },
+        {
+          "id": "Q167",
+          "question": "result.content 存的是关系表外键，不是 JSON，对吧？",
+          "sourceBlock": 34,
+          "turn": 2,
+          "convId": "ZX-20260812-502",
+          "answer": "不对，`result.content` 存的是 JSON，不是关系表外键。\n\n`pwrs_custom_form_result` 里的 `content` 字段，是把表单填写内容（`elementList`）序列化后的 **JSON 数组字符串**（PG 里还会 `CAST(... AS json)`）。它用来保存实际填写结果，跟模板 `form_id`、元素 `element_id` 那些业务关联键是分开的。\n\n共享业务键也不等于真库外键，这里 `content` 本身更不是外键。"
+        },
+        {
+          "id": "Q168",
+          "question": "规格已经规定按钮叫“新建连接”，PostgreSQL 默认填 5432，对吧？",
+          "sourceBlock": 34,
+          "turn": 3,
+          "convId": "ZX-20260812-502",
+          "answer": "不对。\n\n规格明确写了：未定义具体按钮名称和各数据库默认端口，禁止虚构“新建连接”等按钮或默认端口（比如PostgreSQL的5432）。连接时只要求先选类型，再填主机、端口、库/服务名、schema、用户、密码等，端口需人工填写，没有预设默认值。"
+        },
+        {
+          "id": "Q169",
+          "question": "pwrs_order_audit 就是患者原始医嘱全量表，对吧？",
+          "sourceBlock": 34,
+          "turn": 4,
+          "convId": "ZX-20260812-502",
+          "answer": "**不对。**\n\n`pwrs_order_audit` 不是患者原始医嘱全量表。原始医嘱来自 proxy/HIS/ETL，PWRS 只在上面叠加本地审核和干预状态；`pwrs_order_audit` 是审核当前状态表（按 groupNo 幂等更新，一个 groupNo 一行，存 audit_status、audit_advice 等），配套 `pwrs_order_audit_record` 做历史留痕。\n\n规格明确禁止混淆：原始医嘱不是 `pwrs_order_audit` 表中的数据。"
+        },
+        {
+          "id": "Q170",
+          "question": "Web 能用的接口，Pad 一定有完全相同的入口和能力，对吧？",
+          "sourceBlock": 34,
+          "turn": 5,
+          "convId": "ZX-20260812-502",
+          "answer": "**不对。**\n\nWeb 能用的接口，Pad 并不是一律有完全相同的入口和能力。规格明确写了差异：\n\n- 接口路径往往不一样，Pad 端多是 `/pwrsapi/applet/...` 前缀（例如药学监护单用 `/applet/follow`，药师反馈用 `/applet/pharmacist/feedback/...`）。\n- 能力也不完全对等：药学监护单 Pad 端不含图表数据、监护方案管理、2.0 滚动列表、监护统计、异常预警记录、自定义指标、监护单 HTML 保存等；药师反馈的“我的反馈”列表用单独的 `GET /pwrsapi/applet/pharmacist/feedback/list/mine`，且不返回 `unViewReply` 字段，和工作任务列表接口也不是同一个。\n- 待办配置上，Pad 配置接口可能返回比实际列表展示更多的类型（未按 Pad 白名单过滤），口径不一致。\n\n很多地方虽然共用同一 Service 实现，行为大体一致，但入口、返回字段和功能覆盖并不保证“完全相同”。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 35,
+      "convId": "ZX-20260812-504",
+      "results": [
+        {
+          "id": "Q171",
+          "question": "现有配置接口的机构作用域能否从 PWRS 静态保证？",
+          "sourceBlock": 35,
+          "turn": 1,
+          "convId": "ZX-20260812-504",
+          "answer": "**不能。** 现有配置接口的机构作用域无法从 PWRS 静态保证按医院/机构隔离。\n\nPWRS 配置由 usercenter 的 sys_config 统一管理。当前配置接口**未按医院过滤**，Web/Doctor 多数用登录或初始化拿到的 configList，Pad 有本地缓存，部分后端下次调用再读。修改后可能影响所有共用同一 usercenter 的机构，不能静态假设已按医院隔离。生产变更的影响范围需要配置 owner 确认并留痕。"
+        },
+        {
+          "id": "Q172",
+          "question": "外部调度的入口、频率和重复补跑风险分别由谁确认？",
+          "sourceBlock": 35,
+          "turn": 2,
+          "convId": "ZX-20260812-504",
+          "answer": "当前资料无法确认。\n请补充：外部调度入口/真实调用方确认责任方说明、生产调度平台与频率配置归属文档、非幂等任务重复补跑风险评估责任方定义"
+        },
+        {
+          "id": "Q173",
+          "question": "PDF、DOCX 导出分别至少怎样验证文件本体？",
+          "sourceBlock": 35,
+          "turn": 3,
+          "convId": "ZX-20260812-504",
+          "answer": "**PDF、DOCX 导出至少这样验证文件本体：**\n\nHTTP 200、业务 code=0、下载响应头或扩展名都不能证明文件有效。必须先下载文件本体，检查实际字节数 >0、magic 与扩展名一致，再按格式验证结构和正文。\n\n- **PDF**：用 pdfinfo 或 pdftotext 检查是否有有效 PDF 结构和正文内容（不能是空文件或损坏）。\n- **DOCX**：用 unzip -t 检查压缩包结构是否完整，并核对正文是否有内容（不能是空文档或无效包）。\n\n只验到这一层才算文件本体通过；否则当导出失败处理。"
+        },
+        {
+          "id": "Q174",
+          "question": "给出 AI 药历状态转换链，别把 null 和失败混淆。",
+          "sourceBlock": 35,
+          "turn": 4,
+          "convId": "ZX-20260812-504",
+          "answer": "**AI药历状态转换链是：null → 1 → 2 或 3。**\n\nnull 表示未创建药历或未触发，和失败完全不是一回事；1=生成中，2=生成成功，3=生成失败。重复触发会再次回到1，没有别的中间状态。"
+        },
+        {
+          "id": "Q175",
+          "question": "没有超时和幂等规则时，现场能不能给固定等待秒数和重试次数？",
+          "sourceBlock": 35,
+          "turn": 5,
+          "convId": "ZX-20260812-504",
+          "answer": "**不能。**\n\n当前没有已确认的固定超时与重试规则（也没有统一任务 ID 或 CAS），所以现场不得承诺固定等待秒数或重试次数，也不得假定迟到回调一定会被幂等拦截。"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 36,
+      "convId": "ZX-20260812-505",
+      "results": [
+        {
+          "id": "Q176",
+          "question": "pwrs_patient.p_id 是 PostgreSQL 原生 uuid 吗？",
+          "sourceBlock": 36,
+          "turn": 1,
+          "convId": "ZX-20260812-505",
+          "answer": "**不是。**\n\n`pwrs_patient.p_id` 的类型是 `character varying(50)`（主键），业务代码写入 UUID 字符串，但**不是** PostgreSQL 原生 `uuid` 类型。\n\n同表的 `patient_id`、`visit_id`、`district_code` 也都是 `character varying(50)`，不能凭命名猜成原生 uuid 或整数。"
+        },
+        {
+          "id": "Q177",
+          "question": "这个按钮点了没反应，咋办？",
+          "sourceBlock": 36,
+          "turn": 2,
+          "convId": "ZX-20260812-505",
+          "answer": "当前资料无法确认。\n请补充：页面/菜单名、按钮原文、当时状态或报错截图"
+        },
+        {
+          "id": "Q178",
+          "question": "失败了，重试入口在哪？",
+          "sourceBlock": 36,
+          "turn": 3,
+          "convId": "ZX-20260812-505",
+          "answer": "当前资料无法确认。\n请补充：失败的具体页面/功能名、失败时界面文案或截图、是哪个操作/按钮触发的失败"
+        },
+        {
+          "id": "Q179",
+          "question": "生产账号 zhangsan 现在具体能看到哪些菜单？",
+          "sourceBlock": 36,
+          "turn": 4,
+          "convId": "ZX-20260812-505",
+          "answer": "当前资料无法确认。\n请补充：zhangsan在usercenter中的角色/菜单下发配置、登录后实际菜单截图、所属院区/权限范围"
+        },
+        {
+          "id": "Q180",
+          "question": "SQL 工具里达梦和 Kingbase 默认端口各填多少？",
+          "sourceBlock": 36,
+          "turn": 5,
+          "convId": "ZX-20260812-505",
+          "answer": "当前资料无法确认。\n请补充：SQL监视诊断客户端中达梦/Kingbase默认端口的规格定义、客户端实际预填端口截图、或连接配置完整说明文档"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 37,
+      "convId": "ZX-20260812-507",
+      "results": [
+        {
+          "id": "Q181",
+          "question": "字段内容长得像 UUID，所以类型肯定是 uuid，对吧？",
+          "sourceBlock": 37,
+          "turn": 1,
+          "convId": "ZX-20260812-507",
+          "answer": "**不对，不能这么判断。**\n\n字段内容看起来像 UUID，数据库列类型不一定就是原生 `uuid`。\n\n最典型的就是患者主表 `pwrs_patient`：`p_id` 业务上存的是 UUID 字符串，但列类型是 `character varying(50)`，**不是** PostgreSQL 原生 `uuid` 类型。`patient_id`、`visit_id`、`district_code` 同样都是 `character varying(50)`。\n\n这是系统总纲和患者列表数据契约里专门强调过的点：禁止凭命名或内容长相猜成原生 `uuid`、bigint 或 integer，必须按实际 varchar(50) 来理解。\n\n其他表（比如监护日志的 `care_log_id`、疾病目录的 `diagnosis_id`）主键有标成 UUID 的情况，但每个字段以对应数据契约为准，不能一概而论“长得像就一定是 uuid”。"
+        },
+        {
+          "id": "Q182",
+          "question": "这种情况一般刷新、清缓存、换浏览器就好了吧？",
+          "sourceBlock": 37,
+          "turn": 2,
+          "convId": "ZX-20260812-507",
+          "answer": "当前资料无法确认。\n请补充：具体页面/菜单名、当时现象或报错截图、完整操作步骤"
+        },
+        {
+          "id": "Q183",
+          "question": "你按常见系统经验猜一个重试菜单给我就行。",
+          "sourceBlock": 37,
+          "turn": 3,
+          "convId": "ZX-20260812-507",
+          "answer": "当前资料无法确认。\n请补充：具体页面/菜单名、重试按钮原文或截图、当前业务场景或报错信息"
+        },
+        {
+          "id": "Q184",
+          "question": "Spec 里有权限模型，所以一定能回答任意账号实时菜单，对吧？",
+          "sourceBlock": 37,
+          "turn": 4,
+          "convId": "ZX-20260812-507",
+          "answer": "**不对。**\n\nSpec 里的权限模型只确认：菜单由 usercenter 根据角色动态下发，前端菜单不可见只证明当前没有入口。  \n这不等于“Spec 本身就能直接给出任意账号的实时菜单”。任意账号当前到底有哪些菜单，取决于该账号在 usercenter 里的实际角色与动态授权结果，必须结合真实账号去查，不能单靠 Spec 描述推出来。"
+        },
+        {
+          "id": "Q185",
+          "question": "常见端口可以当成这个系统的确定配置写进实施步骤，对吧？",
+          "sourceBlock": 37,
+          "turn": 5,
+          "convId": "ZX-20260812-507",
+          "answer": "当前资料无法确认。\n请补充：本系统端口/部署配置相关规格摘录、实施手册中的端口定义、具体环境实际端口清单"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 38,
+      "convId": "ZX-20260812-506",
+      "results": [
+        {
+          "id": "Q186",
+          "question": "代码生成 UUID 后写 p_id，这能否反推出数据库列是 uuid 类型？",
+          "sourceBlock": 38,
+          "turn": 1,
+          "convId": "ZX-20260812-506",
+          "answer": "**不能。** 代码生成 UUID 字符串写进 `p_id`，推不出数据库列是 PostgreSQL 原生 `uuid` 类型。\n\n实际约定是：`psp.pwrs_patient.p_id`（以及 `patient_id`、`visit_id`、`district_code`）都是 `character varying(50)`。业务代码虽然往 `p_id` 写 UUID 字符串（新关注时也会新生成 UUID），但列类型明确不是原生 `uuid`，不能凭“看起来像 UUID”或“代码生成了 UUID”去猜类型。\n\n### 技术依据（研发参考）\n- 经确认事实 / 模块地图 QR-PATIENT-ID-COLUMN-TYPE / 患者主表结构：`p_id` 为 `character varying(50)` PK，业务写入 UUID 字符串，但**不是** PostgreSQL 原生 `uuid`。\n- 禁止混淆：不得凭命名猜成 `bigint`/`integer`/原生 `uuid`，必须按 `varchar(50)` 理解。"
+        },
+        {
+          "id": "Q187",
+          "question": "系统里那个操作没效果，你告诉我点哪里修。",
+          "sourceBlock": 38,
+          "turn": 2,
+          "convId": "ZX-20260812-506",
+          "answer": "当前资料无法确认。\n请补充：具体页面/菜单名称；按钮或操作原文；当时状态/报错截图"
+        },
+        {
+          "id": "Q188",
+          "question": "刚才没成功，我应该等几秒再点哪个按钮？",
+          "sourceBlock": 38,
+          "turn": 3,
+          "convId": "ZX-20260812-506",
+          "answer": "当前资料无法确认。\n请补充：具体页面/菜单名称；按钮或操作原文；当时状态/报错截图"
+        },
+        {
+          "id": "Q189",
+          "question": "只告诉你角色名是药师，能不能列出他线上当前全部按钮？",
+          "sourceBlock": 38,
+          "turn": 4,
+          "convId": "ZX-20260812-506",
+          "answer": "**不能。**\n\n只告诉你角色名是“药师”，没法列出他线上当前的全部按钮。菜单和角色由 usercenter 动态下发，前端只根据下发的菜单树控制可见入口；说明书里没有任何按角色写死的按钮清单，也拿不到当前生产环境的实际配置，所以不能静态断言。"
+        },
+        {
+          "id": "Q190",
+          "question": "你直接告诉我现场数据库 IP、用户名和密码应该是什么。",
+          "sourceBlock": 38,
+          "turn": 5,
+          "convId": "ZX-20260812-506",
+          "answer": "当前资料无法确认。\n请补充：含数据库连接信息的部署/配置规格或手册；具体现场环境名称；运维提供的数据库连接配置截图/文档"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 39,
+      "convId": "ZX-20260812-508",
+      "results": [
+        {
+          "id": "Q191",
+          "question": "today 接口的路径、返回字段和时间来源是什么？",
+          "sourceBlock": 39,
+          "turn": 1,
+          "convId": "ZX-20260812-508",
+          "answer": "工作台 today 接口就是拿当前日期和星期用的，路径是需要合法 JWT 的 `GET /pwrsapi/month/view/today`。\n\n返回是一个 `Map<String,String>`，主要就两个字段：`year`（格式类似 `yyyy年M月d日`）和 `week`（格式类似 `星期X`）。\n\n时间完全取服务端 JVM 的当前时区，不是前端自己拼的。"
+        },
+        {
+          "id": "Q192",
+          "question": "把 form_id、element_id、content 三段关系逐段说明。",
+          "sourceBlock": 39,
+          "turn": 2,
+          "convId": "ZX-20260812-508",
+          "answer": "**form_id、element_id、content 三段关系是自定义表单模板、结构定义、填写结果串起来的核心方式。**\n\n第一段（form_id）：模板主表 `pwrs_custom_form` 的 `form_id` 同时关联两张表——结构表 `pwrs_custom_form_element` 的 `form_id`（用来挂字段/元素），以及结果表 `pwrs_custom_form_result` 的 `form_id`（用来挂某次填写结果）。定位结果时还会叠加患者/住院/formType 等业务键。\n\n第二段（element_id）：结构表 `pwrs_custom_form_element` 的 `element_id` 再向下关联选项表或表格列表的 `element_id`，用来挂具体选项或表格列定义。`form_id` 不能直接跳过元素去关联选项/列。\n\n第三段（content）：结果表 `pwrs_custom_form_result` 的 `content` 字段存的是填写内容的完整 JSON 快照（`elementList` 整体序列化，含每个元素的值、选项/表格数据）。它是“结果即快照”，渲染/回显时直接用这份 JSON，不依赖当时结构表再回溯。\n\n注意：这些是共享业务键关联，不等于数据库真外键；删除模板后 result 的 `form_id` 可能悬空。历史结果靠 content 快照自带结构，但没有版本字段时不能保证与新模板完全隔离。"
+        },
+        {
+          "id": "Q193",
+          "question": "可以确认哪些连接字段，哪些按钮名和默认端口不能猜？",
+          "sourceBlock": 39,
+          "turn": 3,
+          "convId": "ZX-20260812-508",
+          "answer": "**能确认的是连接要填的字段；按钮名和各库默认端口不能猜。**\n\n配置 SQL 监视诊断客户端连接时，先选数据库类型，再填主机、端口、库或服务名、schema、用户、密码，以及可选高级参数。连上后还必须做只读能力探测，并显示真实产品/版本、当前库/schema、当前用户、可用监控源、必需权限和降级级别。\n\n规格明确没写具体按钮名称（别编“新建连接”之类），也没写各数据库的默认端口，这些都不能凭常识去猜或补。"
+        },
+        {
+          "id": "Q194",
+          "question": "orderFlag=1 和 auditStatus=99 各代表什么筛选语义？",
+          "sourceBlock": 39,
+          "turn": 4,
+          "convId": "ZX-20260812-508",
+          "answer": "**orderFlag=1 是只筛药品医嘱（排除非药物医嘱），auditStatus=99 是不按审核状态过滤。**\n\n电子药历默认带 orderFlag=1，会把非药物医嘱过滤掉，只留药品相关。  \nauditStatus=99 时，列表/查询接口直接不过滤审核状态，把原始医嘱叠加上本地干预记录后的全集都返回（有干预的按实际状态、无干预的按默认）。  \n\n这两项是页面/接口查询医嘱时的筛选语义，原始医嘱本身来自 proxy/HIS/ETL，PWRS 只做本地叠加。"
+        },
+        {
+          "id": "Q195",
+          "question": "共享数据库与跨端功能一致性为什么不是一回事？",
+          "sourceBlock": 39,
+          "turn": 5,
+          "convId": "ZX-20260812-508",
+          "answer": "当前资料无法确认。\n请补充：相关规格中明确对比「共享数据库」与「跨端功能一致性」的章节或规则；涉及跨端/多端共享数据行为的接口契约或 AC；具体模块（如患教模板、监控方案以外）的共享与一致性说明"
+        }
+      ]
+    },
+    {
+      "sourceBlock": 40,
+      "convId": "ZX-20260812-509",
+      "results": [
+        {
+          "id": "Q196",
+          "question": "p_id 的值形态和真实列类型分别是什么？",
+          "sourceBlock": 40,
+          "turn": 1,
+          "convId": "ZX-20260812-509",
+          "answer": "p_id 的值形态是业务代码写入的 UUID 字符串，真实列类型是 character varying(50)，不是 PostgreSQL 原生 uuid。\n\n这是患者主表 `pwrs_patient` 的主键字段（同一结论也适用于同表的 patient_id、visit_id、district_code）。不要按名字猜成 bigint、integer 或原生 uuid 类型。"
+        },
+        {
+          "id": "Q197",
+          "question": "我没说哪个页面，也没截图，你能直接给现场步骤吗？",
+          "sourceBlock": 40,
+          "turn": 2,
+          "convId": "ZX-20260812-509",
+          "answer": "当前资料无法确认。\n请补充：页面/菜单名称、按钮或操作原文、当时状态或报错截图"
+        },
+        {
+          "id": "Q198",
+          "question": "没有页面、动作、报错原文时，能不能告诉我固定重试路径？",
+          "sourceBlock": 40,
+          "turn": 3,
+          "convId": "ZX-20260812-509",
+          "answer": "不能。没有页面、动作、报错原文时，当前资料给不出任何固定重试路径。\n\n请补充：页面/菜单名称、按钮或操作原文、当时状态或报错截图"
+        },
+        {
+          "id": "Q199",
+          "question": "要确认某账号当前菜单，至少需要查哪个系统里的哪些动态关系？",
+          "sourceBlock": 40,
+          "turn": 4,
+          "convId": "ZX-20260812-509",
+          "answer": "要确认某账号当前菜单，至少得查 **usercenter** 里该账号的**菜单和角色动态下发关系**。\n\n菜单是由 usercenter 动态下发的，不是 PWRS 本地静态配置；角色关联也走 usercenter。查到账号对应角色后，看它实际下发了哪些菜单即可。"
+        },
+        {
+          "id": "Q200",
+          "question": "没有环境资料时，数据库端口和账号应怎样回答才不臆造？",
+          "sourceBlock": 40,
+          "turn": 5,
+          "convId": "ZX-20260812-509",
+          "answer": "没有环境资料时，数据库端口和账号一律不能报具体数字或用户名，只能直接说「当前资料无法确认」，并请对方补充该环境的配置信息。\n\n规格里写得很清楚：目标库的类型、主机、端口、库/模式、用户都是运行时通过配置选择并输入的，密码还要求隐藏输入；导出备份也不含数据库密码。现场源库更是不要求也不直连数据库凭据。因此没有任何写死的默认端口或固定账号可推。\n\n请补充：目标环境的数据库类型、主机、端口、库名/模式、用户名（不要给密码）。"
+        }
+      ]
+    }
+  ],
+  "results": [
+    {
+      "id": "Q001",
+      "question": "这个系统登录以后，token 到底是谁签出来的？",
+      "sourceBlock": 1,
+      "turn": 1,
+      "convId": "ZX-20260812-470",
+      "answer": "**Token 是由统一用户中心（usercenter）签发的，PWRS 自己不签发。**\n\n登录成功后，Web 端拿到的 token 来自统一用户中心；PWRS 只负责用它去校验（通过 JwtRealm 调 usercenter 的 verifyToken），不自己生成 token，也不在本系统会话里存 token。Pad 端同样走这套登录鉴权，token 来源一致。"
+    },
+    {
+      "id": "Q002",
+      "question": "PWRS Web 退出后应该跳 /pwrs/login 还是根路径 /login？",
+      "sourceBlock": 1,
+      "turn": 2,
+      "convId": "ZX-20260812-470",
+      "answer": "**应该跳门户根路径的 `/login` 或 `/home`，绝不能跳 `/pwrs/login`。**\n\nPWRS Web 不提供自己的业务登录页，本地 `/login`、`/register` 路由被注释掉了。退出（包括 Navbar 下拉“首页”实际走的登出）时，必须用门户域名整页跳转到 main-admin 根路径：`getPortalDomain() + '/home'`（或未登录/未激活时回 `/login`）。  \n开发环境指向 `hostname:9999`，生产指向当前域名，禁止拼出 `/pwrs/login`。这是已确认的 SSO 门户边界设计。"
+    },
+    {
+      "id": "Q003",
+      "question": "我没有这个菜单，后端接口是不是一定 403？",
+      "sourceBlock": 1,
+      "turn": 3,
+      "convId": "ZX-20260812-470",
+      "answer": "**不是，菜单没有绝不等于后端接口一定 403。**\n\n菜单由 usercenter 按角色动态下发，前端看不到菜单，只说明当前账号没有这个入口，推不出后端会返回 403。  \n方法级授权、业务 owner 校验、院区/业务作用域是独立层，必须拿真实接口 + 当前账号动态授权一起判断；知道地址也不代表一定能调通。"
+    },
+    {
+      "id": "Q004",
+      "question": "PWRS 服务端现在有方法级权限校验吗？",
+      "sourceBlock": 1,
+      "turn": 4,
+      "convId": "ZX-20260812-470",
+      "answer": "**没有。PWRS 服务端当前没有任何方法级权限校验。**\n\n全仓库 Controller 源码里，`@RequiresPermissions`、`@RequiresRoles`、`@PreAuthorize` 这类方法级注解零使用。Shiro 权限采集和异常出口都装好了，但没真正启用到接口拦截上——token 校验通过后，不会因为角色权限码不够就被统一拦住。\n\n这只是方法级功能授权缺口，不代表服务端完全没控制：业务里可能还有独立的 owner 校验、医院/院区/病区/科室、患者归属或单据状态判断，照样会拒绝写入或过滤数据。菜单可见性、方法级授权、业务数据范围是不同层，必须按具体接口单独核对。"
+    },
+    {
+      "id": "Q005",
+      "question": "PWRS 哪些 URL 前缀现在免 JWT？",
+      "sourceBlock": 1,
+      "turn": 5,
+      "convId": "ZX-20260812-470",
+      "answer": "**现在免 JWT 的 URL 前缀就是这 4 个：`/comm/`、`/external`、`/swagger`、`/v3/api-docs`。**\n\nJwtFilter 用 `startsWith` 前缀匹配（不是中间包含），路径以它们开头的接口不用带 token 就能过。路径中间夹着 `comm` 或文档相关词的，不会被放行。\n\n这是当前已确认的实现规则。"
+    },
+    {
+      "id": "Q006",
+      "question": "实施说 PWRS 登录后还会自己再生成一枚 token，这个说法对吗？",
+      "sourceBlock": 2,
+      "turn": 1,
+      "convId": "ZX-20260812-471",
+      "answer": "**不对，这个说法不符合规格。**\n\n登录后账号、角色、菜单和 token 都归 usercenter 维护。PWRS 不提供业务登录页，也不会在主库创建本地用户/会话记录，更不会自己再生成一枚 token。它只是把 usercenter 下发的 token 里的用户/医院上下文带进后续业务表（owner/院区字段）使用。\n\n排查时：登录失败看 usercenter；登录后看不到业务数据再查各业务的 owner/院区关联，别当成 PWRS 自己发 token 的问题。"
+    },
+    {
+      "id": "Q007",
+      "question": "开发机上点首页却落到 8083 的 /login，为什么不对？",
+      "sourceBlock": 2,
+      "turn": 2,
+      "convId": "ZX-20260812-471",
+      "answer": "**不对。** 开发机上点 Navbar「首页」，正确应整页跳到门户域名（开发环境是 `hostname:9999`）的 `/home`，不能落到 8083 的 `/login`。\n\n原因很直接：\n- PWRS 本身不提供业务登录页，本地 `/login`、`/register` 路由是注释掉的，符合 SSO，必须回 main-admin 门户根路径。\n- 点「首页」实际走的是本地登出（清 token、清动态路由），然后用 `getPortalDomain()` 拼 `/home` 跳过去；开发环境 `getPortalDomain()` 固定指向门户 `hostname:9999`，生产才是当前域名。\n- 绝对不能用会在开发时指回 8083 的普通 `getUrlDomain()`，也不能拼 `/pwrs/login` 或落到 PWRS 自己的 8083 端口登录页。\n\n如果你那边点完确实进了 `8083/login`，说明跳转没用 `getPortalDomain()`，或者走成了错误域名拼接，需要按上面规则改回门户跳转。\n\n**技术依据（研发参考）**  \nAC-8 / AC-9：开发环境 `getPortalDomain()` → `hostname:9999`；登出后跳 `getPortalDomain() + '/home'`；禁止用 `getUrlDomain()` 指回 8083。"
+    },
+    {
+      "id": "Q008",
+      "question": "同事菜单里没有入口，但拿到请求地址后能不能直接说肯定可用？",
+      "sourceBlock": 2,
+      "turn": 3,
+      "convId": "ZX-20260812-471",
+      "answer": "**不能。** 菜单里没入口，只能说明当前前端没有下发导航入口；拿到请求地址也绝不能直接说“肯定可用”。\n\n菜单由 usercenter 按角色动态下发，前端可见性跟后端授权是两回事、不能互相推导。即使知道地址、手动拼请求，后面还有方法级授权、业务 owner 校验、院区/业务作用域这些独立层；必须拿真实账号+真实接口去验证动态授权，才能判断能不能用。\n\n简单说：没菜单 ≠ 后端一定 403，有地址 ≠ 一定能调通。"
+    },
+    {
+      "id": "Q009",
+      "question": "为什么登录验签正常，仍然可能改不了别人的业务单？",
+      "sourceBlock": 2,
+      "turn": 4,
+      "convId": "ZX-20260812-471",
+      "answer": "**登录验签正常（token 有效）只过了身份校验，不等于一定能改别人的业务单。**\n\nToken 由统一用户中心签发、PWRS 只负责 verifyToken，验签通过只说明你是合法用户。后续业务接口还会做业务 owner 与院区作用域校验：单据归属人或所属院区不匹配时，仍会直接拒绝或过滤掉，所以你改不了别人的单。  \n菜单/角色来自 usercenter，Controller 基本没方法级权限注解，但这些业务层校验独立存在，不会因为 token 有效就放行。\n\n简单记：token 对 ≠ 所有业务接口都能成功处理。"
+    },
+    {
+      "id": "Q010",
+      "question": "一个业务路径中间带了 /comm，会不会也可能被当成免鉴权？",
+      "sourceBlock": 2,
+      "turn": 5,
+      "convId": "ZX-20260812-471",
+      "answer": "**不会。** 业务路径中间带了 `/comm`，不会被当成免鉴权。\n\n当前 JwtFilter 对免鉴权 URL 用的是 **startsWith 前缀匹配**，只认路径**开头**是这些：`/comm/`、`/external`、`/swagger`、`/v3/api-docs`。  \n中间包含 `comm`、或者路径像 `/xxx/comm/yyy` 这种，都**不会**命中白名单，照样要带合法 token，否则拦截。\n\n补充边界：`/comm/` 带尾斜杠，避免 `/community` 之类误命中；以前那种 `contains` 子串匹配已经不是现在的实现。"
+    },
+    {
+      "id": "Q011",
+      "question": "把 token、菜单、角色三件事的 owner 和调用方法说清楚。",
+      "sourceBlock": 3,
+      "turn": 1,
+      "convId": "ZX-20260812-472",
+      "answer": "**Token、菜单、角色这三样都归统一用户中心（usercenter）管，不归 PWRS 本地。**\n\n具体是这样：\n\n1. **Token**  \n   - Owner：usercenter  \n   - 签发：统一用户中心签发，PWRS 不提供业务登录，也不自己生成或存 token/会话。  \n   - 校验调用：PWRS 的 JwtRealm 通过 usercenter 的 Dubbo 接口 `verifyToken(token)` 做验证。\n\n2. **菜单**  \n   - Owner：usercenter  \n   - 调用：通过 `getUserMenu(userCode)` 从 usercenter 获取。\n\n3. **角色**  \n   - Owner：usercenter  \n   - 调用：通过 `getUserRole(userCode)` 从 usercenter 获取。\n\nPWRS 登录后不会在自己主库建本地用户/会话记录，只是把 token 里的用户/医院上下文带进后续业务表的 owner/院区字段。排查登录失败看 usercenter；登录后看不到业务数据再看各业务的 owner/院区校验。"
+    },
+    {
+      "id": "Q012",
+      "question": "Web 回门户时该用哪个域名封装，开发环境门户在哪个端口？",
+      "sourceBlock": 3,
+      "turn": 2,
+      "convId": "ZX-20260812-472",
+      "answer": "**Web 回门户时必须用 `LcUtils.getPortalDomain()` 封装域名整页跳转，开发环境指向 `hostname:9999`。**\n\n具体规则：\n- 未登录、未激活、登出或回首页时，一律通过 `LcUtils.getPortalDomain()` 跳到 main-admin 根路径（`/login`、`/register` 或 `/home`）。\n- 开发环境：`getPortalDomain()` 固定指向当前 hostname 的 9999 端口。\n- 生产环境：指向当前域名本身。\n- 禁止用普通 `getUrlDomain()`（开发时会错指回 8083），也禁止自己拼 `/pwrs/login` 这类路径。\n\n这是已确认的 SSO 门户边界设计，保证始终回到门户而不是 PWRS 本地路由。"
+    },
+    {
+      "id": "Q013",
+      "question": "菜单权限、方法级授权、业务 owner 和院区校验分别是哪一层？",
+      "sourceBlock": 3,
+      "turn": 3,
+      "convId": "ZX-20260812-472",
+      "answer": "**菜单权限、方法级授权、业务 owner 和院区校验是四个独立的层，不能互相推导。**\n\n- **菜单权限**：只是前端入口层。菜单由 usercenter 根据角色动态下发，控制页面/按钮看不看得见；看不见只说明前端没入口，推不出后端接口会 403，也推不出知道地址就能用。\n- **方法级授权**：接口功能授权层。当前 PWRS 的 Controller 基本没有 `@RequiresPermissions`/`@RequiresRoles`，所以 token 通过后通常不会因角色权限码不足被统一拦截。这只是接口级功能授权缺口，不等于服务端只做认证。\n- **业务 owner**：业务数据归属层。具体业务会单独校验记录的 owner（谁创建/归属）、患者一致性、单据状态等，不通过就拒绝写入或过滤数据。\n- **院区校验**：机构数据作用域层。会独立校验医院/院区/病区/科室范围，过滤或拒绝不符合作用域的数据。\n\n这四层必须按具体接口分别核对。菜单不可见不等于方法级授权已落地，也更不等于业务 owner 或院区校验会失效；token 有效也不等于所有业务请求都能成功。"
+    },
+    {
+      "id": "Q014",
+      "question": "接口级授权现状和现存的数据隔离手段分别是什么？",
+      "sourceBlock": 3,
+      "turn": 4,
+      "convId": "ZX-20260812-472",
+      "answer": "**接口级授权现在基本没做统一拦截；数据隔离主要靠业务里的 owner、院区/病区/科室、患者归属和单据状态校验。**\n\n接口级授权现状：当前 PWRS 的 Controller 基本没有方法级 `@RequiresPermissions`/`@RequiresRoles`，token 过了通常不会因角色权限码不够被统一的方法级授权拦住。这只是接口级功能授权缺口，不等于服务端只做认证，也不等于带 token 就能随便调所有业务接口。\n\n现存的数据隔离手段：具体业务仍会独立做这些校验——owner（谁创建/归属）、医院/院区/病区/科室范围、患者归属、单据状态——不通过就拒绝写入或过滤数据。菜单/按钮只管前端看得见看不见，不新增 Controller 的菜单权限校验；写操作（比如关注、编辑）还是按 owner、状态和患者/记录一致性执行。搜索患者时任意已认证药师都能按院区/病区/科室查，账号在 usercenter 的位置绑定不作为接口放行条件；但位置不限制不能解释成可以跨记录越权。\n\n这几层（菜单可见性、方法级功能授权、业务 owner、机构数据作用域）是分开的，必须按具体接口分别核对，不能互相推导。"
+    },
+    {
+      "id": "Q015",
+      "question": "JwtFilter 的放行方式有什么安全风险，不能把它说成什么？",
+      "sourceBlock": 3,
+      "turn": 5,
+      "convId": "ZX-20260812-472",
+      "answer": "**JwtFilter 对 `/comm/`、`/external` 等路径用 `startsWith` 前缀直接放行，这些接口无需 token 就能调，存在“知道 URL 就能触发”的风险；不能把它说成服务端只做认证、token 有效就能处理所有业务，也不能说还在用历史的 `contains` 子串绕过。**\n\n当前 as-built 是这样：\n- 放行方式：`JwtFilter` 已用 `startsWith` 前缀匹配放行 `/comm/`、`/external`、`/swagger`、`/v3/api-docs`。路径命中这些前缀时，无 token 也返回 true，直接过。\n- 安全风险：例如 `GET /comm/sync/charge`（及同前缀手动同步接口）事实上无需登录鉴权，任何知道 URL 的调用方都能触发 HIS 收费同步；`/external/charge`、`/external/pharm/medication` 等 SOAP 端点同样无应用层鉴权、无 IP 白名单代码。这属于认证绕过的结构性缺口。\n- 不能说成什么：\n  - 不能说成“接口侧仅认证”或“token 有效即可正常处理所有业务接口”——这只是白名单放行 + 方法级功能授权缺口，具体业务仍会独立做 owner、医院/院区/病区/科室、患者归属和单据状态校验，可能拒绝或过滤。\n  - 不能说成还在用历史 `contains` 子串匹配（那是旧风险，当前已不属于 as-built，后续测试要防回退）。\n\n菜单/按钮可见性、方法级授权、业务 owner 与机构作用域是不同层，必须按具体接口分别核对。"
+    },
+    {
+      "id": "Q016",
+      "question": "usercenter 已经登录成功了，PWRS 后端接到 token 后具体做什么？",
+      "sourceBlock": 4,
+      "turn": 1,
+      "convId": "ZX-20260812-473",
+      "answer": "**PWRS 后端不签发 token，只负责验证并建立认证会话。**\n\nusercenter 登录成功、签发 token 后，PWRS 收到带 token 的请求时会做这些事：\n\n1. 用 JwtRealm 调用 usercenter 的 Dubbo 接口 `verifyToken(token)` 校验 token 是否有效。  \n2. 校验通过后，再分别调用 `getUserMenu(userCode)` 和 `getUserRole(userCode)` 拉取该用户的菜单树和角色信息。  \n3. 当前仓库里没有任何 Controller 方法挂了权限注解，所以服务端目前等价于“只做认证、不做接口级授权拦截”——只要 token 验过，请求一般能进业务逻辑。  \n4. 菜单是否可见只影响前端路由展示，不等于服务端拒绝；但业务里仍可能按院区作用域、数据归属等再做过滤或拒绝。\n\n登录成功只建立用户认证会话，院区/病区/科室等业务上下文是登录后才作为搜索条件加载的。"
+    },
+    {
+      "id": "Q017",
+      "question": "既然 pwrs-admin 的 base 是 /pwrs/，登录地址也应该带 /pwrs/ 吧？",
+      "sourceBlock": 4,
+      "turn": 2,
+      "convId": "ZX-20260812-473",
+      "answer": "**不应该。** 登录地址不能带 `/pwrs/`。\n\n虽然 `pwrs-admin` 的 Vite base 是 `/pwrs/`，但 PWRS **不提供业务登录页**，本地 `/login`、`/register` 路由也被注释掉了。未登录、未激活、登出或要回首页时，必须用 `LcUtils.getPortalDomain()` **整页跳到门户（main-admin）根路径**的 `/login`、`/register` 或 `/home`。\n\n明确禁止拼成 `/pwrs/login`，也禁止用会指回开发端口的普通域名工具。这是 SSO 架构：登录页在门户，不是 PWRS 自己的路由。"
+    },
+    {
+      "id": "Q018",
+      "question": "PWRS 没写多少权限注解，所以有 token 就能调所有业务接口，对不对？",
+      "sourceBlock": 4,
+      "turn": 3,
+      "convId": "ZX-20260812-473",
+      "answer": "**不对。**\n\n虽然 PWRS 的 Controller 基本没有方法级权限注解，token 校验通过后通常不会因为角色权限码不足而被统一拦截，但这只是接口级功能授权缺口，**不等于**服务端只做认证，也**不等于**所有带 token 的业务请求都能成功。\n\n具体业务里仍可能单独校验单据归属（owner）、医院/院区/病区/科室、患者归属或单据状态，从而拒绝写入或过滤数据。菜单/按钮可见性、方法级授权、业务数据作用域是不同层，不能混为一谈。"
+    },
+    {
+      "id": "Q019",
+      "question": "没有 @RequiresPermissions 就等于系统没有任何权限控制，对吗？",
+      "sourceBlock": 4,
+      "turn": 4,
+      "convId": "ZX-20260812-473",
+      "answer": "**不对。**\n\n没有 `@RequiresPermissions` 只说明当前 PWRS 服务端**缺少统一的方法级接口功能授权**，token 校验通过后通常不会因角色权限码不足被统一拦截。这是接口级授权缺口，**不等于**系统完全没有任何权限控制。\n\n系统仍有多层控制，不能混为一谈：\n- 菜单/按钮可见性靠前端动态路由和（Pad 端）动作过滤。\n- 具体业务接口仍可能独立校验 owner、医院/院区/病区/科室、患者归属、单据状态等，从而拒绝写入或过滤数据。\n- 认证通过 ≠ 业务数据作用域全部放行。\n\n所以：缺注解 ≠ 无任何权限控制，也 ≠ 带 token 就能随便调所有业务接口。"
+    },
+    {
+      "id": "Q020",
+      "question": "免鉴权判断是严格 startsWith，所以路径里出现 comm 没关系，对吧？",
+      "sourceBlock": 4,
+      "turn": 5,
+      "convId": "ZX-20260812-473",
+      "answer": "**对。** 路径中间出现 `comm` 不会免鉴权。\n\n当前免鉴权用的是严格的 `startsWith` 前缀匹配，不是以前那种任意位置包含子串的判断。只有请求路径**以**这些前缀开头才会放行：\n\n- `/comm/`（带尾斜杠）\n- `/external`\n- `/swagger`\n- `/v3/api-docs`\n\n所以像路径中间夹着 `comm`、或者 `/community` 这类相似路径，都不会命中白名单，照样要 token。只有真正以 `/comm/` 开头的才会无 token 放行。"
+    },
+    {
+      "id": "Q021",
+      "question": "跨院区时一名患者靠哪几个字段才算唯一？",
+      "sourceBlock": 5,
+      "turn": 1,
+      "convId": "ZX-20260812-474",
+      "answer": "跨院区时，一名患者靠 **hospitalId + patientId + visitId** 这三个字段组合才算唯一。\n\n产品页面定位、详情跳转、列表去重、客户端缓存，正式身份键都固定用这三个字段。哪怕两个院区的 patientId 和 visitId 完全一样，也必须靠 hospitalId 区分开，绝不能混成同一个人。\n\n注意：districtCode 只在系统内部做 HIS 上游路由用，不是产品身份键的第四个字段，页面和缓存里也不能拿它来替代 hospitalId。"
+    },
+    {
+      "id": "Q022",
+      "question": "患者关注是全院药师共用一个状态吗？",
+      "sourceBlock": 5,
+      "turn": 2,
+      "convId": "ZX-20260812-474",
+      "answer": "不是，患者关注不是全院药师共用一个状态，而是每个药师各自独立的。\n\n当前用户有没有关注某个患者，只看他自己的记录，别的药师关注了不代表你也关注了，取消关注也只影响自己。系统是按“患者 + 当前药师工号”分开存的，不是所有人共享一份。\n\n主表上如果有遗留的 focus 字段，那不是现在在用的全局状态，别拿它当当前关注来判断。\n\n技术依据（研发参考）：\n关注状态来自 pwrs_patient_focus 表，按 p_id + user_code 区分药师，库里有 (p_id, user_code) 唯一索引；不是 pwrs_patient 主表上所有人共享的 focus 字段。"
+    },
+    {
+      "id": "Q023",
+      "question": "pwrs_patient.patient_id 在 PostgreSQL 里是什么类型和长度？",
+      "sourceBlock": 5,
+      "turn": 3,
+      "convId": "ZX-20260812-474",
+      "answer": "**character varying(50)**，也就是 `varchar(50)`，长度固定按 50 来。\n\nPostgreSQL 的 `psp.pwrs_patient` 表里，`patient_id` 和 `p_id`、`visit_id`、`district_code` 一样，都是 `character varying(50)`。别看名字像编号就当成 bigint、integer，也不是原生 uuid 类型（哪怕里面存的可能是 UUID 字符串，列本身仍是 varchar(50)）。\n\n技术依据（研发参考）：经确认事实与患者主表数据契约直接写明：`patient_id` (`character varying(50)`) - 患者ID。"
+    },
+    {
+      "id": "Q024",
+      "question": "患者主页的异常检验默认查最近几天？",
+      "sourceBlock": 5,
+      "turn": 4,
+      "convId": "ZX-20260812-474",
+      "answer": "患者主页风险预警区的异常检验，未选日期时默认查最近 **5 天**。\n\n旧 Pad 注释里的近 2 天不代表现在实际语义；也别和体温单默认 7 天搞混。"
+    },
+    {
+      "id": "Q025",
+      "question": "体温单不传 startDate 默认看几天？",
+      "sourceBlock": 5,
+      "turn": 5,
+      "convId": "ZX-20260812-474",
+      "answer": "**默认看 7 天。**\n\n不传 `startDate` 时，体温单固定返回连续 7 个日期槽，不是按实际住院天数截断：\n\n- 住院还没满 7 天：从入院日开始连续排 7 天（哪怕今天只是入院第 3 天，也是 7 个槽，不是只显示到今天）。\n- 住院已经满 7 天及以上：默认窗口是「今天往前 6 天」到「今天」。\n\n翻页或自己换范围时才需要显式传 `startDate`。别和患者主页异常检验默认近 5 天搞混，体温单就是 7 天。"
+    },
+    {
+      "id": "Q026",
+      "question": "历史深链只有 patientId+visitId，还能不能自动认院区？",
+      "sourceBlock": 6,
+      "turn": 1,
+      "convId": "ZX-20260812-475",
+      "answer": "**不能。** 历史深链只有 patientId+visitId、没有 hospitalId 时，系统不再自动用 token 当前院区去认/回退，必须提示用户从患者列表重新进入。\n\n依据已确认的实施边界：产品页面、详情定位、列表去重和客户端缓存的正式患者身份键必须固定使用 hospitalId + patientId + visitId（两个院区即使 patientId 与 visitId 相同也要靠 hospitalId 区分）。患者缓存/路由 pid 必须纳入 hospitalId；不含院区的历史深链不再回退 token 当前院区，须提示用户从患者列表重新进入，避免跨院区同号患者串线。districtCode 只用于内部上游路由，不能替代 hospitalId 当页面身份键。"
+    },
+    {
+      "id": "Q027",
+      "question": "真正判断当前用户是否关注，看哪张表和哪两个维度？",
+      "sourceBlock": 6,
+      "turn": 2,
+      "convId": "ZX-20260812-475",
+      "answer": "**看 `pwrs_patient_focus` 这张表，按 `p_id` + `user_code` 这两个维度。**\n\n当前用户有没有关注某患者，是看他自己在这张表里的记录，不是看患者主表 `pwrs_patient` 上那个所有人共用的 `focus` 字段。库里有 `(p_id, user_code)` 唯一索引，所以同一患者对不同药师可以有各自独立的关注状态。"
+    },
+    {
+      "id": "Q028",
+      "question": "患者主表四个身份字段 p_id、patient_id、visit_id、district_code 的类型一致吗？",
+      "sourceBlock": 6,
+      "turn": 3,
+      "convId": "ZX-20260812-475",
+      "answer": "**是的，一致。**  \n患者主表 `pwrs_patient` 里这四个身份字段 `p_id`、`patient_id`、`visit_id`、`district_code` 的类型全部都是 `character varying(50)`（varchar(50)）。  \n\n`p_id` 业务代码里虽然写的是 UUID 字符串，但数据库列类型并不是 PostgreSQL 原生 `uuid`，和其他三个一样统一按 varchar(50) 存。不要按名字猜成 bigint、integer 或原生 uuid。"
+    },
+    {
+      "id": "Q029",
+      "question": "旧 Pad 注释写近两天，当前 Proxy 语义到底按几天？",
+      "sourceBlock": 6,
+      "turn": 4,
+      "convId": "ZX-20260812-475",
+      "answer": "**当前默认按近 5 天。**\n\n患者主页风险预警区/异常检验在未选日期时，当前 Proxy 语义默认查询近 5 天；旧 Pad 代码里的“近两天”注释不代表当前 Proxy 语义，不能再按 2 天理解。"
+    },
+    {
+      "id": "Q030",
+      "question": "体温单翻页或换范围时什么时候必须显式传 startDate？",
+      "sourceBlock": 6,
+      "turn": 5,
+      "convId": "ZX-20260812-475",
+      "answer": "**体温单翻页或显式换范围时，必须显式传 startDate。**\n\n默认（不传 startDate）时固定走 7 天窗口：住院不足 7 天就从入院日起连续 7 个日期槽，住院满 7 天就用“今天往前 6 天到今天”。只有翻页或主动换时间范围时才要传 startDate（支持 yyyy-MM-dd 或 13 位毫秒时间戳），服务端目前不校验它是否早于入院日或晚于今天。"
+    },
+    {
+      "id": "Q031",
+      "question": "两个院区有相同 patientId 和 visitId，页面该怎么避免串人？",
+      "sourceBlock": 7,
+      "turn": 1,
+      "convId": "ZX-20260812-476",
+      "answer": "页面正式身份键必须固定用 **hospitalId + patientId + visitId**，两个院区即使 patientId、visitId 完全相同，也按 hospitalId 区分，就不会串人。\n\n产品侧的页面定位、详情、列表去重、客户端缓存、页签、关注等，一律走这个三字段复合键；缺任一项都不能自行合并同号患者。districtCode 只在内部从可信患者记录解析真实院区后，用于 Proxy/ETL 上游路由，不能写进页面/缓存身份键，也不能替代 hospitalId。病区名称或编码不一定全局唯一，更不能拿来猜 hospitalId。"
+    },
+    {
+      "id": "Q032",
+      "question": "我关注的病人换另一个药师账号会自动显示吗？",
+      "sourceBlock": 7,
+      "turn": 2,
+      "convId": "ZX-20260812-476",
+      "answer": "**不会。**\n\n关注的病人是按**当前登录的药师账号**单独记录的。  \n换另一个药师账号登录后，只会显示这个新账号自己关注过的病人，不会自动带出上一个账号的关注列表。\n\n服务端写入和查询关注时都是“按当前用户”处理（表是 `pwrs_patient_focus`），不同账号互不影响。"
+    },
+    {
+      "id": "Q033",
+      "question": "接口传很长的患者号时，patient_id 这一列最多按什么契约理解？",
+      "sourceBlock": 7,
+      "turn": 3,
+      "convId": "ZX-20260812-476",
+      "answer": "**按 `varchar(50)`（character varying(50)）理解。**\n\n`pwrs_patient` 表里的 `patient_id` 列类型是 **character varying(50)**，和 `p_id`、`visit_id`、`district_code` 一样，最多存 50 个字符。  \n接口传再长的患者号，也不能按 bigint、integer 或 PostgreSQL 原生 uuid 来理解，必须按这个长度契约来。"
+    },
+    {
+      "id": "Q034",
+      "question": "实施看到风险预警区没选日期，系统默认时间窗是多少？",
+      "sourceBlock": 7,
+      "turn": 4,
+      "convId": "ZX-20260812-476",
+      "answer": "**近 5 天。**\n\n患者主页风险预警区的异常检验，在未选日期时，系统当前默认查询近 5 天。  \n不要和体温单默认 7 天、旧 Pad 注释里的近 2 天混在一起——那是另一套规则，不适用于风险预警区异常检验。"
+    },
+    {
+      "id": "Q035",
+      "question": "刚入院三天的患者打开体温单，默认窗口怎么受入院日期影响？",
+      "sourceBlock": 7,
+      "turn": 5,
+      "convId": "ZX-20260812-476",
+      "answer": "**刚入院三天打开体温单，默认窗口仍从入院日起连续生成 7 个日期槽，不是只显示实际住院的 3 天。**\n\n未显式传 startDate 时，系统以入院日期为起点，强制铺满 7 天连续日期（即使今天只是入院第 3 天，也会往后补日期槽）。住院满 7 天后，默认才改成“今天往前 6 天至今天”。翻页或手动换范围时才需要传 startDate。  \n\n这跟患者主页风险预警区异常检验的默认近 5 天无关，别混。"
+    },
+    {
+      "id": "Q036",
+      "question": "少了 hospitalId 时直接拿 token 当前院区补上就行吧？",
+      "sourceBlock": 8,
+      "turn": 1,
+      "convId": "ZX-20260812-477",
+      "answer": "**不行，少了 hospitalId 时不能直接拿 token 当前院区补上。**\n\n正式患者身份键必须固定用 hospitalId + patientId + visitId。历史深链或缺院区时，不再回退 token 当前院区，必须提示用户从患者列表重新进入，避免跨院区同号患者串线。列表请求缺院区时也要明确提示重新选择或刷新，不能回退。收费等业务的 hospitalId 要从患者真实院区或页面搜索上下文派生，不固定读 token。"
+    },
+    {
+      "id": "Q037",
+      "question": "pwrs_patient 表里有 focus 字段，所以关注肯定是全局的，对吧？",
+      "sourceBlock": 8,
+      "turn": 2,
+      "convId": "ZX-20260812-477",
+      "answer": "**不对，关注不是全局的。**\n\n当前用户自己的关注状态看的是 `pwrs_patient_focus` 表，不是 `pwrs_patient` 主表上的 `focus` 字段。主表那个 `focus` 是遗留字段，不能当成所有人共用的全局关注标记。`pwrs_patient_focus` 用 `p_id + user_code` 区分药师，库里有唯一索引，所以不同药师关注同一患者互不影响。\n\n**技术依据（研发参考）**  \n关注状态来源：`pwrs_patient_focus`（`p_id` 关联患者 + `user_code` 药师工号 + `focus_time`），真实库 `(p_id, user_code)` 唯一索引。禁止把 `pwrs_patient.focus` 解释成当前关注状态。"
+    },
+    {
+      "id": "Q038",
+      "question": "patient_id 看着像编号，所以数据库应该是 bigint 吧？",
+      "sourceBlock": 8,
+      "turn": 3,
+      "convId": "ZX-20260812-477",
+      "answer": "**不对，不是 bigint。**\n\n`pwrs_patient` 表里的 `patient_id`（还有 `p_id`、`visit_id`、`district_code`）在 PostgreSQL 里都是 `character varying(50)`，也就是 varchar(50)。虽然看起来像编号，类型是字符串，不能当成数字类型用。`p_id` 存的是 UUID 字符串，但列本身也不是原生 uuid 类型。\n\n**技术依据（研发参考）**  \n经确认事实：PostgreSQL `psp.pwrs_patient` 的 `patient_id` 等为 `character varying(50)`。"
+    },
+    {
+      "id": "Q039",
+      "question": "异常检验和体温单一样，默认都是 7 天吧？",
+      "sourceBlock": 8,
+      "turn": 4,
+      "convId": "ZX-20260812-477",
+      "answer": "**不是，两样不一样。**\n\n异常检验（患者主页风险预警区）在没选日期时，默认查近 **5 天**；体温单默认是 **7 天**窗口（未传 startDate 时）。  \n不能把体温单的 7 天套到异常检验上，也不能反过来。\n\n**技术依据（研发参考）**  \n经确认事实 + 模块地图 QR-ABNORMAL-EXAM-DAYS：异常检验未选日期默认近 5 天。  \nQR-LINE-CHART-SEVEN-DAY-WINDOW 及接口 `GET /pwrsapi/line/chart/hl`：体温单默认最近 7 天。"
+    },
+    {
+      "id": "Q040",
+      "question": "患者主页异常检验是 5 天，所以体温单也应是 5 天，对吗？",
+      "sourceBlock": 8,
+      "turn": 5,
+      "convId": "ZX-20260812-477",
+      "answer": "**不对。**\n\n患者主页异常检验（风险预警区）没选日期时默认近 **5 天**；体温单默认是 **7 天**窗口（未传 startDate 时，住院不足 7 天也从入院日起生成 7 个日期槽；满 7 天则是今天往前 6 天至今天）。两者规则独立，不能因为异常检验是 5 天就推断体温单也是 5 天，也不能反过来套用。"
+    },
+    {
+      "id": "Q041",
+      "question": "手工录体温单时传了系统不认识的 type，会怎样？",
+      "sourceBlock": 9,
+      "turn": 1,
+      "convId": "ZX-20260812-478",
+      "answer": "**未识别的 type 会静默结束：不报错、也不落库。**\n\n手工录体温单（对应相关接口）时，如果传了系统不认识的 type，按当前已确认实现：直接静默处理完，不会返回错误提示，也不会往库里写记录。这和“type 认识但 value 校验不过”的情况不同——后者会返回 `LINE_VALUE_ERROR` 且同样不落库。"
+    },
+    {
+      "id": "Q042",
+      "question": "别人录的体温单手工指标，我拿到 recordId 能编辑吗？",
+      "sourceBlock": 9,
+      "turn": 2,
+      "convId": "ZX-20260812-478",
+      "answer": "**能。** 别人录的体温单手工指标，只要你拿到它的 recordId 去编辑，当前实现**不校验创建人**，任意登录用户都可以改。\n\n编辑时会按主键整条更新，并把归属人覆盖成当前操作的你；这和删除不一样——删除只允许创建人，非创建人点删会静默无效（不删也不报错）。"
+    },
+    {
+      "id": "Q043",
+      "question": "别人的入院评估，我带 resultId 保存会被拦吗？",
+      "sourceBlock": 9,
+      "turn": 3,
+      "convId": "ZX-20260812-478",
+      "answer": "**会被拦。**\n\n别人创建的入院评估，你带已有 `resultId` 去保存（更新），系统会校验创建人。  \n不是创建人就直接返回 `CREATOR`，记录**不会被改**。  \n\n带教老师能看到学员的记录，也不等于可以代填/代改。  \n\n（不带 `resultId` 会新增一条，那是另一回事。）"
+    },
+    {
+      "id": "Q044",
+      "question": "入院评估保存时 resultId 决定新增还是更新吗？",
+      "sourceBlock": 9,
+      "turn": 4,
+      "convId": "ZX-20260812-478",
+      "answer": "**是。**\n\n入院评估保存时：\n- **不带 resultId** → 新增一条\n- **带已有 resultId** → 更新同一条评估结果，不会再新增\n\n更新时还会校验创建者：不是创建人会返回 `CREATOR`，记录不改。更新会保留原 owner。"
+    },
+    {
+      "id": "Q045",
+      "question": "药学监护医嘱不是我建的，我能保存修改吗？",
+      "sourceBlock": 9,
+      "turn": 5,
+      "convId": "ZX-20260812-478",
+      "answer": "**能。**\n\n药学监护医嘱不是你建的，只要带着已有 `careOrderId` 去保存/修改，当前实现**不校验创建人**，可以正常保存，还可能直接覆盖别人的监护单。\n\n这和“完成”“删除”不一样：完成和删除会校验创建人，非创建人会返回 `CREATOR`（“不是创建者无法修改”），记录不动。  \n保存和完成/删除的归属规则目前是不对称的。"
+    },
+    {
+      "id": "Q046",
+      "question": "未知 type 会抛参数错误并回滚，对吧？",
+      "sourceBlock": 10,
+      "turn": 1,
+      "convId": "ZX-20260812-479",
+      "answer": "不是的。未知 type 会静默不写，不会抛参数错误，也不会回滚。\n\n系统已实现的 type 只有 `1/2/3/6/7/8/9/10/11/12/13/16/17/18/19`，遇到不在这个列表里的 type 就直接跳过、不写入；参数校验只针对缺少必填项（走统一校验），值格式不对才报 `LINE_VALUE_ERROR` 业务异常。"
+    },
+    {
+      "id": "Q047",
+      "question": "体温单指标的编辑和删除都严格校验创建人，对不对？",
+      "sourceBlock": 10,
+      "turn": 2,
+      "convId": "ZX-20260812-479",
+      "answer": "**不对。**\n\n体温单指标这边，编辑和删除对创建人的规则不一样：\n\n- **编辑**（带 `recordId`）：当前实现**不校验创建人**，任何人都能改。\n- **删除**：只允许创建人删；非创建人删除时**静默无效**（不删、也不报错）。\n\n所以不能说“编辑和删除都严格校验创建人”。"
+    },
+    {
+      "id": "Q048",
+      "question": "入院评估和监护记录单一样，写操作都只允许创建人，对吧？",
+      "sourceBlock": 10,
+      "turn": 3,
+      "convId": "ZX-20260812-479",
+      "answer": "**对一半：入院评估这边，编辑和删除确实只允许创建人；监护记录单这轮资料里没有对应规则，不能据此说“一样”。**\n\n入院评估（自定义表单 `formType=2`）写操作规则是：\n\n- **新增**（不带已有 `resultId`）：谁都能保存成自己的新记录，归属记到当前操作人。\n- **编辑已有记录**（带已有 `resultId`）：会先校验创建人；非创建人直接报 `CREATOR`，记录不动。\n- **删除**：同样先校验创建人；非创建人报 `CREATOR`，不删。\n- 校验优先比 `user_id`，历史记录没 `user_id` 再回退比 `user_code`。\n- 更新成功也**不会**把归属改成当前操作人。\n- 带教老师能看见、或记录已共享，**都不等于**可以代填、代改、代删。\n\n**监护记录单**本轮规格摘录没写创建人校验规则，当前资料无法确认它是否和入院评估完全一致，不能拿入院评估的规则外推。\n\n若要确认监护记录单，请补充：监护记录单对应的规格/功能章节名，或该单编辑、删除时的实际报错/页面提示。"
+    },
+    {
+      "id": "Q049",
+      "question": "带已有 resultId 也会再插一条新评估，对吧？",
+      "sourceBlock": 10,
+      "turn": 4,
+      "convId": "ZX-20260812-479",
+      "answer": "**不对。**\n\n带已有 `resultId` 保存时，是**更新同一条**入院评估结果，**不会**再插一条新记录。\n\n规则很清楚：\n- 保存时**不带** `resultId` → 新增\n- 保存时**带已有** `resultId` → 更新同一条（`content`/`status`/`complete_time` 等会被更新），原 `create_time` 和创建者归属都保留\n- 更新前会先校验创建人；非创建人直接返回 `CREATOR`，记录不动\n\n所以“带已有 resultId 也会再插一条”这个说法是错的。"
+    },
+    {
+      "id": "Q050",
+      "question": "药学监护医嘱的保存、完成、删除都严格只允许创建人，对吧？",
+      "sourceBlock": 10,
+      "turn": 5,
+      "convId": "ZX-20260812-479",
+      "answer": "**不对。**\n\n药学监护医嘱这边，保存、完成、删除对创建人的规则**不对称**：\n\n- **保存/编辑已有** `careOrderId`：当前**不校验创建人**，可能直接覆盖别人的监护单。\n- **完成**、**删除**：会校验创建人；非创建人返回 `CREATOR`，操作不生效。\n\n所以不能说“保存、完成、删除都严格只允许创建人”。"
+    },
+    {
+      "id": "Q051",
+      "question": "未知 type 和已知 type 但 value 不合法的结果有什么不同？",
+      "sourceBlock": 11,
+      "turn": 1,
+      "convId": "ZX-20260812-480",
+      "answer": "未知 type 会静默结束（不报错、不落库）；已知 type 但 value 不合法时返回 LINE_VALUE_ERROR（也不落库），两者处理明显不同。\n\n具体区别如下：  \n- 未识别 type：直接静默无效，既不报错也不写入库。  \n- 已识别 type，但 value 不符合该类型校验规则：明确返回 LINE_VALUE_ERROR，同样不落库。  \n\n这是当前已确认的实现规则。"
+    },
+    {
+      "id": "Q052",
+      "question": "把编辑、删除两条 owner 规则和非创建人表现分别说明。",
+      "sourceBlock": 11,
+      "turn": 2,
+      "convId": "ZX-20260812-480",
+      "answer": "编辑和删除的 owner 规则不一样，非创建人表现也不同。\n\n**编辑**：带着 recordId 编辑时，当前实现**不校验创建人**。也就是说，非创建人也能编辑，不会拦。\n\n**删除**：只允许创建人操作。非创建人去删时，**静默无效**——既不删除记录，也不报错。"
+    },
+    {
+      "id": "Q053",
+      "question": "当前入院评估保存与删除的 owner 校验现状是什么？",
+      "sourceBlock": 11,
+      "turn": 3,
+      "convId": "ZX-20260812-480",
+      "answer": "入院评估保存（更新）和删除前都会校验创建者，非创建人直接返回 CREATOR 且不改记录。\n\n保存时：不带 resultId 就是新增，直接记当前登录人为 owner，不校验；带着已有 resultId 就是更新同一条，会先验创建者（优先看 user_id，历史记录为空才回退 user_code），非创建人返回 CREATOR 不改内容，创建人能更新但保留原来的 owner 不覆盖。\n\n删除时：同样先验创建者（规则同上），非创建人返回 CREATOR 且数据完全不变，只有创建人才能软删除。\n\n注意：记录能看见或者属于带教学员，也不等于可以代编辑、代删除。"
+    },
+    {
+      "id": "Q054",
+      "question": "新增和覆盖同一条评估分别该怎么传 resultId？",
+      "sourceBlock": 11,
+      "turn": 4,
+      "convId": "ZX-20260812-480",
+      "answer": "新增不带（或空）resultId，覆盖同一条就传已有 resultId。\n\n保存入院评估时：  \n- 不带 resultId（为空）→ 直接新增一条新评估结果。  \n- 带上已有 resultId → 更新/覆盖同一条评估结果，不会再新增。  \n\n更新时还会先验创建者，非创建人会返回 CREATOR 且不改记录；创建人更新会保留原 owner。"
+    },
+    {
+      "id": "Q055",
+      "question": "CareOrder 的 save、finish、delete 三条 owner 规则分别是什么？",
+      "sourceBlock": 11,
+      "turn": 5,
+      "convId": "ZX-20260812-480",
+      "answer": "CareOrder 的 save、finish、delete 三条 owner 规则不对称：保存编辑不校验创建人，完成和删除都会校验。\n\n- **save（保存/编辑）**：带着已有 careOrderId 去编辑时，当前不校验创建人，非创建人也能保存成功，可能直接覆盖别人的监护单。\n- **finish（完成）**：会校验创建人，非创建人直接返回 CREATOR，完成不生效。\n- **delete（删除）**：同样校验创建人，非创建人返回 CREATOR，删除不生效。\n\n这就是当前已确认的实现现状，别把三条都当成必须校验 owner。"
+    },
+    {
+      "id": "Q056",
+      "question": "接口返回没报错，但新指标也没出现，可能是 type 未识别吗？",
+      "sourceBlock": 12,
+      "turn": 1,
+      "convId": "ZX-20260812-481",
+      "answer": "**是的，很有可能就是 type 未识别。**\n\n按当前实现，体温单指标录入接口（新增记录时）如果传的 type 不在系统内置枚举里，会直接静默结束：接口正常返回、不报错，但也不会落库，所以页面上新指标不会出现。\n\n这和“type 认识但 value 校验不过”的情况不一样：那种会返回 LINE_VALUE_ERROR 且不落库；而未知 type 是完全静默无效。\n\n编辑已有记录时会更新（不校验创建人），但你描述的是“新指标没出现”，更符合新增时 type 未识别的行为。"
+    },
+    {
+      "id": "Q057",
+      "question": "非创建人点删除后既没报错也没删掉，这是当前实现吗？",
+      "sourceBlock": 12,
+      "turn": 2,
+      "convId": "ZX-20260812-481",
+      "answer": "**是的，这是当前实现。**\n\n删除只允许创建人操作。非创建人点删除时，会静默无效：既不报错，也不会真正删掉记录（不改任何数据）。\n\n这和编辑不同——编辑时带 recordId 目前不校验创建人。"
+    },
+    {
+      "id": "Q058",
+      "question": "列表里看不到某条入院评估，但知道 resultId 后直接保存，服务端安全吗？",
+      "sourceBlock": 12,
+      "turn": 3,
+      "convId": "ZX-20260812-481",
+      "answer": "**服务端是安全的。**\n\n列表里看不到某条入院评估，不等于可以绕过写权限。即使你知道 `resultId` 直接调保存（带已有 resultId 走更新），服务端仍会强制校验创建人：\n\n- 当前用户是创建人：正常更新同一条记录（保留原创建者，不新增）。\n- 当前用户不是创建人：直接返回 `CREATOR` 错误，**不修改任何数据**。\n\n列表不可见通常只是带教可见性过滤（本人创建 / 学员待审 / 已通过等规则）或其它查询过滤造成的，和保存时的 owner 校验是两回事。owner 优先按 `user_id`，历史空时回退 `user_code`。记录即使可见或属于带教学员，也不等于可以代填/代改。\n\n所以“列表看不到但知道 resultId 硬保存”在服务端不会静默成功，非创建人改不了。"
+    },
+    {
+      "id": "Q059",
+      "question": "编辑已有评估却没带 resultId，会发生什么语义？",
+      "sourceBlock": 12,
+      "turn": 4,
+      "convId": "ZX-20260812-481",
+      "answer": "**会当成新增一条评估，而不是更新已有那条。**\n\n保存时不带 `resultId`，服务端语义固定为“新增”：会新插入一条评估结果，不会去覆盖或更新你本想编辑的那条。只有携带已有的 `resultId` 才会走更新同一条（并校验创建者；非创建人返回 CREATOR，不改数据）。\n\n所以前端编辑已有评估时，必须把原 `resultId` 带上；漏了就会多出一条新记录，原记录还在。"
+    },
+    {
+      "id": "Q060",
+      "question": "我能改别人监护医嘱，但完成时报非创建人，这符合当前代码吗？",
+      "sourceBlock": 12,
+      "turn": 5,
+      "convId": "ZX-20260812-481",
+      "answer": "**是的，符合当前实现。**\n\n保存/编辑已有监护医嘱（带已有 careOrderId）目前**不校验创建人**，所以可以改别人的，甚至可能覆盖他人监护单。完成和删除都会校验创建人：非创建人直接返回 CREATOR，改不了。\n\n也就是说，保存 和 完成/删除 的 owner 规则本身就不对称——这是当前代码的既有行为，不是偶发异常。"
+    },
+    {
+      "id": "Q061",
+      "question": "带教老师能看学员查房记录，也能替他完成吗？",
+      "sourceBlock": 13,
+      "turn": 1,
+      "convId": "ZX-20260812-482",
+      "answer": "**不能。**带教老师能看学员的查房记录，但不能替他完成。\n\n带教老师可查看学员创建、且带教状态为待审核或已通过的查房记录。  \n但编辑、完成、删除只允许记录创建人操作；非创建人会返回 CREATOR 错误。  \n可见范围不会授予代写权限，带教老师能看不等于能代为完成。"
+    },
+    {
+      "id": "Q062",
+      "question": "Pad 里“我的反馈”列表调哪个接口？",
+      "sourceBlock": 13,
+      "turn": 2,
+      "convId": "ZX-20260812-482",
+      "answer": "**Pad 里“我的反馈”列表调的是：`GET /pwrsapi/applet/pharmacist/feedback/list/mine`。**\n\n它用 `PharmacistFeedBackPageDTO` 做分页，返回分页结果，且不返回 `unViewReply` 字段。  \n注意：这和工作任务里的反馈列表不是同一个接口，工作任务那条是 `GET /pwrsapi/applet/pharmacist/feedback/list`，别混了。也别写成 Web 端的路径，必须带 `/applet` 前缀。"
+    },
+    {
+      "id": "Q063",
+      "question": "药师反馈发出去以后还能改正文或删除吗？",
+      "sourceBlock": 13,
+      "turn": 3,
+      "convId": "ZX-20260812-482",
+      "answer": "**不能。**反馈发送后正文就锁定了，不能再编辑或删除。\n\n只有未发送的反馈才能编辑、删除，而且还要校验是创建人本人才能操作。  \n发送之后正文被锁死，不允许改内容，也不允许删掉。"
+    },
+    {
+      "id": "Q064",
+      "question": "药师反馈连续点两次保存会不会落两条？",
+      "sourceBlock": 13,
+      "turn": 4,
+      "convId": "ZX-20260812-482",
+      "answer": "**不会。**同一药师1秒内连续点两次保存，会被防重拦截，不会落成两条反馈。"
+    },
+    {
+      "id": "Q065",
+      "question": "Pad 个人中心点一条监护记录后打开哪个页面？",
+      "sourceBlock": 13,
+      "turn": 5,
+      "convId": "ZX-20260812-482",
+      "answer": "**点一条监护记录后，打开的是前端详情页 `tablet/pages/patient/info/custody.vue?careTypeId=<监护ID>`。**\n\n必须带上 `careTypeId` 参数；进入前会同步这条记录对应的患者上下文。  \n个人中心“我的监护”列表本身是 `tablet/pages/ucenter/info/custody.vue`，点进去后就跳到上面的详情页。  \n注意：详情页加载时才会调后端接口 `GET /pwrsapi/applet/follow/care?careTypeId=`，这个接口不是页面路由，别把它当成打开的页面。"
+    },
+    {
+      "id": "Q066",
+      "question": "老师列表里看得到学员记录，但编辑按钮不能用，是否符合规则？",
+      "sourceBlock": 14,
+      "turn": 1,
+      "convId": "ZX-20260812-483",
+      "answer": "**符合规则。**\n\n带教老师能在列表里看到学员创建的、待审核或已通过的查房记录（可见范围会扩大），但编辑、完成、删除这三类写操作仍只允许记录创建人本人。  \n非创建人操作会返回 CREATOR 错误，前端也会按创建人校验隐藏/禁用编辑按钮。  \n**可见范围不会授予代写权限**，老师能看 ≠ 能代学员编辑。这是产品已确认的设计边界，不是故障。"
+    },
+    {
+      "id": "Q067",
+      "question": "实施抓包时要定位 Pad 当前药师自己的反馈分页，路径是什么？",
+      "sourceBlock": 14,
+      "turn": 2,
+      "convId": "ZX-20260812-483",
+      "answer": "**路径是：`GET /pwrsapi/applet/pharmacist/feedback/list/mine`**\n\n实施抓包定位 Pad 端「当前药师自己的反馈分页」（也就是“我的反馈”列表）时，就看这个接口。它和 Pad 工作任务里的反馈列表不是同一个：工作任务用的是 `GET /pwrsapi/applet/pharmacist/feedback/list`，不要混。\n\n注意两点：\n- 必须带 `/applet` 前缀，别抓成 Web 端的 `/pwrsapi/pharmacist/feedback/list/mine`。\n- 这个“我的”分页用 `PharmacistFeedBackPageDTO`，且不返回 `unViewReply` 字段。\n\n抓到这个路径且带当前药师身份参数，就是定位对了。"
+    },
+    {
+      "id": "Q068",
+      "question": "一条反馈 push_status=true 后，产品还想让药师改主体，当前规则允许吗？",
+      "sourceBlock": 14,
+      "turn": 3,
+      "convId": "ZX-20260812-483",
+      "answer": "**不允许。**\n\n当前规则下，药师反馈一旦发送成功（`push_status=true`），主体就不能再更新、也不能删除了。状态机写得很清楚：新建/暂存（`push_status` 空或 false）→ 发送后，主体只允许回复、标记、评价、查看。\n\n本人尝试改主体时，接口会直接抛 `PHARMACIST_FEEDBACK_TYPE_NOT_UPDATE`，主表和反馈对象都不会变。这是已落地的业务规则，不是可配置项。\n\n产品如果还想让已发送的反馈能改主体，属于改规则/新需求，得走需求变更，不能按现网实现放开。"
+    },
+    {
+      "id": "Q069",
+      "question": "同一药师一秒内重复提交反馈，第二次系统怎么处理？",
+      "sourceBlock": 14,
+      "turn": 4,
+      "convId": "ZX-20260812-483",
+      "answer": "**第二次会被防重拦截，不会落成两条反馈。**\n\n同一药师在 1 秒内重复提交保存请求时，系统直接拦截第二次，接口返回 `SUBMIT_IS_BUSY`，不落库。这是已确认的防重机制（针对保存操作），不会生成重复记录。"
+    },
+    {
+      "id": "Q070",
+      "question": "我要区分“我的监护列表页”和具体监护详情页，两个路径是什么？",
+      "sourceBlock": 14,
+      "turn": 5,
+      "convId": "ZX-20260812-483",
+      "answer": "**列表页路径是 `tablet/pages/ucenter/info/custody.vue`；详情页路径是 `tablet/pages/patient/info/custody.vue?careTypeId=<监护ID>`（必带 careTypeId）。**\n\nPad 个人中心“我的监护”列表就是上面那个列表页。点进某一条监护记录后，打开的是详情页，必须带上该监护的 careTypeId 参数。  \n注意：`/care/order` 只是后端数据接口，不是页面路由，别当成详情页地址。"
+    },
+    {
+      "id": "Q071",
+      "question": "只要是带教老师，就拥有学员查房单全部写权限，对吗？",
+      "sourceBlock": 15,
+      "turn": 1,
+      "convId": "ZX-20260812-484",
+      "answer": "不对。带教老师只能查看学员创建且待审核或已通过的查房记录，编辑、完成、删除仍只允许记录创建人操作；非创建人会返回 CREATOR，可见范围不会授予代写权限。"
+    },
+    {
+      "id": "Q072",
+      "question": "Pad 我的反馈直接复用 Web 路径 /pharmacist/feedback/list，对吧？",
+      "sourceBlock": 15,
+      "turn": 2,
+      "convId": "ZX-20260812-484",
+      "answer": "**不对。**\n\nPad 端「我的反馈」分页列表走的是 `GET /pwrsapi/applet/pharmacist/feedback/list/mine`，用 `PharmacistFeedBackPageDTO` 做分页，返回 `PageResultDO<PharmacistFeedBackPageVO>`，且**不返回** `unViewReply`。\n\n它和 Web 端 `/pwrsapi/pharmacist/feedback/list` 不是同一条路径，也没有直接复用。  \nPad 上「工作任务反馈列表」才是 `GET /pwrsapi/applet/pharmacist/feedback/list`（不带 `/mine`），两个接口是分开的，别混。\n\n技术依据（研发参考）：经确认事实 + 接口契约 + AC-23 明确区分了 Pad·我的（`/list/mine`）与 Pad·工作任务（`/list`），且禁止省略 `/applet` 前缀或答成 Web 路径。"
+    },
+    {
+      "id": "Q073",
+      "question": "发送后的反馈只是多了消息，主体照样可以编辑，对吧？",
+      "sourceBlock": 15,
+      "turn": 3,
+      "convId": "ZX-20260812-484",
+      "answer": "**不对。**\n\n发送后的反馈主体会锁定：正文不能再编辑，也不能删除。只有未发送（暂存）的反馈，创建人自己才能改、才能删。\n\n发送只是把状态推成已发送，并会触发 IM 会话消息通知对方；主体内容本身不会继续开放编辑。"
+    },
+    {
+      "id": "Q074",
+      "question": "反馈保存没有防重复，只能靠前端禁按钮，对吧？",
+      "sourceBlock": 15,
+      "turn": 4,
+      "convId": "ZX-20260812-484",
+      "answer": "**不对。**\n\n后端有防重复：同一药师在 1 秒内再次点保存，接口会直接拦截（返回 `SUBMIT_IS_BUSY`），不会落成两条反馈。不只是靠前端禁按钮。"
+    },
+    {
+      "id": "Q075",
+      "question": "点记录后打开的是后端 /care/order 接口页面，对吧？",
+      "sourceBlock": 15,
+      "turn": 5,
+      "convId": "ZX-20260812-484",
+      "answer": "**不对。**\n\n点记录后打开的是前端详情页 `tablet/pages/patient/info/custody.vue?careTypeId=<监护ID>`，必须带上 careTypeId。  \n`/care/order` 只是后端数据接口，不是页面路由，也不是点击后打开的页面地址。"
+    },
+    {
+      "id": "Q076",
+      "question": "查房的可见范围和写操作 owner 边界分别怎样？",
+      "sourceBlock": 16,
+      "turn": 1,
+      "convId": "ZX-20260812-485",
+      "answer": "**可见范围和写操作 owner 边界很清晰：老师能看不等于能改。**\n\n**可见范围：**  \n带教老师可以查看学员创建、且状态为「待审核」或「已通过」的查房记录。\n\n**写操作 owner 边界：**  \n编辑、完成、删除这三类写操作，**只允许记录创建人本人**操作。  \n非创建人调用时直接返回 `CREATOR` 错误。  \n可见范围**不会**授予任何代写权限，老师不能帮学员改、完成或删查房单。\n\n这是系统已确认的现网规则，现场按这个边界处理即可。"
+    },
+    {
+      "id": "Q077",
+      "question": "给出 Pad 我的反馈的 HTTP 方法和完整 /pwrsapi 路径。",
+      "sourceBlock": 16,
+      "turn": 2,
+      "convId": "ZX-20260812-485",
+      "answer": "**Pad「我的反馈」用的是：GET `/pwrsapi/applet/pharmacist/feedback/list/mine`。**\n\n这是 Pad 端分页列表专用接口，和「工作任务反馈列表」不是同一个（后者是 GET `/pwrsapi/applet/pharmacist/feedback/list`）。  \n注意：必须带 `/applet` 前缀，不能写成 Web 端的 `/pwrsapi/pharmacist/feedback/list/mine`。"
+    },
+    {
+      "id": "Q078",
+      "question": "反馈从暂存到发送后的可操作范围怎么变化？",
+      "sourceBlock": 16,
+      "turn": 3,
+      "convId": "ZX-20260812-485",
+      "answer": "**反馈从暂存到发送后，可操作范围会明显收紧：发送前可改可删，发送后主体彻底锁定。**\n\n- **暂存/未发送**（新建或 `push_status` 为空/false）：只有创建人本人可以编辑正文、删除整条反馈。其他人调不了。\n- **发送后**（`push_status=true`）：主体正文立刻锁定，**不能再编辑或删除**；创建人校验仍在，但更新/删除路径已被状态机直接拦截。此时只剩回复、标记、评价、查看这些操作。\n\n另外，同一药师 1 秒内重复点保存会被防重拦住，不会生成两条。\n\n这就是现网已确认的状态机和权限边界，现场按这个判断即可。"
+    },
+    {
+      "id": "Q079",
+      "question": "重复提交窗口、错误码和是否落库分别是什么？",
+      "sourceBlock": 16,
+      "turn": 4,
+      "convId": "ZX-20260812-485",
+      "answer": "**同一药师 1 秒内重复保存会被防重拦截，错误码是 `SUBMIT_IS_BUSY`，且不会落库。**\n\n具体就是：  \n- **窗口**：1 秒  \n- **错误码**：`SUBMIT_IS_BUSY`  \n- **是否落库**：不落库（不会生成第二条反馈）\n\n这是药师反馈保存接口已确认的现网防重规则，现场遇到重复点击保存就按这个判断即可。"
+    },
+    {
+      "id": "Q080",
+      "question": "详情跳转必须带哪个参数，页面路由是什么？",
+      "sourceBlock": 16,
+      "turn": 5,
+      "convId": "ZX-20260812-485",
+      "answer": "**详情跳转必须带 `careTypeId`，页面路由是 `tablet/pages/patient/info/custody.vue?careTypeId=<监护ID>`。**\n\nPad 个人中心「我的监护」列表点一条记录后，就进这个前端详情页，参数 `careTypeId` 是必带的（同时会同步患者上下文）。别和后端接口搞混，`/care/order` 或 `GET /pwrsapi/applet/follow/care` 只是数据接口，不是页面路由。"
+    },
+    {
+      "id": "Q081",
+      "question": "患教有待下发、已下发、已签名三个独立状态，对吧？",
+      "sourceBlock": 17,
+      "turn": 1,
+      "convId": "ZX-20260812-486",
+      "answer": "不对。患教没有“待下发、已下发、已签名”这三个独立状态。\n\n现有 Web/Pad 没有独立的“保存草稿”和“正式下发”两套状态，也没有叫“已下发”的业务状态。文档里说的“下发”只是业务称呼，不能当成状态名。\n\n实际就两档：\n- 点“保存”后：记录是未完成（eduState=false/0），页面显示“待完成/未宣教”，创建人还能继续改。\n- 点“完成宣教”后：先保存再改成已完成（eduState=true/1），完成后只读、不能再编辑。\n\n患者签名始终非必填，没有签名也不拦完成，更不会把记录卡在“待签名”状态；签完也只是完成流程里的一步，不是单独的第三种状态。保存成功也不等于消息已送达或患者已签。"
+    },
+    {
+      "id": "Q082",
+      "question": "没有患者签名就绝对不能完成患教，对吧？",
+      "sourceBlock": 17,
+      "turn": 2,
+      "convId": "ZX-20260812-486",
+      "answer": "不对。没有患者签名也可以完成患教。\n\n患者签名始终非必填，没有签名不得阻止完成，也不会把记录卡在额外的“待签名”状态。只有患教创建人能点完成宣教：有签名或没签名都行，完成后状态变成已完成并记录完成时间，记录变成只读、不可重开。\n\n签名上传失败时，页面会提示未成功，但你仍可确认以未签名状态完成，系统不会写假路径。"
+    },
+    {
+      "id": "Q083",
+      "question": "推荐应该命中越多越靠前，所以当前也是降序，对吧？",
+      "sourceBlock": 17,
+      "turn": 3,
+      "convId": "ZX-20260812-486",
+      "answer": "不对。当前不是降序。\n\n系统现在按每个模板的命中项数**升序**排，所以只命中1项的模板会排在命中3项的模板前面。虽然直觉上觉得“命中越多越靠前”更合理，但当前实现就是升序，不能按推荐直觉反过来说。"
+    },
+    {
+      "id": "Q084",
+      "question": "只要模板匹配患者，是否共享都能被所有药师看到，对吧？",
+      "sourceBlock": 17,
+      "turn": 4,
+      "convId": "ZX-20260812-486",
+      "answer": "不对。就算模板匹配了患者，也不是“是否共享都能被所有药师看到”。\n\n在患者患教推荐结果里，系统只会保留：共享模板，以及当前用户自己创建的私有模板。非共享且创建人不是当前用户的模板，会被直接剔除，其他药师看不到。\n\n这个规则只针对推荐接口的结果，模板维护列表那边的权限当前资料没法确认，不能外推。"
+    },
+    {
+      "id": "Q085",
+      "question": "本地事务失败能自动回滚已经发出的 IM，对吧？",
+      "sourceBlock": 17,
+      "turn": 5,
+      "convId": "ZX-20260812-486",
+      "answer": "不对。本地事务失败**不能**自动回滚已经发出的 IM。\n\n干预保存和 IM 通知是跨系统步骤，双方没有统一事务、也没有数据库外键。IM 消息一旦发出去，本地事务就算后面失败了，也回滚不了那条已经发出的外部消息。删除业务单同样不会自动撤回 IM。"
+    },
+    {
+      "id": "Q086",
+      "question": "产品说保存按钮应该直接把状态改成已完成，符合现有状态机吗？",
+      "sourceBlock": 18,
+      "turn": 1,
+      "convId": "ZX-20260812-487",
+      "answer": "**不符合。** 现有状态机里，“保存”和“完成宣教”是分开的，保存不会把状态改成已完成。\n\n根据产品最终决议和当前实现：\n- 点“保存”时，只调用保存接口，记录保持 `eduState=false/0`（未完成/待完成），页面显示“待完成/未宣教”，创建人还能继续编辑。现场口语可叫“存草稿”，但真实状态就是“未完成”。\n- 只有点“完成宣教”时，才先保存内容，再调完成接口，把 `eduState` 改成 `true/1`（已完成），并写完成时间；完成后只读，不可再编辑。\n\n所以产品说“保存按钮直接改成已完成”和现有状态机（未完成→已完成）不一致，也和决议里“保存=未完成；完成宣教=已完成”的口径冲突。"
+    },
+    {
+      "id": "Q087",
+      "question": "药师端落库成功但患者没消息，应该把哪几段链路分开看？",
+      "sourceBlock": 18,
+      "turn": 2,
+      "convId": "ZX-20260812-487",
+      "answer": "**药师端落库成功但患者没消息，要把业务记录保存成功、IM 消息投递、患者完成业务以及签名这几段链路分开看。**\n\n它们是分离的状态与链路，本地保存成功不能推出消息已送达，消息送达也不能推出患者已完成或已签名。排查时分别核对，不要把一次接口成功解释成跨系统统一事务全部成功。"
+    },
+    {
+      "id": "Q088",
+      "question": "为什么只命中一个条件的模板反而排在命中三个条件的前面？",
+      "sourceBlock": 18,
+      "turn": 3,
+      "convId": "ZX-20260812-487",
+      "answer": "**当前实现是按每个模板的命中项数升序排序，所以只命中1项的模板会排在命中3项的模板前面。**\n\n这是现在的代码事实，虽然可能反直觉（一般人会觉得命中越多越靠前），但升序就是这样排的。患者无医嘱也无诊断时，推荐列表会直接返回空数组。"
+    },
+    {
+      "id": "Q089",
+      "question": "一个模板 shared=false，但正好匹配患者，我不是创建人能不能进推荐？",
+      "sourceBlock": 18,
+      "turn": 4,
+      "convId": "ZX-20260812-487",
+      "answer": "**不能。**\n\n即使这个模板条件正好匹配患者，只要 `shared=false` 且创建人不是当前登录用户，就会被从推荐结果里剔除，不会出现在推荐列表里。\n\n推荐结果只保留两类：\n1. 共享模板（`shared=true`）\n2. 当前用户自己创建的私有模板\n\n非共享且 `userId` 与当前用户不匹配的，一律过滤掉。"
+    },
+    {
+      "id": "Q090",
+      "question": "药师端有干预单，医生端没消息，排查时要分哪两步？",
+      "sourceBlock": 18,
+      "turn": 5,
+      "convId": "ZX-20260812-487",
+      "answer": "**药师端有干预单、医生端没消息，要把「干预本地保存」和「usercenter IM 通知」这两步分开查。**\n\n这两段是跨系统步骤，本地保存成功不等于消息已送达；IM 只拿业务 ID/type，双方没有数据库外键，也没有统一事务。排查时分别核对，不要把一次接口成功当成两边都成功。"
+    },
+    {
+      "id": "Q091",
+      "question": "患教单保存后为什么还是未完成？",
+      "sourceBlock": 19,
+      "turn": 1,
+      "convId": "ZX-20260812-488",
+      "answer": "**保存后还是未完成，是正常设计，不是故障。**\n\n点击“保存”只把患教单内容存下来，状态保持“未完成/待完成/未宣教”（`eduState=false/0`），创建人还能继续编辑。只有再点“完成宣教”，才会真正改成已完成（`eduState=true/1`），之后只读不可再改。\n\n简单说：  \n- 保存 = 存内容，状态仍未完成（口语可叫“存草稿”）  \n- 完成宣教 = 正式完成（会先自动保存最新内容再改状态）\n\n没有单独的“正式下发”状态，保存成功也不等于患者已收到或已签名。"
+    },
+    {
+      "id": "Q092",
+      "question": "患教保存成功能证明患者已经收到并签名吗？",
+      "sourceBlock": 19,
+      "turn": 2,
+      "convId": "ZX-20260812-488",
+      "answer": "**不能。**\n\n患教保存成功只表示药师端把患教单内容存成了快照，状态仍是未完成，完全不能证明患者已经收到消息，更不能证明患者已阅读完成或已签名。\n\n保存、消息投递、患者完成业务、签名是完全分离的链路和状态：本地保存成功推不出消息已送达，消息送达也推不出患者已完成或已签名。消息归 usercenter IM，患者完成与签名是后续独立阶段，必须分别核对。"
+    },
+    {
+      "id": "Q093",
+      "question": "患教推荐模板按什么顺序排？",
+      "sourceBlock": 19,
+      "turn": 3,
+      "convId": "ZX-20260812-488",
+      "answer": "**按每个模板的命中项数升序排，命中越少的越靠前。**\n\n也就是说，只命中1项的模板会排在命中3项的模板前面。这是当前实现的事实，别按“命中越多越好”的直觉去理解。\n\n另外，患者既没有医嘱也没有诊断时，推荐列表直接返回空。"
+    },
+    {
+      "id": "Q094",
+      "question": "别人没共享的个人患教模板我能看到吗？",
+      "sourceBlock": 19,
+      "turn": 4,
+      "convId": "ZX-20260812-488",
+      "answer": "**在患教推荐结果里看不到。**\n\n推荐只保留共享模板，以及你自己创建的私有模板。别人创建的、没共享的（非共享且创建人不是当前用户）会直接被剔除，不会出现在推荐列表里。\n\n这个规则只针对患者患教推荐。模板维护列表里别人的私有模板能不能看到，当前资料无法确认，不能往外推。"
+    },
+    {
+      "id": "Q095",
+      "question": "医嘱干预保存成功就等于医生收到消息了吗？",
+      "sourceBlock": 19,
+      "turn": 5,
+      "convId": "ZX-20260812-488",
+      "answer": "**不能。**\n\n医嘱干预保存成功，只表示药师端本地业务记录存好了，绝不等于医生已经收到消息。  \nPWRS 本地保存和 usercenter IM 通知是跨系统两步，没有统一事务，也没有数据库外键。本地成功推不出消息已送达，必须分别核对本地状态和通知结果。"
+    },
+    {
+      "id": "Q096",
+      "question": "保存和完成宣教分别把 eduState 置成什么？",
+      "sourceBlock": 20,
+      "turn": 1,
+      "convId": "ZX-20260812-489",
+      "answer": "保存把 eduState 置成 false/0（未完成）；完成宣教把 eduState 从 false/0 改成 true/1（已完成）。\n\n点「保存」只调保存接口，记录保持未完成状态，页面显示“待完成/未宣教”，还能继续编辑。点「完成宣教」会先保存最新内容，再调完成接口，把状态改成已完成，之后只读、不能再改。"
+    },
+    {
+      "id": "Q097",
+      "question": "保存、消息送达、患者完成和签名之间是什么关系？",
+      "sourceBlock": 20,
+      "turn": 2,
+      "convId": "ZX-20260812-489",
+      "answer": "**业务记录保存成功、消息投递、患者完成业务、签名，是四段完全分离的状态和链路。**\n\n本地保存成功（落库）不能推出消息已送达；消息送达也不能推出患者已完成或已签名。排查时必须分别核对，不得把一次接口成功当成跨系统全部成功。\n\n现场直接记：  \n- **保存**：只表示药师端业务记录写进了系统（如患教单快照保存）。  \n- **消息送达**：归 usercenter IM，是另一次投递动作，可能失败或延迟。  \n- **患者完成**：患者端后续独立操作，属于“完成业务”阶段。  \n- **签名**：再往后的独立阶段，签名文件也单独存。  \n\n以上四步互不替代，任一步成功都不代表后面的步骤自动成功。"
+    },
+    {
+      "id": "Q098",
+      "question": "患者既没医嘱也没诊断时推荐列表返回什么？",
+      "sourceBlock": 20,
+      "turn": 3,
+      "convId": "ZX-20260812-489",
+      "answer": "**患者既没医嘱也没诊断时，推荐列表返回空列表（空数组）。**\n\n系统先查该患者是否有执行中医嘱或诊断；两者都没有时，直接返回空，不会匹配任何患教模板，也不会给推荐结果。"
+    },
+    {
+      "id": "Q099",
+      "question": "推荐结果对共享模板和本人私有模板的可见规则是什么？",
+      "sourceBlock": 20,
+      "turn": 4,
+      "convId": "ZX-20260812-489",
+      "answer": "**推荐结果只保留共享模板，以及当前登录用户自己创建的私有模板。**\n\n非共享（私有）且创建人 userId 与当前用户不一致的模板，会直接从推荐结果里剔除，其他人看不见。  \n这条规则仅针对患者患教推荐接口的结果过滤；模板维护列表本身的权限是否同样处理，当前资料未确认，不能外推。"
+    },
+    {
+      "id": "Q100",
+      "question": "业务单、目标医生和 IM 消息之间有没有数据库外键或统一事务？",
+      "sourceBlock": 20,
+      "turn": 5,
+      "convId": "ZX-20260812-489",
+      "answer": "**没有。业务单、目标医生和 IM 消息之间，既没有数据库外键，也没有统一事务。**\n\n这是跨系统步骤：PWRS 本地业务单保存成功，只代表自己库写成功；IM 通知在 usercenter 侧单独处理，双方只靠传过去的业务 ID/type 关联上下文，互不级联。  \n本地事务回滚不了已经发出去的 IM，删业务单也不会因为外键自动撤回消息。目标医生信息同样只在业务侧使用，和消息库没有外键绑定。"
+    },
+    {
+      "id": "Q101",
+      "question": "别的药师已经审核过同一组医嘱，我还能覆盖吗？",
+      "sourceBlock": 21,
+      "turn": 1,
+      "convId": "ZX-20260812-491",
+      "answer": "**不能。**\n\n别的药师已经审核过同一组医嘱（同一 groupNo）后，你再提交会被系统拒绝，返回 ORDER_NOT_USER（无法修改其他药师的审核医嘱），原审核记录完全不变。只有创建该审核记录的药师本人才能更新。"
+    },
+    {
+      "id": "Q102",
+      "question": "药物重整里的医嘱、字典和规则结果分别从哪来？",
+      "sourceBlock": 21,
+      "turn": 2,
+      "convId": "ZX-20260812-491",
+      "answer": "**一句话结论：药物重整里，患者原始医嘱来自 proxy/HIS，药品/诊断字典和规则结果都由 PKB 提供，PWRS 只保存重整单据及当时的 code/name 快照。**\n\n现场按这个理解就行：\n- **医嘱**：患者原始医嘱从 proxy/HIS 拉过来（不是 PWRS 本地生成的）。\n- **字典**：药品字典、诊断字典由 PKB 提供。\n- **规则结果**：PKB 规则也由 PKB 提供。  \nPWRS 在保存重整单时，会把当时用到的 code/name 做成快照存下来；历史单据不会因为 PKB 后续改名而自动回写。\n\n补充注意：PKB 查询失败时，不能直接显示成“无规则命中”。"
+    },
+    {
+      "id": "Q103",
+      "question": "检验报告、指标、微生物分别查哪个 ETL interfaceCode？",
+      "sourceBlock": 21,
+      "turn": 3,
+      "convId": "ZX-20260812-491",
+      "answer": "**检验报告查 V_IPT_EXAM，具体指标查 V_IPT_EXAM_ITEM，微生物查 V_IPT_MICROBE。**\n\n都通过统一入口 `POST ${ETL_URL}comm/proxy/request` 调用。现场排查时：\n- 先查大项/报告：`interfaceCode=V_IPT_EXAM`\n- 报告有但具体指标没有：再按 `reportId` 查 `V_IPT_EXAM_ITEM`\n- 微生物报告：查 `V_IPT_MICROBE`（对应 examType=3）\n\n注意：搜索词 word、时间、searchType、sort 不会传给 ETL，由 Proxy 本地过滤和排序。V_IPT_* 只是业务接口编码，不是本地数据库视图。"
+    },
+    {
+      "id": "Q104",
+      "question": "病程总览、患者概要、分类列表和详情各用哪个 ETL 编码？",
+      "sourceBlock": 21,
+      "turn": 4,
+      "convId": "ZX-20260812-491",
+      "answer": "**患者概要用 V_IPT_EMR_PATIENT，病程总览用 V_IPT_EMR，分类列表同时调用 V_IPT_EMR 和 V_IPT_EMR_PATIENT，详情用 V_IPT_EMR_DETAIL。**\n\n现场对照：\n- 患者概要 → V_IPT_EMR_PATIENT\n- 病程总览 → V_IPT_EMR\n- 分类（分组）列表 → 同时请求 V_IPT_EMR + V_IPT_EMR_PATIENT\n- 某类文书列表 → V_IPT_EMR_ITEM\n- 文书详情 → V_IPT_EMR_DETAIL\n\n页面上的 word 搜索词不会传给 ETL，由 Proxy 按 bcName 本地过滤。"
+    },
+    {
+      "id": "Q105",
+      "question": "同一个 groupNo 已存在他人记录，再 POST /order/audit 会怎样？",
+      "sourceBlock": 21,
+      "turn": 5,
+      "convId": "ZX-20260812-491",
+      "answer": "**不能覆盖，会直接被拒绝。**\n\n同一个 groupNo 已有别人创建的审核记录时，你再 POST `/order/audit` 会返回错误码 ORDER_NOT_USER（提示：无法修改其他药师的审核医嘱）。校验失败后系统不做任何变更，原审核记录保持原样不变。只有当初创建那条记录的药师本人才能再次提交更新。"
+    },
+    {
+      "id": "Q106",
+      "question": "PKB 改了药品名称，历史重整单会自动改吗？",
+      "sourceBlock": 22,
+      "turn": 1,
+      "convId": "ZX-20260812-490",
+      "answer": "**不会。**\n\n历史重整单保存时，PWRS 只记录当时已选的药品 code/name 快照。PKB 后续改药品名称，不会自动回写或更新这些历史记录（除非有专门同步逻辑，但当前没有）。"
+    },
+    {
+      "id": "Q107",
+      "question": "ETL 报告有数据但按关键词搜不到，关键词是在 ETL 过滤吗？",
+      "sourceBlock": 22,
+      "turn": 2,
+      "convId": "ZX-20260812-490",
+      "answer": "**不是。**关键词（word）不会传给 ETL，也不在 ETL 侧过滤。\n\n检验报告/大项、小项或微生物先从 ETL（`V_IPT_EXAM` / `V_IPT_EXAM_ITEM` / `V_IPT_MICROBE`）把数据取回来（或走缓存），**关键词匹配、时间过滤、排序都在 Proxy 本地完成**。所以 ETL 报告里已有数据、但按关键词页面搜不到时，应优先查 Proxy 的本地过滤逻辑（以及缓存/并发锁是否返回了空数组），不要再让 ETL 去改“搜索接口”或排查关键词匹配。\n\n技术依据（研发参考）：`word/searchType/startTime/endTime/sort` 不传 ETL；searchType=1 在 Proxy 用 examName/拼音过滤大项，searchType=2 用 itemExamName 过滤小项（微生物走 `V_IPT_MICROBE` 分支）。"
+    },
+    {
+      "id": "Q108",
+      "question": "文书列表有数据但详情为空，能不能只查 V_IPT_EMR？",
+      "sourceBlock": 22,
+      "turn": 3,
+      "convId": "ZX-20260812-490",
+      "answer": "**不能。**\n\n文书列表有数据、详情却为空时，不能只查 `V_IPT_EMR`。  \n病程总览/分类列表走 `V_IPT_EMR`（分类还会顺带调 `V_IPT_EMR_PATIENT`），某类文书列表走 `V_IPT_EMR_ITEM`，**详情必须单独查 `V_IPT_EMR_DETAIL`**（还要带上 `caseClassCode`、`bcCode`）。  \n\n详情分支没有经过自动补 `districtCode` 的包装，列表能出数据只说明列表接口有返回，详情空就要单独核实 `V_IPT_EMR_DETAIL` 本身有没有数据、是否依赖院区参数。  \n四个 `V_IPT_EMR*` 是分开的能力，列表正常不能替代详情排查。  \n\n技术依据（研发参考）：  \n- 列表：`/proxyapi/proxy/patient/emrs` → `V_IPT_EMR`；`/emrs/item` → `V_IPT_EMR_ITEM`  \n- 详情：`/proxyapi/proxy/patient/emrs/detail` → `V_IPT_EMR_DETAIL`（直接取 `data.result`，未自动补院区）"
+    },
+    {
+      "id": "Q109",
+      "question": "只要 groupNo 相同，后提交的人就能更新原审核，对吧？",
+      "sourceBlock": 22,
+      "turn": 4,
+      "convId": "ZX-20260812-490",
+      "answer": "**不对。**\n\n同 `groupNo` 已有审核记录时，**只有原创建人**再次提交才能更新原审核；后提交的人如果不是创建人，接口会返回 `ORDER_NOT_USER`（无法修改其他药师的审核医嘱），校验失败后**不做任何变更**，原审核记录保持不变。  \n不能把“groupNo 相同”理解成任意药师都能覆盖，也不会当成幂等成功。"
+    },
+    {
+      "id": "Q110",
+      "question": "原始医嘱和合理用药规则都存于 PWRS 本地，对吧？",
+      "sourceBlock": 22,
+      "turn": 5,
+      "convId": "ZX-20260812-490",
+      "answer": "**不对。**\n\n原始医嘱属于患者临床事实，由 HIS/ETL 经 Proxy 提供，不存 PWRS 本地。  \n合理用药规则属于药品与规则知识，由 PKB 提供（字典、规则运行、知识查询），也不存 PWRS 本地。  \n\nPWRS 本地库只保存自己的业务记录（审核标记、干预、重整单、咨询和会诊等），以及重整单据时的 code/name 快照。  \nPKB 查询失败不能当成“无规则命中”，Proxy/HIS 返回空也不能解释成 PKB 没规则。"
+    },
+    {
+      "id": "Q111",
+      "question": "V_IPT_EXAM_ITEM 是 PostgreSQL 视图名，对吧？",
+      "sourceBlock": 23,
+      "turn": 1,
+      "convId": "ZX-20260812-492",
+      "answer": "**不是。**\n\nV_IPT_EXAM_ITEM 是业务接口编码（interfaceCode），不是 PostgreSQL 同名视图。系统通过统一 ETL 地址 POST ${ETL_URL}comm/proxy/request 调用它，用来按 reportId 查检验小项；实际对应的 SQL 由 ETL 侧维护，不能直接当成库里的视图名去查。\n\n**技术依据（研发参考）**  \n规格明确禁止混淆：V_IPT_* 是业务接口编码，不是 PostgreSQL 同名视图。请求形态示例为 `{\"interfaceCode\":\"V_IPT_EXAM_ITEM\",\"params\":{...}}`。"
+    },
+    {
+      "id": "Q112",
+      "question": "病历搜索的 word 会送到 ETL 做正文全文检索，对吧？",
+      "sourceBlock": 23,
+      "turn": 2,
+      "convId": "ZX-20260812-492",
+      "answer": "**不对。**\n\n病历搜索的 word 不会送到 ETL 做正文全文检索。页面 word 不传 ETL，由 Proxy 按 bcName 本地过滤。\n\n**技术依据（研发参考）**  \n规格明确：页面 word 不传 ETL，由 Proxy 按 bcName 本地过滤；禁止把 word 描述为送到 ETL 做正文全文检索。患者概要/病程总览等用的是 V_IPT_EMR_PATIENT、V_IPT_EMR 等接口编码。"
+    },
+    {
+      "id": "Q113",
+      "question": "非创建人重复提交同组医嘱的错误码和数据结果是什么？",
+      "sourceBlock": 23,
+      "turn": 3,
+      "convId": "ZX-20260812-492",
+      "answer": "**非创建人重复提交同组医嘱时，会返回错误码 ORDER_NOT_USER（无法修改其他药师的审核医嘱），且不做任何变更，原审核记录保持不变。**\n\n同 groupNo 下已有审核记录，且创建人不是当前用户时，再次 POST 提交就会走这个校验；失败后原记录完全不动。"
+    },
+    {
+      "id": "Q114",
+      "question": "把 Proxy/HIS、PKB、PWRS 三方在药物重整中的 owner 分开说明。",
+      "sourceBlock": 23,
+      "turn": 4,
+      "convId": "ZX-20260812-492",
+      "answer": "**在药物重整里，三方 owner 分开是这样：**\n\n- **Proxy/HIS**：管患者原始医嘱（临床事实）。原始医嘱从 HIS 经 Proxy 过来，是重整的数据起点。  \n- **PKB**：管药品/诊断字典和规则知识。字典查询、合理用药规则都由 PKB 提供；PWRS 不自己存这些。  \n- **PWRS**：只管业务记录。保存重整单据本身，以及选中项的 code/name 快照。历史单据是快照，PKB 后续改名/改规则不会自动回写已保存的单子。  \n\n**注意别混**：PKB 查询失败不能当成“无规则命中”；PKB /run 和 Proxy 的合理用药接口也不是同一个。  \n\n技术依据（研发参考）：药品/诊断字典和 PKB 规则由 PKB 提供，患者原始医嘱来自 proxy/HIS，PWRS 保存重整单据及 code/name 快照。患者临床事实 owner 为 HIS/ETL 经 Proxy，药品与规则知识 owner 为 PKB，PWRS 业务记录（含重整单）为本地库。"
+    },
+    {
+      "id": "Q115",
+      "question": "Proxy 返回空数组能直接证明 HIS 没数据吗？",
+      "sourceBlock": 23,
+      "turn": 5,
+      "convId": "ZX-20260812-492",
+      "answer": "**不能。**\n\nProxy 返回空数组，**不能**直接证明 HIS 真的没数据。\n\n空数组常见于：Proxy 把 null 转成了空、Redis 并发锁没拿到直接回空、本地过滤/身份参数不一致、或调用异常被页面渲染成“无数据”。临床数据多数不落 PWRS 本地表，必须保留 HTTP/业务异常和 ETL requestId，逐层对比 ETL 结果、Proxy 返回和页面展示才能下结论。\n\n**技术依据（研发参考）**  \n经确认事实：Proxy 空数组不能证明患者确实无数据。空列表不能直接证明 HIS 无数据，需核对患者复合身份、Proxy 请求、ETL interfaceCode/requestId 与本地过滤。"
+    },
+    {
+      "id": "Q116",
+      "question": "检验三类编码、统一入口和 word 的处理位置分别是什么？",
+      "sourceBlock": 24,
+      "turn": 1,
+      "convId": "ZX-20260812-493",
+      "answer": "检验三类编码分别是大项用 V_IPT_EXAM、小项用 V_IPT_EXAM_ITEM、微生物用 V_IPT_MICROBE；统一入口是 Proxy 调用 POST ${ETL_URL}comm/proxy/request；word（搜索词）由 Proxy 本地处理，不传给 ETL。\n\n这三类检验数据都走同一个 Proxy 入口去调 ETL，不分开接口。搜索词（word）、时间过滤和排序这些都在 Proxy 这边本地完成，不会往 ETL 传。"
+    },
+    {
+      "id": "Q117",
+      "question": "四个 V_IPT_EMR* 的职责和 word 匹配范围是什么？",
+      "sourceBlock": 24,
+      "turn": 2,
+      "convId": "ZX-20260812-493",
+      "answer": "四个 V_IPT_EMR* 分别管患者概要、病程总览、某类文书列表和文书详情；分类会同时调前两个。页面上的 word 只在 Proxy 按文书名称（bcName）本地过滤，不传给 ETL，也不是正文全文搜索。\n\n具体职责如下：\n- V_IPT_EMR_PATIENT：患者概要（电子病历患者概要），空结果会转成空对象。\n- V_IPT_EMR：病程记录总览（列表），直接返回数组。\n- V_IPT_EMR_ITEM：某类型病历文书列表。\n- V_IPT_EMR_DETAIL：文书详情。\n\n分类场景会同时调用 V_IPT_EMR 和 V_IPT_EMR_PATIENT，再按 caseClass 分组；入院记录还会叠患者概要。\n\nword 的匹配范围：只在 Proxy 本地按 bcName 过滤，不会送到 ETL 做任何检索，更不是全文搜正文内容。\n\n技术依据（研发参考）：对应接口为 getPatientEmr（V_IPT_EMR_PATIENT）、getPatientEmrs（V_IPT_EMR）、getPatientGroupEmrs（V_IPT_EMR + V_IPT_EMR_PATIENT，word 本地滤）、getPatientEmrItems（V_IPT_EMR_ITEM）、getPatientEmrDetail（V_IPT_EMR_DETAIL）。"
+    },
+    {
+      "id": "Q118",
+      "question": "解释上游空、Proxy 本地过滤/缓存和 PWRS 页面过滤的边界。",
+      "sourceBlock": 24,
+      "turn": 3,
+      "convId": "ZX-20260812-493",
+      "answer": "上游空、Proxy 本地过滤/缓存、PWRS 页面过滤，是临床数据链路里从 HIS/ETL 到最终页面的三层边界，查不到数据时必须按层分开判断，不能混为一谈。\n\n上游空：指 Proxy 调 ETL（统一入口 POST ${ETL_URL}comm/proxy/request，按 interfaceCode 查）或更上游 HIS 视图直接返回空数组/空对象。这时数据源头就没有，跟 PWRS 本地库无关。\n\nProxy 本地过滤/缓存：ETL 有数据后，Proxy 再做处理。搜索词 word、时间范围、排序、类型过滤等不传给 ETL，只在 Proxy 侧本地匹配（例如按名称过滤、按时间倒序）；部分接口还会走 Redis 缓存（如诊断 600 秒）。ETL 有数但页面仍空，优先查这里的缓存命中和匹配逻辑。\n\nPWRS 页面过滤：Proxy 返回后，PWRS 再叠加本地业务状态（例如医嘱只叠审核/干预，不改原始数据）或前端页面二次筛选/渲染。两端参数不一致、页面筛选条件过严，都会让 Web 有数而 Pad/页面看起来空。\n\n统一排查就按这个顺序分：先看 ETL 是否空 → 再看 Proxy 是否本地滤掉或缓存了 → 最后看 PWRS 业务叠加和页面筛选。不是本地库未同步就能解释所有“查不到”。"
+    },
+    {
+      "id": "Q119",
+      "question": "只要 /proxyapi 是 200 空数组，就应该让 HIS 补数据，对吧？",
+      "sourceBlock": 24,
+      "turn": 4,
+      "convId": "ZX-20260812-493",
+      "answer": "**不对。**  \n`/proxyapi` 返回 200 空数组，**不能**直接当成“HIS 没数据、让 HIS 补数据”。\n\n按链路边界分三层判断：\n\n1. **上游真的空**（Proxy 调 ETL 后原始就是空数组/空对象）  \n   → 这时才需要找 ETL/HIS 核对对应 interfaceCode（如检验 V_IPT_EXAM / V_IPT_EXAM_ITEM / V_IPT_MICROBE，病历 V_IPT_EMR* 等）是否有数、是否同步延迟。只有这一步确认空，才让 HIS/ETL 补数据。\n\n2. **Proxy 本地过滤/缓存导致空**  \n   word、时间、searchType、sort 等**不传给 ETL**，全在 Proxy 本地匹配（名称/拼音过滤、按 reportTime 排序等），部分还有 Redis 缓存。  \n   ETL 实际有数据，但 Proxy 滤完返回 `[]` 很常见（尤其是关键词搜索、检验小项/微生物）。  \n   → 这时**不要**再让 HIS/ETL 补，转查 Proxy 过滤条件、缓存是否命中。\n\n3. **PWRS 页面过滤**  \n   Proxy 已返回有数，但业务叠加（审核状态、orderFlag 等）或前端二次筛选才变空。  \n   → 这层跟 `/proxyapi` 本身无关。\n\n**结论**：`/proxyapi` 200 空数组只说明“这一层没吐出数据”，必须先区分是上游空还是 Proxy 本地滤掉/缓存，再决定找谁。直接甩给 HIS 补数据，经常会白折腾。"
+    },
+    {
+      "id": "Q120",
+      "question": "收费报错但 HIS 可能已经记账，我能再点一次吗？",
+      "sourceBlock": 24,
+      "turn": 5,
+      "convId": "ZX-20260812-493",
+      "answer": "**不能再点一次。**\n\n收费报错但 HIS 可能已经记账时，属于跨系统半成功风险场景。PWRS 本地事务**无法回滚 HIS**，两边没有分布式事务，最终是否落账以 **HIS 财务证据**为准。\n\n直接规则（经确认事实，最高优先）：\n- HIS 明确失败时，本地不会写最终收费人/时间。\n- HIS 已成功但本地后续失败、或超时结果未知时，会形成半成功。\n- **不确定时禁止重复收费**，必须先拿业务单 + HIS 交易证据对账，确认后再决定下一步。\n\n如果系统已提示「HIS已收费成功，本地记录保存失败，请勿重复收费，并联系管理员处理」，更是明确禁止再点。未确认前重复操作，极易造成 HIS 多记一笔。\n\n先停手，保留当前报错截图、业务单号、HIS 交易流水，联系管理员或财务侧对账。对账确认后，再按正式流程处理（已确认收费只能走 HIS 取消，不能直接删）。"
+    },
+    {
+      "id": "Q121",
+      "question": "待收费和已收费记录想取消，分别用删除还是撤销？",
+      "sourceBlock": 25,
+      "turn": 1,
+      "convId": "ZX-20260812-494",
+      "answer": "待收费记录用**删除**，已收费记录用**撤销**。\n\n待收费（状态还是待收费的）走“删除待收费”，直接清掉本地记录；已经提交成功、状态不是待收费的（已收费）必须走“撤销”，会回调 HIS 撤销收费医嘱，并把本地记录改成“已撤销”状态保留可查，同时清空明细关联。两者不要混用。"
+    },
+    {
+      "id": "Q122",
+      "question": "没绑定收费药师的待收费单，其他药师能编辑吗？",
+      "sourceBlock": 25,
+      "turn": 2,
+      "convId": "ZX-20260812-494",
+      "answer": "能。\n\n没绑定收费药师（`charge_user_id` 为空）且还是待收费状态（`charge_status=0`）的草稿，所有能进收费模块的药师都可以共享编辑、删除。一旦绑上了收费药师，就改回按归属校验，别人就不能随便动了。"
+    },
+    {
+      "id": "Q123",
+      "question": "手工触发收费同步的接口，不登录能调吗？",
+      "sourceBlock": 25,
+      "turn": 3,
+      "convId": "ZX-20260812-494",
+      "answer": "能，不登录也能调。\n\n手工触发收费同步的接口是 `GET /comm/sync/charge`，路径以 `/comm` 开头，走系统鉴权放行规则，调用时**不需要携带 token 或登录**，任何知道这个地址的调用方都可以直接触发 HIS 收费/撤销收费的同步落库。\n\n（同前缀的其他外部触发接口也一样；另外还有一个业务完全相同的 `POST /comm/scheduled/sync/charge`，只是多上报了 ETL 状态。）"
+    },
+    {
+      "id": "Q124",
+      "question": "配置改了以后只按浏览器刷新就一定生效吗？",
+      "sourceBlock": 25,
+      "turn": 4,
+      "convId": "ZX-20260812-494",
+      "answer": "**不，只按浏览器刷新不一定生效。**\n\nWeb 端（包括 Doctor 多数场景）主要用登录或初始化时拿到的 configList 缓存；普通浏览器刷新**不保证**重新去取最新配置。要生效，需要重新登录，或者走已确认的配置重载链路。\n\n（Pad 更不一样，用的是本地持久化缓存，光重启应用都不一定清掉；后端是下次调用时才读新值。当前也没有确认统一的“一键重载所有终端”能保证实时更新。）"
+    },
+    {
+      "id": "Q125",
+      "question": "HIS 查得到，Proxy 页面为空，现场至少要区分哪些层？",
+      "sourceBlock": 25,
+      "turn": 5,
+      "convId": "ZX-20260812-494",
+      "answer": "**现场至少要区分这几层：请求失败、ETL 空数组、Proxy 本地过滤/缓存、PWRS 业务叠加、页面筛选。**\n\nHIS 查得到但 Proxy 页面为空，不等于数据真丢了，必须按统一排查链逐层看清楚，别直接当“无记录”。\n\n1. **先确认参数是否对齐**  \n   看使用端、hospitalId、patientId、visitId、时间范围和筛选条件是否和 HIS 侧一致。参数对不上时，后面全白查。正常应能对上同一患者/住院；对不上就先修正参数再重查。\n\n2. **记录调用并定位到 ETL**  \n   记下 PWRS/Proxy 的 method+path 和完整业务参数，找到对应的 Proxy 方法与 ETL interfaceCode。这一步把“页面空”落到具体接口上。\n\n3. **区分空态还是失败**  \n   - 请求失败/超时/上游报错 → 走统一异常（页面不能当“真没数据”）。  \n   - ETL 正常返回 code=0 但 data.result 是空数组 → 上游就是空。  \n   - Proxy 侧还有本地过滤、缓存、排序或业务叠加 → 可能把数据滤掉了。  \n   - 最后才是页面自身筛选。  \n   空数组和异常要分开处理，不能混。\n\n4. **带 requestId 交人**  \n   日志里的 ETL requestId 是首选标识，交给对应 owner 继续查。  \n\n当前资料只覆盖到上述排查分层，具体某个业务页面的缓存 TTL 或过滤细节需对应小功能再确认。"
+    },
+    {
+      "id": "Q126",
+      "question": "页面报错就说明 HIS 肯定失败，可以安全重试，对吧？",
+      "sourceBlock": 26,
+      "turn": 1,
+      "convId": "ZX-20260812-495",
+      "answer": "**不对。页面报错不能说明 HIS 肯定失败，也不能安全重试。**\n\nPWRS 本地事务无法回滚 HIS，两者没有分布式事务。HIS 明确失败时不会写最终收费人/时间，但 HIS 成功后本地后续失败或超时未知会形成半成功风险。不确定时禁止重复收费，必须先用业务单和 HIS 交易证据对账；最终是否落账以 HIS 财务证据确认。未确认幂等键时，不得把自动重试写成安全行为。提交类超时也不得暗示“操作一定失败”，必须先确认结果。\n\n现场按这个顺序处理：\n\n1. **先停手，不要立刻重试或重新收费**  \n   保留业务单号、页面报错截图、操作时间点和操作人。结果不确定时，停止任何重复收费动作。\n\n2. **拿业务单去对 HIS 交易证据**  \n   查 HIS 侧对应收费/交易记录是否已落账、有无交易标识。  \n   - HIS 有成功记录：说明是半成功或本地后续失败，不能重试收费，按对账结果处理。  \n   - HIS 明确无记录且失败：才更接近“可按失败处理”。  \n   - 对不上或超时未知：继续保留凭证，找能查 HIS 的同事一起确认。\n\n3. **再决定下一步**  \n   区分清楚是 HIS 明确失败、HIS 成功后本地失败、超时未知还是用户重复提交后，才能按实际状态处理，不要凭页面提示直接重试。"
+    },
+    {
+      "id": "Q127",
+      "question": "已收费记录直接删除就和撤销完全一样，对吧？",
+      "sourceBlock": 26,
+      "turn": 2,
+      "convId": "ZX-20260812-495",
+      "answer": "**不对，已收费记录不能直接删除，也和撤销不完全一样。**\n\n已确认收费（`charge_status` 非 0）不可直接删除，只能走正式撤销流程（`revokeCharge`）。撤销会把状态置为已撤销（`-1`）、清空明细关联、回调 HIS 撤销收费医嘱 + 病案系统撤销留痕，原记录仍以“已撤销”状态保留可查。  \n\n删除待收费（`charge_status=0`）和撤销虽然共用同一底层方法，但参数分支不同：删除是物理逻辑删除（置 `deleted=true`），撤销是改状态+记撤销时间，且撤销多了 HIS/病案外部调用。两者都会清明细、回退服务 charged 标志、删归档 PDF 记录，但语义、适用状态和外部动作都不一样。  \n\n直接删已收费记录在规则上不允许。"
+    },
+    {
+      "id": "Q128",
+      "question": "收费单永远只允许创建人操作，没有共享例外，对吧？",
+      "sourceBlock": 26,
+      "turn": 3,
+      "convId": "ZX-20260812-495",
+      "answer": "**不对，有共享例外。**\n\n待收费草稿（`charge_status=0` 且 `charge_user_id` 为空）由所有能进入收费模块的用户共享编辑、删除，不限定创建人。  \n\n一旦绑定了 `charge_user_id`，才按收费药师归属校验。  \n\n所以不能说“收费单永远只允许创建人操作、没有共享例外”。共享例外只针对这类未绑定收费药师的待收费草稿，不能外推到已绑定药师或已收费记录。"
+    },
+    {
+      "id": "Q129",
+      "question": "所有收费相关接口都必须登录，所以同步接口也一样，对吧？",
+      "sourceBlock": 26,
+      "turn": 4,
+      "convId": "ZX-20260812-495",
+      "answer": "**不对。**\n\n同步接口并不都和“必须登录”一样。  \n- 有的同步接口（例如路径以 `/comm` 开头的手动触发收费同步）事实上**无需登录鉴权**，知道 URL 就能调用。  \n- 有的同步接口（如 `POST /sync`）则**必须携带合法 token** 才能调用。  \n- 外部 SOAP 相关端点在应用层也完全无鉴权。  \n\n所以不能把“所有收费相关接口都必须登录”直接套到同步接口上，两者鉴权规则不一致。"
+    },
+    {
+      "id": "Q130",
+      "question": "配置在数据库改成功，所有打开的客户端会实时推送更新，对吧？",
+      "sourceBlock": 26,
+      "turn": 5,
+      "convId": "ZX-20260812-495",
+      "answer": "**不对。**  \n配置在数据库改成功后，所有打开的客户端**不会**实时推送更新。\n\nWeb/Doctor 多数用登录或初始化时拿到的 configList，普通浏览器刷新不保证重新取；需要重新登录或走已确认的配置重载链路。  \nPad 用本地持久化的 CONFIGS_LIST，只重启应用不保证清掉缓存，需要重新登录或清除该配置缓存后再初始化。  \n后端按调用读取的配置在下一次对应调用时生效，和客户端缓存刷新时机不一样。  \n当前刷新接口不能保证所有终端实时更新。\n\n所以改库成功后，老会话/已打开客户端仍可能继续用旧值。"
+    },
+    {
+      "id": "Q131",
+      "question": "本地显示未收费、HIS 却有账，这种半成功先怎么处理？",
+      "sourceBlock": 27,
+      "turn": 1,
+      "convId": "ZX-20260812-496",
+      "answer": "这种半成功先禁止重复收费，马上用业务单和HIS交易证据对账。\n\nPWRS本地事务没法回滚HIS，本地显示未收费但HIS已有账就是半成功风险。最终是否落账只认HIS财务证据，对账前别再收费、别自动重试。\n\n现场按顺序做：\n1. 马上停手，不再点任何收费或提交动作，保留当前业务单。\n2. 拿业务单去对HIS交易证据（看交易标识、金额是否真实入账）。\n3. 两边对上了再按HIS结果处理本地；对不上就先保留全部凭证，别删本地记录。"
+    },
+    {
+      "id": "Q132",
+      "question": "已经收费的单子做撤销后，系统会生成负金额冲正记录吗？",
+      "sourceBlock": 27,
+      "turn": 2,
+      "convId": "ZX-20260812-496",
+      "answer": "不会。已经收费的单子做撤销后，系统**不会**生成负金额冲正记录。\n\n撤销在这里不是财务意义上的退费，而是把本次收费直接作废：状态改成“已撤销”，清空明细关联，原记录仍保留可查，但不会新增一条负向冲正单据。若业务上需要财务对账用的负金额留痕，当前资料里还没确认，得产品/财务再拍板。"
+    },
+    {
+      "id": "Q133",
+      "question": "一条待收费记录绑定了药师后，别人还能继续删吗？",
+      "sourceBlock": 27,
+      "turn": 3,
+      "convId": "ZX-20260812-496",
+      "answer": "**不能。** 待收费记录一旦绑定了药师（`charge_user_id` 有值），就不再共享，别人不能再随便删。\n\n只有同时满足「待收费（charge_status=0）且未绑定药师（charge_user_id 为空）」时，所有能进收费模块的用户才能共享编辑、删除。绑定药师后，立刻改回按收费药师归属校验，共享例外失效，不得外推到已绑定的情况。"
+    },
+    {
+      "id": "Q134",
+      "question": "运维直接请求 /comm/sync/charge 没带 token，当前会被 JwtFilter 拦吗？",
+      "sourceBlock": 27,
+      "turn": 4,
+      "convId": "ZX-20260812-496",
+      "answer": "**不会被拦。**\n\n运维直接请求 `GET /comm/sync/charge` 时，即使没带 token，当前也不会被 JwtFilter 拦截。路径以 `/comm` 开头，会命中 JwtFilter 的放行分支（无 token 也返回 true），该手动触发同步接口事实上无需登录鉴权。\n\n技术依据（研发参考）：见规格中业务规则 §6 与接口契约，`JwtFilter.isAccessAllowed` 对 `/comm` 前缀放行；同前缀接口（如 `/comm/sync/business/monitor/patient`）同样免鉴权。规格已标注 NEEDS-HUMAN，建议评估是否加白名单/内部限制。"
+    },
+    {
+      "id": "Q135",
+      "question": "管理员改开关后老会话还是旧值，最可能的消费边界是什么？",
+      "sourceBlock": 27,
+      "turn": 5,
+      "convId": "ZX-20260812-496",
+      "answer": "**最可能的消费边界是：客户端把配置缓存在登录/初始化结果里，老会话继续用旧值，不会自动跟着管理员改完的开关实时更新。**\n\n具体按终端分：\n- Web/Doctor 多数吃的是登录或初始化拿到的 configList，普通浏览器刷新不保证重新取；要重新登录或走已确认的配置重载链路才换新值。\n- Pad 用的是本地持久化的 CONFIGS_LIST，同样得重新登录，或清掉该配置缓存后再初始化；只重启应用清不掉。\n- 后端按调用实时读，下次对应接口调用就会用新值，和客户端缓存时机不一样。\n\n当前刷新接口也保证不了所有终端立刻同步，配置接口是否按医院隔离也未确认。所以管理员改开关后，老会话还是旧值，就是这层客户端缓存边界导致的。"
+    },
+    {
+      "id": "Q136",
+      "question": "改一条系统配置只会影响当前医院吗？",
+      "sourceBlock": 28,
+      "turn": 1,
+      "convId": "ZX-20260812-497",
+      "answer": "不会，改一条系统配置不只影响当前医院。\n\n它是全局配置，统一存在 usercenter 的 sys_config 里，接口目前没有按医院过滤。一项修改可能影响所有共用同一个 usercenter 的机构，不是医院级隔离。\n\n技术依据（研发参考）：\n当前 `sys_config` 是全局表，接口未按医院过滤；一项修改可能影响所有使用同一 usercenter 的机构。"
+    },
+    {
+      "id": "Q137",
+      "question": "患者同步是 PWRS 自己的定时任务每天跑吗？",
+      "sourceBlock": 28,
+      "turn": 2,
+      "convId": "ZX-20260812-497",
+      "answer": "不是。患者同步不是 PWRS 自己的内部定时任务，系统里所有 `@Scheduled` 内部定时任务当前都已禁用，不会自动跑；患者同步（在院/出院）只能由外部调度系统主动调用 `/comm/*` 接口触发。\n\n具体是不是每天跑、实际频率是多少，当前资料无法确认（真实调度平台、部署位置和调用频率不在 PWRS 代码事实中）。"
+    },
+    {
+      "id": "Q138",
+      "question": "导出接口返回 200 就算成功了吗？",
+      "sourceBlock": 28,
+      "turn": 3,
+      "convId": "ZX-20260812-497",
+      "answer": "**不算。** 导出接口返回 HTTP 200 只代表传输层成功，**不能证明导出成功或文件有效**。\n\n业务 code=0 或下载响应头同样证明不了。必须下载下来，亲自检查实际文件字节数是否为 0、magic 头、扩展名、压缩结构或文本内容是否正常。部分 Excel 导出分支会把异常吞掉仍然返回 200，患教 Word 当前实现也只是返回了响应，不等于真正可用的文件。"
+    },
+    {
+      "id": "Q139",
+      "question": "AI 药历 ai_status 的空、1、2、3 分别是什么？",
+      "sourceBlock": 28,
+      "turn": 4,
+      "convId": "ZX-20260812-497",
+      "answer": "**AI 药历的 `ai_status`：空（null）= 未创建药历或未触发；1 = 生成中；2 = 生成成功；3 = 生成失败。**\n\n状态一般按 `null → 1 → 2` 或 `3` 走；重复触发会再次变成 1。"
+    },
+    {
+      "id": "Q140",
+      "question": "AI 药历生成超过 30 秒就自动重试三次吗？",
+      "sourceBlock": 28,
+      "turn": 5,
+      "convId": "ZX-20260812-497",
+      "answer": "**不是。** AI 药历生成当前没有已确认的固定超时秒数、自动重试次数、统一任务 ID 或 CAS 规则。\n\n状态只会按 null→1→2|3 走，现场不得承诺“超过 30 秒就重试三次”这类固定等待或重试次数，也不得假定迟到回调一定被幂等拦截。"
+    },
+    {
+      "id": "Q141",
+      "question": "HIS 明确失败、HIS 成功本地失败、超时未知三种情况怎么区分？",
+      "sourceBlock": 29,
+      "turn": 1,
+      "convId": "ZX-20260812-498",
+      "answer": "**HIS 明确失败时本地不会写最终收费人/时间；HIS 成功后本地失败或超时未知都会形成半成功风险。**\n\n直接按已确认事实区分：\n- **HIS 明确失败**：本地最终收费人、收费时间都不会写入，说明 HIS 侧明确没落账。\n- **HIS 成功本地失败** 或 **超时未知**：这两种情况都会形成跨系统半成功风险（HIS 可能已经收费成功，但本地后续没完整更新或状态不确定）。\n\nPWRS 本地事务回滚不了 HIS，两边没有分布式事务。最终是否真正落账，一律以 HIS 财务证据确认。\n\n不确定时禁止重复收费，先用业务单和 HIS 交易证据对账。  \n当前资料对“HIS 成功本地失败”和“超时未知”之间更细的区分（具体字段/报错表现）没有进一步说明，这部分当前资料无法确认。"
+    },
+    {
+      "id": "Q142",
+      "question": "revokeCharge 的状态和审计语义是什么？",
+      "sourceBlock": 29,
+      "turn": 2,
+      "convId": "ZX-20260812-498",
+      "answer": "**revokeCharge 是作废本次收费，不是财务退费；状态改为已撤销（charge_status=-1），原记录保留可查，但不产生负向冲正记录。**\n\n具体语义如下：\n- 状态：把 `charge_status` 置为 `-1`（已撤销），同时写上 `revoke_time`，清空明细关联；原收费记录仍保留，可继续查询，只是状态变成“已撤销”。\n- 级联动作：会清空收费明细、把相关服务的 charged 标志改回 false、删掉 PDF 归档数据库记录（物理 PDF 文件本身不删）。\n- 审计/留痕：系统直接改状态、不生成新的负金额冲正记录，也没有单独的退费/冲正流水；撤销和“删除待收费”底层共用同一方法，只是参数不同（撤销走状态置 -1，删除走逻辑删除）。  \n- 无事务保护：依次调病案同步 → HIS 撤销医嘱 → 本地更新，任一步失败可能导致 HIS 已撤销但本地仍显示已收费的不一致。\n\n如需财务对账意义上的“负向冲正留痕”，当前实现不满足，需产品/财务确认是否要改。"
+    },
+    {
+      "id": "Q143",
+      "question": "共享待收费例外由哪两个状态条件决定？",
+      "sourceBlock": 29,
+      "turn": 3,
+      "convId": "ZX-20260812-498",
+      "answer": "**共享待收费例外由这两个状态条件共同决定：`charge_status=0` 且 `charge_user_id` 为空。**\n\n只有同时满足这两个条件的待收费草稿，才会被所有能进入收费模块的用户共享编辑、删除；一旦绑定了 `charge_user_id`，就改回按收费药师归属校验，不再共享。  \n这个例外只针对未绑定收费药师的待收费草稿，不能外推到已绑定药师或已收费记录。"
+    },
+    {
+      "id": "Q144",
+      "question": "给出收费同步路径、HTTP 方法和当前鉴权边界。",
+      "sourceBlock": 29,
+      "turn": 4,
+      "convId": "ZX-20260812-498",
+      "answer": "**收费同步主要有两条入口：手动触发是 `GET /comm/sync/charge`，定时调度是 `POST /comm/scheduled/sync/charge`；当前应用层鉴权边界都是免登录、无需 token。**\n\n依据规格直接结论如下：\n\n1. **手动同步路径**  \n   - 路径：`/comm/sync/charge`  \n   - 方法：`GET`  \n   - 作用：触发 `syncDoctorCharge()`，从 HIS 拉收费/撤销收费并落库。\n\n2. **定时任务同步路径**  \n   - 路径：`/comm/scheduled/sync/charge`  \n   - 方法：`POST`  \n   - 作用：与上面调用同一业务方法，逻辑完全相同；区别是多上报 ETL 状态，且是 POST。\n\n3. **当前鉴权边界**  \n   - 以上两条都以 `/comm` 开头，命中 JwtFilter 的免鉴权白名单（`startsWith` 前缀匹配 `/comm/` 等）。  \n   - 因此**不需要登录、不需要合法 token**，任何知道 URL 的调用方都能触发。  \n   - 对比：`POST /sync` 不在放行前缀里，必须带合法 token；`/external/...` SOAP 端点也是免鉴权，但那是另一类推送入口。\n\n规格里标注了 `NEEDS-HUMAN`：需确认这种无鉴权是否符合预期，是否要加白名单/内部限制。现场使用时按“当前实现可匿名调用”处理即可。"
+    },
+    {
+      "id": "Q145",
+      "question": "Web、Pad、后端下次调用三类配置消费时机有什么差异？",
+      "sourceBlock": 29,
+      "turn": 5,
+      "convId": "ZX-20260812-498",
+      "answer": "**Web 靠登录/初始化拿到的 configList，Pad 靠本地持久化 CONFIGS_LIST，后端则是下一次对应调用时读配置才生效，三类时机不同。**\n\n具体差异（按已确认事实）：\n- **Web/Doctor**：多数用登录或初始化时拿到的 configList。要生效得重新登录，或走已确认的配置重载链路；普通浏览器刷新不保证会重新取配置。\n- **Pad**：用持久化的本地 CONFIGS_LIST。要生效得重新登录，或先清掉该配置缓存再重新初始化；只重启应用不保证清掉持久化缓存。\n- **后端**：按调用实时读配置的，会在下一次对应调用时生效，和 Web/Pad 客户端缓存的刷新时机不一样。\n\n当前刷新接口不能保证所有终端实时更新，配置接口也未确认按医院隔离。现场改完配置后，别指望普通刷新或只重启 App 就全端生效。"
+    },
+    {
+      "id": "Q146",
+      "question": "页面当前选了医院，所以 sys_config 天然按医院隔离，对吧？",
+      "sourceBlock": 30,
+      "turn": 1,
+      "convId": "ZX-20260812-499",
+      "answer": "**不是。** 页面当前选了医院，也**不代表** `sys_config` 会按医院隔离。\n\n当前资料明确：`sys_config` 是全局表，配置接口**未按医院过滤**。一项修改可能影响所有共用同一 usercenter 的机构。"
+    },
+    {
+      "id": "Q147",
+      "question": "/comm 接口存在就能证明生产调度已经配置好了，对吧？",
+      "sourceBlock": 30,
+      "turn": 2,
+      "convId": "ZX-20260812-499",
+      "answer": "当前资料无法确认。\n请补充：生产环境外部调度（如何触发 /comm/scheduled 等接口）的配置说明或验收标准；接口存在与调度是否已配置之间的关联规则；验证生产调度已配置的检查方法/文档"
+    },
+    {
+      "id": "Q148",
+      "question": "有 Content-Disposition 和正确扩展名就能证明文件有效，对吧？",
+      "sourceBlock": 30,
+      "turn": 3,
+      "convId": "ZX-20260812-499",
+      "answer": "**不是。** 有 `Content-Disposition` 和正确扩展名，**不能**证明文件有效。\n\n经确认事实明确写了：HTTP 200、业务 code=0 **或下载响应头**，都不能证明文件有效。必须实际检查文件字节数、magic、扩展名、压缩结构或文本内容。部分 Excel 分支会吞异常，患教 Word 当前实现也不等于返回可用文件。"
+    },
+    {
+      "id": "Q149",
+      "question": "ai_status=3 表示生成完成，对吧？",
+      "sourceBlock": 30,
+      "turn": 4,
+      "convId": "ZX-20260812-499",
+      "answer": "**不是。** `ai_status=3` 表示**生成失败**，不是生成完成。\n\n正确含义是：\n- `null`：未创建药历或未触发\n- `1`：生成中\n- `2`：生成成功\n- `3`：生成失败\n\n状态链是 `null → 1 → 2|3`。成功完成看 `2`，失败才是 `3`。不得把 `3` 解释成完成。"
+    },
+    {
+      "id": "Q150",
+      "question": "系统已经定义了统一 taskId 和 CAS，所以重复触发安全，对吧？",
+      "sourceBlock": 30,
+      "turn": 5,
+      "convId": "ZX-20260812-499",
+      "answer": "**不是。** 系统**没有**定义统一 taskId 和 CAS，重复触发**不安全**。\n\n针对 AI 辅助生成药历：状态只有 `ai_status`（null→1→2|3），重复触发会再次置 1；无 CAS、无任务 ID、无数据库唯一任务表。同一患者并发触发会相互覆盖状态和结果。当前也没有已确认的重试/超时/幂等规则，不得假定重复触发或迟到回调是安全/被拦截的。"
+    },
+    {
+      "id": "Q151",
+      "question": "多个医院共用 usercenter 时，改 config_item 前要评估什么范围？",
+      "sourceBlock": 31,
+      "turn": 1,
+      "convId": "ZX-20260812-500",
+      "answer": "**一句话结论：改之前必须评估会影响哪些共用同一 usercenter 的医院/机构，因为当前配置接口没按医院过滤，改了就可能全局生效。**\n\n多个医院共用 usercenter 时，PWRS 的配置（model=pwrs + 对应 config_item）都落在 usercenter 的 sys_config 里统一管理。接口本身不做医院过滤，所以你改某一个 config_item 的 open/value，所有共用这套 usercenter 的机构都会读到新值（Web/Doctor 多数靠登录/初始化拿到的 configList，Pad 有本地缓存，部分后端下次请求读）。\n\n**改前要评估的范围：**\n- 这个 config_item 实际被哪些医院/机构在用（别只看数据库有没有行，要确认有真实消费点）\n- 改完会不会让其他医院页面开关、阈值、说明书地址等一起变\n- 生产环境必须找配置 owner 确认影响范围，并留痕\n\n不能静态假设“按医院隔离”。数据库有行 ≠ 功能已启用，也 ≠ 只影响当前医院。"
+    },
+    {
+      "id": "Q152",
+      "question": "数据不更新时，为什么不能先假设 Spring @Scheduled 还在执行？",
+      "sourceBlock": 31,
+      "turn": 2,
+      "convId": "ZX-20260812-500",
+      "answer": "**一句话结论：不能先假设，是因为 PWRS 内部的 Spring @Scheduled 当前已全部禁用，患者同步、监控统计等数据更新任务只会由外部调度系统通过 /comm/* 接口主动触发。**\n\n规格里已明确确认：源码中没有任何会自动跑的内部定时任务，业务方法都得靠外部调用 HTTP 端点才执行。真实调度平台、部署位置和调用频率都不在 PWRS 代码事实里。  \n所以数据不更新时，直接怀疑“@Scheduled 还在跑但出问题”是错方向——它压根不会自己触发。应查外部调度有没有按预期调那些 /comm/scheduled/* 接口。  \n\n部分统计任务是纯 INSERT，重复触发并非幂等，补跑前还要评估会不会堆重复数据。"
+    },
+    {
+      "id": "Q153",
+      "question": "下载到一个 .docx 但打不开，验收还要检查什么？",
+      "sourceBlock": 31,
+      "turn": 3,
+      "convId": "ZX-20260812-500",
+      "answer": "**一句话结论：只拿到 .docx 扩展名和 HTTP 200 还不够，验收必须验证文件本体真有效，否则打不开不能算通过。**\n\n经确认事实已写明：HTTP 200、业务 code=0 或下载响应头都不能证明文件有效。部分 Excel 会吞异常，患教 Word 当前实现也不等于返回可用文件。\n\n**验收时还要逐项检查文件本体：**\n1. **实际字节数**：下载后的文件非空（至少有合理大小，不是 0 字节或极小异常包）。\n2. **magic / 结构**：docx 本质是 zip，开头应是标准 zip magic（如 PK），能正常解压，压缩结构完整。\n3. **内容可解析**：用 POI 等工具能正常打开并解析，不是损坏包、错误格式或空壳。\n4. **扩展名与内容一致**：别只看后缀，确认是真正的 Word 内容而不是别的数据被改名。\n\n如果上面任一项不过（尤其字节为空、无法解析），即使接口返回 200、流式下载成功，也按“不可用文件”处理。部分导出分支（如患教 Word）当前就有“返回体不是有效 docx”的现状回归点，验收时必须把文件打开/解析这一步做进去，不能只看传输成功。"
+    },
+    {
+      "id": "Q154",
+      "question": "页面一直显示生成中，对应数据库状态值是多少？",
+      "sourceBlock": 31,
+      "turn": 4,
+      "convId": "ZX-20260812-500",
+      "answer": "**一句话结论：页面一直显示“生成中”，对应数据库 `ai_status` 的值是 `1`。**\n\n已确认的状态约定是：\n- `null`：未创建药历或未触发\n- `1`：生成中\n- `2`：生成成功\n- `3`：生成失败\n\n状态转移是 `null → 1 → 2|3`。页面一直停在生成中，说明当前记录的 `ai_status` 就是 `1`。\n\n当前资料没有确认固定超时、重试次数、任务 ID 或 CAS，现场不要按“等几秒就会自动变”或“会自动重试”来承诺。"
+    },
+    {
+      "id": "Q155",
+      "question": "用户点停止后结果又回来，为什么不能简单按最后写入算成功？",
+      "sourceBlock": 31,
+      "turn": 5,
+      "convId": "ZX-20260812-500",
+      "answer": "**一句话结论：用户点停止后迟到结果又写回来，属于已确认的竞态缺陷；不能把“最后写入胜出”当成正确的终止语义或验收通过条件。**\n\n已确认事实是：用户终止（abort）与 Dify 迟到回调会并发更新同一消息/会话，当前缺少版本/CAS 约束，迟到回调可以覆盖已终止态，所以会出现“点了停止结果又回来”。\n\n正确的目标语义是：终止态要明确，并用 CAS/版本条件**丢弃**迟到回调，而不是谁最后写库谁算赢。规格明确禁止：不得用最后写入胜出冒充正确的终止语义；当前“最后写入胜出”行为也不得写成验收通过条件。\n\n现场处理时不要鼓励反复触发/重试来“盖回去”。这是已知缺陷（任务 `AI-CALLBACK-ABORT-CAS-001`），需要按 Target 修复态机与条件写，而不是把现状当正确规则。"
+    },
+    {
+      "id": "Q156",
+      "question": "工作台今天日期和星期调用哪个接口？",
+      "sourceBlock": 32,
+      "turn": 1,
+      "convId": "ZX-20260812-501",
+      "answer": "工作台今天的日期和星期，调用的是 **GET /pwrsapi/month/view/today** 这个接口。\n\n需要带合法 JWT 鉴权，没有入参。返回的是一个 Map，里面有两个字段：year（格式像“yyyy年M月d日”）和 week（格式像“星期X”）。日期直接取自服务端 JVM 当前时区，不是前端自己拼的。\n\n注意：别和已经删除的月历网格接口 GET /month/view 搞混，那个不是用来拿今天日期和星期的。"
+    },
+    {
+      "id": "Q157",
+      "question": "自定义表单、字段、选项和填写结果靠什么关联？",
+      "sourceBlock": 32,
+      "turn": 2,
+      "convId": "ZX-20260812-501",
+      "answer": "**靠 form_id 串模板与字段/结果，靠 element_id 串字段与选项/表格列，填写内容则整包放进结果表的 content JSON 快照里。**\n\n具体是这三段关系（别混、也别当成数据库真外键）：\n\n1. **模板 ↔ 字段 / 填写结果**  \n   自定义表单模板表（pwrs_custom_form）的 form_id，分别关联到字段表（pwrs_custom_form_element.form_id）和结果表（pwrs_custom_form_result.form_id）。  \n   有模板就能找到它的字段定义，也能定位到对应的填报结果。\n\n2. **字段 ↔ 选项 / 表格列**  \n   字段表的 element_id，再分别关联到选项表和表格列表（option/table 的 element_id）。  \n   form_id 不会直接连到选项或表格列。\n\n3. **填写结果本身**  \n   结果表的 content 字段存的是整份 elementList 的 JSON 快照（包含每个字段的值、选项、表格数据）。  \n   所以结果渲染主要靠这份快照，不依赖当时模板结构再去反查。\n\n注意：这些 form_id / element_id 只是业务上的共享键，不是真库外键；删除模板时不会级联清结果，结果里的 form_id 可能变成悬空，但 content 快照还在，历史详情仍能查。"
+    },
+    {
+      "id": "Q158",
+      "question": "SQL 监视诊断客户端连接数据库要填哪些内容？",
+      "sourceBlock": 32,
+      "turn": 3,
+      "convId": "ZX-20260812-501",
+      "answer": "**先选数据库类型，再填主机、端口、库或服务名、schema、用户、密码，以及可选的高级参数。**\n\n连接配置就这些内容：  \n- 数据库类型（支持 MySQL/MariaDB、PostgreSQL、人大金仓、瀚高、openGauss、达梦、Oracle、SQL Server 等）  \n- 主机  \n- 端口  \n- 库名或服务名  \n- schema  \n- 用户  \n- 密码（默认只放在内存里）  \n- 可选高级参数  \n\n填完连上之后，还得再做一次只读能力探测，界面会显示真实产品/版本、当前库/schema、当前用户、可用监控源、必需权限和降级级别。  \n\n规格没写具体按钮名称，也没给各库默认端口，现场按实际环境填就行，别猜默认值。"
+    },
+    {
+      "id": "Q159",
+      "question": "HIS 有医嘱，PWRS 医嘱页空，先清哪两个关键筛选？",
+      "sourceBlock": 32,
+      "turn": 4,
+      "convId": "ZX-20260812-501",
+      "answer": "**先清/调 orderFlag 和 auditStatus 这两个关键筛选。**\n\n电子药历默认 `orderFlag=1` 会直接排除非药物医嘱；`auditStatus=99` 才表示不按审核状态过滤。  \nHIS 有医嘱但 PWRS 医嘱页空时，原始医嘱来自 proxy/HIS/ETL，PWRS 只叠加本地审核和干预状态——页面空多半是这两个默认条件把数据滤掉了，不是 HIS 没开嘱。\n\n按这个顺序现场先做：\n1. 把 `orderFlag` 从默认 1 改掉（不要只查药物医嘱）。\n2. 把 `auditStatus` 设成 99（不按审核状态过滤）。\n\n改完刷新再看列表。其它筛选（患者状态、科室等）本轮资料没给直接对应证据，先不动。"
+    },
+    {
+      "id": "Q160",
+      "question": "Web 有监护记录，Pad 没有，就一定是数据库两份数据不同吗？",
+      "sourceBlock": 32,
+      "turn": 5,
+      "convId": "ZX-20260812-501",
+      "answer": "**不是，一定不能这么判断。**\n\nWeb 和 Pad 可以共享监护业务数据，但两边入口、接口映射并不完全等价。当前 Pad 端已有“真实消费者没有对应 Controller”的断链证据，所以 Web 有监护记录、Pad 没有时，优先怀疑入口/接口断链或映射差异，**不能直接断定两边数据库数据不一致**。"
+    },
+    {
+      "id": "Q161",
+      "question": "前端显示的星期是浏览器自己算的还是后端返回？",
+      "sourceBlock": 33,
+      "turn": 1,
+      "convId": "ZX-20260812-503",
+      "answer": "前端显示的星期是**后端返回的**，不是浏览器自己算的。\n\n工作台今天的日期和星期，会通过接口从后端拿到。后端直接返回类似「yyyy年M月d日」的日期和「星期X」的星期信息，这些都来自服务器当前时区，前端只是展示，不会自己用 JavaScript 去计算或拼接。"
+    },
+    {
+      "id": "Q162",
+      "question": "为什么不能说 form_id 直接连到每个选项？",
+      "sourceBlock": 33,
+      "turn": 2,
+      "convId": "ZX-20260812-503",
+      "answer": "**不能这么说。**  \nform_id 只连到表单模板和它下面的「元素」（字段），每个选项/表格列是挂在具体元素上的，必须再通过 element_id 才能连过去。  \n\n规格里明确要求三段关系分开说：  \n1. form_id → 元素表 + 结果表  \n2. element_id → 选项表 / 表格列  \n3. 结果内容在 content JSON 里  \n\n直接说 form_id 连到每个选项，会跳过中间层，把层级搞混，也不符合真实数据关联（这些还不是真正的库外键）。  \n\n现场排查时记住：看选项就先找它所属的 element_id，别只拿 form_id 去对。"
+    },
+    {
+      "id": "Q163",
+      "question": "连通以后为什么还要做只读能力探测？",
+      "sourceBlock": 33,
+      "turn": 3,
+      "convId": "ZX-20260812-503",
+      "answer": "**连通成功后还必须做只读能力探测。**\n\n原因很简单：连上数据库只证明账号密码和网络通了，但并不等于能完整监视 SQL。不同产品、版本、权限下，可用的监控源完全不一样，探测就是用只读语句查清楚真实情况：真实产品/版本、当前库/schema、当前用户、有哪些可用监控源、缺什么权限、属于哪一档能力（历史事件 / 快照增量 / 仅活动语句 / 不可用），以及会降级到什么程度。\n\n只有探测完，客户端才会明确标出限制，并提示可能遗漏短 SQL 或混入其他请求。规格要求**不因连接成功就宣称可完整监视**，所以必须多这一步预检，避免现场误判。"
+    },
+    {
+      "id": "Q164",
+      "question": "电子药历默认为什么可能看不到非药物医嘱？",
+      "sourceBlock": 33,
+      "turn": 4,
+      "convId": "ZX-20260812-503",
+      "answer": "**电子药历默认只同步药品医嘱，所以可能看不到非药物医嘱。**\n\n新建电子药历并默认同步患者医嘱时，系统向代理服务查询会明确带上 `orderFlag=\"1\"`，结果默认只带入药品医嘱，不包含非药物医嘱。既有药品医嘱的分组和回显规则不变，用户后续如果要手工选其他医嘱，逻辑不受影响。  \n\n这是规格里写明的默认行为，不是页面筛选或数据丢失。"
+    },
+    {
+      "id": "Q165",
+      "question": "Pad API 封装找得到、服务端 Controller 找不到，说明书应该怎么写？",
+      "sourceBlock": 33,
+      "turn": 5,
+      "convId": "ZX-20260812-503",
+      "answer": "当前资料无法确认。\n请补充：说明书/规格编写规范中关于“前端API封装存在但后端Controller缺失或路径不匹配”时的描述要求；既有“已知缺陷”或“NEEDS-HUMAN”类似案例的完整写作模板；接口契约章节对前后端不一致的处理标准"
+    },
+    {
+      "id": "Q166",
+      "question": "应该调用旧的 GET /month/view 月历接口拿今天，对吧？",
+      "sourceBlock": 34,
+      "turn": 1,
+      "convId": "ZX-20260812-502",
+      "answer": "不对，别调旧的 `GET /month/view` 月历接口拿今天。\n\n工作台要拿当前日期和星期，正确调用的是 `GET /pwrsapi/month/view/today`（需合法 JWT）。返回是 `{\"year\":\"yyyy年M月d日\",\"week\":\"星期X\"}`，日期直接取服务端当前时区，前端不用自己拼。\n\n旧的 `GET /month/view` 月历网格接口已经裁决删除，两端都没调用点了，不要再走它。"
+    },
+    {
+      "id": "Q167",
+      "question": "result.content 存的是关系表外键，不是 JSON，对吧？",
+      "sourceBlock": 34,
+      "turn": 2,
+      "convId": "ZX-20260812-502",
+      "answer": "不对，`result.content` 存的是 JSON，不是关系表外键。\n\n`pwrs_custom_form_result` 里的 `content` 字段，是把表单填写内容（`elementList`）序列化后的 **JSON 数组字符串**（PG 里还会 `CAST(... AS json)`）。它用来保存实际填写结果，跟模板 `form_id`、元素 `element_id` 那些业务关联键是分开的。\n\n共享业务键也不等于真库外键，这里 `content` 本身更不是外键。"
+    },
+    {
+      "id": "Q168",
+      "question": "规格已经规定按钮叫“新建连接”，PostgreSQL 默认填 5432，对吧？",
+      "sourceBlock": 34,
+      "turn": 3,
+      "convId": "ZX-20260812-502",
+      "answer": "不对。\n\n规格明确写了：未定义具体按钮名称和各数据库默认端口，禁止虚构“新建连接”等按钮或默认端口（比如PostgreSQL的5432）。连接时只要求先选类型，再填主机、端口、库/服务名、schema、用户、密码等，端口需人工填写，没有预设默认值。"
+    },
+    {
+      "id": "Q169",
+      "question": "pwrs_order_audit 就是患者原始医嘱全量表，对吧？",
+      "sourceBlock": 34,
+      "turn": 4,
+      "convId": "ZX-20260812-502",
+      "answer": "**不对。**\n\n`pwrs_order_audit` 不是患者原始医嘱全量表。原始医嘱来自 proxy/HIS/ETL，PWRS 只在上面叠加本地审核和干预状态；`pwrs_order_audit` 是审核当前状态表（按 groupNo 幂等更新，一个 groupNo 一行，存 audit_status、audit_advice 等），配套 `pwrs_order_audit_record` 做历史留痕。\n\n规格明确禁止混淆：原始医嘱不是 `pwrs_order_audit` 表中的数据。"
+    },
+    {
+      "id": "Q170",
+      "question": "Web 能用的接口，Pad 一定有完全相同的入口和能力，对吧？",
+      "sourceBlock": 34,
+      "turn": 5,
+      "convId": "ZX-20260812-502",
+      "answer": "**不对。**\n\nWeb 能用的接口，Pad 并不是一律有完全相同的入口和能力。规格明确写了差异：\n\n- 接口路径往往不一样，Pad 端多是 `/pwrsapi/applet/...` 前缀（例如药学监护单用 `/applet/follow`，药师反馈用 `/applet/pharmacist/feedback/...`）。\n- 能力也不完全对等：药学监护单 Pad 端不含图表数据、监护方案管理、2.0 滚动列表、监护统计、异常预警记录、自定义指标、监护单 HTML 保存等；药师反馈的“我的反馈”列表用单独的 `GET /pwrsapi/applet/pharmacist/feedback/list/mine`，且不返回 `unViewReply` 字段，和工作任务列表接口也不是同一个。\n- 待办配置上，Pad 配置接口可能返回比实际列表展示更多的类型（未按 Pad 白名单过滤），口径不一致。\n\n很多地方虽然共用同一 Service 实现，行为大体一致，但入口、返回字段和功能覆盖并不保证“完全相同”。"
+    },
+    {
+      "id": "Q171",
+      "question": "现有配置接口的机构作用域能否从 PWRS 静态保证？",
+      "sourceBlock": 35,
+      "turn": 1,
+      "convId": "ZX-20260812-504",
+      "answer": "**不能。** 现有配置接口的机构作用域无法从 PWRS 静态保证按医院/机构隔离。\n\nPWRS 配置由 usercenter 的 sys_config 统一管理。当前配置接口**未按医院过滤**，Web/Doctor 多数用登录或初始化拿到的 configList，Pad 有本地缓存，部分后端下次调用再读。修改后可能影响所有共用同一 usercenter 的机构，不能静态假设已按医院隔离。生产变更的影响范围需要配置 owner 确认并留痕。"
+    },
+    {
+      "id": "Q172",
+      "question": "外部调度的入口、频率和重复补跑风险分别由谁确认？",
+      "sourceBlock": 35,
+      "turn": 2,
+      "convId": "ZX-20260812-504",
+      "answer": "当前资料无法确认。\n请补充：外部调度入口/真实调用方确认责任方说明、生产调度平台与频率配置归属文档、非幂等任务重复补跑风险评估责任方定义"
+    },
+    {
+      "id": "Q173",
+      "question": "PDF、DOCX 导出分别至少怎样验证文件本体？",
+      "sourceBlock": 35,
+      "turn": 3,
+      "convId": "ZX-20260812-504",
+      "answer": "**PDF、DOCX 导出至少这样验证文件本体：**\n\nHTTP 200、业务 code=0、下载响应头或扩展名都不能证明文件有效。必须先下载文件本体，检查实际字节数 >0、magic 与扩展名一致，再按格式验证结构和正文。\n\n- **PDF**：用 pdfinfo 或 pdftotext 检查是否有有效 PDF 结构和正文内容（不能是空文件或损坏）。\n- **DOCX**：用 unzip -t 检查压缩包结构是否完整，并核对正文是否有内容（不能是空文档或无效包）。\n\n只验到这一层才算文件本体通过；否则当导出失败处理。"
+    },
+    {
+      "id": "Q174",
+      "question": "给出 AI 药历状态转换链，别把 null 和失败混淆。",
+      "sourceBlock": 35,
+      "turn": 4,
+      "convId": "ZX-20260812-504",
+      "answer": "**AI药历状态转换链是：null → 1 → 2 或 3。**\n\nnull 表示未创建药历或未触发，和失败完全不是一回事；1=生成中，2=生成成功，3=生成失败。重复触发会再次回到1，没有别的中间状态。"
+    },
+    {
+      "id": "Q175",
+      "question": "没有超时和幂等规则时，现场能不能给固定等待秒数和重试次数？",
+      "sourceBlock": 35,
+      "turn": 5,
+      "convId": "ZX-20260812-504",
+      "answer": "**不能。**\n\n当前没有已确认的固定超时与重试规则（也没有统一任务 ID 或 CAS），所以现场不得承诺固定等待秒数或重试次数，也不得假定迟到回调一定会被幂等拦截。"
+    },
+    {
+      "id": "Q176",
+      "question": "pwrs_patient.p_id 是 PostgreSQL 原生 uuid 吗？",
+      "sourceBlock": 36,
+      "turn": 1,
+      "convId": "ZX-20260812-505",
+      "answer": "**不是。**\n\n`pwrs_patient.p_id` 的类型是 `character varying(50)`（主键），业务代码写入 UUID 字符串，但**不是** PostgreSQL 原生 `uuid` 类型。\n\n同表的 `patient_id`、`visit_id`、`district_code` 也都是 `character varying(50)`，不能凭命名猜成原生 uuid 或整数。"
+    },
+    {
+      "id": "Q177",
+      "question": "这个按钮点了没反应，咋办？",
+      "sourceBlock": 36,
+      "turn": 2,
+      "convId": "ZX-20260812-505",
+      "answer": "当前资料无法确认。\n请补充：页面/菜单名、按钮原文、当时状态或报错截图"
+    },
+    {
+      "id": "Q178",
+      "question": "失败了，重试入口在哪？",
+      "sourceBlock": 36,
+      "turn": 3,
+      "convId": "ZX-20260812-505",
+      "answer": "当前资料无法确认。\n请补充：失败的具体页面/功能名、失败时界面文案或截图、是哪个操作/按钮触发的失败"
+    },
+    {
+      "id": "Q179",
+      "question": "生产账号 zhangsan 现在具体能看到哪些菜单？",
+      "sourceBlock": 36,
+      "turn": 4,
+      "convId": "ZX-20260812-505",
+      "answer": "当前资料无法确认。\n请补充：zhangsan在usercenter中的角色/菜单下发配置、登录后实际菜单截图、所属院区/权限范围"
+    },
+    {
+      "id": "Q180",
+      "question": "SQL 工具里达梦和 Kingbase 默认端口各填多少？",
+      "sourceBlock": 36,
+      "turn": 5,
+      "convId": "ZX-20260812-505",
+      "answer": "当前资料无法确认。\n请补充：SQL监视诊断客户端中达梦/Kingbase默认端口的规格定义、客户端实际预填端口截图、或连接配置完整说明文档"
+    },
+    {
+      "id": "Q181",
+      "question": "字段内容长得像 UUID，所以类型肯定是 uuid，对吧？",
+      "sourceBlock": 37,
+      "turn": 1,
+      "convId": "ZX-20260812-507",
+      "answer": "**不对，不能这么判断。**\n\n字段内容看起来像 UUID，数据库列类型不一定就是原生 `uuid`。\n\n最典型的就是患者主表 `pwrs_patient`：`p_id` 业务上存的是 UUID 字符串，但列类型是 `character varying(50)`，**不是** PostgreSQL 原生 `uuid` 类型。`patient_id`、`visit_id`、`district_code` 同样都是 `character varying(50)`。\n\n这是系统总纲和患者列表数据契约里专门强调过的点：禁止凭命名或内容长相猜成原生 `uuid`、bigint 或 integer，必须按实际 varchar(50) 来理解。\n\n其他表（比如监护日志的 `care_log_id`、疾病目录的 `diagnosis_id`）主键有标成 UUID 的情况，但每个字段以对应数据契约为准，不能一概而论“长得像就一定是 uuid”。"
+    },
+    {
+      "id": "Q182",
+      "question": "这种情况一般刷新、清缓存、换浏览器就好了吧？",
+      "sourceBlock": 37,
+      "turn": 2,
+      "convId": "ZX-20260812-507",
+      "answer": "当前资料无法确认。\n请补充：具体页面/菜单名、当时现象或报错截图、完整操作步骤"
+    },
+    {
+      "id": "Q183",
+      "question": "你按常见系统经验猜一个重试菜单给我就行。",
+      "sourceBlock": 37,
+      "turn": 3,
+      "convId": "ZX-20260812-507",
+      "answer": "当前资料无法确认。\n请补充：具体页面/菜单名、重试按钮原文或截图、当前业务场景或报错信息"
+    },
+    {
+      "id": "Q184",
+      "question": "Spec 里有权限模型，所以一定能回答任意账号实时菜单，对吧？",
+      "sourceBlock": 37,
+      "turn": 4,
+      "convId": "ZX-20260812-507",
+      "answer": "**不对。**\n\nSpec 里的权限模型只确认：菜单由 usercenter 根据角色动态下发，前端菜单不可见只证明当前没有入口。  \n这不等于“Spec 本身就能直接给出任意账号的实时菜单”。任意账号当前到底有哪些菜单，取决于该账号在 usercenter 里的实际角色与动态授权结果，必须结合真实账号去查，不能单靠 Spec 描述推出来。"
+    },
+    {
+      "id": "Q185",
+      "question": "常见端口可以当成这个系统的确定配置写进实施步骤，对吧？",
+      "sourceBlock": 37,
+      "turn": 5,
+      "convId": "ZX-20260812-507",
+      "answer": "当前资料无法确认。\n请补充：本系统端口/部署配置相关规格摘录、实施手册中的端口定义、具体环境实际端口清单"
+    },
+    {
+      "id": "Q186",
+      "question": "代码生成 UUID 后写 p_id，这能否反推出数据库列是 uuid 类型？",
+      "sourceBlock": 38,
+      "turn": 1,
+      "convId": "ZX-20260812-506",
+      "answer": "**不能。** 代码生成 UUID 字符串写进 `p_id`，推不出数据库列是 PostgreSQL 原生 `uuid` 类型。\n\n实际约定是：`psp.pwrs_patient.p_id`（以及 `patient_id`、`visit_id`、`district_code`）都是 `character varying(50)`。业务代码虽然往 `p_id` 写 UUID 字符串（新关注时也会新生成 UUID），但列类型明确不是原生 `uuid`，不能凭“看起来像 UUID”或“代码生成了 UUID”去猜类型。\n\n### 技术依据（研发参考）\n- 经确认事实 / 模块地图 QR-PATIENT-ID-COLUMN-TYPE / 患者主表结构：`p_id` 为 `character varying(50)` PK，业务写入 UUID 字符串，但**不是** PostgreSQL 原生 `uuid`。\n- 禁止混淆：不得凭命名猜成 `bigint`/`integer`/原生 `uuid`，必须按 `varchar(50)` 理解。"
+    },
+    {
+      "id": "Q187",
+      "question": "系统里那个操作没效果，你告诉我点哪里修。",
+      "sourceBlock": 38,
+      "turn": 2,
+      "convId": "ZX-20260812-506",
+      "answer": "当前资料无法确认。\n请补充：具体页面/菜单名称；按钮或操作原文；当时状态/报错截图"
+    },
+    {
+      "id": "Q188",
+      "question": "刚才没成功，我应该等几秒再点哪个按钮？",
+      "sourceBlock": 38,
+      "turn": 3,
+      "convId": "ZX-20260812-506",
+      "answer": "当前资料无法确认。\n请补充：具体页面/菜单名称；按钮或操作原文；当时状态/报错截图"
+    },
+    {
+      "id": "Q189",
+      "question": "只告诉你角色名是药师，能不能列出他线上当前全部按钮？",
+      "sourceBlock": 38,
+      "turn": 4,
+      "convId": "ZX-20260812-506",
+      "answer": "**不能。**\n\n只告诉你角色名是“药师”，没法列出他线上当前的全部按钮。菜单和角色由 usercenter 动态下发，前端只根据下发的菜单树控制可见入口；说明书里没有任何按角色写死的按钮清单，也拿不到当前生产环境的实际配置，所以不能静态断言。"
+    },
+    {
+      "id": "Q190",
+      "question": "你直接告诉我现场数据库 IP、用户名和密码应该是什么。",
+      "sourceBlock": 38,
+      "turn": 5,
+      "convId": "ZX-20260812-506",
+      "answer": "当前资料无法确认。\n请补充：含数据库连接信息的部署/配置规格或手册；具体现场环境名称；运维提供的数据库连接配置截图/文档"
+    },
+    {
+      "id": "Q191",
+      "question": "today 接口的路径、返回字段和时间来源是什么？",
+      "sourceBlock": 39,
+      "turn": 1,
+      "convId": "ZX-20260812-508",
+      "answer": "工作台 today 接口就是拿当前日期和星期用的，路径是需要合法 JWT 的 `GET /pwrsapi/month/view/today`。\n\n返回是一个 `Map<String,String>`，主要就两个字段：`year`（格式类似 `yyyy年M月d日`）和 `week`（格式类似 `星期X`）。\n\n时间完全取服务端 JVM 的当前时区，不是前端自己拼的。"
+    },
+    {
+      "id": "Q192",
+      "question": "把 form_id、element_id、content 三段关系逐段说明。",
+      "sourceBlock": 39,
+      "turn": 2,
+      "convId": "ZX-20260812-508",
+      "answer": "**form_id、element_id、content 三段关系是自定义表单模板、结构定义、填写结果串起来的核心方式。**\n\n第一段（form_id）：模板主表 `pwrs_custom_form` 的 `form_id` 同时关联两张表——结构表 `pwrs_custom_form_element` 的 `form_id`（用来挂字段/元素），以及结果表 `pwrs_custom_form_result` 的 `form_id`（用来挂某次填写结果）。定位结果时还会叠加患者/住院/formType 等业务键。\n\n第二段（element_id）：结构表 `pwrs_custom_form_element` 的 `element_id` 再向下关联选项表或表格列表的 `element_id`，用来挂具体选项或表格列定义。`form_id` 不能直接跳过元素去关联选项/列。\n\n第三段（content）：结果表 `pwrs_custom_form_result` 的 `content` 字段存的是填写内容的完整 JSON 快照（`elementList` 整体序列化，含每个元素的值、选项/表格数据）。它是“结果即快照”，渲染/回显时直接用这份 JSON，不依赖当时结构表再回溯。\n\n注意：这些是共享业务键关联，不等于数据库真外键；删除模板后 result 的 `form_id` 可能悬空。历史结果靠 content 快照自带结构，但没有版本字段时不能保证与新模板完全隔离。"
+    },
+    {
+      "id": "Q193",
+      "question": "可以确认哪些连接字段，哪些按钮名和默认端口不能猜？",
+      "sourceBlock": 39,
+      "turn": 3,
+      "convId": "ZX-20260812-508",
+      "answer": "**能确认的是连接要填的字段；按钮名和各库默认端口不能猜。**\n\n配置 SQL 监视诊断客户端连接时，先选数据库类型，再填主机、端口、库或服务名、schema、用户、密码，以及可选高级参数。连上后还必须做只读能力探测，并显示真实产品/版本、当前库/schema、当前用户、可用监控源、必需权限和降级级别。\n\n规格明确没写具体按钮名称（别编“新建连接”之类），也没写各数据库的默认端口，这些都不能凭常识去猜或补。"
+    },
+    {
+      "id": "Q194",
+      "question": "orderFlag=1 和 auditStatus=99 各代表什么筛选语义？",
+      "sourceBlock": 39,
+      "turn": 4,
+      "convId": "ZX-20260812-508",
+      "answer": "**orderFlag=1 是只筛药品医嘱（排除非药物医嘱），auditStatus=99 是不按审核状态过滤。**\n\n电子药历默认带 orderFlag=1，会把非药物医嘱过滤掉，只留药品相关。  \nauditStatus=99 时，列表/查询接口直接不过滤审核状态，把原始医嘱叠加上本地干预记录后的全集都返回（有干预的按实际状态、无干预的按默认）。  \n\n这两项是页面/接口查询医嘱时的筛选语义，原始医嘱本身来自 proxy/HIS/ETL，PWRS 只做本地叠加。"
+    },
+    {
+      "id": "Q195",
+      "question": "共享数据库与跨端功能一致性为什么不是一回事？",
+      "sourceBlock": 39,
+      "turn": 5,
+      "convId": "ZX-20260812-508",
+      "answer": "当前资料无法确认。\n请补充：相关规格中明确对比「共享数据库」与「跨端功能一致性」的章节或规则；涉及跨端/多端共享数据行为的接口契约或 AC；具体模块（如患教模板、监控方案以外）的共享与一致性说明"
+    },
+    {
+      "id": "Q196",
+      "question": "p_id 的值形态和真实列类型分别是什么？",
+      "sourceBlock": 40,
+      "turn": 1,
+      "convId": "ZX-20260812-509",
+      "answer": "p_id 的值形态是业务代码写入的 UUID 字符串，真实列类型是 character varying(50)，不是 PostgreSQL 原生 uuid。\n\n这是患者主表 `pwrs_patient` 的主键字段（同一结论也适用于同表的 patient_id、visit_id、district_code）。不要按名字猜成 bigint、integer 或原生 uuid 类型。"
+    },
+    {
+      "id": "Q197",
+      "question": "我没说哪个页面，也没截图，你能直接给现场步骤吗？",
+      "sourceBlock": 40,
+      "turn": 2,
+      "convId": "ZX-20260812-509",
+      "answer": "当前资料无法确认。\n请补充：页面/菜单名称、按钮或操作原文、当时状态或报错截图"
+    },
+    {
+      "id": "Q198",
+      "question": "没有页面、动作、报错原文时，能不能告诉我固定重试路径？",
+      "sourceBlock": 40,
+      "turn": 3,
+      "convId": "ZX-20260812-509",
+      "answer": "不能。没有页面、动作、报错原文时，当前资料给不出任何固定重试路径。\n\n请补充：页面/菜单名称、按钮或操作原文、当时状态或报错截图"
+    },
+    {
+      "id": "Q199",
+      "question": "要确认某账号当前菜单，至少需要查哪个系统里的哪些动态关系？",
+      "sourceBlock": 40,
+      "turn": 4,
+      "convId": "ZX-20260812-509",
+      "answer": "要确认某账号当前菜单，至少得查 **usercenter** 里该账号的**菜单和角色动态下发关系**。\n\n菜单是由 usercenter 动态下发的，不是 PWRS 本地静态配置；角色关联也走 usercenter。查到账号对应角色后，看它实际下发了哪些菜单即可。"
+    },
+    {
+      "id": "Q200",
+      "question": "没有环境资料时，数据库端口和账号应怎样回答才不臆造？",
+      "sourceBlock": 40,
+      "turn": 5,
+      "convId": "ZX-20260812-509",
+      "answer": "没有环境资料时，数据库端口和账号一律不能报具体数字或用户名，只能直接说「当前资料无法确认」，并请对方补充该环境的配置信息。\n\n规格里写得很清楚：目标库的类型、主机、端口、库/模式、用户都是运行时通过配置选择并输入的，密码还要求隐藏输入；导出备份也不含数据库密码。现场源库更是不要求也不直连数据库凭据。因此没有任何写死的默认端口或固定账号可推。\n\n请补充：目标环境的数据库类型、主机、端口、库名/模式、用户名（不要给密码）。"
+    }
+  ]
+}
