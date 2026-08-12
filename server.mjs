@@ -811,7 +811,17 @@ function routeQuestion(map, query, subKey = '') {
       for (const a of ((r && r.aliases) || [])) { const al = String(a || '').toLowerCase().trim(); if (al.length >= 3 && (qLower.includes(al) || (al.length >= 4 && al.includes(qLower) && qLower.length >= 4))) { aliasHit = true; break; } }
       if (aliasHit) sc += ROUTE_ALIAS_BONUS;
       return { r, sc: Math.round(sc * 1000) / 1000, aliasHit };
-    }).sort((a, b) => b.sc - a.sc);
+    }).sort((a, b) => {
+      // QR 是面向确定事实的人工路由，DQ 是宽泛排查卡。同一问法下 DQ 的通用词较多，
+      // 可能以很小分差压过已强命中实体的 QR（如“我的监护列表/详情路径”）。
+      // 当两者分差在 15% 内时优先 QR；差距明显时仍尊重原始相关性，避免硬抢无关问题。
+      const aQr = String(a.r && a.r.id || '').startsWith('QR-'), bQr = String(b.r && b.r.id || '').startsWith('QR-');
+      if (aQr !== bQr) {
+        const high = Math.max(a.sc, b.sc), low = Math.min(a.sc, b.sc);
+        if (high > 0 && low >= high * 0.85) return aQr ? -1 : 1;
+      }
+      return b.sc - a.sc;
+    });
     best = scored[0];
     if (best && best.sc >= ROUTE_MATCH_MIN) {
       const r = best.r;

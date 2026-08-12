@@ -138,6 +138,22 @@ test('AC-2 tier-1 别名整串命中 → 强 bonus 命中，超阈值', () => {
   assert.deepEqual(r.mustNotConfuse, FIXTURE_MAP.questionRoutes[0].mustNotConfuse);
 });
 
+test('专用 QR 与泛化 DQ 小分差竞争时优先 QR；明显更相关的 DQ 仍可命中', () => {
+  const S = buildRoutingSandbox(makeDeps());
+  const map = {
+    questionRoutes: [
+      { id: 'DQ-001', title: '泛化列表数据对不上', aliases: [], keywords: ['列表', '页面', '路径', '数据', '不一致'], answerFacts: ['泛化排查'] },
+      { id: 'QR-CARE-PAGE', title: '监护列表与详情页', aliases: ['我的监护列表页和具体监护详情页'], keywords: ['我的监护', '列表页', '详情页', '路径'], answerFacts: ['确定路径'] },
+    ],
+    specs: [], indexes: {},
+  };
+  const specific = S.routeQuestion(map, '我要区分我的监护列表页和具体监护详情页，两个路径是什么？', '');
+  assert.equal(specific.route.id, 'QR-CARE-PAGE');
+
+  const diagnostic = S.routeQuestion(map, '列表数据不一致怎么排查？', '');
+  assert.equal(diagnostic.route.id, 'DQ-001');
+});
+
 test('AC-2 tier-1 关键词 IDF 打分命中（无整串别名，纯关键词重叠）', () => {
   const S = buildRoutingSandbox(makeDeps());
   const r = S.routeQuestion(FIXTURE_MAP, '医嘱干预的时候说明书地址在哪里配置', '');
