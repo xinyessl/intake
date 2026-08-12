@@ -234,6 +234,24 @@ test('真实PWRS地图回归：体温单七天窗口四种问法命中且不足�
   }
 });
 
+test('真实PWRS地图回归：风险预警异常检验四种问法命中近五天而非调度诊断', {
+  skip: !process.env.PWRS_REAL_MAP,
+}, () => {
+  const S = buildRoutingSandbox(makeDeps());
+  const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
+  for (const question of [
+    '患者主页的异常检验默认查最近几天？',
+    '旧 Pad 注释写近两天，当前 Proxy 语义到底按几天？',
+    '实施看到风险预警区没选日期，系统默认时间窗是多少？',
+    '异常检验和体温单一样，默认都是 7 天吧？',
+  ]) {
+    const hit = S.routeQuestion(map, question, '');
+    assert.equal(hit.route.id, 'QR-ABNORMAL-EXAM-DAYS', `${question}，topN=${JSON.stringify(hit.topN)}`);
+    assert.match(hit.answerFacts.join('\n'), /风险预警区.*未选日期.*近 5 天/);
+    assert.match(hit.mustNotConfuse.join('\n'), /数据不更新的调度诊断/);
+  }
+});
+
 test('AC-2 tier-1 关键词 IDF 打分命中（无整串别名，纯关键词重叠）', () => {
   const S = buildRoutingSandbox(makeDeps());
   const r = S.routeQuestion(FIXTURE_MAP, '医嘱干预的时候说明书地址在哪里配置', '');
