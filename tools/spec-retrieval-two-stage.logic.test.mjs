@@ -147,6 +147,30 @@ test('自然问法只补检索概念、不硬编码答案：跨医院同一次�
   assert.doesNotMatch(expanded, /hospitalId|patientId|visitId/, '检索补词不能把答案字段硬编码进 query');
 });
 
+test('通用概念归一只补实体同义词：Pad/owner/私有/白名单均不注入答案值', () => {
+  const cases = [
+    ['Pad 上我的反馈从哪个接口取？', /Pad applet/, /feedback/],
+    ['别人创建的入院评估能删除吗？', /owner user_id user_code CREATOR/, /AdmissionAssessment/],
+    ['私有患教模板谁能看？', /private shared userId/, /可见/],
+    ['路径中间包含 comm 会免鉴权吗？', /JwtFilter anon prefix startsWith/, /免鉴权/],
+  ];
+  for (const [q, a, b] of cases) {
+    const expanded = expandRetrievalQuery([{ role: 'user', content: q }], q);
+    assert.match(expanded, a);
+    assert.match(expanded, b);
+  }
+});
+
+test('片段排序带所属实体：相邻模块正文同词时，当前问题实体的正文稳定优先', () => {
+  const specs = [
+    doc('docs/specs/care.md', `---\nid: CARE\ntitle: 药学监护\nmodule: 监护\n---\n## 权限\n创建人可以删除记录，其他人不能删除。`),
+    doc('docs/specs/admission.md', `---\nid: CLIN\ntitle: 入院评估\nmodule: 评估\n---\n## 权限\n创建人可以删除记录，其他人返回 CREATOR。`),
+  ];
+  const result = searchSpecDocuments(specs, '别人创建的入院评估能删除吗？', { n: 2 });
+  assert.equal(path.basename(result.hits[0].file), 'admission.md');
+  assert.match(result.hits[0].text, /CREATOR/);
+});
+
 test('普通事实问答不把完整 Spec 目录塞给模型；明确询问模块清单时仍可见完整目录', () => {
   const server = fs.readFileSync(path.join(ROOT, 'server.mjs'), 'utf8');
   let fullCatalogCalls = 0;

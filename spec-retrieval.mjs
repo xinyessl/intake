@@ -12,6 +12,15 @@ const API_QUERY_RE = /接口|api|调用|请求|端点|endpoint|url|路径/i;
 const DATA_BODY_RE = /数据契约|主表|列名|varchar|char\(|bigint|\bPK\b|表结构/i;
 const API_BODY_RE = /接口契约|\b(?:GET|POST|PUT|DELETE|PATCH)\s+\//i;
 const GENERIC_QUERY_IDENTIFIERS = new Set(['sql', 'pwrs', 'web', 'postgresql', 'mysql', 'oracle', 'http', 'https', 'api', 'etl', 'his', 'jwt', 'json', 'java', 'vue', 'websocket']);
+const CONCEPT_NORMALIZATIONS = [
+  [/(?:pad|平板|小程序)/i, 'Pad applet 平板端'],
+  [/(?:我的|本人|自己创建)/, 'mine 当前用户 创建人 owner'],
+  [/(?:归属|创建者|创建人|非本人|别人创建)/, 'owner user_id user_code CREATOR'],
+  [/(?:私有|非共享|共享|可见性)/, 'private shared userId 可见'],
+  [/(?:白名单|免鉴权|匿名访问)/, 'JwtFilter anon prefix startsWith'],
+  [/(?:反馈)/, 'feedback 药师反馈'],
+  [/(?:入院评估)/, 'AdmissionAssessment CustomForm resultId'],
+];
 
 function uniq(list) { return [...new Set(list.filter(Boolean))]; }
 function frontmatter(text) {
@@ -227,7 +236,11 @@ export function searchSpecDocuments(rawDocs, query, options = {}) {
   if (!candidates.length) return { candidates: [], hits: [] };
   const qTokens = retrievalTokens(query), qIds = identifiersFrom(query, true);
   const chunks = candidates.flatMap(chunkSpecDocument);
-  const sets = chunks.map(c => new Set(retrievalTokens(`${c.heading}\n${c.text}`)));
+  // 正文片段在评分时带上所属 spec 的身份（id/title/module/subsystem），避免“创建人、删除、
+  // 完成”等通用词把相邻模块的正文顶到前面；返回给模型的 evidence 仍只有 c.text，目录身份
+  // 只参与路由和排序，不会被冒充成事实。
+  const sets = chunks.map(c => new Set(retrievalTokens(`${c.id}\n${c.title}\n${c.module}\n${c.subsystem}\n${c.heading}\n${c.text}`)));
+  const identitySets = chunks.map(c => new Set(retrievalTokens(`${c.id}\n${c.title}\n${c.module}\n${c.subsystem}`)));
   const df = new Map();
   for (const set of sets) for (const t of set) df.set(t, (df.get(t) || 0) + 1);
   const weight = t => Math.log(1 + (chunks.length + 1) / ((df.get(t) || 0) + 0.5)) * (t.length >= 4 ? 1.8 : 1);
@@ -236,7 +249,11 @@ export function searchSpecDocuments(rawDocs, query, options = {}) {
   const tableQ = DATA_QUERY_RE.test(query), apiQ = API_QUERY_RE.test(query);
   const ranked = chunks.map((c, i) => {
     let lexical = 0; const matchedTerms = [];
-    for (const t of qTokens) if (sets[i].has(t)) { lexical += weight(t); matchedTerms.push(t); }
+    for (const t of qTokens) if (sets[i].has(t)) {
+      const w = weight(t);
+      lexical += w * (identitySets[i].has(t) ? 3.2 : 1);
+      matchedTerms.push(t);
+    }
     const exact = chunkExactScore(qIds, c.text);
     let relevanceScore = exact.score + lexical;
     if (tableQ && DATA_BODY_RE.test(c.text)) relevanceScore += 9;
@@ -281,6 +298,7 @@ export function currentTurnEvidenceGuard(query, hits) {
     `当前问题：${String(query || '').trim().slice(0, 1200)}`,
     `当前召回实体：${entities.length ? entities.join('、') : '无可用规格正文证据'}`,
     '回答当前问题时，只能把本轮“相关规格摘录”和经验/源码片段中的正文当作事实证据；规格目录标题只用于导航，不能据此补写规则。',
+    '若本轮摘录已直接给出接口、字段、状态或权限结论，应明确回答该结论；不要因为别的摘录未覆盖同一问题而笼统拒答。发生冲突时，优先采用“经确认事实”以及明确描述当前实现/当前代码的摘录，并说明边界。',
     '历史对话只用于理解追问和代词，不能把历史中其它模块的事实迁移成当前问题的事实证据。若本轮正文没有证据，继续安全说明当前资料无法确认。',
   ].join('\n');
 }
@@ -292,6 +310,7 @@ export function expandRetrievalQuery(messages, currentQuestion) {
   // 把本次住院说成同一次就诊；若不做概念归一，标题里的“身份字段类型”会压过
   // 正文中的“跨院区患者复合身份”。这些提示只参与路由，最终事实仍必须来自正文 hit。
   const conceptHints = [];
+  for (const [pattern, normalized] of CONCEPT_NORMALIZATIONS) if (pattern.test(current)) conceptHints.push(normalized);
   if (/(?:跨[^，。；]{0,8}(?:医院|机构)|(?:医院|机构)[^，。；]{0,8}跨)/.test(current)) conceptHints.push('跨院区');
   if (/(?:同一|本次|一次)[^，。；]{0,10}(?:患者|就诊|住院)|患者[^，。；]{0,10}(?:同一|本次)[^，。；]{0,6}(?:就诊|住院)/.test(current)) conceptHints.push('本次住院 同号患者');
   if (/(?:身份[^，。；]{0,6}字段|字段[^，。；]{0,6}身份)/.test(current)) conceptHints.push('患者身份 复合身份');
