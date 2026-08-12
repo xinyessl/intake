@@ -19,6 +19,12 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = fs.readFileSync(path.join(ROOT, 'server.mjs'), 'utf8');
 
+test('大功能地图可读取：gitOut 显式放大 maxBuffer，避免默认上限使路由静默失效', () => {
+  const gitOutSource = extractFn(SRC, 'gitOut');
+  assert.match(gitOutSource, /maxBuffer:\s*32\s*\*\s*1024\s*\*\s*1024/);
+  assert.match(gitOutSource, /r\.status\s*===\s*0/);
+});
+
 function extractFn(src, name) {
   const start = src.indexOf('function ' + name);
   assert.ok(start >= 0, `应能在 server.mjs 找到 function ${name}`);

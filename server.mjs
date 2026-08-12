@@ -431,7 +431,10 @@ function custWithTicketCount(list) {   // 给每条客户挂读时派生的 tick
 // git 引用安全校验：只允许 tag/branch/sha 常见字符，挡掉选项注入（如 --upload-pack）。空=不安全/未提供。
 function safeRef(v) { v = String(v || '').trim(); return (/^[A-Za-z0-9._\-\/]+$/.test(v) && !v.startsWith('-')) ? v : ''; }
 // core.quotepath=false：让 git 直接输出 UTF-8 中文路径，不做八进制转义（否则 ls-tree 的中文文件名喂给 git show 会失配）
-function gitOut(repoPath, args) { try { const r = spawnSync('git', ['-c', 'core.quotepath=false', ...args], { cwd: repoPath, encoding: 'utf8', timeout: 8000 }); return r.status === 0 ? (r.stdout || '') : ''; } catch { return ''; } }
+// 功能模块地图包含完整目录/索引，真实 PWRS JSON 已超过 spawnSync 默认约 1 MiB 输出上限。
+// 未显式放大 maxBuffer 时 git show 会 ENOBUFS，旧实现又静默退成空串，最终表现为
+// retrieval.routing.enabled=false、所有 questionRoutes/answerFacts 在生产失效。
+function gitOut(repoPath, args) { try { const r = spawnSync('git', ['-c', 'core.quotepath=false', ...args], { cwd: repoPath, encoding: 'utf8', timeout: 8000, maxBuffer: 32 * 1024 * 1024 }); return r.status === 0 ? (r.stdout || '') : ''; } catch { return ''; } }
 
 // ===== 产品仓只读上下文：git tag 列表 + spec@tag =====
 // 版本号倒序比较（复用，保证各处「按版本排序」口径一致：数字感知、倒序）
