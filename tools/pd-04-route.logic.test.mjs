@@ -252,6 +252,21 @@ test('真实PWRS地图回归：风险预警异常检验四种问法命中近五�
   }
 });
 
+test('真实PWRS地图回归：同组医嘱owner、待收费共享例外、配置消费时机均命中专用事实', { skip: !process.env.PWRS_REAL_MAP }, () => {
+  const S = buildRoutingSandbox(makeDeps());
+  const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
+  const groups = [
+    ['QR-ORDER-AUDIT-GROUP-OWNER', ['别的药师已经审核过同一组医嘱，我还能覆盖吗？','同一个 groupNo 已存在他人记录，再 POST /order/audit 会怎样？','只要 groupNo 相同，后提交的人就能更新原审核，对吧？','非创建人重复提交同组医嘱的错误码和数据结果是什么？'], /ORDER_NOT_USER[\s\S]*原审核记录/],
+    ['QR-CHARGE-DRAFT-SHARED-OWNER', ['没绑定收费药师的待收费单，其他药师能编辑吗？','收费单永远只允许创建人操作，没有共享例外，对吧？','一条待收费记录绑定了药师后，别人还能继续删吗？','共享待收费例外由哪两个状态条件决定？'], /charge_status=0.*charge_user_id 为空/],
+    ['QR-CONFIG-NOT-EFFECTIVE', ['配置改了以后只按浏览器刷新就一定生效吗？','配置在数据库改成功，所有打开的客户端会实时推送更新，对吧？','管理员改开关后老会话还是旧值，最可能的消费边界是什么？','Web、Pad、后端下次调用三类配置消费时机有什么差异？'], /后端.*下一次对应调用/],
+  ];
+  for (const [routeId, questions, facts] of groups) for (const question of questions) {
+    const hit = S.routeQuestion(map, question, '');
+    assert.equal(hit.route.id, routeId, `${question}，topN=${JSON.stringify(hit.topN)}`);
+    assert.match(hit.answerFacts.join('\n'), facts);
+  }
+});
+
 test('AC-2 tier-1 关键词 IDF 打分命中（无整串别名，纯关键词重叠）', () => {
   const S = buildRoutingSandbox(makeDeps());
   const r = S.routeQuestion(FIXTURE_MAP, '医嘱干预的时候说明书地址在哪里配置', '');
