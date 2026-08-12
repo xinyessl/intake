@@ -138,6 +138,15 @@ test('多轮代词追问只补上一条 user 实体做检索，不把 assistant 
   assert.equal(expandRetrievalQuery(messages, '患者主页异常检验默认看几天？'), '患者主页异常检验默认看几天？');
 });
 
+test('自然问法只补检索概念、不硬编码答案：跨医院同一次就诊可路由到跨院区复合身份正文', () => {
+  const q = '跨医院判断同一次患者就诊，最少要用哪些身份字段？';
+  const expanded = expandRetrievalQuery([{ role: 'user', content: q }], q);
+  assert.match(expanded, /跨院区/);
+  assert.match(expanded, /本次住院/);
+  assert.match(expanded, /复合身份/);
+  assert.doesNotMatch(expanded, /hospitalId|patientId|visitId/, '检索补词不能把答案字段硬编码进 query');
+});
+
 test('普通事实问答不把完整 Spec 目录塞给模型；明确询问模块清单时仍可见完整目录', () => {
   const server = fs.readFileSync(path.join(ROOT, 'server.mjs'), 'utf8');
   let fullCatalogCalls = 0;
@@ -195,4 +204,8 @@ test('PWRS 真实 86 份 Spec 全量可达：git 目录第 79 份 SYS-07a 与第
     assert.ok(targetHits.length, `${q}：目标文件正文应进入 Top5`);
     assert.match(hitText(targetHits), bodyNeedle, `${q}：Top5 应含可直接作答的正文证据`);
   }
+
+  const identityQuestion = '跨医院判断同一次患者就诊，最少要用哪些身份字段？';
+  const identityResult = searchSpecDocuments(specs, expandRetrievalQuery([{ role: 'user', content: identityQuestion }], identityQuestion), { n: 5 });
+  assert.ok(identityResult.hits.some(h => /PWRS-(?:CARE-01a|ACC-06)-/.test(h.file) && /hospitalId(?:\/districtCode)?\s*\+\s*patientId\s*\+\s*visitId/.test(h.text)), '自然问法经概念归一后，答案字段必须来自 CARE-01a/ACC-06 正文');
 });

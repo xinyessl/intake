@@ -288,13 +288,21 @@ export function currentTurnEvidenceGuard(query, hits) {
 export function expandRetrievalQuery(messages, currentQuestion) {
   const current = String(currentQuestion || '').trim();
   if (!current) return '';
+  // 只补“检索概念同义词”，不补任何答案字段/取值。现场自然问法常把院区说成医院、
+  // 把本次住院说成同一次就诊；若不做概念归一，标题里的“身份字段类型”会压过
+  // 正文中的“跨院区患者复合身份”。这些提示只参与路由，最终事实仍必须来自正文 hit。
+  const conceptHints = [];
+  if (/(?:跨[^，。；]{0,8}(?:医院|机构)|(?:医院|机构)[^，。；]{0,8}跨)/.test(current)) conceptHints.push('跨院区');
+  if (/(?:同一|本次|一次)[^，。；]{0,10}(?:患者|就诊|住院)|患者[^，。；]{0,10}(?:同一|本次)[^，。；]{0,6}(?:就诊|住院)/.test(current)) conceptHints.push('本次住院 同号患者');
+  if (/(?:身份[^，。；]{0,6}字段|字段[^，。；]{0,6}身份)/.test(current)) conceptHints.push('患者身份 复合身份');
+  const enriched = conceptHints.length ? `${current}\n检索概念：${uniq(conceptHints).join(' ')}` : current;
   const contextual = /^(?:那|那么|所以|然后|还有|这个|那个|它|其中|上面|前面|刚才)|(?:它|这个|那个|上述|前面|刚才|该接口|该功能|这些|分别)/i.test(current);
-  if (!contextual || current.length > 80) return current;
+  if (!contextual || current.length > 80) return enriched;
   const users = (Array.isArray(messages) ? messages : []).filter(m => m && m.role === 'user' && String(m.content || '').trim());
   let previous = '';
   for (let i = users.length - 1; i >= 0; i--) {
     const value = String(users[i].content || '').trim();
     if (value && value !== current) { previous = value; break; }
   }
-  return previous ? `${previous.slice(0, 1200)}\n追问：${current}` : current;
+  return previous ? `${previous.slice(0, 1200)}\n追问：${enriched}` : enriched;
 }
