@@ -123,7 +123,9 @@ test('实施诊断守卫在 route 命中或缺失时都给安全最小留证，�
   const fn = new Function('consultSafeDiagnosticIntent', extractFn(SRC, 'consultDiagnosticGuard') + '\nreturn consultDiagnosticGuard;')(intent);
   assert.equal(fn('患者接口是什么？', { matched: true }), '');
   const text = fn('那页面一个患者都看不到，实施现场先查什么？', { matched: true });
-  assert.match(text, /命中 route 能确认的业务事实/);
+  assert.match(text, /命中的 route 能确认的业务事实/);
+  assert.match(text, /作为本轮判断基线/);
+  assert.match(text, /不能因为当前轮改问“下一步怎么查”就降级成“说明书未覆盖”/);
   assert.match(text, /2~4 步观察型、非破坏/);
   assert.match(text, /没有请求 \/ 请求失败 \/ 响应正常但页面错误/);
   assert.match(text, /不得编造按钮名、接口路径、字段名、数据库表、状态值/);
@@ -145,6 +147,10 @@ test('实施诊断守卫在 route 命中或缺失时都给安全最小留证，�
     assert.match(miss, /先基于当前页面和本次请求完成上述留证/);
   }
   assert.equal(intent('密码最少要几位？'), false, '业务取值中的“最少要”不是现场诊断意图');
+
+  const inherited = fn('接口是通的，返回也是 200，但页面没变化，下一步看哪？', { matched: true, inherited: true });
+  assert.match(inherited, /从同会话上一轮继承的 route/);
+  assert.match(inherited, /只把.*未确认的细节局部标为未知/);
 });
 
 test('已核规则应用守卫：先判预期行为，冲突时才收最少证据，route miss 不放松证据门', () => {
@@ -166,7 +172,12 @@ test('已核规则应用守卫：先判预期行为，冲突时才收最少证�
     assert.match(text, /不得整体回复“当前资料无法确认”/);
     assert.match(text, /只追问一个/);
     assert.match(text, /历史 assistant 自由文本始终不是证据/);
+    assert.match(text, /已确认事实必须继续作为判断基线/);
+    assert.match(text, /不能因为用户改问排查步骤就说“说明书未覆盖”/);
   }
+
+  const inherited = fn('第一步看过了，下一步呢？', { matched: true, inherited: true });
+  assert.match(inherited, /从同会话上一轮继承/);
 });
 
 test('模糊的“第二步对不上”仍须先给规则条件分支，不能退回整体拒答', () => {

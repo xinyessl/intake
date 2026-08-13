@@ -56,6 +56,7 @@ function buildRoutingSandbox(deps) {
   const body = consts +
     extractFn(SRC, 'routeScorer') + '\n' +
     extractFn(SRC, 'routeQuestion') + '\n' +
+    extractFn(SRC, 'consultContextFollowupIntent') + '\n' +
     extractFn(SRC, 'contextualRouteQuestion') + '\n' +
     extractFn(SRC, 'extractSection') + '\n' +
     extractFn(SRC, 'loadModuleMap') + '\n' +
@@ -198,6 +199,33 @@ test('承接型诊断追问衰减继承上一轮专用QR；显式新实体覆盖
   const unrelated = S.contextualRouteQuestion(map, history.slice(0, 2).concat({ role: 'user', content: '这个红色按钮该点哪个？' }), '这个红色按钮该点哪个？', '');
   assert.equal(unrelated.matched, false, '无承接提示、无证据按钮不能继承患者route');
   assert.equal(unrelated.contextOverride, true);
+
+  for (const followUp of [
+    '回到这里，第一步已经看过了，没发现异常。接下来呢？',
+    '第一步都查过了，没发现异常，下一步怎么做？',
+    '接口已经通了，返回也是 HTTP 200，但页面没变化，下一步看哪？',
+  ]) {
+    const routed = S.contextualRouteQuestion(map, history.slice(0, 2).concat({ role: 'user', content: followUp }), followUp, '');
+    assert.equal(routed.route.id, 'QR-PATIENT-SOURCE', followUp);
+    assert.equal(routed.inherited, true, followUp);
+    assert.match(routed.answerFacts.join('\n'), /先调PWRS接口/);
+  }
+
+  const chained = '接口也通了，下一步看哪？';
+  const chainedRoute = S.contextualRouteQuestion(map, [
+    history[0],
+    history[1],
+    { role: 'user', content: '第一步已经看过了，没发现异常，接下来呢？' },
+    { role: 'assistant', content: '中间答案仍不能作为事实证据。' },
+    { role: 'user', content: chained },
+  ], chained, '');
+  assert.equal(chainedRoute.route.id, 'QR-PATIENT-SOURCE', '连续两轮无业务名的进度追问仍回溯最近已核route');
+  assert.equal(chainedRoute.inherited, true);
+
+  const progressSwitched = '接口已经通了。换个问题，医嘱查询不到怎么排查？';
+  const progressRoute = S.contextualRouteQuestion(map, history.slice(0, 2).concat({ role: 'user', content: progressSwitched }), progressSwitched, '');
+  assert.equal(progressRoute.route.id, 'DQ-ORDER-EMPTY', '排查进度句中显式新实体仍覆盖旧route');
+  assert.equal(progressRoute.contextOverride, true);
 });
 
 test('接口权限自然问法族优先专用QR，并同时保留功能授权缺口与业务数据边界', () => {
@@ -602,6 +630,38 @@ test('真实PWRS地图回归：多组一次返回的页签只读验证，不要�
     { role: 'user', content: followUp },
   ], followUp, '');
   assert.equal(changed.route?.id, 'QR-MEDICAL-CONSULT-VISIBILITY', '显式新实体必须覆盖上一轮药物重整路由');
+});
+
+test('真实PWRS地图回归：退出跳转已核事实跨多轮诊断持续生效，显式新实体仍覆盖', { skip: !process.env.PWRS_REAL_MAP }, () => {
+  const S = buildRoutingSandbox(makeDeps());
+  const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
+  const q21 = '医院报的退出跳转问题，换了另一个账号就正常了，这个线索说明先看哪边？';
+  const q22 = '回到退出跳转这里，第一步看过了，没发现异常。接下来呢？';
+  const q23 = '退出跳转这一段，接口是通的，返回也是 200，但页面还是没变化，下一步看哪？';
+  const messages = [{ role: 'user', content: q21 }];
+  const first = S.routeQuestion(map, q21, '');
+  assert.equal(first.route?.id, 'DQ-001', `Q21 topN=${JSON.stringify(first.topN)}`);
+  messages.push({ role: 'assistant', content: '助手自由文本不作证据。' }, { role: 'user', content: q22 });
+  const second = S.contextualRouteQuestion(map, messages, q22, '');
+  assert.equal(second.route?.id, 'DQ-001', `Q22 direct=${JSON.stringify(second.directCandidate)}`);
+  messages.push({ role: 'assistant', content: '仍只使用地图事实。' }, { role: 'user', content: q23 });
+  const third = S.contextualRouteQuestion(map, messages, q23, '');
+  assert.equal(third.route?.id, 'DQ-001', `Q23 direct=${JSON.stringify(third.directCandidate)}`);
+  const facts = third.answerFacts.join('\n');
+  assert.match(facts, /LcUtils\.getPortalDomain\(\)/);
+  assert.match(facts, /hostname:9999/);
+  assert.match(facts, /生产环境指向当前域名/);
+  assert.match(facts, /根路径 \/login/);
+  assert.match(facts, /不得加 \/pwrs\//);
+  assert.match(facts, /PWRS 自己端口 8083/);
+  assert.match(facts, /HTTP 200 只确认传输成功/);
+
+  const switchedQuestion = '换个问题，患者列表的身份键是什么？';
+  const switched = S.contextualRouteQuestion(map, messages.concat(
+    { role: 'assistant', content: '旧功能到此结束。' },
+    { role: 'user', content: switchedQuestion },
+  ), switchedQuestion, '');
+  assert.notEqual(switched.route?.id, 'DQ-001', '显式患者新实体不得继承退出route');
 });
 
 test('AC-2 tier-1 关键词 IDF 打分命中（无整串别名，纯关键词重叠）', () => {

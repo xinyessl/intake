@@ -886,21 +886,43 @@ function routeQuestion(map, query, subKey = '') {
 
 // 承接型短追问允许复用上一轮已经命中的功能 route，但只复用地图里的 route/facts：
 // 不读取、也不把上一条模型自由文本当证据。当前轮若明确切到另一个业务实体，当前 route 始终优先。
+function consultContextFollowupIntent(question) {
+  const q = String(question || '').trim();
+  if (!q || q.length > 160) return false;
+  // 除代词式承接外，现场常用“第一步正常了/接口通了/下一步呢”汇报排查进度。
+  // 这里只判断是否值得尝试继承；contextualRouteQuestion 后续仍会用当前直达 route、显式新实体和高风险 UI 门阻止串话。
+  const anaphoric = /^(?:那|那么|这个|那个|它|刚才|上面|前面|所以|然后|还有|其中|该功能|该接口|该页面|回到|关于(?:刚才|上面|前面|这个|该)|针对(?:刚才|上面|前面|这个|该)|这(?:里|块|一段|一步)|刚才这(?:里|块|一段)|填完(?:以后|后)?|提交(?:完|后)|保存(?:完|后)|发送(?:完|后)|完成(?:后)?|药师想复核这次|医生想复核这次|现场想复核这次|复核这次)/i.test(q);
+  const progress = /^(?:(?:第[一二三四五六七八九十\d]+步|前(?:一|两|几)步)(?:已经|也|都|先)?[^，。；]{0,36}(?:正常|完成|看过|查过|没发现异常|对上|没对上)|(?:接口|请求|响应)(?:已经|也|都|是)?[^，。；]{0,36}(?:正常|成功|通了|返回(?:也是|为)?\s*(?:HTTP\s*)?200)|(?:接下来|下一步|后面)(?:呢|怎么|查|看|做|先))/i.test(q);
+  return anaphoric || progress;
+}
+
 function contextualRouteQuestion(map, messages, currentQuestion, subKey = '') {
   const current = String(currentQuestion || '').trim();
   const direct = routeQuestion(map, current, subKey);
-  // 除代词式承接外，也覆盖“动作完成后/复核这次结果”这类现场短追问：它们常不重复业务实体，
-  // 但语义明确要求沿用上一轮已核 route。这里只扩大候选，后面的显式新实体门仍可阻止串话。
-  const contextual = /^(?:那|那么|这个|那个|它|刚才|上面|前面|所以|然后|还有|其中|该功能|该接口|该页面|填完(?:以后|后)?|提交(?:完|后)|保存(?:完|后)|发送(?:完|后)|完成(?:后)?|药师想复核这次|医生想复核这次|现场想复核这次|复核这次)/i.test(current);
-  if (!contextual || current.length > 160) return direct;
+  if (!consultContextFollowupIntent(current)) return direct;
   const users = (Array.isArray(messages) ? messages : []).filter(m => m && m.role === 'user' && String(m.content || '').trim());
   let previous = '';
+  let previousIndex = -1;
   for (let i = users.length - 1; i >= 0; i--) {
     const value = String(users[i].content || '').trim();
-    if (value && value !== current) { previous = value; break; }
+    if (value && value !== current) { previous = value; previousIndex = i; break; }
   }
   if (!previous) return direct;
-  const prior = routeQuestion(map, previous, subKey);
+  let prior = routeQuestion(map, previous, subKey);
+  // 连续多轮都只汇报“第一步看过了/下一步呢”时，中间句本身可能没有任何业务词。
+  // 只有中间句也是纯承接、且没有显式业务实体时，才向前寻找最近的已核 route；红色按钮/医嘱/患者等新实体会形成屏障。
+  if (!prior.matched && consultContextFollowupIntent(previous)) {
+    const interveningEntity = /按钮|菜单|医嘱|收费|监护|患教|反馈|药品|检验|体温单|权限|角色|token|登录|退出|登出|缓存|配置|模板|处方|病历|评估/i.test(previous);
+    if (!interveningEntity) {
+      for (let i = previousIndex - 1; i >= 0; i--) {
+        const candidateQuestion = String(users[i].content || '').trim();
+        if (!candidateQuestion) continue;
+        const candidate = routeQuestion(map, candidateQuestion, subKey);
+        if (candidate.matched) { prior = candidate; break; }
+        if (!consultContextFollowupIntent(candidateQuestion)) break;
+      }
+    }
+  }
   if (!prior.matched) return direct;
   const directId = String(direct.route && direct.route.id || '');
   const priorId = String(prior.route && prior.route.id || '');
@@ -1529,8 +1551,8 @@ function consultSafeDiagnosticIntent(question) {
   const q = String(question || '').trim();
   if (!q || q.length > 1000) return false;
   const direct = /(?:现场(?:要|怎么)?复现|怎么复现|如何复现|复现(?:步骤|条件)|怎么排查|如何排查|先查什么|从哪查起|哪里出问题|怎么留证|如何留证|现场留证|转开发前|交给开发前|(?:最少|至少)(?:要|需)?(?:补|提供|收集|记录)(?:什么|哪些)|抓什么|需要什么证据|只有(?:一张)?图|只有截图|拿不到\s*spec|没有\s*spec|先别让我找\s*spec)/i.test(q);
-  const symptom = /(?:列表为空|查不到|没数据|没有数据|一个都看不到|不显示|看不到|没反应|对不上|失败|异常|错误|页码|分页|筛选|保存后|患者端|医生端|药师端|详情|下钻)/i.test(q);
-  const diagnosticAsk = /(?:怎么查|如何查|查什么|排查|复现|留证|补什么|提供什么|抓什么|确认什么|怎么判断|如何判断|怎么办|怎么处理)/i.test(q);
+  const symptom = /(?:列表为空|查不到|没数据|没有数据|一个都看不到|不显示|看不到|没反应|没变化|对不上|失败|异常|错误|页码|分页|筛选|保存后|患者端|医生端|药师端|详情|下钻)/i.test(q);
+  const diagnosticAsk = /(?:怎么查|如何查|查什么|排查|复现|留证|补什么|提供什么|抓什么|确认什么|怎么判断|如何判断|怎么办|怎么处理|接下来|下一步)/i.test(q);
   return direct || (symptom && diagnosticAsk);
 }
 
@@ -1541,7 +1563,7 @@ function consultDiagnosticGuard(question, route) {
   return [
     '【本轮是实施现场诊断问题】',
     hasFacts
-      ? '先说明本轮命中 route 能确认的业务事实，以及仍不能确认的边界；不得用已知部分推测未知部分。'
+      ? `先说明本轮${route && route.inherited ? '从同会话上一轮继承的' : '命中的'} route 能确认的业务事实，并把它作为本轮判断基线；不能因为当前轮改问“下一步怎么查”就降级成“说明书未覆盖”。只把 route/当前召回证据未确认的细节局部标为未知，不得用已知部分推测未知部分。`
       : '当前没有足够正文证据确认具体业务规则、按钮、接口、字段、表或状态值；先把这个边界说清，但不能因此只机械索要 spec 或立即转开发。',
     '随后给 2~4 步观察型、非破坏的最小动作：确认实际终端/页面、账号角色、版本和复现前后条件；只观察本次操作是否发出请求，并记录浏览器实际显示的 URL、请求参数、HTTP/业务码与响应；按“没有请求 / 请求失败 / 响应正常但页面错误”分支判断；整理发生时间与脱敏截图。',
     '如果已知首次加载会一次返回多个分组，页签允许只在前端切换这些已有分组：不能要求每切一个页签都必须发新请求，也不能把没有新请求当成失效，除非正文/源码/接口契约明确要求逐页请求。优先只读对比首次响应的各组数量、成员集合以及各组互斥/包含关系；不得通过点开未读、切换已读、星标、审批或提交等改变业务状态的动作来验证。',
@@ -1559,7 +1581,7 @@ function consultRuleApplicationGuard(question, route) {
   if (!applying) return '';
   return [
     '【先应用已核规则，再决定是否诊断】',
-    '本轮已经命中有经确认事实的功能 route。先把用户描述的现象/想做的操作与这些事实比较：若规则已经能直接解释（例如终态本就不可编辑、非 owner 本就会被拒绝、缓存本就不会因普通刷新必然更新），先明确告诉实施“这是规则内的预期行为”及正确可行做法，不要用“当前资料无法确认”开头，也不要启动无意义的日志/ID/数据库调查。',
+    `本轮已经${route.inherited ? '从同会话上一轮继承' : '命中'}有经确认事实的功能 route。route/当前召回证据中的已确认事实必须继续作为判断基线，不能因为用户改问排查步骤就说“说明书未覆盖”。先把用户描述的现象/想做的操作与这些事实比较：若规则已经能直接解释（例如终态本就不可编辑、非 owner 本就会被拒绝、缓存本就不会因普通刷新必然更新），先明确告诉实施“这是规则内的预期行为”及正确可行做法，不要用“当前资料无法确认”开头，也不要启动无意义的日志/ID/数据库调查。`,
     '只有用户观察到的结果与已核规则冲突时，才按异常处理，并只索取能区分冲突分支的最少证据，说明在哪里取、拿到后怎么判断。',
     '如果用户只说“这一步对不上/还是不行”而没有讲清具体落在哪个分支，不得整体回复“当前资料无法确认”：先依据已核规则给出条件式结论（符合规则→这是预期、停止异常调查；与规则冲突→继续排查），再只追问一个能区分这两个分支的现象或字段。',
     '若当前轮出现新的明确业务实体，仍以当前 route 为准；不得沿用旧功能事实。历史 assistant 自由文本始终不是证据。',
