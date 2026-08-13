@@ -233,6 +233,41 @@ test('批处理/同步/调度守卫：观测不直接定故障，补跑须满足
   assert.equal(fn('反馈发送后正文还能改吗？', { matched: true, route: { title: '反馈锁定' }, answerFacts: ['发送后锁定'] }), '');
 });
 
+test('下载/导出/附件制品守卫：200、非空与能打开均不充分，须校验签名结构正文', () => {
+  const fn = new Function(extractFn(SRC, 'consultFileArtifactGuard') + '\nreturn consultFileArtifactGuard;')();
+  const route = {
+    matched: true,
+    inherited: true,
+    route: { title: '导出接口返回 200，但文件为空、损坏或下载不到' },
+    answerFacts: ['HTTP 200 不能证明文件有效，必须验证文件本体。'],
+    mustNotConfuse: ['响应头不证明文件内容有效。'],
+  };
+  for (const q of [
+    '导出接口 200，文件也非空，能打开就算成功了吗？',
+    '附件下载回来其实是 JSON 错误体，该怎么只读验收？',
+    '模板文件后缀是 docx，但 magic 对不上怎么办？',
+    'PDF 缺 EOF，DOCX 的 zip central directory 损坏，还能算成功吗？',
+    '换个账号下载就正常，先看权限范围还是文件本体？',
+  ]) {
+    const text = fn(q, route);
+    assert.match(text, /文件下载\/导出制品的只读验收门/);
+    assert.match(text, /HTTP 200、业务 code=0.*长度非零.*能打开.*不能单独证明/);
+    assert.match(text, /JSON\/HTML 错误页/);
+    assert.match(text, /文件长度大于 0/);
+    assert.match(text, /magic\/文件签名与声明扩展名、Content-Type\/MIME 一致/);
+    assert.match(text, /PDF.*header、EOF\/xref/);
+    assert.match(text, /DOCX\/XLSX\/ZIP.*central directory/);
+    assert.match(text, /\[Content_Types\]\.xml、word\/document\.xml/);
+    assert.match(text, /\[Content_Types\]\.xml、xl\/workbook\.xml/);
+    assert.match(text, /具体格式未知.*不得硬猜/);
+    assert.match(text, /同一环境、同一入口、同一筛选条件和同一已有记录/);
+    assert.match(text, /不得为了验证而修改权限、模板、业务数据/);
+  }
+  for (const q of ['token 是谁签发的？', '患者列表从哪个接口取数？', '这个红色按钮点哪个？']) {
+    assert.equal(fn(q, { matched: false }), '', q);
+  }
+});
+
 test('通用非破坏诊断守卫：写操作不能包装成只做一次，四项条件齐备才可受控验证', () => {
   const safeIntent = new Function(extractFn(SRC, 'consultSafeDiagnosticIntent') + '\nreturn consultSafeDiagnosticIntent;')();
   const fn = new Function('consultSafeDiagnosticIntent', extractFn(SRC, 'consultNonDestructiveDiagnosticGuard') + '\nreturn consultNonDestructiveDiagnosticGuard;')(safeIntent);
@@ -281,12 +316,13 @@ test('模糊的“第二步对不上”仍须先给规则条件分支，不能�
   }
 });
 
-test('consult prompt 同时注入规则应用、运行安全与现场诊断，顺序固定', () => {
-  const call = SRC.match(/consultSystem\(proj, cver, hits, specHits, codeHits, qtext\)[\s\S]{0,900}?messages: msgs/);
+test('consult prompt 同时注入规则应用、运行安全、文件验收与现场诊断，顺序固定', () => {
+  const call = SRC.match(/consultSystem\(proj, cver, hits, specHits, codeHits, qtext\)[\s\S]{0,1100}?messages: msgs/);
   assert.ok(call, '应定位 consult 模型调用');
   assert.ok(call[0].indexOf('consultEvidenceLedgerGuard') < call[0].indexOf('consultRuleApplicationGuard'));
   assert.ok(call[0].indexOf('consultRuleApplicationGuard') < call[0].indexOf('consultOperationalSafetyGuard'));
-  assert.ok(call[0].indexOf('consultOperationalSafetyGuard') < call[0].indexOf('consultDiagnosticGuard'));
+  assert.ok(call[0].indexOf('consultOperationalSafetyGuard') < call[0].indexOf('consultFileArtifactGuard'));
+  assert.ok(call[0].indexOf('consultFileArtifactGuard') < call[0].indexOf('consultDiagnosticGuard'));
   assert.ok(call[0].indexOf('consultDiagnosticGuard') < call[0].indexOf('consultNonDestructiveDiagnosticGuard'));
 });
 
@@ -298,6 +334,7 @@ test('安全诊断意图绕过机械 miss，但普通无证据事实题仍保持
   assert.match(route, /const noAnswer = !conversationMode && !safeDiagnostic && routeMiss && specNoSpec/);
   assert.match(route, /consultDiagnosticGuard\(qtext, route\)/);
   assert.match(route, /consultOperationalSafetyGuard\(qtext, route\)/);
+  assert.match(route, /consultFileArtifactGuard\(qtext, route\)/);
   assert.match(route, /consultEvidenceLedgerGuard\(qtext, route\)/);
   assert.match(route, /consultNonDestructiveDiagnosticGuard\(qtext, route\)/);
 });

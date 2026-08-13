@@ -787,6 +787,60 @@ test('真实PWRS地图回归：调度事实可在同主题诊断继承，显式�
   }
 });
 
+test('真实PWRS地图回归：下载导出附件与模板文件验收自然问法命中DQ-014并保留完整制品门', { skip: !process.env.PWRS_REAL_MAP }, () => {
+  const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
+  const S = buildRoutingSandbox(makeDeps());
+  for (const question of [
+    '导出接口返回 200 就算成功了吗？',
+    '附件下载返回 200，响应其实是 JSON 错误体，怎么判断？',
+    '下载文件后缀是 docx，但 magic 不是 ZIP，能算成功吗？',
+    'PDF 有 header 但没有 EOF 和 xref，还算结构完整吗？',
+    'DOCX 的 central directory 或必要 entries 损坏，实施怎么留证？',
+    '模板下载文件非空也能打开，还需要验 MIME、签名和正文吗？',
+    '医院报导出坏文件，换账号就正常了，先查数据范围还是文件本体？',
+  ]) {
+    const hit = S.routeQuestion(map, question, '');
+    assert.equal(hit.route?.id, 'DQ-014', `${question}，top=${JSON.stringify(hit.topN)}`);
+    const facts = hit.answerFacts.join('\n');
+    assert.match(facts, /响应体是文件字节而不是 JSON\/HTML 错误体/);
+    assert.match(facts, /bytes>0/);
+    assert.match(facts, /magic\/签名与扩展名及 Content-Type\/MIME 一致/);
+    assert.match(facts, /PDF.*header、EOF\/xref/);
+    assert.match(facts, /DOCX\/XLSX\/ZIP.*central directory.*必要 entries/);
+    assert.match(facts, /格式未知.*实际文件名、扩展名和 MIME.*不得硬猜/);
+    assert.match(facts, /换账号后正常.*同环境、同入口、同筛选和同一已有记录/);
+    assert.match(facts, /不得修改权限、模板或业务数据来验证/);
+  }
+});
+
+test('真实PWRS地图回归：导出事实可继承，显式医嘱审核切题且普通事实不被抢', { skip: !process.env.PWRS_REAL_MAP }, () => {
+  const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
+  const S = buildRoutingSandbox(makeDeps());
+  const follow = '回到导出文件这里，第一步看过了，没发现异常。接下来呢？';
+  const inherited = S.contextualRouteQuestion(map, [
+    { role: 'user', content: '导出接口返回 200 就算成功了吗？' },
+    { role: 'assistant', content: '只复述已核 route，不提供自由猜测。' },
+    { role: 'user', content: follow },
+  ], follow, '');
+  assert.equal(inherited.route?.id, 'DQ-014');
+  assert.equal(inherited.inherited, true);
+  assert.match(inherited.answerFacts.join('\n'), /magic\/签名.*MIME/);
+
+  const switchedQuestion = '换个问题，非创建人重复提交同组医嘱的错误码和数据结果是什么？';
+  const switched = S.contextualRouteQuestion(map, [
+    { role: 'user', content: '附件下载是 JSON 错误体，怎么验文件？' },
+    { role: 'assistant', content: '继续按文件制品门只读核对。' },
+    { role: 'user', content: switchedQuestion },
+  ], switchedQuestion, '');
+  assert.notEqual(switched.route?.id, 'DQ-014');
+  assert.match(switched.answerFacts.join('\n'), /ORDER_NOT_USER/);
+
+  for (const question of ['token 是谁签发的？', '这个红色按钮点哪个？', '患者列表从哪个接口取数？']) {
+    const hit = S.routeQuestion(map, question, '');
+    assert.notEqual(hit.route?.id, 'DQ-014', question);
+  }
+});
+
 test('真实PWRS地图回归：权限与归属后续排查保持事实并优先只读证据，显式新实体仍切题', { skip: !process.env.PWRS_REAL_MAP }, () => {
   const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
   const S = buildRoutingSandbox(makeDeps());

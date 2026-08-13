@@ -1633,6 +1633,25 @@ function consultOperationalSafetyGuard(question, route) {
   ].join('\n');
 }
 
+// 文件下载/导出/附件/模板下载的“成功”必须验文件制品本体：HTTP 200、非空、扩展名或阅读器能打开均不充分。
+// 该守卫只给已有响应/文件的只读验证清单，不推测当前业务一定使用某一种格式，也不要求重复触发可能有副作用的导出动作。
+function consultFileArtifactGuard(question, route) {
+  const q = String(question || '').trim();
+  const routeText = route && route.matched
+    ? [route.route && route.route.title, ...(route.answerFacts || []), ...(route.mustNotConfuse || [])].filter(Boolean).join(' ')
+    : '';
+  const topic = `${q} ${routeText}`;
+  const fileArtifact = /(?:下载|导出|附件|模板(?:文件)?(?:下载|导出)|文件(?:为空|空白|损坏|打不开|无法打开|格式|扩展名|后缀|内容|正文|字节|大小)|HTTP\s*200|Content-Type|Content-Disposition|MIME|magic|签名|文件头|PDF|DOCX|XLSX|ZIP|压缩包|central directory|EOF|xref)/i.test(topic);
+  if (!fileArtifact) return '';
+  return [
+    '【文件下载/导出制品的只读验收门】',
+    'HTTP 200、业务 code=0、Content-Disposition、扩展名、长度非零或“某个软件能打开”都不能单独证明文件有效。优先使用用户已经拿到的文件和已经发生的请求响应，不得为了验证而修改权限、模板、业务数据，或重复触发可能改变状态的导出动作。',
+    '实施按固定顺序核对并留证：1. 响应体是真实文件字节，而不是 HTTP 200 包裹的 JSON/HTML 错误页；2. 文件长度大于 0；3. magic/文件签名与声明扩展名、Content-Type/MIME 一致；4. 按实际声明格式验证结构完整；5. 抽检正文或业务内容，确认不是空壳、错误页、错数据或缺关键内容。任一层失败都不能判成功。',
+    '结构校验按实际格式选择：PDF 至少核可识别 header、EOF/xref 并能被 PDF 结构解析器解析；DOCX/XLSX/ZIP 至少核 central directory 可解析，并检查该格式必要 entries（DOCX 如 [Content_Types].xml、word/document.xml；XLSX 如 [Content_Types].xml、xl/workbook.xml）。具体格式未知时，先取得实际文件名、扩展名与 MIME，再按其声明格式选对应解析器；不得硬猜文件一定是 PDF、DOCX、XLSX，也不得编造系统使用的具体工具。',
+    '若换账号后正常，先固定同一环境、同一入口、同一筛选条件和同一已有记录，只读对比两边账号权限/数据范围/模板上下文，以及响应类型、字节数、magic、结构和正文。范围或数据不同只能说明账号上下文可能影响结果；同条件下坏文件签名/结构失败才指向文件生成或下载链，不能只凭“另一个账号正常”归因。',
+  ].join('\n');
+}
+
 // 同主题事实账本：route/facts 每轮都从模块地图与正文重新装配，不持久化模型自由文本。
 // 部分证据、现场限制和复测问法只能收窄“本轮能观测到哪”，不能反向抹掉已核系统事实。
 function consultEvidenceLedgerGuard(question, route) {
@@ -3337,7 +3356,7 @@ const server = http.createServer((req, res) => {
       else {
         // PD-04：命中 mustNotConfuse → 作负向提示注入 system（易混淆项，勿臆造）。answerFacts 已在 specHits 顶段（consultSystem 走 specExcerpts）。
         const mncNote = routeMnc.length ? '\n【以下为该问题的易混淆项，请勿臆造、勿张冠李戴】' + routeMnc.map(x => '\n· ' + x).join('') : '';
-        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationMode) + '\n' + consultEvidenceLedgerGuard(qtext, route) + '\n' + consultRuleApplicationGuard(qtext, route) + '\n' + consultOperationalSafetyGuard(qtext, route) + '\n' + consultDiagnosticGuard(qtext, route) + '\n' + consultNonDestructiveDiagnosticGuard(qtext, route) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
+        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationMode) + '\n' + consultEvidenceLedgerGuard(qtext, route) + '\n' + consultRuleApplicationGuard(qtext, route) + '\n' + consultOperationalSafetyGuard(qtext, route) + '\n' + consultFileArtifactGuard(qtext, route) + '\n' + consultDiagnosticGuard(qtext, route) + '\n' + consultNonDestructiveDiagnosticGuard(qtext, route) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
           piece = String(piece == null ? '' : piece); if (!piece) return;
           if (!kbInjected && kbRefs.length) { kbInjected = true; sse({ kb: kbRefs, kbInjected: true }); }
           reply += piece; sse({ v: piece });
