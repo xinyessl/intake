@@ -739,6 +739,54 @@ test('真实PWRS地图回归：配置、退出、反馈、权限的部分证据�
   assert.notEqual(switched.route?.id, 'DQ-012');
 });
 
+test('真实PWRS地图回归：调度截图、旧时间、同步中断与受控补跑自然问法命中DQ-013', { skip: !process.env.PWRS_REAL_MAP }, () => {
+  const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
+  const S = buildRoutingSandbox(makeDeps());
+  for (const question of [
+    '监控截图最后成功时间停在三天前，是不是调度停了？',
+    '只看到最后成功时间很旧，实施先查什么，能直接恢复吗？',
+    '同步任务运行中断了，现在可以重跑还是要先确认范围？',
+    'ETL 能不能先补跑昨天的数据？',
+    '批处理明确幂等，重新触发前还要核对当前运行态和谁授权吗？',
+    'PWRS 自己没有定时，由外部调度触发，这个事实现场怎么继续核对？',
+  ]) {
+    const hit = S.routeQuestion(map, question, '');
+    assert.equal(hit.route?.id, 'DQ-013', `${question}，top=${JSON.stringify(hit.topN)}`);
+    const facts = hit.answerFacts.join('\n');
+    assert.match(facts, /PWRS 内部 @Scheduled 当前禁用/);
+    assert.match(facts, /只属于现场观测/);
+    assert.match(facts, /不能据此断言调度停止、平台故障或责任归属/);
+    assert.match(facts, /幂等\/补偿契约.*目标时间窗.*当前运行态与授权/);
+  }
+});
+
+test('真实PWRS地图回归：调度事实可在同主题诊断继承，显式新实体切题且普通事实不被抢', { skip: !process.env.PWRS_REAL_MAP }, () => {
+  const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
+  const S = buildRoutingSandbox(makeDeps());
+  const follow = '第一步看过了，后面先怎么处理？';
+  const inherited = S.contextualRouteQuestion(map, [
+    { role: 'user', content: 'PWRS 的患者同步是谁定时触发的？' },
+    { role: 'assistant', content: '已按模块地图确认外部调度边界。' },
+    { role: 'user', content: follow },
+  ], follow, '');
+  assert.equal(inherited.route?.id, 'DQ-013');
+  assert.equal(inherited.inherited, true);
+
+  const switchedQuestion = '换个问题，药师反馈发送后正文还能改吗？';
+  const switched = S.contextualRouteQuestion(map, [
+    { role: 'user', content: '同步最后成功时间停在昨天，能不能重跑？' },
+    { role: 'assistant', content: '旧时间只是观测证据。' },
+    { role: 'user', content: switchedQuestion },
+  ], switchedQuestion, '');
+  assert.equal(switched.route?.id, 'QR-FEEDBACK-SEND-DEDUP');
+  assert.notEqual(switched.route?.id, 'DQ-013');
+
+  for (const question of ['token 是谁签发的？', '这个红色按钮点哪个？', '患者列表从哪个接口取数？']) {
+    const hit = S.routeQuestion(map, question, '');
+    assert.notEqual(hit.route?.id, 'DQ-013', question);
+  }
+});
+
 test('AC-2 tier-1 关键词 IDF 打分命中（无整串别名，纯关键词重叠）', () => {
   const S = buildRoutingSandbox(makeDeps());
   const r = S.routeQuestion(FIXTURE_MAP, '医嘱干预的时候说明书地址在哪里配置', '');

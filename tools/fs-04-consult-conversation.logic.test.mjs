@@ -201,6 +201,38 @@ test('同主题事实账本只继承 route/spec/source，部分现场证据不�
   assert.equal(fn('患者接口是什么？', { matched: true }), '', '非同主题追问不注入账本守卫');
 });
 
+test('批处理/同步/调度守卫：观测不直接定故障，补跑须满足副作用前置条件', () => {
+  const fn = new Function(extractFn(SRC, 'consultOperationalSafetyGuard') + '\nreturn consultOperationalSafetyGuard;')();
+  const route = {
+    matched: true,
+    inherited: true,
+    route: { title: '患者、监控或统计数据长时间不更新' },
+    answerFacts: ['PWRS 内部不定时，由外部调度触发。'],
+    mustNotConfuse: ['非幂等任务补跑前必须评估重复数据。'],
+  };
+  for (const q of [
+    '监控截图最后成功时间停在三天前，是不是调度停了，直接恢复吗？',
+    '同步任务中断了，实施能不能先补跑一次？',
+    'ETL 好久没有新增，下一步怎么查？',
+    '这个批处理明确是幂等的，现在可以重新触发吗？',
+  ]) {
+    const text = fn(q, route);
+    assert.match(text, /观测与副作用安全边界/);
+    assert.match(text, /只是当前观测证据/);
+    assert.match(text, /不得据此断言“调度停了”“某平台故障”/);
+    assert.match(text, /恢复、重跑、补跑、重新触发、手动执行.*可能有副作用/);
+    assert.match(text, /未确认.*幂等或补偿契约、目标时间窗和数据范围、当前运行态、执行 Owner\/授权之前，不得建议直接执行/);
+    assert.match(text, /即使用户明确说任务幂等/);
+    assert.match(text, /1\. 对照经确认的预期计划.*2\. 只读取得.*3\. 确认任务 Owner.*4\. 再决定升级/);
+    assert.match(text, /系统内部不定时、由外部调度触发/);
+    assert.match(text, /不得由此外推真实调度平台、频率、任务名、部署位置、错误状态或责任人/);
+  }
+
+  assert.equal(fn('这个红色按钮应该点哪个？', { matched: false }), '');
+  assert.equal(fn('token 是谁签发的？', { matched: false }), '');
+  assert.equal(fn('反馈发送后正文还能改吗？', { matched: true, route: { title: '反馈锁定' }, answerFacts: ['发送后锁定'] }), '');
+});
+
 test('模糊的“第二步对不上”仍须先给规则条件分支，不能退回整体拒答', () => {
   const fn = new Function(extractFn(SRC, 'consultRuleApplicationGuard') + '\nreturn consultRuleApplicationGuard;')();
   for (const q of [
@@ -215,11 +247,12 @@ test('模糊的“第二步对不上”仍须先给规则条件分支，不能�
   }
 });
 
-test('consult prompt 同时注入规则应用与现场诊断，且规则应用在诊断前', () => {
+test('consult prompt 同时注入规则应用、运行安全与现场诊断，顺序固定', () => {
   const call = SRC.match(/consultSystem\(proj, cver, hits, specHits, codeHits, qtext\)[\s\S]{0,900}?messages: msgs/);
   assert.ok(call, '应定位 consult 模型调用');
   assert.ok(call[0].indexOf('consultEvidenceLedgerGuard') < call[0].indexOf('consultRuleApplicationGuard'));
-  assert.ok(call[0].indexOf('consultRuleApplicationGuard') < call[0].indexOf('consultDiagnosticGuard'));
+  assert.ok(call[0].indexOf('consultRuleApplicationGuard') < call[0].indexOf('consultOperationalSafetyGuard'));
+  assert.ok(call[0].indexOf('consultOperationalSafetyGuard') < call[0].indexOf('consultDiagnosticGuard'));
 });
 
 test('安全诊断意图绕过机械 miss，但普通无证据事实题仍保持短路', () => {
@@ -229,5 +262,6 @@ test('安全诊断意图绕过机械 miss，但普通无证据事实题仍保持
   assert.match(route, /const safeDiagnostic = consultSafeDiagnosticIntent\(qtext\)/);
   assert.match(route, /const noAnswer = !conversationMode && !safeDiagnostic && routeMiss && specNoSpec/);
   assert.match(route, /consultDiagnosticGuard\(qtext, route\)/);
+  assert.match(route, /consultOperationalSafetyGuard\(qtext, route\)/);
   assert.match(route, /consultEvidenceLedgerGuard\(qtext, route\)/);
 });
