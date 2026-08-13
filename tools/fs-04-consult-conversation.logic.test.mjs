@@ -144,7 +144,24 @@ test('已核规则应用守卫：先判预期行为，冲突时才收最少证�
     assert.match(text, /预期行为/);
     assert.match(text, /与已核规则冲突/);
     assert.match(text, /最少证据/);
+    assert.match(text, /条件式结论/);
+    assert.match(text, /不得整体回复“当前资料无法确认”/);
+    assert.match(text, /只追问一个/);
     assert.match(text, /历史 assistant 自由文本始终不是证据/);
+  }
+});
+
+test('模糊的“第二步对不上”仍须先给规则条件分支，不能退回整体拒答', () => {
+  const fn = new Function(extractFn(SRC, 'consultRuleApplicationGuard') + '\nreturn consultRuleApplicationGuard;')();
+  for (const q of [
+    '关于反馈发送后锁定，按这个顺序查到第二步就对不上了，后面先停还是继续？',
+    '患教状态这里还是不行，接下来先停吗？',
+    '配置缓存第二步对不上，下一步呢？',
+  ]) {
+    const text = fn(q, { matched: true });
+    assert.match(text, /符合规则→这是预期、停止异常调查/);
+    assert.match(text, /与规则冲突→继续排查/);
+    assert.match(text, /只追问一个/);
   }
 });
 
