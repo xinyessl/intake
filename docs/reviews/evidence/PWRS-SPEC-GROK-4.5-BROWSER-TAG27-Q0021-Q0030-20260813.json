@@ -1,0 +1,214 @@
+{
+  "schema": 1,
+  "evidenceId": "PWRS-SPEC-GROK-4.5-BROWSER-TAG27-Q0021-Q0030-20260813",
+  "createdAt": "2026-08-13",
+  "fixture": {
+    "questions": "tools/fixtures/pwrs-grok-browser-1000.questions.json",
+    "requirements": "tools/fixtures/pwrs-grok-browser-1000.question-requirements.json",
+    "range": "Q0021-Q0030"
+  },
+  "runtime": {
+    "product": "pwrs",
+    "version": "2.7.260813-27",
+    "model": "grok-4.5",
+    "intakeCommitAtRun": "a6296d5",
+    "browser": "official Chrome Browser Plugin",
+    "visibleUi": true,
+    "standalonePlaywrightOrHttpUsedAsAnswerSource": false,
+    "imagesUploaded": 0,
+    "finalTabDisposition": "handoff"
+  },
+  "conversationExecution": [
+    {
+      "fixtureConversation": "C004-continuation",
+      "questions": ["Q0021", "Q0022", "Q0023"],
+      "actualConvId": "unavailable",
+      "newConversationButtonClickedBeforeFirstQuestion": false,
+      "continuationVerifiedByVisibleQuestions": ["Q0019", "Q0020"]
+    },
+    {
+      "fixtureConversation": "C005",
+      "questions": ["Q0024", "Q0025", "Q0026", "Q0027", "Q0028", "Q0029"],
+      "actualConvId": "unavailable",
+      "newConversationButtonClickedBeforeFirstQuestion": true,
+      "isolationCheck": {"fMsgCount": 0, "bubbleCount": 0}
+    },
+    {
+      "fixtureConversation": "C006",
+      "questions": ["Q0030"],
+      "actualConvId": "unavailable",
+      "newConversationButtonClickedBeforeFirstQuestion": true,
+      "isolationCheck": {"fMsgCount": 0, "bubbleCount": 0}
+    }
+  ],
+  "summary": {
+    "completed": 10,
+    "passed": 8,
+    "failed": 2,
+    "score": "8/10",
+    "failureIds": ["Q0022", "Q0023"],
+    "systemicFailure": "退出跳转连续会话中，前轮已经确认 getPortalDomain、开发端口 9999、门户根路径 /login 或 /home；Q0022 与 Q0023 却改口称当前说明书摘录未覆盖退出跳转具体规则，丢失已核上下文事实。"
+  },
+  "results": [
+    {
+      "id": "Q0021",
+      "question": "医院报的退出跳转问题，换了另一个账号就正常了，这个线索说明先看哪边？",
+      "requirementId": "A02",
+      "turnType": "context_followup",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "answerText": "结论：优先看出问题账号自身的权限、菜单、角色和 token 状态，而不是先判定通用退出跳转代码或门户环境故障。退出跳转是账号无关的通用流程；另一个账号正常，可先比较两个账号登录后的菜单、角色、授权院区以及用同样操作退出后的最终 URL。用问题账号只读复现，记录 token/菜单是否清理、最终是否到门户根路径、是否出现 403 或 Console 报错；若两账号最终 URL 不同，再把账号侧动态授权与登录态差异作为优先方向。不能仅凭换账号正常就断言具体权限项或字段错误。",
+      "answerTextKind": "faithful_normalization_of_complete_visible_dom",
+      "manualEvaluation": {
+        "verdict": "PASS",
+        "reason": "用正常账号作对照，优先收窄问题账号的菜单、权限、登录态与最终跳转差异，并未改变门户根路径规则。",
+        "minorObservation": "账号侧原因展开较多，属于诊断方向而非已经确认的根因。"
+      }
+    },
+    {
+      "id": "Q0022",
+      "question": "回到退出跳转这里，第一步看过了，没发现异常。接下来呢？",
+      "requirementId": "A02",
+      "turnType": "context_followup",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "answerText": "结论：第一步账号对比没异常，就继续用问题账号把退出完整复现一遍，只盯最终跳到哪、与正常账号是否一致、中途有没有被拦。回答要求记录地址栏最终完整 URL、页面形态、Console 红色报错、Storage 中登录态和菜单缓存是否清掉，并在 Network 中区分无请求、请求失败、请求成功但页面仍错；还建议清站点数据或用无痕窗口做对照。回答同时明确写道：当前这轮说明书摘录没有写退出跳转的具体规则（该跳哪个域名/路径、token 怎么清、账号差异会不会改跳转），所以只做观察型定位，不写具体接口路径或配置名。",
+      "answerTextKind": "faithful_normalization_of_complete_visible_dom",
+      "manualEvaluation": {
+        "verdict": "FAIL",
+        "reason": "诊断动作虽然可执行，但错误声称说明书未覆盖退出跳转具体规则，未复用同会话已确认的 getPortalDomain、开发端口 9999 和门户根路径 /login 或 /home，违反连续会话事实继承要求。"
+      }
+    },
+    {
+      "id": "Q0023",
+      "question": "退出跳转这一段，接口是通的，返回也是 200，但页面还是没变化，下一步看哪？",
+      "requirementId": "A02",
+      "turnType": "context_followup",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "answerText": "结论：接口返回 200 只说明传输层或后端应答成功，不等于前端已清登录态并完成跳转。下一步看地址栏是否变化、页面和菜单是否仍保留、200 之后有无导航、Storage 中 token/菜单是否清掉、Console 是否有路由或跳转报错；响应成功但页面不动时收窄到 200 之后的前端清态、路由或整页跳转。回答还建议用无痕或清站点数据对照，并要求记录最终 URL 和 Console 报错。回答同时再次写道：当前说明书摘录对退出后页面如何跳、200 后为何仍停在原地没有直接写清规则，并在结尾声明摘录没有退出跳转的具体实现细节。",
+      "answerTextKind": "faithful_normalization_of_complete_visible_dom",
+      "manualEvaluation": {
+        "verdict": "FAIL",
+        "reason": "200 后转查前端跳转、清态和 Console 的方向正确，但再次错误否认已确认的退出跳转契约，没有用门户 9999、getPortalDomain 和根路径作为正常对照。"
+      }
+    },
+    {
+      "id": "Q0024",
+      "question": "药师反馈连续点两次保存会不会落两条？",
+      "requirementId": "A19",
+      "turnType": "fact_or_incident",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "answerText": "不会落两条。同一药师在 1 秒内连续点两次或多次保存，系统会做防重拦截，不会生成两条反馈记录。现场可确认同一账号、短间隔和最终列表只存在一条；真的出现同一药师极短间隔落两条才作为异常，记录操作时间、账号、页面状态和请求响应。回答还区分了未发送反馈的编辑删除与已发送正文锁定规则。",
+      "answerTextKind": "faithful_normalization_of_complete_visible_dom",
+      "manualEvaluation": {
+        "verdict": "PASS",
+        "reason": "明确同一药师 1 秒内重复保存会被防重且第二次不落库，覆盖题目核心。",
+        "minorObservation": "本题回答未展开 SUBMIT_IS_BUSY，但题目只问是否落两条。"
+      }
+    },
+    {
+      "id": "Q0025",
+      "question": "现在卡在“药师连点两次发送，第二次提示正在提交”。给我一个能直接照着走的排查顺序。",
+      "requirementId": "A19",
+      "turnType": "field_diagnostic",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "answerText": "结论：同一药师约 1 秒内连点两次发送或保存，第二次正在提交通常是防重表现，不会落两条。先固定同一账号、未发送状态和 1 秒内连点条件；随后刷新或重新进入看最终条数和发送状态。只有一条且已发送后锁定就按预期结案；两条、第一次未成功却一直卡住、或已发送仍可改删才算异常。异常时只记录账号、时间、间隔、最终条数和页面状态，并只复现一次抓请求是否发出、HTTP/业务结果和页面响应，避免反复提交造数据。",
+      "answerTextKind": "faithful_normalization_of_complete_visible_dom",
+      "manualEvaluation": {
+        "verdict": "PASS",
+        "reason": "给出同一账号、1 秒内防重、只落一条的预期和最小现场证据分支。",
+        "minorObservation": "未直接写 SUBMIT_IS_BUSY，但现场“正在提交”提示与拦截语义一致。"
+      }
+    },
+    {
+      "id": "Q0026",
+      "question": "现场还卡在反馈重复提交这里，我只拿得到这张截图，没有日志，够不够？",
+      "requirementId": "A19",
+      "turnType": "context_followup",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "answerText": "截图可先判断一大半，但是否足够取决于是否能看清按钮、提示原文、连点间隔和是否同一药师。第二次出现正在提交、提交中或请勿重复提交与 1 秒防重相符；单张提示截图若看不出最终条数，则无需先要日志，只需刷新或重新进入确认是一条还是两条、是否已发送锁定。一条且锁定可结案；两条、一直卡且未成功、或已发送仍可改删时，再补账号、时间、间隔、条数和可选的 Network 结果作为最小异常证据。",
+      "answerTextKind": "faithful_normalization_of_complete_visible_dom",
+      "manualEvaluation": {
+        "verdict": "PASS",
+        "reason": "明确截图可先判断但需页面确认最终条数与发送锁定，缺日志不会机械阻塞。"
+      }
+    },
+    {
+      "id": "Q0027",
+      "question": "关于反馈重复提交，请求和响应都抓到了，重点核对哪几个地方？",
+      "requirementId": "A19",
+      "turnType": "context_followup",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "answerText": "重点核对两次是否为同一保存接口和同一药师、时间差是否约在 1 秒内、第二次响应是否为 SUBMIT_IS_BUSY、请求体是否指向同一条业务记录、最终是否只有一条。正常是第一次成功、第二次 SUBMIT_IS_BUSY 且不落库、页面最终一条；第二次也成功、产生新 feedbackId、返回其它业务错误或最终两条才按异常。升级时保留两次 URL、时间差、脱敏请求体、业务码文案、最终条数和账号时间。",
+      "answerTextKind": "faithful_normalization_of_complete_visible_dom",
+      "manualEvaluation": {
+        "verdict": "PASS",
+        "reason": "明确同一药师、1 秒内、第二次 SUBMIT_IS_BUSY 且不落库以及最终只有一条。"
+      }
+    },
+    {
+      "id": "Q0028",
+      "question": "pwrs_patient.patient_id 在 PostgreSQL 里是什么类型和长度？",
+      "requirementId": "A08",
+      "turnType": "topic_switch",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "answerText": "pwrs_patient.patient_id 在 PostgreSQL 中是 character varying(50)，即 varchar(50)，长度 50。同表 p_id、patient_id、visit_id、district_code 都是 varchar(50)；p_id 的值虽然可能像 UUID，但列不是 PostgreSQL 原生 uuid。",
+      "answerTextKind": "faithful_normalization_of_complete_visible_dom",
+      "manualEvaluation": {
+        "verdict": "PASS",
+        "reason": "准确回答 patient_id 为 varchar(50)，并正确区分 p_id 的 UUID 形态与原生 uuid 列类型。"
+      }
+    },
+    {
+      "id": "Q0029",
+      "question": "医院报的患者号字段问题，按这个顺序查到第二步就对不上了，后面先停还是继续？",
+      "requirementId": "A08",
+      "turnType": "switched_followup",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "answerText": "先停在第二步把对不上的点说清，不盲目向 Proxy、ETL 或改库方向继续。若现场类型与 varchar(50) 一致，类型问题可停止；若实际列被说成 int、bigint 或 uuid，只继续核实是否确为 psp.pwrs_patient.patient_id、是否连错库或环境并留列类型证据。若医院所说患者号可能不是 patient_id，先确认截图或接口中的实际字段。回答还将“请求入口或参数不一致”和“请求正常但结果为空”分开：前者停在当前层对齐请求，后者才按查自己或查医院分支继续。",
+      "answerTextKind": "faithful_normalization_of_complete_visible_dom",
+      "manualEvaluation": {
+        "verdict": "PASS",
+        "reason": "先停在第二步辨明字段类型、字段指认或请求条件分支，复用 varchar(50) 事实且不盲目向后查。",
+        "minorObservation": "回答扩展了患者列表入口诊断，虽非本题必要，但未与权威事实冲突。"
+      }
+    },
+    {
+      "id": "Q0030",
+      "question": "改一条系统配置只会影响当前医院吗？",
+      "requirementId": "A36",
+      "turnType": "fact_or_incident",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "answerText": "不会。系统配置不只影响当前医院，可能影响所有共用同一统一用户中心的机构。sys_config 是统一用户中心的全局配置，当前接口没有按医院过滤；修改 open 或 value 等配置可能让共用 usercenter 的医院一起受影响。现场改前应确认 usercenter 是否多机构共用并留痕；如果只想影响单家医院，当前实现不能静态保证医院级隔离，需要产品或开发评估覆盖方案。",
+      "answerTextKind": "faithful_normalization_of_complete_visible_dom",
+      "manualEvaluation": {
+        "verdict": "PASS",
+        "reason": "明确系统配置不保证医院隔离，可能影响共用 usercenter 的全部机构，并提示改前确认影响范围。",
+        "minorObservation": "原回答再次把 GET /api/config/all 作为核验示例；该示例不影响配置全局结论，但不是本题必要事实。"
+      }
+    }
+  ],
+  "limitations": [
+    "实际 convId、route 与 inherited 没有出现在本轮可见 DOM，未按时间或题意猜测，统一标为 unavailable。",
+    "answerText 为当轮完整可见 DOM 回答的忠实归一化文本，去掉 Markdown 排版重复、反馈卡和转工单卡，不作为逐字原文。",
+    "本文件只固化评测证据；Q0022/Q0023 的系统性修复未在本批启动。"
+  ]
+}
