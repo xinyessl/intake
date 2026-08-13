@@ -508,6 +508,78 @@ test('真实PWRS地图回归：跨端共享数据消歧不抢患教模板私有/
   }
 });
 
+test('真实PWRS地图回归：tag25五个失败问法与十五个自然变体命中四类专用路由', { skip: !process.env.PWRS_REAL_MAP }, () => {
+  const S = buildRoutingSandbox(makeDeps());
+  const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
+  const groups = [
+    {
+      id: 'QR-ORDER-AUDIT-PAGINATION',
+      questions: [
+        '这个医嘱干预历史列表重新筛选后页码该不该重置，现场只有图怎么留证？',
+        '那我在第三页保存一条干预后，页码应该留在第三页吗？',
+        '医嘱干预分页在保存记录后会不会跳回首页？',
+        '历史列表已经翻到第五页，修改干预后正常应显示哪一页？',
+        '筛选条件改了以后是否必须回到第一页，说明书有定义吗？',
+        '保存后当前页已经没有数据，医嘱干预列表应怎么回退？',
+      ],
+      fact: /只有该页已无有效数据时.*最后一个有效页/,
+    },
+    {
+      id: 'QR-MEDICAL-CONSULT-VISIBILITY',
+      questions: [
+        '用药咨询患者端看不到，现场要查哪个落库状态？',
+        '那这个用药咨询的已读未读和标记，到底是患者端还是药师端？',
+        '医生给药师发的用药咨询，患者本人能在系统里看到吗？',
+        '实施说患者手机上没有咨询列表，这是已知功能还是新需求？',
+        '用药咨询的回复是给医生看的，还是也已经有患者查看入口？',
+        '用药咨询标记和未读数在药师工作台还是患者端？',
+      ],
+      fact: /现有 Spec 没有患者端查看该用药咨询的能力/,
+    },
+    {
+      id: 'QR-STAT-ORDER-AUDIT-DRILLDOWN',
+      questions: [
+        '统计分析里医嘱干预这一行，怎么跟原业务记录对上？',
+        '工作量统计下钻的干预记录，跨页能直接拿 groupNo 当唯一关联键吗？',
+        '统计弹窗一条医嘱干预，回业务列表应核对哪些可见信息？',
+        '医嘱干预统计下钻到详情，用 audit 主键能保证是同一条吗？',
+        '统计这条和原始干预对不上，只有截图时最少留哪些证据？',
+      ],
+      fact: /没有确认 groupNo、audit 主键.*唯一关联键/,
+    },
+    {
+      id: 'QR-ASSESS-DRUG-DOCTOR-INBOX',
+      questions: [
+        '药物重整医生端全部、已读、未读、星标四组是怎么分的？',
+        '医生看了重整单以后再看一次，已读会被取消吗？',
+        '我的药物重整列表里，星标再点一次是取消还是保持？',
+      ],
+      fact: /all\/read\/unRead\/mask 四组/,
+    },
+  ];
+  let count = 0;
+  for (const { id, questions, fact } of groups) for (const question of questions) {
+    const hit = S.routeQuestion(map, question, '');
+    assert.equal(hit.route?.id, id, `${question}，topN=${JSON.stringify(hit.topN)}`);
+    assert.match(hit.answerFacts.join('\n'), fact);
+    count++;
+  }
+  assert.ok(count >= 20, '应覆盖5个失败问法与至少10个自然变体');
+});
+
+test('真实PWRS地图回归：tag26新路由不抢 token、患者列表、无证据红按钮或采纳闭环', { skip: !process.env.PWRS_REAL_MAP }, () => {
+  const S = buildRoutingSandbox(makeDeps());
+  const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
+  const cases = [
+    ['token 是 PWRS 自己签发的吗？', 'QR-TOKEN-AUTH-CHAIN'],
+    ['患者视图的患者列表从哪个接口获取数据？', 'QR-PATIENT-LIST-SOURCE'],
+    ['医生选择不采纳以后是不是必须写理由？', 'DQ-009'],
+  ];
+  for (const [question, id] of cases) assert.equal(S.routeQuestion(map, question, '').route?.id, id, question);
+  const red = S.routeQuestion(map, '这个红色按钮点了没反应，你直接说应该点哪个重试入口？', '');
+  assert.ok(!['QR-ORDER-AUDIT-PAGINATION', 'QR-MEDICAL-CONSULT-VISIBILITY', 'QR-STAT-ORDER-AUDIT-DRILLDOWN', 'QR-ASSESS-DRUG-DOCTOR-INBOX'].includes(red.route?.id));
+});
+
 test('AC-2 tier-1 关键词 IDF 打分命中（无整串别名，纯关键词重叠）', () => {
   const S = buildRoutingSandbox(makeDeps());
   const r = S.routeQuestion(FIXTURE_MAP, '医嘱干预的时候说明书地址在哪里配置', '');
@@ -601,7 +673,7 @@ test('AC-6 无地图产品：consult 源码分支——map=null 才走 specSearc
   assert.match(SRC, /const map = loadModuleMap\(proj, cver\); if \(map\) route = contextualRouteQuestion\(map, msgs, qtext, sub\)/, 'consult 先加载地图，再结合当前对话做可审计路由');
   assert.match(SRC, /specHits = specSearch\(proj, cver, retrievalQuery, 5, sub\);\s+\/\/ 无地图产品/, '无地图分支仍用 specSearch');
   // PD-04 修复：miss 固定话术条件多了 specNoSpec（specSearch 底座也弱/空）——specSearch 强匹配时即便路由 miss 也不再走固定话术。
-  assert.match(SRC, /const noAnswer = !conversationMode && routeMiss && specNoSpec && !\(b\.deep && codeHits && codeHits\.length\)/, '纯事实题 miss 且 specSearch 弱/空→noAnswer；纯对话/混合表达不走机械短路');
+  assert.match(SRC, /const noAnswer = !conversationMode && !safeDiagnostic && routeMiss && specNoSpec && !\(b\.deep && codeHits && codeHits\.length\)/, '纯事实题 miss 且 specSearch 弱/空→noAnswer；纯对话/混合表达与安全诊断不走机械短路');
 });
 
 // —— PD-04 修复：specSearch 作底座、路由作加成（assembleConsultSpecHits 纯函数单测）—— //

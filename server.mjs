@@ -1525,15 +1525,27 @@ function consultConversationGuard(question, mode) {
   ].join('\n');
 }
 
+function consultSafeDiagnosticIntent(question) {
+  const q = String(question || '').trim();
+  if (!q || q.length > 1000) return false;
+  const direct = /(?:现场(?:要|怎么)?复现|怎么复现|如何复现|复现(?:步骤|条件)|怎么排查|如何排查|先查什么|从哪查起|哪里出问题|怎么留证|如何留证|现场留证|转开发前|交给开发前|(?:最少|至少)(?:要|需)?(?:补|提供|收集|记录)(?:什么|哪些)|抓什么|需要什么证据|只有(?:一张)?图|只有截图|拿不到\s*spec|没有\s*spec|先别让我找\s*spec)/i.test(q);
+  const symptom = /(?:列表为空|查不到|没数据|没有数据|一个都看不到|不显示|看不到|没反应|对不上|失败|异常|错误|页码|分页|筛选|保存后|患者端|医生端|药师端|详情|下钻)/i.test(q);
+  const diagnosticAsk = /(?:怎么查|如何查|查什么|排查|复现|留证|补什么|提供什么|抓什么|确认什么|怎么判断|如何判断|怎么办|怎么处理)/i.test(q);
+  return direct || (symptom && diagnosticAsk);
+}
+
 function consultDiagnosticGuard(question, route) {
   const q = String(question || '').trim();
-  const diagnostic = /(?:列表为空|查不到|没数据|没有数据|一个都看不到|不显示|看不到|先查(?:什么|哪)|怎么排查|如何排查|从哪查起|哪里出问题)/i.test(q);
-  if (!diagnostic || !route || !route.matched) return '';
+  if (!consultSafeDiagnosticIntent(q)) return '';
+  const hasFacts = !!(route && route.matched);
   return [
     '【本轮是实施现场诊断问题】',
-    '先根据本轮命中 route 的经确认事实，给出实施可以立即执行的分层排查路径；不要只回复“补充截图/入口/返回”。',
-    '排查顺序优先覆盖：确认实际页面入口 → 抓对应 PWRS 请求、关键参数和响应 → 按已知服务端分支检查本地过滤或 Proxy/外部数据源。',
-    '只追问会改变下一步判断分支的最少信息，并说明这项信息在哪里取得、拿到后分别如何判断。没有证据的最终外部接口码或内部实现仍只做局部限定，不能猜。',
+    hasFacts
+      ? '先说明本轮命中 route 能确认的业务事实，以及仍不能确认的边界；不得用已知部分推测未知部分。'
+      : '当前没有足够正文证据确认具体业务规则、按钮、接口、字段、表或状态值；先把这个边界说清，但不能因此只机械索要 spec 或立即转开发。',
+    '随后给 2~4 步观察型、非破坏的最小动作：确认实际终端/页面、账号角色、版本和复现前后条件；只观察本次操作是否发出请求，并记录浏览器实际显示的 URL、请求参数、HTTP/业务码与响应；按“没有请求 / 请求失败 / 响应正常但页面错误”分支判断；整理发生时间与脱敏截图。',
+    '不得编造按钮名、接口路径、字段名、数据库表、状态值；不得建议反复提交、重复保存、重试或其他可能产生副作用的动作。只追问会改变下一步判断的最少信息，并说明在哪里取得、拿到后如何判断。',
+    '用户说只有图、拿不到 spec 或先别让他找 spec 时，先基于当前页面和本次请求完成上述留证，不能继续把找 spec 当第一要求；真正未知的业务事实最后再局部交给对应 Owner 确认。',
   ].join('\n');
 }
 
@@ -3205,7 +3217,8 @@ const server = http.createServer((req, res) => {
       const codeHits = b.deep ? codeSearch(proj, cver, retrievalQuery, hasMap ? (specHits || []) : specHits, 4, sub) : null;
       // PD-04 miss 判定（修复）：路由未命中 且 specSearch 底座也弱/空（specNoSpec），且（非 deep，或 deep 但源码也无命中）→ 不调模型、返回固定话术。
       //   即：specSearch 强匹配时，即便路由未命中也不再走固定话术——由提示词功能级覆盖判定据 spec 底座答/说没覆盖。
-      const noAnswer = !conversationMode && routeMiss && specNoSpec && !(b.deep && codeHits && codeHits.length);
+      const safeDiagnostic = consultSafeDiagnosticIntent(qtext);   // 无直接业务证据时仍允许模型给观察型、非破坏的最小留证步骤；不放松具体事实证据门
+      const noAnswer = !conversationMode && !safeDiagnostic && routeMiss && specNoSpec && !(b.deep && codeHits && codeHits.length);
       // PD-03 检索诊断：把「实际喂给 AI 的三类检索内容」组装成紧凑 retrieval 对象，挂到本轮 assistant 消息（与 kbRefs 同位置、同持久化路径）。
       //   spec 复用上面已算的 searchScored（同 specSearch 召回口径、带 score）；kb 复用 kbScored；code 无分。捕获不阻断答疑（try 静默）。
       //   PD-04：把「路由决策」并进 retrieval.routing，并带上「是否用了 specSearch 底座 + specSearch 首条分」方便回放判断。

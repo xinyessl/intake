@@ -104,7 +104,7 @@ test('consult 接线：对话性表达不走固定miss，事实题仍保留原�
   const end = SRC.indexOf("if (url.pathname === '/api/consult-to-intake'", start);
   const route = SRC.slice(start, end);
   assert.match(route, /const conversationMode = consultConversationMode\(qtext\)/);
-  assert.match(route, /const noAnswer = !conversationMode && routeMiss && specNoSpec/);
+  assert.match(route, /const noAnswer = !conversationMode && !safeDiagnostic && routeMiss && specNoSpec/);
   assert.match(route, /consultConversationGuard\(qtext, conversationMode\)/);
   assert.match(route, /retrieval\.conversationIntent = !!conversationMode/);
   assert.match(route, /retrieval\.conversationIntentMode = conversationMode/);
@@ -118,15 +118,28 @@ test('检索回放也标记对话意图，便于诊断事实miss与对话绕行'
   assert.match(replay, /retrieval\.conversationIntentMode = consultConversationMode\(query\)/);
 });
 
-test('实施诊断守卫要求先给可执行路径，未知仍局部受证据门约束', () => {
-  const fn = new Function(extractFn(SRC, 'consultDiagnosticGuard') + '\nreturn consultDiagnosticGuard;')();
+test('实施诊断守卫在 route 命中或缺失时都给安全最小留证，不机械索要 spec', () => {
+  const intent = new Function(extractFn(SRC, 'consultSafeDiagnosticIntent') + '\nreturn consultSafeDiagnosticIntent;')();
+  const fn = new Function('consultSafeDiagnosticIntent', extractFn(SRC, 'consultDiagnosticGuard') + '\nreturn consultDiagnosticGuard;')(intent);
   assert.equal(fn('患者接口是什么？', { matched: true }), '');
   const text = fn('那页面一个患者都看不到，实施现场先查什么？', { matched: true });
-  assert.match(text, /确认实际页面入口/);
-  assert.match(text, /PWRS 请求、关键参数和响应/);
-  assert.match(text, /本地过滤或 Proxy/);
-  assert.match(text, /最少信息/);
-  assert.match(text, /不能猜/);
+  assert.match(text, /命中 route 能确认的业务事实/);
+  assert.match(text, /2~4 步观察型、非破坏/);
+  assert.match(text, /没有请求 \/ 请求失败 \/ 响应正常但页面错误/);
+  assert.match(text, /不得编造按钮名、接口路径、字段名、数据库表、状态值/);
+  assert.match(text, /不得建议反复提交、重复保存、重试/);
+
+  for (const q of [
+    '我只有一张截图，拿不到 spec，转开发前最少补什么？',
+    '先别让我找 spec，这个红色按钮没反应怎么留证？',
+    '现场要复现这个问题，最少记录哪些东西？',
+  ]) {
+    assert.equal(intent(q), true, q);
+    const miss = fn(q, { matched: false });
+    assert.match(miss, /不能因此只机械索要 spec/);
+    assert.match(miss, /先基于当前页面和本次请求完成上述留证/);
+  }
+  assert.equal(intent('密码最少要几位？'), false, '业务取值中的“最少要”不是现场诊断意图');
 });
 
 test('已核规则应用守卫：先判预期行为，冲突时才收最少证据，route miss 不放松证据门', () => {
@@ -169,4 +182,13 @@ test('consult prompt 同时注入规则应用与现场诊断，且规则应用�
   const call = SRC.match(/consultSystem\(proj, cver, hits, specHits, codeHits, qtext\)[\s\S]{0,900}?messages: msgs/);
   assert.ok(call, '应定位 consult 模型调用');
   assert.ok(call[0].indexOf('consultRuleApplicationGuard') < call[0].indexOf('consultDiagnosticGuard'));
+});
+
+test('安全诊断意图绕过机械 miss，但普通无证据事实题仍保持短路', () => {
+  const start = SRC.indexOf("if (url.pathname === '/api/consult'");
+  const end = SRC.indexOf("if (url.pathname === '/api/consult-to-intake'", start);
+  const route = SRC.slice(start, end);
+  assert.match(route, /const safeDiagnostic = consultSafeDiagnosticIntent\(qtext\)/);
+  assert.match(route, /const noAnswer = !conversationMode && !safeDiagnostic && routeMiss && specNoSpec/);
+  assert.match(route, /consultDiagnosticGuard\(qtext, route\)/);
 });
