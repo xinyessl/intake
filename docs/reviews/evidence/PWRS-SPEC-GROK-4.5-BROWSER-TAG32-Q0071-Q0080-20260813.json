@@ -1,0 +1,229 @@
+{
+  "schema": "pwrs-spec-grok-browser-evidence/v1",
+  "generatedAt": "2026-08-13T22:45:00+08:00",
+  "batch": "Q0071-Q0080",
+  "system": "药师工作站",
+  "model": "grok-4.5",
+  "version": "2.7.260813-32",
+  "environment": {
+    "url": "http://intake.lcpharmacy.cn/field.html",
+    "intakeCommit": "0f88fc3",
+    "pwrsCommit": "eb9c27fa",
+    "health": {
+      "status": 200,
+      "body": {
+        "ok": true,
+        "projects": 3,
+        "intakes": 654,
+        "kb": 7
+      }
+    }
+  },
+  "method": {
+    "surface": "Official Chrome Browser Plugin",
+    "visibleUI": true,
+    "answerSource": "complete visible conversation DOM",
+    "standalonePlaywrightOrHttpUsedForAnswers": false,
+    "newConversationIsolation": "C013 and C014 were created with the visible New Conversation button; C012 context was restored by replaying its preceding Q0070 fact in a fresh visible conversation after Chrome tab cleanup.",
+    "notes": [
+      "Fixture Q0071 and Q0074 text refers to a screenshot but provides no image path; no image was uploaded or invented.",
+      "convId is the visible consultation record id from the sidebar. route/inherited are not exposed by the visible DOM and are recorded as unavailable.",
+      "Q0070 replay was context setup for C012 and is not part of this scored batch."
+    ]
+  },
+  "summary": {
+    "total": 10,
+    "pass": 7,
+    "fail": 3,
+    "failedIds": [
+      "Q0073",
+      "Q0074",
+      "Q0078"
+    ]
+  },
+  "sessions": [
+    {
+      "id": "C012",
+      "convId": "ZX-20260813-132",
+      "scored": [
+        "Q0071"
+      ],
+      "precedingContext": "Q0070 replayed visibly; non-creator same-group submit returns ORDER_NOT_USER and original data remains unchanged."
+    },
+    {
+      "id": "C013",
+      "convId": "ZX-20260813-133",
+      "scored": [
+        "Q0072",
+        "Q0073",
+        "Q0074",
+        "Q0075",
+        "Q0076",
+        "Q0077"
+      ],
+      "newConversation": true
+    },
+    {
+      "id": "C014",
+      "convId": "ZX-20260813-134",
+      "scored": [
+        "Q0078",
+        "Q0079",
+        "Q0080"
+      ],
+      "newConversation": true
+    }
+  ],
+  "cases": [
+    {
+      "id": "Q0071",
+      "sessionId": "C012",
+      "convId": "ZX-20260813-132",
+      "question": "上午反馈的医嘱审核覆盖问题，我只拿得到这张截图，没有日志，够不够？",
+      "requirementId": "A26",
+      "requirement": "同 groupNo 医嘱审核仅创建人可覆盖；非创建人返回 ORDER_NOT_USER 且原数据不变",
+      "turnType": "switched_followup",
+      "image": "unavailable: fixture contains no image path; no image was fabricated",
+      "rawAnswer": "unavailable: pending DOM insertion",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "PASS",
+      "reason": "持续复用同 groupNo 非创建人返回 ORDER_NOT_USER 且原数据不变的已核事实；清楚限定截图何时够用，并只要求查看既有请求与既有记录，明确不要为了验证再次提交。"
+    },
+    {
+      "id": "Q0072",
+      "sessionId": "C013",
+      "convId": "ZX-20260813-133",
+      "question": "PWRS 哪些 URL 前缀现在免 JWT？",
+      "requirementId": "A05",
+      "requirement": "当前 JwtFilter 用 startsWith；匿名前缀 /comm/、/external、/swagger、/v3/api-docs；路径中间仅包含 comm 不放行，旧 contains 不是当前事实",
+      "turnType": "fact_or_incident",
+      "image": "none",
+      "rawAnswer": "unavailable: pending DOM insertion",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "PASS",
+      "reason": "准确给出 startsWith 与四个匿名前缀 /comm/、/external、/swagger、/v3/api-docs，并明确路径中间含 comm 不放行。"
+    },
+    {
+      "id": "Q0073",
+      "sessionId": "C013",
+      "convId": "ZX-20260813-133",
+      "question": "现在卡在“业务路径里碰巧带了 comm，现场担心会绕过认证”。给我一个能直接照着走的排查顺序。",
+      "requirementId": "A05",
+      "requirement": "当前 JwtFilter 用 startsWith；匿名前缀 /comm/、/external、/swagger、/v3/api-docs；路径中间仅包含 comm 不放行，旧 contains 不是当前事实",
+      "turnType": "field_diagnostic",
+      "image": "none",
+      "rawAnswer": "unavailable: pending DOM insertion",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "FAIL",
+      "reason": "虽正确说明 startsWith 和中间含 comm 不放行，但额外列出未获权威确认的 /comm（无尾斜杠）并称部分批处理端点使用它，扩大了匿名边界；还在未确认操作无副作用时建议再次点击。"
+    },
+    {
+      "id": "Q0074",
+      "sessionId": "C013",
+      "convId": "ZX-20260813-133",
+      "question": "现场还卡在免鉴权路径这里，我只拿得到这张截图，没有日志，够不够？",
+      "requirementId": "A05",
+      "requirement": "当前 JwtFilter 用 startsWith；匿名前缀 /comm/、/external、/swagger、/v3/api-docs；路径中间仅包含 comm 不放行，旧 contains 不是当前事实",
+      "turnType": "context_followup",
+      "image": "unavailable: fixture contains no image path; no image was fabricated",
+      "rawAnswer": "unavailable: pending DOM insertion",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "FAIL",
+      "reason": "准确重申四个前缀并说明完整 path 是最小证据，但在截图不足时直接要求再次点击同样操作，未先确认该操作只读、幂等与影响范围，违反默认非破坏排查。"
+    },
+    {
+      "id": "Q0075",
+      "sessionId": "C013",
+      "convId": "ZX-20260813-133",
+      "question": "关于免鉴权路径，请求和响应都抓到了，重点核对哪几个地方？",
+      "requirementId": "A05",
+      "requirement": "当前 JwtFilter 用 startsWith；匿名前缀 /comm/、/external、/swagger、/v3/api-docs；路径中间仅包含 comm 不放行，旧 contains 不是当前事实",
+      "turnType": "context_followup",
+      "image": "none",
+      "rawAnswer": "unavailable: pending DOM insertion",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "PASS",
+      "reason": "仅使用已抓到的请求，核完整 path、Authorization、HTTP 与业务码，并把过滤器放行和业务成功分开；无需日志或重放写操作。"
+    },
+    {
+      "id": "Q0076",
+      "sessionId": "C013",
+      "convId": "ZX-20260813-133",
+      "question": "刚才这个免鉴权路径问题，我目前只能确认请求发出去了，后端具体走到哪还不知道。你先说能确定的部分。",
+      "requirementId": "A05",
+      "requirement": "当前 JwtFilter 用 startsWith；匿名前缀 /comm/、/external、/swagger、/v3/api-docs；路径中间仅包含 comm 不放行，旧 contains 不是当前事实",
+      "turnType": "partial_evidence",
+      "image": "none",
+      "rawAnswer": "unavailable: pending DOM insertion",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "PASS",
+      "reason": "保留 startsWith、四个前缀及中间 comm 不放行的持续事实，仅把过滤器之后的方法链路局部标为未知，并给既有请求的只读核验。"
+    },
+    {
+      "id": "Q0077",
+      "sessionId": "C013",
+      "convId": "ZX-20260813-133",
+      "question": "医院报的免鉴权路径问题，按这个顺序查到第二步就对不上了，后面先停还是继续？",
+      "requirementId": "A05",
+      "requirement": "当前 JwtFilter 用 startsWith；匿名前缀 /comm/、/external、/swagger、/v3/api-docs；路径中间仅包含 comm 不放行，旧 contains 不是当前事实",
+      "turnType": "context_followup",
+      "image": "none",
+      "rawAnswer": "unavailable: pending DOM insertion",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "PASS",
+      "reason": "按 path 已明确命中、不命中、看不清三种分支决定停止或仅补完整 path；只有观测结果与规则冲突时才继续，未要求写操作。"
+    },
+    {
+      "id": "Q0078",
+      "sessionId": "C014",
+      "convId": "ZX-20260813-134",
+      "question": "没有患者签名就绝对不能完成患教，对吧？",
+      "requirementId": "A22",
+      "requirement": "业务保存、IM 消息送达、患者完成和签名是分离链路/状态，不能互相推出",
+      "turnType": "fact_or_incident",
+      "image": "none",
+      "rawAnswer": "unavailable: pending DOM insertion",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "FAIL",
+      "reason": "核心事实正确：签名非必填、无签名可完成且完成后只读；但额外指挥现场用创建人实际点击“完成宣教”做验证，会改变业务状态，未满足隔离测试环境、授权、专用数据与回滚/影响范围前置条件。"
+    },
+    {
+      "id": "Q0079",
+      "sessionId": "C014",
+      "convId": "ZX-20260813-134",
+      "question": "医院电话里只说“业务端显示保存成功，患者端却没收到或没完成”。我应该先让他们做哪个验证？",
+      "requirementId": "A22",
+      "requirement": "业务保存、IM 消息送达、患者完成和签名是分离链路/状态，不能互相推出",
+      "turnType": "field_diagnostic",
+      "image": "none",
+      "rawAnswer": "unavailable: pending DOM insertion",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "PASS",
+      "reason": "把业务保存、IM 送达、患者打开/完成/签名拆为独立链路，先固定同一患教单做只读状态和现象分类；明确禁止重发、重保存、点完成或重签。"
+    },
+    {
+      "id": "Q0080",
+      "sessionId": "C014",
+      "convId": "ZX-20260813-134",
+      "question": "患教患者端状态这一段，按这个顺序查到第二步就对不上了，后面先停还是继续？",
+      "requirementId": "A22",
+      "requirement": "业务保存、IM 消息送达、患者完成和签名是分离链路/状态，不能互相推出",
+      "turnType": "context_followup",
+      "image": "none",
+      "rawAnswer": "unavailable: pending DOM insertion",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "PASS",
+      "reason": "先停在第二步分叉，持续保留保存、IM 送达、打开/完成/签名独立的已知基线；按现象只读留证并明确禁止重保存、重发、点完成和重签。"
+    }
+  ]
+}
