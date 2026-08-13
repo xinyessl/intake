@@ -1,0 +1,80 @@
+{
+  "schema": 1,
+  "source": "Browser Plugin DOM answers + read-only production intake retrieval diagnostics",
+  "version": "2.7.260813-24",
+  "model": "grok-4.5",
+  "sourceImagePath": "/Users/lsy/lc-work/psp/pwrs/docs/.intake/Lm3rbOi2SaktHfsTbjacsGqonqd/rec40-19.png",
+  "browserConstraints": {
+    "browserPluginOnly": true,
+    "standalonePlaywright": false,
+    "consultHttpOrApiAsAnswerSource": false,
+    "newConversationPerQuestion": true,
+    "previewConfirmedBeforeEverySend": true
+  },
+  "fix": {
+    "pwrsCommit": "73438f4",
+    "tag": "2.7.260813-24",
+    "intakeCommit": "0383d46",
+    "routeId": "DQ-009",
+    "routeTitle": "医嘱干预通知、医生采纳结果与药师端闭环",
+    "authoritativeFacts": [
+      "PWRS-CLIN-04a AC-8：医生选择采纳/不采纳/其他；不采纳/其他原因必填，采纳原因可空；结果和意见回传药师工作站。",
+      "PWRS-CLIN-04a AC-7/AC-11：列表显示医生采纳结果；详情/时间线显示结果、意见、录入来源、录入人和时间。",
+      "PWRS-CLIN-04a AC-9：维护采纳字段不改变医嘱干预的已完成状态。"
+    ],
+    "staticRegression": "PWRS_REAL_MAP route suite 36/36 PASS，含9个自然问法与体温单/药师反馈/无证据按钮反例。"
+  },
+  "production": {
+    "repoFetch": "intake-app:/app/data/repos/psp/pwrs fetched tag 2.7.260813-24 successfully",
+    "health": { "ok": true, "projects": 3, "intakes": 607, "kb": 7 },
+    "uiVersionOptionConfirmed": true
+  },
+  "summary": { "completed": 4, "passed": 4, "failed": 0, "score": "4/4" },
+  "results": [
+    {
+      "conversationId": "ZX-20260813-83",
+      "turn": 1,
+      "question": "医生这边已经选了“其他”，提交前还缺什么？提交后药师能看到哪些信息？",
+      "attachment": { "previewCount": 1, "userBubbleImageCount": 1, "persistedMedia": "media/ZX-20260813-83/img-1.png" },
+      "uiAnswer": "提交前还缺“其他原因”必填说明；提交后药师端能看到采纳结果和医生意见相关信息。\n\n医生选了「其他」后，必须填写原因（截图里带*的「其他原因」输入框不能空，写清楚说明内容才能提交）。「采纳」原因可空，「不采纳/其他」必须填原因。\n\n提交后，采纳结果和医生意见会回传药师工作站：\n\n列表直接显示医生采纳结果（采纳/不采纳/其他）；\n详情/时间线会显示结果、意见、录入来源、录入人和时间。\n\n这个反馈不会改变医嘱干预本身的已完成状态。",
+      "domComplete": true,
+      "routing": { "enabled": true, "routeId": "DQ-009", "routeTitle": "医嘱干预通知、医生采纳结果与药师端闭环", "score": 48.072, "specTopTitle": "功能模块地图（系统说明书总目录）" },
+      "manualVerdict": "PASS",
+      "manualReason": "原失败题已直接回答其他原因必填、列表与详情展示以及状态不变，无整体拒答。"
+    },
+    {
+      "conversationId": "ZX-20260813-84",
+      "turn": 1,
+      "question": "这个“其他”选项能直接提交吗，医生要补哪一项？",
+      "attachment": { "previewCount": 1, "userBubbleImageCount": 1, "persistedMedia": "media/ZX-20260813-84/img-1.png" },
+      "uiAnswer": "不能直接提交。 医生选了「其他」后，必须把下面的「*其他原因」填上才能点提交。\n\n规格写得很清楚：医生打开已通知的医嘱干预记录后，自主选 1=采纳、2=不采纳、3=其他并提交；不采纳/其他必须填写原因，采纳原因才可以为空。截图里这个必填项就是对应的原因说明。",
+      "domComplete": true,
+      "routing": { "enabled": true, "routeId": "DQ-009", "routeTitle": "医嘱干预通知、医生采纳结果与药师端闭环", "score": 8.181, "specTopTitle": "ETL 临床数据接口映射与排查" },
+      "manualVerdict": "PASS",
+      "manualReason": "短问法也由route answerFacts给出正确原因必填矩阵，未被弱specTop带偏。"
+    },
+    {
+      "conversationId": "ZX-20260813-85",
+      "turn": 1,
+      "question": "医生反馈提交完，药师是在列表看结果，还是要进详情看意见和录入信息？",
+      "attachment": { "previewCount": 1, "userBubbleImageCount": 1, "persistedMedia": "media/ZX-20260813-85/img-1.png" },
+      "uiAnswer": "列表就能看到医生采纳结果；要看意见、录入来源、录入人和时间，需要进详情或时间线。\n\n根据已确认事实：医生提交采纳结果（1=采纳、2=不采纳、3=其他）和意见后，结果会回传到药师工作站。\n\n列表：直接显示医生的采纳结果。\n详情/时间线：显示完整内容——结果、意见、录入来源、录入人和时间。\n\n这个反馈不会改变医嘱干预本身的“已完成”状态。",
+      "domComplete": true,
+      "routing": { "enabled": true, "routeId": "DQ-009", "routeTitle": "医嘱干预通知、医生采纳结果与药师端闭环", "score": 19.031, "specTopTitle": "药师反馈" },
+      "manualVerdict": "PASS",
+      "manualReason": "准确区分列表与详情/时间线展示层级，且未与药师反馈模块混淆。"
+    },
+    {
+      "conversationId": "ZX-20260813-86",
+      "turn": 1,
+      "question": "上面“不合理”是药师的结论，那下面“不采纳”是谁选的？会把已完成状态改掉吗？",
+      "attachment": { "previewCount": 1, "userBubbleImageCount": 1, "persistedMedia": "media/ZX-20260813-86/img-1.png" },
+      "uiAnswer": "“不采纳/其他”是医生自己选的，不会改掉干预的已完成状态。\n\n上面表格里的「干预结果：不合理」是药师做完干预、点完成时写下的结论。\n下面「采纳结果」那一栏（采纳 / 不采纳 / 其他）是医生在医生端打开这条已通知的医嘱干预记录后，自己勾选并提交的反馈。不采纳或其他时必须填原因；采纳时原因可空。\n\n医生提交后，采纳结果和意见会回传到药师工作站（列表能看到采纳结果，详情/时间线里能看到结果、意见、录入人、时间），但只更新采纳相关字段，不会动干预本身的已完成状态。",
+      "domComplete": true,
+      "routing": { "enabled": true, "routeId": "DQ-009", "routeTitle": "医嘱干预通知、医生采纳结果与药师端闭环", "score": 9.817, "specTopTitle": "医嘱干预闭环（暂存·通知医生·采纳结果）" },
+      "manualVerdict": "PASS",
+      "manualReason": "正确区分药师干预结论与医生采纳反馈，并明确只更新采纳字段、不改变已完成状态。"
+    }
+  ],
+  "status": { "task": "doing", "accept": "wait" }
+}
