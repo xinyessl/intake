@@ -1,0 +1,148 @@
+{
+  "schema": 1,
+  "source": "Browser Plugin DOM only; images pasted through the Browser Plugin virtual clipboard after explicit user authorization; no consult HTTP/API used as an answer source",
+  "version": "2.7.260813-23",
+  "model": "grok-4.5",
+  "executedAt": "2026-08-13T14:21:00+08:00",
+  "summary": {
+    "completed": 3,
+    "passed": 2,
+    "failed": 1,
+    "score": "2/3"
+  },
+  "privacyAudit": {
+    "rec39-17.png": "PASS：弹窗仅含采纳选项、快捷原因、说明输入框和退出/提交按钮，不含患者、账号、手机号或医院标识。",
+    "rec40-19.png": "PASS-DEMO：仅含明确标注的演示患者、演示医生、演示病区/科室及演示编号。",
+    "rec40-20.png": "PASS-DEMO：仅含明确标注的演示患者、演示医生、演示病区/科室及演示编号。",
+    "rec35-14.png": "REJECTED-NOT-UPLOADED：虽然患者标为演示患者，但画面还含多名未确认姓名，未上传线上；以 rec40-20.png 替代。"
+  },
+  "conversationIsolation": {
+    "method": "每张图发送前均在同一已登录 Chrome/intake 页面点击一次‘新对话’，没有新开 tab。",
+    "persistedConversationIds": [
+      "ZX-20260813-77",
+      "ZX-20260813-78",
+      "ZX-20260813-79"
+    ],
+    "evidence": "生产 intakes 中三条记录各自 chat 长度均为 2（1 个 user + 1 个 assistant），media 分别保存为各会话自己的 media/<conversationId>/img-1.png，证明没有跨题续聊。"
+  },
+  "results": [
+    {
+      "id": "IMG001",
+      "conversationId": "ZX-20260813-77",
+      "sourceImagePath": "/Users/lsy/lc-work/psp/pwrs/docs/.intake/Lm3rbOi2SaktHfsTbjacsGqonqd/rec39-17.png",
+      "persistedMediaPath": "media/ZX-20260813-77/img-1.png",
+      "question": "这个弹窗是干嘛的，我现场应该怎么填？",
+      "selectedVersion": "2.7.260813-23",
+      "attachment": {
+        "method": "Browser Plugin virtual clipboard image/png + input Meta+V",
+        "previewConfirmedBeforeSend": true,
+        "previewImageCount": 1,
+        "previewDisplay": "flex",
+        "previewControlText": "×",
+        "sentUserBubbleImageCount": 1,
+        "note": "剪贴板粘贴预览不显示源文件名；源文件路径由测试输入记录，发送后生产持久化路径为 media/ZX-20260813-77/img-1.png。"
+      },
+      "dom": {
+        "userBubbles": 1,
+        "answerBubbles": 1,
+        "complete": true,
+        "thinkingCount": 0
+      },
+      "uiAnswer": "当前资料无法确认。\n请补充：1. 「医生采纳结果录入」对应功能的规格/验收标准正文；2. 触发该弹窗的页面/菜单路径或按钮原文；3. 采纳结果各选项与说明字段的业务规则说明。",
+      "manualVerdict": "FAIL",
+      "manualReason": "图片已经提供弹窗标题、三种采纳选项、快捷原因、说明输入框和提交按钮；现有 PWRS-CLIN-04a AC-8 也明确不采纳/其他原因必填、采纳原因可空。回答却整体拒答并要求用户重复提供画面已有信息，没有解决现场问题。",
+      "retrieval": {
+        "query": "这个弹窗是干嘛的，我现场应该怎么填？",
+        "routingEnabled": true,
+        "routeId": "QR-LINE-CHART-SEVEN-DAY-WINDOW",
+        "routeTitle": "体温单默认七天窗口与开始日期",
+        "routeScore": 5.792,
+        "specTopTitle": "Web 全局弹窗设计规范",
+        "relevantSpecAvailableButNotRetrieved": "PWRS-CLIN-04a-医嘱干预闭环.md AC-8"
+      },
+      "failureLayer": {
+        "primary": "spec retrieval/routing failure",
+        "imageRecognition": "PASS：回答引用了用户文字中没有的画面标题‘医生采纳结果录入’，说明模型看到了图片；不是图片未送达或完全识别失败。",
+        "specRetrieval": "FAIL：持久化 retrieval 显示 query 只有口语文本，route 错命中体温单七天窗口，首段 spec 是 Web 全局弹窗设计规范，没有召回现有的 PWRS-CLIN-04a AC-8。",
+        "evidenceGate": "按拿到的错误/无关证据执行了安全拒答，边界本身未越界；但因上游漏召回而造成整体拒答。",
+        "style": "SECONDARY：固定‘当前资料无法确认’和三项补充清单偏机械，但即使改善措辞，也不能替代召回缺失的业务事实。"
+      }
+    },
+    {
+      "id": "IMG002",
+      "conversationId": "ZX-20260813-78",
+      "sourceImagePath": "/Users/lsy/lc-work/psp/pwrs/docs/.intake/Lm3rbOi2SaktHfsTbjacsGqonqd/rec40-19.png",
+      "persistedMediaPath": "media/ZX-20260813-78/img-1.png",
+      "question": "这页显示不合理，医生选择其他以后该怎么处理？",
+      "selectedVersion": "2.7.260813-23",
+      "attachment": {
+        "method": "Browser Plugin virtual clipboard image/png + input Meta+V",
+        "previewConfirmedBeforeSend": true,
+        "previewImageCount": 1,
+        "previewDisplay": "flex",
+        "previewControlText": "×",
+        "sentUserBubbleImageCount": 1,
+        "note": "剪贴板粘贴预览不显示源文件名；源文件路径由测试输入记录，发送后生产持久化路径为 media/ZX-20260813-78/img-1.png。"
+      },
+      "dom": {
+        "userBubbles": 1,
+        "answerBubbles": 1,
+        "complete": true,
+        "thinkingCount": 0
+      },
+      "uiAnswer": "医生选「其他」后：把「其他原因」填上（必填），点「提交」就行。\n\n这是医生端对已通知干预记录的正常反馈流程：\n\n干预结果里显示「不合理」只是药师侧已完成的干预结论，医生不需要改它。\n采纳结果选「其他」时，必须填写原因（「采纳」才可以不填原因）。\n提交后，采纳结果和医生意见会回传到药师工作站；药师端列表/详情时间线会显示结果、意见、录入来源等，干预本身保持「已完成」状态不变。",
+      "manualVerdict": "PASS",
+      "manualReason": "先给现场可执行结论，正确区分药师‘不合理’干预结论与医生‘其他’采纳反馈，并覆盖原因必填、提交回传和不改变已完成状态。",
+      "retrieval": {
+        "routeId": "DQ-008",
+        "routeTitle": "药物重整药品、诊断或合理用药结果为空",
+        "routeScore": 6.07,
+        "specTopTitle": "医嘱干预闭环（暂存·通知医生·采纳结果）",
+        "note": "route 本身偏离，但当前文本 specSearch 召回了正确 CLIN-04a 正文，因此答案可由证据完成。"
+      }
+    },
+    {
+      "id": "IMG003",
+      "conversationId": "ZX-20260813-79",
+      "sourceImagePath": "/Users/lsy/lc-work/psp/pwrs/docs/.intake/Lm3rbOi2SaktHfsTbjacsGqonqd/rec40-20.png",
+      "persistedMediaPath": "media/ZX-20260813-79/img-1.png",
+      "question": "这个页面里为什么会显示不采纳，现场提交前要确认什么？",
+      "selectedVersion": "2.7.260813-23",
+      "attachment": {
+        "method": "Browser Plugin virtual clipboard image/png + input Meta+V",
+        "previewConfirmedBeforeSend": true,
+        "previewImageCount": 1,
+        "previewDisplay": "flex",
+        "previewControlText": "×",
+        "sentUserBubbleImageCount": 1,
+        "note": "剪贴板粘贴预览不显示源文件名；源文件路径由测试输入记录，发送后生产持久化路径为 media/ZX-20260813-79/img-1.png。"
+      },
+      "dom": {
+        "userBubbles": 1,
+        "answerBubbles": 1,
+        "complete": true,
+        "thinkingCount": 0
+      },
+      "uiAnswer": "这个页面是医生端反馈药师医嘱干预的地方（药师完成干预并通知医生后，医生打开已通知的记录来选结果）。\n\n为什么会显示“不采纳”：\n这里本来就给医生三个选项：采纳 / 不采纳 / 其他。截图里“不采纳”被选中（标题也对应成“医生不采纳”），是因为医生正在选这个结果，属于正常可操作的反馈项，不是系统自动判的。页面上方只是展示药师的干预内容（药品、时间、结果“不合理”、意见），下方才是医生自己的采纳选择。\n\n现场提交前要确认的：\n\n采纳结果必须选一个（当前已选“不采纳”）。\n选“不采纳”或“其他”时，必须填理由（页面上有*号，不填提交不了）。可以点快捷按钮（患者情况特殊、已有等效替代方案、剂量已充分、考虑临床实际情况、存在禁忌），也可以在下面文本框写具体理由；两种都能用，理由不能空。\n如果改选“采纳”，理由可以不填（支持快捷原因）。\n确认无误再点“提交”——结果和意见会回传给药师工作站，列表里能看到医生采纳结果；不采纳/其他的原因也会一起带过去。点“退出”则不保存。\n\n按上面确认理由填好了再提交就行，这是规则内的正常流程。",
+      "manualVerdict": "PASS",
+      "manualReason": "准确读取图片当前选中的‘不采纳’及快捷原因，区分药师干预结论与医生采纳选择，给出提交前必要核对和回传结果，未猜测未知接口。",
+      "retrieval": {
+        "routeId": "QR-PATIENT-LIST-SOURCE",
+        "routeTitle": "患者视图列表接口、数据源与 ETL 边界",
+        "routeScore": 8.201,
+        "specTopTitle": "医嘱干预闭环（暂存·通知医生·采纳结果）",
+        "note": "route 错配但 specSearch 召回正确 CLIN-04a 正文，图片视觉信息与正文证据共同支撑答案。"
+      }
+    }
+  ],
+  "readOnlyDiagnosis": {
+    "productionRecord": "ZX-20260813-77",
+    "conclusion": "IMG001 是图片已送达且可识别、但文本路由/spec 召回失败导致证据门安全拒答；不是图片上传失败，也不是主要的回答风格问题。",
+    "verification": [
+      "发送后的用户气泡包含 1 张图片，生产 chat[0].media 也持久化为 media/ZX-20260813-77/img-1.png。",
+      "回答出现图片独有标题‘医生采纳结果录入’，证明模型至少识别了关键画面文字。",
+      "retrieval.query 仅为用户口语文本，routeId 错命中 QR-LINE-CHART-SEVEN-DAY-WINDOW，spec 首段为 Web 全局弹窗设计规范。",
+      "仓库已有 PWRS-CLIN-04a AC-8 的直接事实，但本题 retrieval.spec 未包含该章节；同样图片场景 IMG002/IMG003 一旦 specSearch 命中 CLIN-04a 即可正确回答。"
+    ]
+  }
+}

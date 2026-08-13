@@ -1,0 +1,133 @@
+{
+  "schema": 1,
+  "source": "Browser Plugin DOM only",
+  "browser": "user logged-in Chrome extension session",
+  "page": "http://intake.lcpharmacy.cn/?mode=chat",
+  "selectedVersion": "2.7.260813-23",
+  "deployedTarget": "125.122.34.110",
+  "executedAt": "2026-08-13T14:30:00+08:00",
+  "constraints": {
+    "standalonePlaywright": false,
+    "consultHttpOrApiAsAnswerSource": false,
+    "browserPluginOnly": true,
+    "imageClipboard": "Browser Plugin virtual clipboard, explicitly authorized by user"
+  },
+  "previewAcceptance": {
+    "score": "7/7",
+    "status": "PASS",
+    "historicalConversation": {
+      "conversationId": "ZX-20260813-79",
+      "question": "这个页面里为什么会显示不采纳，现场提交前要确认什么？",
+      "restoredBy": "clicked the visible historical intake row after refresh",
+      "userImageCount": 1
+    },
+    "checks": [
+      {
+        "id": "PREVIEW-01",
+        "name": "历史用户气泡缩略图打开 lightbox",
+        "verdict": "PASS",
+        "evidence": {
+          "dialogSelector": "dialog#fImageLightbox",
+          "open": true,
+          "largeImageSrcExists": true,
+          "largeImageSrcPrefix": "/api/intake-media?project=psp&file=media",
+          "viewport": { "width": 1920, "height": 902 },
+          "imageBounding": { "left": 254.9375, "top": 24, "right": 1665.046875, "bottom": 877.984375, "width": 1410.109375, "height": 853.984375 },
+          "withinViewport": true,
+          "bodyOverflowWhileOpen": "hidden",
+          "focus": { "tag": "BUTTON", "id": "fImageLightboxClose", "ariaLabel": "关闭图片预览" }
+        }
+      },
+      {
+        "id": "PREVIEW-02",
+        "name": "Esc 关闭并恢复焦点",
+        "verdict": "PASS",
+        "evidence": {
+          "dialogOpenAfter": false,
+          "focusReturnedToTriggerButton": true,
+          "bodyInlineOverflowAfter": "",
+          "bodyComputedOverflowAfter": "hidden",
+          "note": "页面基线 CSS 本身为 overflow:hidden；lightbox 关闭后新增的 body inline 锁定已清空，恢复页面基线。"
+        }
+      },
+      {
+        "id": "PREVIEW-03",
+        "name": "关闭按钮关闭并恢复焦点",
+        "verdict": "PASS",
+        "evidence": { "dialogWasOpen": true, "dialogOpenAfter": false, "focusReturnedToTriggerButton": true, "bodyInlineOverflowAfter": "" }
+      },
+      {
+        "id": "PREVIEW-04",
+        "name": "点击遮罩关闭",
+        "verdict": "PASS",
+        "evidence": { "dialogOpenAfter": false, "focusReturnedToTriggerButton": true, "bodyInlineOverflowAfter": "" }
+      },
+      {
+        "id": "PREVIEW-05",
+        "name": "待发送图片显示可点击缩略图",
+        "verdict": "PASS",
+        "sourceImagePath": "/Users/lsy/lc-work/psp/pwrs/docs/.intake/Lm3rbOi2SaktHfsTbjacsGqonqd/rec39-17.png",
+        "evidence": { "previewDisplay": "flex", "previewImageCount": 1, "previewTriggerAria": "预览待发送截图 1", "deleteButtonAria": "删除待发送截图 1" }
+      },
+      {
+        "id": "PREVIEW-06",
+        "name": "待发送缩略图打开大图",
+        "verdict": "PASS",
+        "evidence": { "dialogOpen": true, "largeImageSrcExists": true, "focusOnCloseButton": true, "pendingPreviewStillPresent": true }
+      },
+      {
+        "id": "PREVIEW-07",
+        "name": "删除按钮只删除、不误开大图、不发送",
+        "verdict": "PASS",
+        "evidence": { "dialogOpenAfterDelete": false, "pendingImageCount": 0, "pendingThumbCount": 0, "previewDisplay": "none", "inputText": "", "userBubbleCount": 0 }
+      }
+    ]
+  },
+  "imageQa": {
+    "score": "2/3",
+    "conversationIsolation": "Each image question started by clicking the visible New Conversation control in the same tab. The DOM intake list exposed three distinct record IDs.",
+    "results": [
+      {
+        "id": "IMAGE-QA-01",
+        "conversationId": "ZX-20260813-80",
+        "sourceImagePath": "/Users/lsy/lc-work/psp/pwrs/docs/.intake/Lm3rbOi2SaktHfsTbjacsGqonqd/rec39-17.png",
+        "previewConfirmedBeforeSend": true,
+        "sentUserBubbleImageCount": 1,
+        "question": "现场医生问这个采纳弹窗怎么选，哪些情况必须写原因？",
+        "domComplete": true,
+        "uiAnswer": "结论：选「采纳」时原因可以不写（可空，也可点快捷短语）；选「不采纳」或「其他」时必须填写原因，否则提交不了。\n\n现场医生打开这个「医生采纳结果录入」弹窗后，按下面做就行：\n\n先选采纳结果（必选一项）\n采纳：表示同意药师干预建议。\n不采纳：表示不同意。\n其他：表示既不是纯采纳也不是纯不采纳的情况。\n原因/说明怎么填\n选了「采纳」：原因可为空，直接点「提交」也行；也可以点上面的快捷按钮（药师建议合理、符合患者当前病情、已调整医嘱剂量、已加强监测）自动填进说明框，或者自己写备注（比如已执行的调整内容）。\n选了「不采纳」或「其他」：说明框必须写原因（不能空），写完再点「提交」。\n写好后点蓝色「提交」按钮即可把结果回传药师工作站；不想填了就点「退出」。\n\n这是系统规则要求的：不采纳/其他必须有原因，采纳可以不填。按上面选完提交就完成了。",
+        "manualVerdict": "PASS",
+        "manualReason": "直接给出三种结果与原因必填矩阵，并把截图上的快捷短语、提交和退出转成现场可执行步骤；没有要求用户重复提供截图内容。"
+      },
+      {
+        "id": "IMAGE-QA-02",
+        "conversationId": "ZX-20260813-81",
+        "sourceImagePath": "/Users/lsy/lc-work/psp/pwrs/docs/.intake/Lm3rbOi2SaktHfsTbjacsGqonqd/rec40-19.png",
+        "previewConfirmedBeforeSend": true,
+        "sentUserBubbleImageCount": 1,
+        "question": "医生这边已经选了“其他”，提交前还缺什么？提交后药师能看到哪些信息？",
+        "domComplete": true,
+        "uiAnswer": "当前资料无法确认。\n请补充：医嘱干预闭环里医生端采纳结果选“其他”时的必填规则/原因矩阵正文；医生提交后药师端列表/详情实际展示的字段与同步规则；相关AC或接口/数据契约摘录",
+        "manualVerdict": "FAIL",
+        "manualReason": "图片与问题已明确‘其他’结果，且现有 CLIN-04a AC-8/AC-11 直接覆盖原因必填与药师列表/详情回显。回答却要求用户补同一份规则正文，整体拒答，没有解决现场问题。"
+      },
+      {
+        "id": "IMAGE-QA-03",
+        "conversationId": "ZX-20260813-82",
+        "sourceImagePath": "/Users/lsy/lc-work/psp/pwrs/docs/.intake/Lm3rbOi2SaktHfsTbjacsGqonqd/rec40-20.png",
+        "previewConfirmedBeforeSend": true,
+        "sentUserBubbleImageCount": 1,
+        "question": "图里现在选的是“不采纳”，这是系统判的还是医生自己选的？我该提醒医生核对什么？",
+        "domComplete": true,
+        "uiAnswer": "是医生自己选的，不是系统自动判的。\n\n从图上和规格都能对上：医生端打开已通知的医嘱干预记录后，自己点选“采纳 / 不采纳 / 其他”，再点提交；结果才会回传到药师工作站。系统不会自动默认成“不采纳”。\n\n提醒医生核对这几项就行：\n\n确认是不是这条干预：看患者信息、药品、干预时间、干预意见是否就是他要反馈的那条。\n选“不采纳”时必须填原因：快捷标签可以点，但下面的“请填写不采纳的具体理由”必填（不采纳/其他都要求原因；选“采纳”时原因可空）。\n点“提交”前再看一眼选项和理由：提交后结果就固定下来，列表和详情会显示医生的采纳结果与意见。\n\n按上面做完提交即可，药师侧会同步看到。",
+        "manualVerdict": "PASS",
+        "manualReason": "正确区分医生手动采纳选择与药师侧‘不合理’结论，给出患者/药品/时间/意见、原因必填及提交前复核的可执行清单。"
+      }
+    ]
+  },
+  "overall": {
+    "preview": "PASS 7/7",
+    "imageQa": "PASS 2/3",
+    "knownContentFailure": "IMAGE-QA-02 is a retrieval/evidence application failure, not an attachment preview or browser UI failure. No code change or deployment was performed in this acceptance run."
+  }
+}

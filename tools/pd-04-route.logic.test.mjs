@@ -351,6 +351,42 @@ test('真实PWRS地图回归：业务规则正反例能召回“预期行为→�
   assert.equal(switched.contextOverride, true, '显式患教新实体必须覆盖反馈route');
 });
 
+test('真实PWRS地图回归：医生采纳结果三值、原因必填与药师端闭环走 DQ-009', {
+  skip: !process.env.PWRS_REAL_MAP,
+}, () => {
+  const S = buildRoutingSandbox(makeDeps());
+  const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
+  const questions = [
+    '医生这边已经选了“其他”，提交前还缺什么？提交后药师能看到哪些信息？',
+    '医生采纳结果录入弹窗怎么填，什么情况下原因必填？',
+    '医嘱干预选不采纳以后是不是必须写理由？',
+    '医生选择其他并提交，药师工作站列表会显示什么？',
+    '采纳、不采纳、其他三种结果，哪些可以不写原因？',
+    '医生意见提交以后，药师详情时间线能看到录入人和时间吗？',
+    '药师给了不合理结论，医生端的不采纳是系统自动判的吗？',
+    '这条干预医生已经回复了，为什么药师端还要看采纳结果和意见？',
+    '医生点提交后，采纳结果会不会改变干预本身的已完成状态？',
+  ];
+  for (const question of questions) {
+    const hit = S.routeQuestion(map, question, '');
+    assert.equal(hit.route.id, 'DQ-009', `${question}，topN=${JSON.stringify(hit.topN)}`);
+    assert.match(hit.answerFacts.join('\n'), /1=采纳、2=不采纳、3=其他/);
+    assert.match(hit.answerFacts.join('\n'), /不采纳\/其他必须填写原因/);
+    assert.match(hit.answerFacts.join('\n'), /列表显示医生采纳结果[\s\S]*详情\/时间线显示结果、意见、录入来源、录入人和时间/);
+    assert.match(hit.mustNotConfuse.join('\n'), /不是医生采纳结果/);
+  }
+});
+
+test('真实PWRS地图回归：采纳结果闭环路由不抢体温单、药师反馈或无证据按钮问法', {
+  skip: !process.env.PWRS_REAL_MAP,
+}, () => {
+  const S = buildRoutingSandbox(makeDeps());
+  const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
+  assert.equal(S.routeQuestion(map, '体温单不传 startDate 默认看几天？', '').route.id, 'QR-LINE-CHART-SEVEN-DAY-WINDOW');
+  assert.equal(S.routeQuestion(map, '药师反馈发出去以后还能改正文或删除吗？', '').route.id, 'QR-FEEDBACK-SEND-DEDUP');
+  assert.notEqual(S.routeQuestion(map, '这个红色按钮点了没反应，我应该点哪个？', '').route?.id, 'DQ-009');
+});
+
 test('真实PWRS地图回归：体温单七天窗口四种问法命中且不足七天不截到今天', {
   skip: !process.env.PWRS_REAL_MAP,
 }, () => {
