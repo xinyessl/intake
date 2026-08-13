@@ -195,8 +195,9 @@ test('承接型诊断追问衰减继承上一轮专用QR；显式新实体覆盖
   assert.equal(switched.contextOverride, true);
   assert.equal(switched.inherited, undefined);
 
-  const unrelated = S.contextualRouteQuestion(map, history.slice(0, 2).concat({ role: 'user', content: '红色按钮该点哪个？' }), '红色按钮该点哪个？', '');
+  const unrelated = S.contextualRouteQuestion(map, history.slice(0, 2).concat({ role: 'user', content: '这个红色按钮该点哪个？' }), '这个红色按钮该点哪个？', '');
   assert.equal(unrelated.matched, false, '无承接提示、无证据按钮不能继承患者route');
+  assert.equal(unrelated.contextOverride, true);
 });
 
 test('接口权限自然问法族优先专用QR，并同时保留功能授权缺口与业务数据边界', () => {

@@ -911,6 +911,11 @@ function contextualRouteQuestion(map, messages, currentQuestion, subKey = '') {
   const directCard = routes.find(r => String(r && r.id || '') === directId);
   const priorCard = routes.find(r => String(r && r.id || '') === priorId);
   const priorText = String(priorCard && priorCard.searchText || [priorCard && priorCard.title, ...((priorCard && priorCard.keywords) || [])].filter(Boolean).join(' ')).toLowerCase();
+  // 当前轮即使没路由成功，只要显式出现上一轮没有的新业务实体，也不能继承旧 route。
+  // 例如患者列表后问“这个红色按钮点哪个”：按钮实体没有证据，应保持 miss，不能被“这个”污染成患者事实。
+  const entityTerms = current.match(/按钮|菜单|医嘱|收费|监护|患教|反馈|药品|检验|体温单|权限|角色|token|登录|缓存|配置|模板|处方|病历|评估/ig) || [];
+  const explicitUnknownEntity = entityTerms.some(term => !previous.toLowerCase().includes(term.toLowerCase()) && !priorText.includes(term.toLowerCase()));
+  if (explicitUnknownEntity && !direct.matched) return { ...direct, contextOverride: true, contextPreviousRouteId: priorId };
   const discriminator = ((directCard && directCard.keywords) || []).map(x => String(x || '').trim()).filter(x => x.length >= 2 && !generic.has(x));
   const explicitSwitch = direct.matched && directId && directId !== priorId && discriminator.some(term => current.toLowerCase().includes(term.toLowerCase()) && !priorText.includes(term.toLowerCase()));
   if (explicitSwitch) return { ...direct, contextOverride: true, contextPreviousRouteId: priorId };
