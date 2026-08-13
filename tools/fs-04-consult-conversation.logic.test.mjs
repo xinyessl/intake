@@ -359,6 +359,17 @@ test('未知动作不得为抓包重做，事实正确也不得委婉追加真�
   assert.match(controlled, /明确执行授权/);
 });
 
+test('通用受控条件齐备但未点名动作时，不得由检索命中替用户选择业务实体', () => {
+  const fn = new Function(extractFn(SRC, 'consultGenericControlledActionGuard') + '\nreturn consultGenericControlledActionGuard;')();
+  const generic = fn('隔离测试环境、专用测试数据、执行授权、回滚清理、幂等性和影响范围都确认了，可以受控验证吗？');
+  assert.match(generic, /具体业务动作尚未点名/);
+  assert.match(generic, /可以进入“评估一次受控验证”的门槛/);
+  assert.match(generic, /不得根据检索关键词或命中的相邻 route/);
+  assert.match(generic, /不得.*自行选择同步、补跑、患者数据、调度、\/comm\//);
+  assert.match(generic, /具体要验证的动作是什么/);
+  assert.equal(fn('隔离测试环境、授权、回滚、幂等和影响范围都确认，要补跑患者同步。'), '');
+});
+
 test('模糊的“第二步对不上”仍须先给规则条件分支，不能退回整体拒答', () => {
   const fn = new Function(extractFn(SRC, 'consultRuleApplicationGuard') + '\nreturn consultRuleApplicationGuard;')();
   for (const q of [
@@ -379,6 +390,8 @@ test('consult prompt 同时注入规则应用、运行安全、文件验收与�
   assert.ok(call[0].indexOf('consultEvidenceLedgerGuard') < call[0].indexOf('consultRuleApplicationGuard'));
   assert.ok(call[0].indexOf('consultRuleApplicationGuard') < call[0].indexOf('consultExactPathBoundaryGuard'));
   assert.ok(call[0].indexOf('consultExactPathBoundaryGuard') < call[0].indexOf('consultOperationalSafetyGuard'));
+  assert.ok(call[0].indexOf('consultExactPathBoundaryGuard') < call[0].indexOf('consultGenericControlledActionGuard'));
+  assert.ok(call[0].indexOf('consultGenericControlledActionGuard') < call[0].indexOf('consultOperationalSafetyGuard'));
   assert.ok(call[0].indexOf('consultOperationalSafetyGuard') < call[0].indexOf('consultFileArtifactGuard'));
   assert.ok(call[0].indexOf('consultFileArtifactGuard') < call[0].indexOf('consultDiagnosticGuard'));
   assert.ok(call[0].indexOf('consultDiagnosticGuard') < call[0].indexOf('consultNonDestructiveDiagnosticGuard'));

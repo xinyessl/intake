@@ -1635,6 +1635,25 @@ function consultNonDestructiveDiagnosticGuard(question, route) {
   ].join('\n');
 }
 
+// 只给出“隔离/授权/回滚/幂等/范围”而未点名实际业务动作时，不能由检索命中反向替用户选一个任务。
+// 这些条件只够回答通用准入原则，不够生成任何实体专属执行步骤。
+function consultGenericControlledActionGuard(question) {
+  const q = String(question || '').trim();
+  const hasBundle = /(?:隔离测试环境|专用测试数据)/i.test(q)
+    && /(?:授权|批准)/i.test(q)
+    && /(?:回滚|清理)/i.test(q)
+    && /(?:幂等|补偿)/i.test(q)
+    && /(?:影响范围|数据范围|执行范围)/i.test(q);
+  if (!hasBundle) return '';
+  const hasNamedAction = /(?:同步|补跑|重跑|重新触发|导出|下载|保存|提交|完成|审批|签名|删除|新建|修改|收费|下发|发送|打开|刷新|切换|接口|任务|患教|咨询|反馈|医嘱|配置|登录|退出|JWT|token)/i.test(q);
+  if (hasNamedAction) return '';
+  return [
+    '【安全前置条件齐全，但具体业务动作尚未点名】',
+    '本轮只能回答条件性原则：隔离环境或专用数据、明确授权、回滚/清理、幂等/补偿与影响范围齐全，表示可以进入“评估一次受控验证”的门槛；还不能直接给执行步骤或断言某个具体动作可执行。',
+    '用户没有说明要验证哪个业务动作/任务/接口。不得根据检索关键词或命中的相邻 route，自行选择同步、补跑、患者数据、调度、/comm/ 或其它具体实体，也不得罗列它们的接口、状态和执行流程。只追问一个问题：具体要验证的动作是什么；拿到实体后再按该动作的当前运行态、契约和风险给单次方案。',
+  ].join('\n');
+}
+
 // 批处理/同步/调度类现场诊断有额外的副作用边界：截图和“最后成功时间”只能证明观测到的现象，
 // 不能单独证明调度已停止；恢复、重跑、补跑也不能在幂等/范围/运行态未知时直接建议。
 function consultOperationalSafetyGuard(question, route) {
@@ -3378,7 +3397,7 @@ const server = http.createServer((req, res) => {
       else {
         // PD-04：命中 mustNotConfuse → 作负向提示注入 system（易混淆项，勿臆造）。answerFacts 已在 specHits 顶段（consultSystem 走 specExcerpts）。
         const mncNote = routeMnc.length ? '\n【以下为该问题的易混淆项，请勿臆造、勿张冠李戴】' + routeMnc.map(x => '\n· ' + x).join('') : '';
-        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationMode) + '\n' + consultEvidenceLedgerGuard(qtext, route) + '\n' + consultRuleApplicationGuard(qtext, route) + '\n' + consultExactPathBoundaryGuard(qtext, route) + '\n' + consultOperationalSafetyGuard(qtext, route) + '\n' + consultFileArtifactGuard(qtext, route) + '\n' + consultDiagnosticGuard(qtext, route) + '\n' + consultNonDestructiveDiagnosticGuard(qtext, route) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
+        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationMode) + '\n' + consultEvidenceLedgerGuard(qtext, route) + '\n' + consultRuleApplicationGuard(qtext, route) + '\n' + consultExactPathBoundaryGuard(qtext, route) + '\n' + consultGenericControlledActionGuard(qtext) + '\n' + consultOperationalSafetyGuard(qtext, route) + '\n' + consultFileArtifactGuard(qtext, route) + '\n' + consultDiagnosticGuard(qtext, route) + '\n' + consultNonDestructiveDiagnosticGuard(qtext, route) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
           piece = String(piece == null ? '' : piece); if (!piece) return;
           if (!kbInjected && kbRefs.length) { kbInjected = true; sse({ kb: kbRefs, kbInjected: true }); }
           reply += piece; sse({ v: piece });
