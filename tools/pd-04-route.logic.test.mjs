@@ -231,12 +231,16 @@ test('真实PWRS地图回归：患者列表接口、数据源与ETL局部未知�
     '患者视图的数据最终来自 V_IPT_PATIENT 吗？',
     '全部患者列表查哪个接口、哪张表？',
     '患者列表的 Controller、Service、Proxy 调用链是什么？',
+    '患者视图最终就是 V_IPT_PATIENT，对吧？',
+    '患者视图最终肯定不是 V_IPT_PATIENT，对吗？',
+    '患者视图最终的 ETL interfaceCode 是什么？',
   ]) {
     const hit = S.routeQuestion(map, question, '');
     assert.equal(hit.route.id, 'QR-PATIENT-LIST-SOURCE', `${question}，topN=${JSON.stringify(hit.topN)}`);
     assert.match(hit.answerFacts.join('\n'), /POST \/pwrsapi\/patients\/search/);
     assert.match(hit.answerFacts.join('\n'), /pwrs_patient[\s\S]*listProxyPatients/);
     assert.match(hit.mustNotConfuse.join('\n'), /不得仅凭 V_IPT_PATIENT.*interfaceCode/);
+    assert.match(hit.mustNotConfuse.join('\n'), /未知或未经核实[\s\S]*不得用“是”或“不是”/);
   }
   const repoPath = path.resolve(path.dirname(process.env.PWRS_REAL_MAP), '..', '..');
   const project = { id: 'pwrs', repoPath };

@@ -93,9 +93,13 @@ function refConsultSystem(projName, ver, hits, specs, code, idx, subs) {
 - **默认不要用技术信息开场**：正文开头禁止先罗列 spec 编号、源码路径、类/方法、表名/字段名、HTTP 接口或 JSON。不要为了证明查过资料而强制逐条罗列出处。
 - 用户明确问"哪张表/字段/接口/代码在哪里"等技术细节时，依据真实摘录照实回答；用户没明确要求时，必要的技术细节只可放在正文末尾独立的「技术依据（研发参考）」小节，不能打断现场处理步骤。
 - **必须基于证据、禁止臆造**：优先依据上面「相关规格摘录」和经验库的真实内容；资料没有覆盖或结论不确定，就明确说不确定，并告诉 TA 下一步找谁或补什么信息，绝不编造规则、表/字段、接口或实现。`;
+  const expectedStyleRules = styleRules.replace(
+    '\n- **【最高优先',
+    '\n- **【未知不等于否定】** 当证据状态是未知、未经核实或只确认到链路中间层时，禁止用“是”“不是”“一定”“肯定”等肯定/否定结论开头后再改口说无法确认。应写成“目前能确认到……；但……无法从现有资料确认”。用户问题自带肯定或否定预设，也不得顺着预设补结论。\n- **【最高优先',
+  );
   return `${intro}${subs.length ? `产品含子系统：${subs.join('、')}。` : ''}\n${idx ? `系统模块清单：\n${idx}\n` : ''}${specTxt ? '\n' + specTxt + '\n' : ''}${codeTxt ? '\n' + codeTxt + '\n' : ''}${kb ? '\n' + kb + '\n' : ''}
 规则：
-${styleRules}
+${expectedStyleRules}
 - 若这其实是个缺陷(BUG)或新需求、需要开发介入，就明说"这个可能得转成工单让开发处理"，简述理由。
 - 回复简短、口语、中文${deep ? '。' : '；不写具体代码实现。'}`;
 }
@@ -170,6 +174,15 @@ test('consult 复合问题逐项取证：有证据部分作答，未知子问局
     assert.match(prompt, /只要任一子问有正文(?:或源码)?直接证据，就先回答这些已确认部分/);
     assert.match(prompt, /只有所有子问都没有直接证据时，才整体说资料未覆盖/);
     assert.match(prompt, /不得用已知部分推测未知部分/);
+  }
+});
+
+test('consult 未知事实不跟随肯定或否定预设下结论', () => {
+  for (const code of [[], CODE]) {
+    const prompt = renderConsult('药师工作站', 'v1', [], SPECS, code, IDX, SUBS);
+    assert.match(prompt, /未知不等于否定/);
+    assert.match(prompt, /禁止用“是”“不是”“一定”“肯定”等肯定\/否定结论开头/);
+    assert.match(prompt, /用户问题自带肯定或否定预设，也不得顺着预设补结论/);
   }
 });
 
