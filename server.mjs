@@ -1434,24 +1434,31 @@ function consultSystem(proj, ver, hits, specs, code, currentQuestion = '') {   /
 // 纯对话意图不需要 Spec 事实证据：寒暄、情绪反馈、评价上一条答复、请求换种说法/澄清对话。
 // 只认「整句就是对话意图」的窄模式；一旦同句还在问按钮、接口、配置、权限等系统事实，就不命中，继续走证据门。
 function consultConversationTurn(question) {
-  const q = String(question || '').trim().replace(/[\s。！？!?，,～~…]+$/g, '').trim();
-  if (!q || q.length > 80) return false;
-  const social = /^(?:你好|您好|嗨|哈喽|hello|hi|早上好|上午好|下午好|晚上好|在吗|辛苦了|谢谢|多谢|感谢|再见|拜拜)$/i.test(q);
-  if (social) return true;
-  // 对话提示词可以带“行/好/那/你”等口头前后缀，不再逐句 exact 匹配；但同句出现事实实体/操作追问时必须退出对话模式。
-  const conversationalCue = /(?:冷漠|冷冰冰|生硬|机械|像机器人|没感情|不耐烦|温柔一点|友好一点|自然一点|耐心一点|口语一点|简单(?:一)?点(?:说)?|说简单(?:一)?点|简短(?:一)?点|直白(?:一)?点|别(?:这么|那么)?官方|换(?:个|一种)说法|换句话说|再解释(?:一下|一遍)?|再说(?:清楚)?(?:一下|一遍)|重说(?:一下|一遍)|说人话|讲简单(?:一)?点|我没听懂|我没看懂|没听懂|没看懂|你刚才是什么意思)/i.test(q);
-  if (!conversationalCue) return false;
-  const factEntity = /(?:按钮|菜单|页面|入口|接口|字段|哪张表|表名|数据库|配置|开关|权限|角色|状态|规则|业务|步骤|路径|地址|缓存|日志|源码|代码|服务|controller|service|proxy|etl|interfacecode|v_[a-z0-9_]+|pwrsapi|患者|医嘱|药品|收费|监护|患教|反馈)/i.test(q);
-  const contextualFactRequest = /(?:这个|那个|它|该功能|该接口|该按钮|那)[^，。；]{0,20}(?:到底|具体|应该|该|怎么|如何|哪个|哪儿|能不能用|可不可以)/i.test(q);
-  return !factEntity && !contextualFactRequest;
+  return consultConversationMode(question) === 'pure';
 }
 
-function consultConversationGuard(question, active) {
-  if (!active) return '';
+function consultConversationMode(question) {
+  const q = String(question || '').trim().replace(/[\s。！？!?，,～~…]+$/g, '').trim();
+  if (!q || q.length > 120) return '';
+  const social = /^(?:你好|您好|嗨|哈喽|hello|hi|早上好|上午好|下午好|晚上好|在吗|辛苦了|谢谢|多谢|感谢|再见|拜拜)$/i.test(q);
+  if (social) return 'pure';
+  // 对话提示词可以带“行/好/那/你”等口头前后缀，不再逐句 exact 匹配；但同句出现事实实体/操作追问时必须退出对话模式。
+  const conversationalCue = /(?:冷漠|冷冰冰|生硬|机械|像机器人|没感情|不耐烦|温柔一点|友好一点|自然一点|耐心一点|口语一点|简单(?:一)?点(?:说)?|说简单(?:一)?点|简短(?:一)?点|直白(?:一)?点|别(?:这么|那么)?官方|换(?:个|一种)说法|换句话说|再解释(?:一下|一遍)?|再说(?:清楚)?(?:一下|一遍)|重说(?:一下|一遍)|说人话|讲简单(?:一)?点|我没听懂|我没看懂|没听懂|没看懂|你刚才是什么意思)/i.test(q);
+  if (!conversationalCue) return '';
+  const factEntity = /(?:按钮|菜单|页面|入口|接口|字段|哪张表|表名|数据库|配置|开关|权限|角色|状态|规则|业务|步骤|路径|地址|缓存|日志|源码|代码|服务|controller|service|proxy|etl|interfacecode|v_[a-z0-9_]+|pwrsapi|患者|医嘱|药品|收费|监护|患教|反馈)/i.test(q);
+  const contextualFactRequest = /(?:这个|那个|它|该功能|该接口|该按钮|那)[^，。；]{0,20}(?:到底|具体|应该|该|怎么|如何|哪个|哪儿|能不能用|可不可以)/i.test(q);
+  return (factEntity || contextualFactRequest) ? 'mixed' : 'pure';
+}
+
+function consultConversationGuard(question, mode) {
+  if (!mode) return '';
+  const mixed = mode === 'mixed';
   return [
-    '【本轮为对话性表达，不是新增系统事实问题】',
+    mixed ? '【本轮同时包含表达诉求与系统事实问题】' : '【本轮为对话性表达，不是新增系统事实问题】',
     `用户本轮表达：${String(question || '').trim().slice(0, 500)}`,
-    '先用一两句自然、有人情味的话承接用户的寒暄、情绪或表达偏好；如果用户觉得上一条太生硬，应简短承认并换成更自然的说法。',
+    mixed
+      ? '先用一句自然的话承接用户想直接得到答案、或不喜欢机械语气的感受；随后仍严格按本轮证据回答事实部分。证据不足时，说明为什么不能随便指错，并用口语指出真正缺少的信息；不得以“当前资料无法确认”这句固定模板开头。'
+      : '先用一两句自然、有人情味的话承接用户的寒暄、情绪或表达偏好；如果用户觉得上一条太生硬，应简短承认并换成更自然的说法。',
     '可以利用紧邻的当前会话理解用户在回应哪一条答案，并继续提供帮助；请求换种说法时可重述上一条已经给出的结论，但不得借机新增没有正文证据的具体系统事实。',
     '本轮不要套用“说明书未覆盖/建议转工单”的固定模板。若用户之后再问具体按钮、接口、字段、配置、权限或业务规则，下一轮仍须重新按 Spec/源码证据门判断。',
   ].join('\n');
@@ -2657,7 +2664,8 @@ const server = http.createServer((req, res) => {
       try { kbScored = await kbRetrieveScored(proj.id, query, 5, 2); } catch {}
       if (deep) { try { codeHits = codeSearch(proj, ver, query, specSearch(proj, ver, query, 5, sub), 4, sub); } catch {} }
       const retrieval = buildRetrieval({ query, deep, ver, subsystem: sub }, specScored, kbScored, codeHits);
-      retrieval.conversationIntent = consultConversationTurn(query);
+      retrieval.conversationIntentMode = consultConversationMode(query);
+      retrieval.conversationIntent = !!retrieval.conversationIntentMode;
       retrieval.routing = routingDiag(hasMap, route);
       // PD-04 修复：回放也带上 specSearch 底座首条分 + 阈值，方便调 SPEC_MIN_RELEVANT（路由未命中但 specSearch 强 → consult 现会据 spec 底座作答，不再固定话术）。
       if (retrieval.routing && retrieval.routing.enabled) {
@@ -3071,7 +3079,8 @@ const server = http.createServer((req, res) => {
       const cfg = readModelCfg();
       try { refreshRepos(proj, false); } catch {}
       const lastUser = [...msgs].reverse().find(m => m.role === 'user'); const qtext = lastUser ? lastUser.content : '';
-      const conversationalTurn = consultConversationTurn(qtext);   // 寒暄/情绪反馈/换种说法不是新增事实题，不应被无Spec固定话术截断
+      const conversationMode = consultConversationMode(qtext);   // pure=纯对话；mixed=表达诉求+事实题；二者都不走机械miss，mixed仍由证据守卫约束事实
+      const conversationalTurn = conversationMode === 'pure';
       const retrievalQuery = expandRetrievalQuery(msgs, qtext);   // “它/这个/那…”短追问用上一条 user 问题补实体；只影响检索，不把旧答案当事实
       const sub = String(b.subsystem || '').trim();   // 用户指定的子系统（空=全部）
       const imgs = (Array.isArray(b.images) ? b.images : []).slice(0, 6);   // 本轮附的截图（data URL，≤6）→ 多模态并进末条 user，让 AI 结合图答疑；落库见下方 convId 已知处
@@ -3107,14 +3116,15 @@ const server = http.createServer((req, res) => {
       const codeHits = b.deep ? codeSearch(proj, cver, retrievalQuery, hasMap ? (specHits || []) : specHits, 4, sub) : null;
       // PD-04 miss 判定（修复）：路由未命中 且 specSearch 底座也弱/空（specNoSpec），且（非 deep，或 deep 但源码也无命中）→ 不调模型、返回固定话术。
       //   即：specSearch 强匹配时，即便路由未命中也不再走固定话术——由提示词功能级覆盖判定据 spec 底座答/说没覆盖。
-      const noAnswer = !conversationalTurn && routeMiss && specNoSpec && !(b.deep && codeHits && codeHits.length);
+      const noAnswer = !conversationMode && routeMiss && specNoSpec && !(b.deep && codeHits && codeHits.length);
       // PD-03 检索诊断：把「实际喂给 AI 的三类检索内容」组装成紧凑 retrieval 对象，挂到本轮 assistant 消息（与 kbRefs 同位置、同持久化路径）。
       //   spec 复用上面已算的 searchScored（同 specSearch 召回口径、带 score）；kb 复用 kbScored；code 无分。捕获不阻断答疑（try 静默）。
       //   PD-04：把「路由决策」并进 retrieval.routing，并带上「是否用了 specSearch 底座 + specSearch 首条分」方便回放判断。
       let retrieval = null;
       try {
         retrieval = buildRetrieval({ query: qtext, deep: !!b.deep, ver: cver, subsystem: sub }, searchScored, kbScored, codeHits);
-        retrieval.conversationIntent = conversationalTurn;
+        retrieval.conversationIntent = !!conversationMode;
+        retrieval.conversationIntentMode = conversationMode;
         retrieval.routing = routingDiag(hasMap, route);
         if (retrieval.routing && retrieval.routing.enabled) { retrieval.routing.usedSpecSearch = usedSpecSearch; retrieval.routing.specTop = Math.round(searchTop * 1000) / 1000; retrieval.routing.specMinRelevant = SPEC_MIN_RELEVANT; }
       } catch {}
@@ -3128,7 +3138,7 @@ const server = http.createServer((req, res) => {
       else {
         // PD-04：命中 mustNotConfuse → 作负向提示注入 system（易混淆项，勿臆造）。answerFacts 已在 specHits 顶段（consultSystem 走 specExcerpts）。
         const mncNote = routeMnc.length ? '\n【以下为该问题的易混淆项，请勿臆造、勿张冠李戴】' + routeMnc.map(x => '\n· ' + x).join('') : '';
-        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationalTurn) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
+        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationMode) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
           piece = String(piece == null ? '' : piece); if (!piece) return;
           if (!kbInjected && kbRefs.length) { kbInjected = true; sse({ kb: kbRefs, kbInjected: true }); }
           reply += piece; sse({ v: piece });

@@ -26,7 +26,8 @@ function extractFn(src, name) {
   return src.slice(start, end + 1);
 }
 
-const classify = new Function(extractFn(SRC, 'consultConversationTurn') + '\nreturn consultConversationTurn;')();
+const mode = new Function(extractFn(SRC, 'consultConversationMode') + '\nreturn consultConversationMode;')();
+const classify = new Function('consultConversationMode', extractFn(SRC, 'consultConversationTurn') + '\nreturn consultConversationTurn;')(mode);
 const guard = new Function(extractFn(SRC, 'consultConversationGuard') + '\nreturn consultConversationGuard;')();
 
 test('纯寒暄、情绪反馈、表达偏好和换种说法属于对话性表达', () => {
@@ -63,6 +64,13 @@ test('系统事实题或情绪夹带事实追问仍走证据门', () => {
   ]) assert.equal(classify(q), false, q);
 });
 
+test('三态分流：纯对话、混合意图、纯事实严格区分', () => {
+  assert.equal(mode('行，那你简单点说'), 'pure');
+  assert.equal(mode('别这么冷漠，直白点告诉我这个按钮到底点哪个'), 'mixed');
+  assert.equal(mode('简单点说，最终 ETL 就是 V_IPT_PATIENT 吗？'), 'mixed');
+  assert.equal(mode('这个红色按钮到底点哪个？'), '');
+});
+
 test('对话性守卫只在命中时注入，允许承接但禁止新增无证据事实', () => {
   assert.equal(guard('接口在哪里', false), '');
   const text = guard('你也太冷漠了吧', true);
@@ -71,16 +79,21 @@ test('对话性守卫只在命中时注入，允许承接但禁止新增无证�
   assert.match(text, /不得借机新增没有正文证据的具体系统事实/);
   assert.match(text, /不要套用“说明书未覆盖\/建议转工单”/);
   assert.match(text, /下一轮仍须重新按 Spec\/源码证据门判断/);
+  const mixed = guard('别这么冷漠，告诉我按钮点哪个', 'mixed');
+  assert.match(mixed, /同时包含表达诉求与系统事实问题/);
+  assert.match(mixed, /不能随便指错/);
+  assert.match(mixed, /不得以“当前资料无法确认”这句固定模板开头/);
 });
 
 test('consult 接线：对话性表达不走固定miss，事实题仍保留原证据短路', () => {
   const start = SRC.indexOf("if (url.pathname === '/api/consult'");
   const end = SRC.indexOf("if (url.pathname === '/api/consult-to-intake'", start);
   const route = SRC.slice(start, end);
-  assert.match(route, /const conversationalTurn = consultConversationTurn\(qtext\)/);
-  assert.match(route, /const noAnswer = !conversationalTurn && routeMiss && specNoSpec/);
-  assert.match(route, /consultConversationGuard\(qtext, conversationalTurn\)/);
-  assert.match(route, /retrieval\.conversationIntent = conversationalTurn/);
+  assert.match(route, /const conversationMode = consultConversationMode\(qtext\)/);
+  assert.match(route, /const noAnswer = !conversationMode && routeMiss && specNoSpec/);
+  assert.match(route, /consultConversationGuard\(qtext, conversationMode\)/);
+  assert.match(route, /retrieval\.conversationIntent = !!conversationMode/);
+  assert.match(route, /retrieval\.conversationIntentMode = conversationMode/);
   assert.match(route, /if \(noAnswer\)[\s\S]*?说明书里没有找到相关描述/);
 });
 
@@ -88,5 +101,5 @@ test('检索回放也标记对话意图，便于诊断事实miss与对话绕行'
   const start = SRC.indexOf("if (url.pathname === '/api/retrieval-replay'");
   const end = SRC.indexOf("if (url.pathname === '/api/retrieval-log'", start);
   const replay = SRC.slice(start, end);
-  assert.match(replay, /retrieval\.conversationIntent = consultConversationTurn\(query\)/);
+  assert.match(replay, /retrieval\.conversationIntentMode = consultConversationMode\(query\)/);
 });
