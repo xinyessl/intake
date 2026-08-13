@@ -1,0 +1,130 @@
+{
+  "schema": 1,
+  "generatedAt": "2026-08-13T11:05:00+08:00",
+  "project": "psp",
+  "version": "2.7.260813-16",
+  "modelConfig": {
+    "provider": "anthropic",
+    "model": "grok-4.5",
+    "baseHost": "grokproxy.zeabur.app",
+    "configured": true,
+    "source": "production /app/data/model-api.json sanitized whitelist; no credential persisted in this evidence"
+  },
+  "automatedTests": {
+    "passed": 64,
+    "failed": 0,
+    "skipped": 0,
+    "realMap": true
+  },
+  "summary": {
+    "singleTurn": "9/9 PASS",
+    "sameConversation": "3/3 PASS",
+    "newConversationNoEvidence": "1/1 PASS",
+    "humanReview": "PASS"
+  },
+  "singleTurn": [
+    {
+      "id": "ZX-20260813-14",
+      "question": "患者视图的患者列表从哪个接口获取数据，查哪个etl",
+      "answer": "患者视图的患者列表，先调 PWRS 自己的接口拿数据，不会直接去查 ETL。\n\nWeb 正式入口是 `POST /pwrsapi/patients/search`（旧页面/兼容还可能走 `GET /pwrsapi/patients`）；关注患者是独立的 `POST /pwrsapi/patients/guanzhu/search` 或旧 `GET /pwrsapi/patients/guanzhu`。请求进 PWRS 后走 `PatientController → PatientService`，再按条件分：查自己读本地 `pwrs_patient` 并过滤；查医院/HIS 则调 `dubboProxyService.listProxyPatients`。\n\n目前能确认到 PWRS → Proxy 这条链路，但 `listProxyPatients` 最终发给 ETL 的 `interfaceCode` 是不是 `V_IPT_PATIENT`，现有资料无法确认（PWRS 仓没有 Proxy 源码）。需要看 Proxy 请求日志/源码，或让 Proxy/ETL 负责人用 requestId 核实。",
+      "routing": {"enabled": true, "matched": true, "routeId": "QR-PATIENT-LIST-SOURCE", "tier": 1, "score": 54.623, "specTop": 276.703},
+      "verdict": "PASS"
+    },
+    {
+      "id": "ZX-20260813-15",
+      "question": "患者视图列表调用什么接口？后面查哪个 ETL？",
+      "answer": "患者视图列表先调用 PWRS 的患者列表接口，不是页面直接查 ETL。  \nWeb 正式入口是 `POST /pwrsapi/patients/search`（旧兼容还有 `GET /pwrsapi/patients`），关注患者走独立的 `POST /pwrsapi/patients/guanzhu/search`（或旧 GET）。这些请求进 `PatientController → PatientService` 后，按条件分支：查自己读本地 `pwrs_patient`；查医院/HIS 则调 `dubboProxyService.listProxyPatients`。  \n\n后面最终查哪个 ETL（`listProxyPatients` 实际发出的 interfaceCode 是否是 `V_IPT_PATIENT`），当前资料无法确认，需要查 Proxy 请求日志/源码，或由 Proxy/ETL 负责人用 requestId 核实。",
+      "routing": {"enabled": true, "matched": true, "routeId": "QR-PATIENT-LIST-SOURCE", "tier": 1, "score": 44.698, "specTop": 211.899},
+      "verdict": "PASS"
+    },
+    {
+      "id": "ZX-20260813-16",
+      "question": "Web 患者列表的数据来源和 ETL interfaceCode 是什么？",
+      "answer": "Web 患者列表先走 PWRS 自己的接口，数据来源按查询条件分支，不是页面直接查 ETL；最终发给 ETL 的 interfaceCode 当前资料无法确认。\n\n目前能确认到：页面正式入口是 POST /pwrsapi/patients/search（旧兼容还可用 GET /pwrsapi/patients；关注列表另走独立接口，别混）。请求进 PatientController 再到 PatientService。命中“查自己”就读本地 pwrs_patient 再本地过滤；命中“查医院/HIS”就调 dubboProxyService.listProxyPatients（旧 GET 且 status=出院 时恒走这条 HIS 分支）。本地快照不等于 HIS 全量患者库。\n\nHIS 侧能看到患者视图 V_IPT_PATIENT 的字段证据，但 PWRS 仓没有 Proxy 源码，无法证明 listProxyPatients 最终请求 ETL 时用的 interfaceCode 就是 V_IPT_PATIENT，也无法确认 Proxy 内部是否还有转换、缓存等。要核实最终 interfaceCode，需查 Proxy 请求日志/源码，或由 Proxy/ETL owner 拿 requestId 核对。\n\n技术依据（研发参考）：Web 正式入口 POST /pwrsapi/patients/search；数据源分支为本地 pwrs_patient 或 dubboProxyService.listProxyPatients；V_IPT_PATIENT 仅作上游字段证据，interfaceCode 未确认。",
+      "routing": {"enabled": true, "matched": true, "routeId": "QR-PATIENT-LIST-SOURCE", "tier": 1, "score": 40.662, "specTop": 194.34},
+      "verdict": "PASS"
+    },
+    {
+      "id": "ZX-20260813-17",
+      "question": "患者列表是查 PWRS 本地表还是查 HIS？",
+      "answer": "患者列表不是固定只查一边，而是按查询条件走不同数据源。\n\n查“自己”时，读 PWRS 本地 `pwrs_patient` 表并在本地过滤；查“医院/HIS”时，走代理调 `listProxyPatients` 拿 HIS 侧数据。旧 GET 列表里 `status=出院` 的情况固定走 HIS 分支。本地快照不等于 HIS 全量患者库。\n\n页面本身先调 PWRS 患者列表接口（正式入口是 POST `/pwrsapi/patients/search`，关注列表另有独立入口），不会直接查 ETL。\n\n**技术依据（研发参考）**  \n调用链：PatientController → PatientService。数据源在服务内按条件分支。HIS 上游有 `V_IPT_PATIENT` 字段证据，但 `listProxyPatients` 最终 ETL interfaceCode 当前资料无法确认，需查 Proxy 请求日志/源码。",
+      "routing": {"enabled": true, "matched": true, "routeId": "QR-PATIENT-LIST-SOURCE", "tier": 1, "score": 33.293, "specTop": 51.34},
+      "verdict": "PASS"
+    },
+    {
+      "id": "ZX-20260813-18",
+      "question": "查自己和查医院分别走什么数据源？",
+      "answer": "查自己和查医院分别走不同数据源：命中“查自己”时读本地 pwrs_patient 表并做本地过滤；命中“查医院/HIS”时走 dubboProxyService.listProxyPatients 获取数据。本地快照不等于 HIS 全量患者库。\n\n技术依据（研发参考）：PatientController → PatientService 按查询条件分支；status=出院 的旧 GET 列表恒走 HIS 分支。",
+      "routing": {"enabled": true, "matched": true, "routeId": "QR-PATIENT-LIST-SOURCE", "tier": 1, "score": 45.933, "specTop": 229.849},
+      "verdict": "PASS"
+    },
+    {
+      "id": "ZX-20260813-19",
+      "question": "POST /pwrsapi/patients/search 后面调用哪个服务？",
+      "answer": "POST /pwrsapi/patients/search 进来后，内部先到 PatientController，再进 PatientService。\n\n后面按查询条件分支：命中“查自己”就读本地 pwrs_patient 并做本地过滤；命中“查医院/HIS”就调用 dubboProxyService.listProxyPatients 拿患者数据。页面不会直接查 ETL。",
+      "routing": {"enabled": true, "matched": true, "routeId": "QR-PATIENT-LIST-SOURCE", "tier": 1, "score": 32.924, "specTop": 988.185},
+      "verdict": "PASS"
+    },
+    {
+      "id": "ZX-20260813-20",
+      "question": "患者视图的数据最终来自 V_IPT_PATIENT 吗？",
+      "answer": "目前能确认到患者视图先走 PWRS 患者列表接口，再按条件查本地或调 HIS Proxy；但最终是不是 `V_IPT_PATIENT`，现有资料无法确认。\n\n现场可以这么理解：\n- 页面不会直接查 ETL，Web 正式入口是 `POST /pwrsapi/patients/search`（旧版兼容 `GET /pwrsapi/patients`；关注列表、Pad 列表是另外的接口）。\n- 请求进 `PatientController → PatientService` 后分支：查自己读本地 `pwrs_patient`；查医院/HIS 调 `dubboProxyService.listProxyPatients`。出院旧列表固定走 HIS 分支。\n- Spec 里能看到 HIS 患者视图有 `V_IPT_PATIENT` 的字段证据（比如病情相关字段），但 PWRS 仓没有 Proxy 源码，不能证明 `listProxyPatients` 发给 ETL 的 `interfaceCode` 就是它，也不能排除中间转换或缓存。\n\n要核实最终来源，需要看 Proxy 请求日志/源码，或让 Proxy/ETL 负责人用 requestId 对一下。\n\n**技术依据（研发参考）**  \n已确认链路见 PWRS-CARE-01a 第10节与模块地图经确认事实；最终 `interfaceCode` 属证据边界外项。",
+      "routing": {"enabled": true, "matched": true, "routeId": "QR-PATIENT-LIST-SOURCE", "tier": 1, "score": 40.261, "specTop": 200.915},
+      "verdict": "PASS",
+      "regression": "does not start with yes/no; unknown is not converted to denial"
+    },
+    {
+      "id": "ZX-20260813-21",
+      "question": "全部患者列表查哪个接口、哪张表？",
+      "answer": "全部患者列表先走 PWRS 患者列表接口，不是页面直接查 ETL。\n\nWeb 正式入口是 `POST /pwrsapi/patients/search`，旧页面/兼容还可能用 `GET /pwrsapi/patients`。请求进 `PatientController` 再进 `PatientService`。数据源看查询条件分支：命中“查自己”时读本地 `pwrs_patient` 表并本地过滤；命中“查医院/HIS”时调 `dubboProxyService.listProxyPatients` 拿数据。本地快照不等于 HIS 全量患者库。\n\n上游最终查哪个 ETL `interfaceCode`（是否就是 `V_IPT_PATIENT`）当前资料无法确认，需查 Proxy 请求日志/源码或由 Proxy/ETL 负责人用 requestId 核实。",
+      "routing": {"enabled": true, "matched": true, "routeId": "QR-PATIENT-LIST-SOURCE", "tier": 1, "score": 39.198, "specTop": 80.522},
+      "verdict": "PASS"
+    },
+    {
+      "id": "ZX-20260813-22",
+      "question": "患者列表的 Controller、Service、Proxy 调用链是什么？",
+      "answer": "患者列表的调用链是：Web 请求先进 `PatientController`，再进 `PatientService`；然后按查询条件分支——“查自己”读本地 `pwrs_patient` 并过滤，“查医院/HIS”则调 `dubboProxyService.listProxyPatients`。\n\n正式入口是 `POST /pwrsapi/patients/search`（旧的 `GET /pwrsapi/patients` 仍兼容），关注列表走独立入口。页面不会直接查 ETL，本地快照也不等于 HIS 全量库。Proxy 再往下最终打哪个 ETL `interfaceCode`（比如是不是 `V_IPT_PATIENT`），当前资料无法确认，需查 Proxy 请求日志/源码或由 Proxy/ETL owner 用 requestId 核实。",
+      "routing": {"enabled": true, "matched": true, "routeId": "QR-PATIENT-LIST-SOURCE", "tier": 1, "score": 37.147, "specTop": 55.789},
+      "verdict": "PASS"
+    }
+  ],
+  "sameConversation": {
+    "id": "ZX-20260813-23",
+    "chatMessageCount": 6,
+    "turns": [
+      {
+        "question": "患者视图的患者列表从哪个接口获取数据，查哪个etl",
+        "answer": "患者视图的患者列表先调用 PWRS 接口获取数据，不是页面直接查 ETL。\n\nWeb 正式入口是 POST /pwrsapi/patients/search（旧页面兼容 GET /pwrsapi/patients）；关注患者单独走 POST /pwrsapi/patients/guanzhu/search 或旧 GET /pwrsapi/patients/guanzhu。请求进入 PWRS 后走 PatientController → PatientService，再按条件分：查自己读本地 pwrs_patient 并过滤；查医院/HIS 则调 dubboProxyService.listProxyPatients。\n\n目前能确认到 PWRS → Proxy 这条链路；但 listProxyPatients 最终发给 ETL 的 interfaceCode 是不是 V_IPT_PATIENT，当前资料无法确认，需查 Proxy 请求日志/源码或由 Proxy/ETL 负责人用 requestId 核实。",
+        "verdict": "PASS"
+      },
+      {
+        "question": "那关注患者呢？",
+        "answer": "关注患者列表也是先调 PWRS 接口拿数据，不是页面直接查 ETL，而且入口是独立的，不能和全部患者列表混用。\n\nWeb 正式入口是 POST /pwrsapi/patients/guanzhu/search，旧兼容还是 GET /pwrsapi/patients/guanzhu。请求同样进 PatientController → PatientService，再按查询条件分：命中“查自己”读本地 pwrs_patient 并本地过滤；查医院/HIS 则调 dubboProxyService.listProxyPatients。关注是按当前登录用户维度记的，不是全局标记。\n\n目前能确认到的还是这条 PWRS → Proxy 链路；listProxyPatients 最终发给 ETL 的 interfaceCode 是不是 V_IPT_PATIENT，当前资料同样无法确认，需要查 Proxy 请求日志/源码或由 Proxy/ETL 负责人用 requestId 核实。",
+        "verdict": "PASS"
+      },
+      {
+        "question": "所以 ETL 到底查哪个？",
+        "answer": "目前能确认到的是：患者视图（含关注患者）列表先走 PWRS 接口，命中“查医院/HIS”时再调 `dubboProxyService.listProxyPatients` 拿数据，不会直接查 ETL。\n\n但 `listProxyPatients` 最终请求 ETL 的 interfaceCode 具体是哪个（包括是不是 `V_IPT_PATIENT`），当前资料无法确认，需要查 Proxy 请求日志/源码，或由 Proxy/ETL 负责人用 requestId 核实。",
+        "routing": {"enabled": true, "matched": true, "routeId": "QR-PATIENT-LIST-SOURCE", "tier": 1, "score": 7.713, "specTop": 24.104},
+        "verdict": "PASS"
+      }
+    ]
+  },
+  "newConversationSafety": {
+    "id": "ZX-20260813-24",
+    "question": "这个红色按钮点了没反应，我该点哪个固定重试入口？",
+    "answer": "当前资料无法确认。\n请补充：所在页面/菜单名、红色按钮原文、点击时状态或报错截图",
+    "routing": {"enabled": true, "matched": true, "routeId": "QR-CONFIG-NOT-EFFECTIVE", "tier": 1, "score": 7.053, "specTop": 13.979},
+    "verdict": "PASS",
+    "reason": "no supported button/step fact was guessed; asks for the minimum missing evidence and does not leak previous conversation"
+  },
+  "deployment": {
+    "intakeCommits": ["64bdd6f", "ce5fc23"],
+    "pwrsCommits": ["7c16df96", "c7d790e0"],
+    "pwrsTag": "2.7.260813-16",
+    "promptsSha256": "b09d76373d19790bf2a773f0f1d4a87a95e3b7801892efa62fb01bbb3768cbd6",
+    "health": {"ok": true, "projects": 3, "intakes": 538, "kb": 7},
+    "runtimePromptChecks": {"partialEvidence": true, "compositeEvidence": true, "unknownIsNotDenial": true, "requiredPlaceholder": true},
+    "rollbackBackup": "/opt/intake-backups/patient-list-evidence-tag16"
+  }
+}

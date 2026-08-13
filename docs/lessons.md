@@ -13,6 +13,7 @@
 ---
 
 ## ✅ 本项目自检清单（每次交付前逐条过）
+- [ ] **【证据状态 unknown/unverified 不是“否定”】**：答疑只确认到链路中间层时，模型不得先说“不是/一定不是”再补“无法确认”；应先说已确认到哪一层，再把未知项局部标为无法确认。回归至少覆盖肯定预设、否定预设、开放问法三类，并保留完全无证据安全拒答。
 - [ ] **【大型 Git Spec 文件通过 `spawnSync(git show)` 读取时显式提高 `maxBuffer` 并对生产 tag 真文件回归】**：PWRS 功能地图约 22.4MB，Node `spawnSync` 默认缓冲会返回错误；若调用方吞掉异常，表象只是 `retrieval.routing.enabled=false`，很容易误判为 alias/路由分数问题。读取这类文件须设置足够的 `maxBuffer`（当前 32MiB）与超时，并用真实 tag 的大地图验证 JSON 可解析、routes 数量非零及生产持久记录 routing 已启用。
 - [ ]（在此追加本项目专属检查点，如：改了主题色记得同步深色态 / 本项目列表空数据有占位）
 - [ ] **【2026-08-11 逻辑测试 `extractFn(SRC,name)` 抽带解构参数的函数体，必须先配平参数括号 `(...)` 再找函数体 `{`】**：本项目多个 `*.logic.test.mjs` 用 `extractFn` 从 `server.mjs` 抠函数体沙箱 eval。老实现 `const braceOpen=src.indexOf('{',start)`——若函数**参数是解构** `function buildRetrieval({ query, deep, ver, subsystem }){...}`，第一个 `{` 是**参数解构**，配平立刻在参数的 `}` 停下，抽出的"函数体"只有 `function foo({ ... }`（半截），`new Function(body+'return foo;')` 报 `Unexpected token 'return'`。修法：先从 `(` 起配平参数括号到匹配 `)`，再 `src.indexOf('{', parenClose)` 取真正函数体开括号。抽解构参数函数（`buildRetrieval` 等）前先确认测试里的 `extractFn` 已跳参数列表。（来源：PD-03 抽 buildRetrieval，参数 `{query,deep,ver,subsystem}` 让 extractFn 截半。）
@@ -385,3 +386,10 @@
 - 根因：该 JSON 约 22.4MB，超过 Node `spawnSync` 默认 `maxBuffer`；上层把读取失败降级成 `null`，于是表象与“地图不存在”完全相同。
 - 解法：读取 git 文件显式设置 32MiB `maxBuffer` 与 8 秒超时；用真实生产 tag 大地图回归解析结果和 routes 数，并以一条生产持久记录证明 `routing.enabled=true` 后才继续调路由。
 - 防复发：见自检清单新增项。诊断“配置文件本地存在但功能 disabled”时先检查加载器错误/缓冲/cache/refresh，不要先扩大 alias。
+
+### L-027 “当前资料无法确认”不能用肯定/否定结论开头
+- 范围/模块：intake · Spec 答疑提示词与功能地图证据边界。
+- 现象：事实边界已经写明“无法确认 Proxy 最终 interfaceCode”，Grok 4.5 面对“最终来自 V_IPT_PATIENT 吗”仍先答“不是”，随后又说“无法确认”，把未知错误表达成否定且前后矛盾。
+- 根因：局部证据规则只约束“已知多少答多少”，没有单独约束带预设的是非问法；模型容易顺着问句先给二元结论，再补不确定性。
+- 解法：普通/深入提示词统一增加“未知不等于否定”，功能地图 `mustNotConfuse` 与 Spec 正文同步写明：unknown/unverified 时不得以“是/不是/一定/肯定”开头，应表述“目前能确认到 X；但 Y 无法从现有资料确认”。权威未知时也不得反向写死“不是某值”。
+- 防复发：见自检清单。自动测试至少覆盖肯定式“就是 X 对吧”、否定式“肯定不是 X 对吗”和开放式“到底是什么”，并在生产模型上复核原句；另保留完全无证据题，确保没有为了多答而降低安全边界。
