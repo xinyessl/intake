@@ -198,9 +198,9 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
 .f-tk-field .fv code { background: var(--color-bg); padding: 1px 5px; border-radius: 4px; font-family: var(--font-num), monospace; font-size: 12px; }
 /* AI 处理意见/初判：主色左边框强调（对齐经验库 .f-kb-answer） */
 .f-tk-field.ai .fv { border-left: 3px solid var(--color-primary); background: var(--color-primary-light); padding: 10px 12px; border-radius: 0 6px 6px 0; }
-/* 截图缩略图（复用对话气泡 .f-bub-imgs 同款：点开原图） */
+/* 截图缩略图（复用对话气泡 .f-bub-imgs 同款：当前页大图预览） */
 .f-tk-media { display: flex; flex-wrap: wrap; gap: 8px; }
-.f-tk-media a { display: inline-block; width: 92px; height: 92px; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--color-border); }
+.f-tk-media .f-image-preview-trigger { width: 92px; height: 92px; border-radius: var(--radius); border: 1px solid var(--color-border); }
 .f-tk-media img { width: 100%; height: 100%; object-fit: cover; display: block; }
 /* 底部弱提示：到对话记录续聊 */
 .f-tk-hint { margin-top: 8px; padding: 11px 13px; background: var(--color-surface-alt); border: 1px dashed var(--color-border); border-radius: var(--radius); font-size: 12px; color: var(--color-text-tertiary); line-height: 1.6; }
@@ -803,14 +803,31 @@ button.f-ov-card { width: 100%; appearance: none; }
 .f-img-preview { display: none; flex-wrap: wrap; gap: 8px; }
 .f-img-preview.on { display: flex; }
 .f-img-preview .thumb { position: relative; width: 56px; height: 56px; border-radius: 8px; overflow: hidden; border: 1px solid var(--color-border); background: var(--color-bg); flex: 0 0 auto; }
+.f-img-preview .thumb .f-image-preview-trigger { width: 100%; height: 100%; }
 .f-img-preview .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .f-img-preview .thumb .rm { position: absolute; top: 1px; right: 1px; width: 17px; height: 17px; border-radius: 50%; border: none; background: rgba(0,0,0,.6); color: #fff; font-size: 11px; line-height: 1; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 0; }
 .f-img-preview .thumb .rm:hover { background: var(--color-danger); }
 /* 用户气泡内所附截图缩略图（发出去能看到自己贴了什么） */
 .f-msg .bub .f-bub-imgs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.f-msg .bub .f-bub-imgs a { display: block; width: 62px; height: 62px; border-radius: 7px; overflow: hidden; border: 1px solid rgba(255,255,255,.35); flex: 0 0 auto; }
-.f-msg.ai .bub .f-bub-imgs a { border-color: var(--color-border); }
+.f-msg .bub .f-bub-imgs .f-image-preview-trigger { width: 62px; height: 62px; border-radius: 7px; border: 1px solid rgba(255,255,255,.35); flex: 0 0 auto; }
+.f-msg.ai .bub .f-bub-imgs .f-image-preview-trigger { border-color: var(--color-border); }
 .f-msg .bub .f-bub-imgs img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* 统一图片预览触发器：气泡、历史恢复、待发送与工单详情共用。 */
+.f-image-preview-trigger { display: block; padding: 0; overflow: hidden; background: transparent; color: inherit; cursor: zoom-in; }
+.f-image-preview-trigger:hover { border-color: var(--color-primary); }
+.f-image-preview-trigger:focus-visible { outline: 3px solid var(--color-btn); outline-offset: -3px; }
+.f-image-lightbox-close:focus-visible { outline: 3px solid var(--color-btn); outline-offset: 3px; }
+/* 当前页大图 lightbox；原图始终受视口约束，关闭按钮保留 44px 触控目标。 */
+.f-image-lightbox { border: 0; padding: 0; max-width: none; max-height: none; background: transparent; color: #fff; overflow: visible; opacity: 0; transform: scale(.985); transition: opacity .16s ease, transform .16s ease; }
+.f-image-lightbox[open] { opacity: 1; transform: scale(1); }
+.f-image-lightbox::backdrop { background: rgba(5,14,26,.86); }
+.f-image-lightbox-content { position: relative; display: flex; align-items: center; justify-content: center; min-width: 120px; min-height: 120px; }
+.f-image-lightbox-image { display: block; max-width: calc(100vw - 48px); max-height: calc(100vh - 48px); width: auto; height: auto; object-fit: contain; border-radius: 8px; box-shadow: 0 18px 54px rgba(0,0,0,.42); }
+.f-image-lightbox-close { position: absolute; top: -18px; right: -18px; z-index: 1; width: 44px; height: 44px; padding: 0; border: 1px solid rgba(255,255,255,.58); border-radius: 50%; background: rgba(15,39,68,.94); color: #fff; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; font-size: 22px; box-shadow: 0 4px 16px rgba(0,0,0,.3); }
+.f-image-lightbox-close:hover { background: var(--color-btn); }
+@media (prefers-reduced-motion: reduce) {
+  .f-image-lightbox { transition: none; }
+}
 /* 空态占位（对话流内） */
 .f-chat-b .f-ws-placeholder { height: 100%; }
 
@@ -1097,6 +1114,14 @@ button.f-ov-card { width: 100%; appearance: none; }
     <div class="f-tk-content" id="fTkContent"></div>
   </div>
 </aside>
+
+<!-- FS-04 · 图片大图预览：所有现场端缩略图共用一个当前页 modal。 -->
+<dialog class="f-image-lightbox" id="fImageLightbox" aria-label="图片预览">
+  <div class="f-image-lightbox-content">
+    <img class="f-image-lightbox-image" id="fImageLightboxImage" alt="">
+    <button class="f-image-lightbox-close" id="fImageLightboxClose" type="button" aria-label="关闭图片预览" title="关闭（Esc）"><i class="ti ti-x" aria-hidden="true"></i></button>
+  </div>
+</dialog>
 
 <!-- FS-09 渐进式 React 全览：固定静态产物；加载失败时页内保留的原生渲染器自动兜底。 -->
 <script src="/assets/field-overview/field-overview.js"></script>
@@ -2836,11 +2861,11 @@ button.f-ov-card { width: 100%; appearance: none; }
       pushField('AI 分析初判', aLines.join('\n\n'), { rich: true, ai: true, icon: 'ti-robot' });
     }
     var body = fields.join('');
-    // 截图（记录级 media → 缩略图，点开原图；复用 mediaUrls）
+    // 截图（记录级 media → 缩略图，当前页大图预览；复用 mediaUrls）
     var media = '';
     var urls = mediaUrls(item.project || (listItem && listItem.project), item.media);
     if (urls.length) {
-      var imgs = urls.map(function (u) { return '<a href="' + esc(u) + '" target="_blank" rel="noopener"><img src="' + esc(u) + '" loading="lazy"></a>'; }).join('');
+      var imgs = urls.map(function (u, i) { var label = '预览工单截图 ' + (i + 1); return '<button class="f-image-preview-trigger" type="button" data-image-preview="' + esc(u) + '" data-image-label="' + label + '" aria-label="' + label + '"><img src="' + esc(u) + '" alt="" loading="lazy"></button>'; }).join('');
       media = '<div class="f-tk-field"><div class="fk"><i class="ti ti-photo"></i>截图</div><div class="fv"><div class="f-tk-media">' + imgs + '</div></div></div>';
     }
     // 底部弱提示：续聊去对话记录（只读抽屉不提供续聊入口）
@@ -3468,20 +3493,52 @@ button.f-ov-card { width: 100%; appearance: none; }
     av.textContent = who === 'me' ? ((state.me && (state.me.name || state.me.username) || '我').slice(0, 1)) : 'AI';
     var bub = document.createElement('div'); bub.className = 'bub' + (streaming ? ' streaming' : '');
     bub.innerHTML = md(text || '');
-    if (Array.isArray(imgs) && imgs.length) bub.appendChild(bubbleImgs(imgs));   // 气泡内附截图缩略图（点开原图）
+    if (Array.isArray(imgs) && imgs.length) bub.appendChild(bubbleImgs(imgs));   // 气泡内附截图缩略图（当前页预览）
     msg.appendChild(av); msg.appendChild(bub);
     box.appendChild(msg); scrollChatBottom();
     return bub;
   }
-  // 构造气泡内的截图缩略图区（点击在新标签看原图）；imgs = URL 数组（data URL 或普通 URL 皆可，直接作 href/src）。
+  // 构造气泡内的截图缩略图区；imgs = URL 数组（data URL 或 /api/intake-media URL 均可）。
   function bubbleImgs(imgs) {
     var wrap = document.createElement('div'); wrap.className = 'f-bub-imgs';
-    imgs.forEach(function (du) {
-      var a = document.createElement('a'); a.href = du; a.target = '_blank'; a.rel = 'noopener';
-      var im = document.createElement('img'); im.src = du; im.loading = 'lazy';
-      a.appendChild(im); wrap.appendChild(a);
+    imgs.forEach(function (du, i) {
+      wrap.appendChild(createImagePreviewTrigger(du, '预览对话截图 ' + (i + 1)));
     });
     return wrap;
+  }
+  // 三类动态图片入口共用的可访问缩略图按钮；原生 button 自带 Enter/Space 键盘激活语义。
+  function createImagePreviewTrigger(src, label) {
+    var btn = document.createElement('button'); btn.type = 'button'; btn.className = 'f-image-preview-trigger';
+    btn.setAttribute('data-image-preview', src); btn.setAttribute('data-image-label', label); btn.setAttribute('aria-label', label);
+    var im = document.createElement('img'); im.src = src; im.alt = ''; im.loading = 'lazy';
+    btn.appendChild(im); return btn;
+  }
+  var imagePreviewTrigger = null, imagePreviewBodyOverflow = '';
+  function openImagePreview(src, label, trigger) {
+    var dlg = $('fImageLightbox'), img = $('fImageLightboxImage'), close = $('fImageLightboxClose');
+    if (!dlg || !img || !src || typeof dlg.showModal !== 'function') return;
+    imagePreviewTrigger = trigger || null;
+    img.src = src; img.alt = label || '图片预览';
+    if (!dlg.open) { imagePreviewBodyOverflow = document.body.style.overflow; document.body.style.overflow = 'hidden'; dlg.showModal(); }
+    if (close) { try { close.focus({ preventScroll: true }); } catch (e) { close.focus(); } }
+  }
+  function closeImagePreview() {
+    var dlg = $('fImageLightbox'), img = $('fImageLightboxImage'), trigger = imagePreviewTrigger;
+    if (!dlg || !dlg.open) return;
+    dlg.close(); document.body.style.overflow = imagePreviewBodyOverflow; imagePreviewTrigger = null;
+    if (img) { img.removeAttribute('src'); img.alt = ''; }
+    if (trigger && trigger.isConnected) { try { trigger.focus({ preventScroll: true }); } catch (e) { trigger.focus(); } }
+  }
+  function bindImagePreview() {
+    var dlg = $('fImageLightbox'), close = $('fImageLightboxClose'); if (!dlg || !close) return;
+    document.addEventListener('click', function (ev) {
+      var trigger = ev.target && ev.target.closest ? ev.target.closest('[data-image-preview]') : null;
+      if (!trigger) return;
+      ev.preventDefault(); openImagePreview(trigger.getAttribute('data-image-preview'), trigger.getAttribute('data-image-label'), trigger);
+    });
+    close.addEventListener('click', closeImagePreview);
+    dlg.addEventListener('click', function (ev) { if (ev.target === dlg) closeImagePreview(); });
+    dlg.addEventListener('cancel', function (ev) { ev.preventDefault(); closeImagePreview(); });
   }
   // Bug A（reopen 显图）：记录级 media 路径数组（如 media/<id>/img-1.png）→ /api/intake-media?project=&file= 完整 URL 数组。
   function mediaUrls(project, media) {
@@ -3545,10 +3602,10 @@ button.f-ov-card { width: 100%; appearance: none; }
     box.innerHTML = '';
     pendingImages.forEach(function (du, i) {
       var t = document.createElement('div'); t.className = 'thumb';
-      var im = document.createElement('img'); im.src = du;
-      var rm = document.createElement('button'); rm.type = 'button'; rm.className = 'rm'; rm.textContent = '×'; rm.title = '删除';
-      rm.addEventListener('click', function () { pendingImages.splice(i, 1); renderImgPreview(); });
-      t.appendChild(im); t.appendChild(rm); box.appendChild(t);
+      var preview = createImagePreviewTrigger(du, '预览待发送截图 ' + (i + 1));
+      var rm = document.createElement('button'); rm.type = 'button'; rm.className = 'rm'; rm.textContent = '×'; rm.title = '删除'; rm.setAttribute('aria-label', '删除待发送截图 ' + (i + 1));
+      rm.addEventListener('click', function (ev) { ev.stopPropagation(); pendingImages.splice(i, 1); renderImgPreview(); });
+      t.appendChild(preview); t.appendChild(rm); box.appendChild(t);
     });
   }
   // 清空待发送截图（每次发送后调；不落草稿/快照）。
@@ -4981,6 +5038,7 @@ button.f-ov-card { width: 100%; appearance: none; }
     // Esc 关闭面板
     document.addEventListener('keydown', function (ev) {
       if (ev.key !== 'Escape') return;
+      var imageLightbox = $('fImageLightbox'); if (imageLightbox && imageLightbox.open) { ev.preventDefault(); closeImagePreview(); return; }
       var tkd = $('fTkDrawer'); if (tkd && tkd.classList.contains('open')) { closeTicketDrawer(); return; }   // 工单详情抽屉：Esc 关闭
       var cvd = $('fConvDrawer'); if (cvd && cvd.classList.contains('open')) { closeConvRec(); return; }      // 对话记录抽屉：Esc 关闭
       if ($('fKbDrawer').classList.contains('open')) { closeKb(); return; }
@@ -5014,6 +5072,7 @@ button.f-ov-card { width: 100%; appearance: none; }
     // 工单详情抽屉（FS-04 2026-08-07）：× / 遮罩关闭
     var tkMask = $('fTkMask'); if (tkMask) tkMask.addEventListener('click', closeTicketDrawer);
     var tkClose = $('fTkClose'); if (tkClose) tkClose.addEventListener('click', closeTicketDrawer);
+    bindImagePreview();
     // 新对话
     $('fNewC').addEventListener('click', function () { newConversation(); });
     // 发送：点按钮 + 回车（AC-9/17：自然语言输入回车发送）
@@ -5057,7 +5116,7 @@ button.f-ov-card { width: 100%; appearance: none; }
   })();
 
   // 暴露给测试/调试（不含敏感数据）
-  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, openConvRec: openConvRec, closeConvRec: closeConvRec, loadConversations: loadConversations, mkConvItem: mkConvItem, reopenConversation: reopenConversation, reopenIntakeConv: reopenIntakeConv, bindConvDelete: bindConvDelete, doDeleteConversation: doDeleteConversation, newSessionId: newSessionId, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, openTicketDrawer: openTicketDrawer, closeTicketDrawer: closeTicketDrawer, renderTicketDrawer: renderTicketDrawer, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, setTicketPriority: setTicketPriority, newConversation: newConversation, sendChat: sendChat, stopSending: stopSending, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast, openMaintainEdit: openMaintainEdit, doMaintainSave: doMaintainSave, maintainChipHtml: maintainChipHtml, maintainDaysLeft: maintainDaysLeft, renderTodoBody: renderTodoBody, mkUpdatePlanBlock: mkUpdatePlanBlock, loadUpdatePlan: loadUpdatePlan, renderUpdatePlan: renderUpdatePlan, mkPlanTaskItem: mkPlanTaskItem, mkSqlBundleItem: mkSqlBundleItem, doTaskToggle: doTaskToggle, doSqlBundleToggle: doSqlBundleToggle, appendConsultToIntake: appendConsultToIntake, openConsultToIntake: openConsultToIntake, doConsultToIntake: doConsultToIntake, appendMediaBubble: appendMediaBubble, mediaUrls: mediaUrls, markLeftActive: markLeftActive, reapplyLeftActive: reapplyLeftActive, bindReopen: bindReopen, fConfirm: fConfirm, doDeleteItem: doDeleteItem, bindDelete: bindDelete, renderOverview: renderOverview, renderOverviewNative: renderOverviewNative, unmountReactOverview: unmountReactOverview };
+  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, openConvRec: openConvRec, closeConvRec: closeConvRec, loadConversations: loadConversations, mkConvItem: mkConvItem, reopenConversation: reopenConversation, reopenIntakeConv: reopenIntakeConv, bindConvDelete: bindConvDelete, doDeleteConversation: doDeleteConversation, newSessionId: newSessionId, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, openTicketDrawer: openTicketDrawer, closeTicketDrawer: closeTicketDrawer, renderTicketDrawer: renderTicketDrawer, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, setTicketPriority: setTicketPriority, newConversation: newConversation, sendChat: sendChat, stopSending: stopSending, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast, openMaintainEdit: openMaintainEdit, doMaintainSave: doMaintainSave, maintainChipHtml: maintainChipHtml, maintainDaysLeft: maintainDaysLeft, renderTodoBody: renderTodoBody, mkUpdatePlanBlock: mkUpdatePlanBlock, loadUpdatePlan: loadUpdatePlan, renderUpdatePlan: renderUpdatePlan, mkPlanTaskItem: mkPlanTaskItem, mkSqlBundleItem: mkSqlBundleItem, doTaskToggle: doTaskToggle, doSqlBundleToggle: doSqlBundleToggle, appendConsultToIntake: appendConsultToIntake, openConsultToIntake: openConsultToIntake, doConsultToIntake: doConsultToIntake, appendMediaBubble: appendMediaBubble, mediaUrls: mediaUrls, createImagePreviewTrigger: createImagePreviewTrigger, openImagePreview: openImagePreview, closeImagePreview: closeImagePreview, markLeftActive: markLeftActive, reapplyLeftActive: reapplyLeftActive, bindReopen: bindReopen, fConfirm: fConfirm, doDeleteItem: doDeleteItem, bindDelete: bindDelete, renderOverview: renderOverview, renderOverviewNative: renderOverviewNative, unmountReactOverview: unmountReactOverview };
 })();
 </script>
 </body>

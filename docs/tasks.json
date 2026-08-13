@@ -431,6 +431,21 @@
           "note": "已实现、推送并部署生产，待用户验收：两阶段召回、局部证据、对话意图与解决率优先均已落地。Qwen-Max严格200题tag12 198/200仅作历史证据；当前生产Grok 4.5 tag21承接型现场诊断API 13/13、浏览器3/3、自动回归62/62通过。只继承已验证route/facts，显式新实体覆盖，无证据不猜；PWRS业务代码/数据库未改。证据见docs/reviews/PWRS-SPEC-GROK-4.5-PARTIAL-EVIDENCE-20260813.md，task保持doing/accept=wait。"
         }
       ]
+    },
+    {
+      "id": "B-20260813-实施端图片预览修复",
+      "source": "CLI窗口·用户反馈",
+      "importedAt": "2026-08-13",
+      "ref": "实施端对话中的图片缩略图点击后无法在当前页预览",
+      "tasks": [
+        {
+          "id": "FS04-IMAGE-PREVIEW-1",
+          "title": "统一待发送、消息历史与工单详情图片缩略图的当前页大图预览及无障碍关闭交互",
+          "status": "doing",
+          "specRef": "FS-04",
+          "note": "已实现待验收：统一 lightbox 覆盖 data URL 与 /api/intake-media URL，支持关闭按钮/遮罩/Esc、Enter/Space、焦点返回与滚动恢复。专项 4/4、FS-04 脱库逻辑 142 通过/2 条真库环境跳过；FS-04/FS-06 完整真库套件因本机 MySQL 127.0.0.1:3306 ECONNREFUSED 在 before hook 阻断。未部署，待当前页真实浏览器验收。"
+        }
+      ]
     }
   ]
 }
