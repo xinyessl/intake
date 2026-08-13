@@ -1,0 +1,201 @@
+{
+  "schema": 1,
+  "evidenceId": "PWRS-SPEC-GROK-4.5-BROWSER-TAG29-Q0041-Q0050-20260813",
+  "createdAt": "2026-08-13T20:40:00+08:00",
+  "source": {
+    "fixture": "tools/fixtures/pwrs-grok-browser-1000.questions.json",
+    "requirements": "tools/fixtures/pwrs-grok-browser-1000.question-requirements.json",
+    "range": "Q0041-Q0050"
+  },
+  "runtime": {
+    "browser": "official Chrome Browser Plugin",
+    "surface": "visible logged-in 收件 · 实施端 UI",
+    "version": "2.7.260813-29",
+    "intakeCommit": "5ebc9fe",
+    "pwrsCommit": "044f7ad3999d4ed99b9534f3eec05c8443dbbd77",
+    "url": "http://intake.lcpharmacy.cn/?mode=chat&site=安吉县人民医院",
+    "answerSource": "Each question was typed and sent in the visible foreground UI; answerText was captured from the completed visible assistant bubble DOM. No standalone Playwright or HTTP answer source was used."
+  },
+  "conversationExecution": [
+    {
+      "conversationId": "C007",
+      "range": "Q0041",
+      "boundary": "Reopened the existing visible Q0036-Q0040 conversation; DOM showed five prior user turns and Q0040 as the last user question before Q0041."
+    },
+    {
+      "conversationId": "C008",
+      "range": "Q0042-Q0047",
+      "boundary": "Clicked 新对话; verified both user and assistant bubble counts were zero before Q0042."
+    },
+    {
+      "conversationId": "C009",
+      "range": "Q0048-Q0050",
+      "boundary": "Clicked 新对话; verified both user and assistant bubble counts were zero before Q0048."
+    }
+  ],
+  "summary": {
+    "total": 10,
+    "pass": 9,
+    "fail": 1,
+    "failedIds": [
+      "Q0050"
+    ]
+  },
+  "results": [
+    {
+      "id": "Q0041",
+      "conversationId": "C007",
+      "question": "菜单和接口权限这一段，换了另一个账号就正常了，这个线索说明先看哪边？",
+      "requirementId": "A03",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "answerText": "结论：换账号就正常，优先看「两个账号差在哪」，不要先当整站接口坏了或全局代码缺陷。\n\n这个线索说明问题高度跟账号维度绑定（角色/菜单下发/院区范围/数据归属），而不是：\n\n全站服务挂了\n某个接口对所有人都 403\n单纯前端写死了全员看不见\n\n结合已确认现状：菜单由 usercenter 按账号角色动态下发；按钮多半前端藏；接口侧方法级功能授权基本没落地；真正还会因人而异的是 登录态 + 各业务的 owner/院区作用域。所以「A 不行、B 正常」时，先比账号，再比同账号下的菜单/接口返回。\n\n现场先看哪边（按顺序）\n先固定对比：坏账号 vs 好账号\n用同一终端（都 Web 或都 Pad）、同一环境、同一功能点。\n记下两个账号各自的：角色名、院区、是否多院区。\n怎么判断：\n角色/院区明显不同 → 先当授权配置差异，别急着转缺陷。\n角色名看起来一样 → 仍要往下比「实际菜单下发」和「接口真实返回」，不能只凭角色名称当完全一致。\n比菜单（usercenter 动态下发结果）\n两个账号分别登录，看该功能菜单：有 / 无。\n怎么判断：\n好账号有菜单、坏账号没有 → 优先查坏账号的角色菜单授权（usercenter / 权限配置侧），不是后端接口坏了。\n两个都有菜单，只有坏账号页面/数据不对 → 菜单线先放下，进第 3 步。\n比接口（同一功能、各自 token 各调一次）\n只观察：是否发出请求、HTTP 码、业务码、有数据还是空/失败（脱敏）。\n怎么判断：\n坏账号 401 → 该账号登录/会话问题。\n坏账号 200 且有数据，但页面空白 → 回到「前端二次过滤/渲染」，且仍用坏账号复现，别和好账号混看。\n坏账号 200 但空列表/范围类失败，好账号有数据 → 优先怀疑 owner（是不是本人数据）或院区作用域，不是「没菜单自动 403」。\n坏账号明确业务无权限，好账号成功 → 记清返回原文，对照是否该功能单独做了业务校验。\n若功能带「本人数据 / 院区」口径，再比业务归属\n同一条业务数据：创建人/责任人是不是坏账号、院区是否一致。\n怎么判断：\n数据本就不属于坏账号范围 → 好账号正常是预期，先对齐业务归属或授权院区。\n归属、院区都应对得上却仍空/失败 → 整理两次请求对比后转开发。\n快速记法\n线索\t先看哪边\n换账号就好\t账号差异（角色、院区、菜单是否下发）\n坏账号没菜单、好账号有\tusercenter 菜单/角色授权\n菜单都有，接口一个有数一个空\towner / 院区 / 业务过滤\n接口都有数，只有坏账号页面空白\t该账号下的前端过滤/渲染（仍绑账号维度）\n两个账号所有返回都一样却一个空白\t再查前端缓存/本地状态，但少见，要留证\n转开发前最少整理成这样\n坏账号 / 好账号：角色、院区（脱敏）\n同一功能下：菜单有无、按钮状态、各一次接口路径 + HTTP/业务返回摘要\n已确认：换账号可复现「一个行一个不行」→ 偏向账号授权或数据范围，而非全局接口挂死\n剩余缺口：两账号在 usercenter 的菜单/角色是否一致；若接口层过滤，过滤条件是 owner 还是院区\n\n一句话：这个线索说明先看「账号侧差异」（角色菜单下发 → 院区/owner），不要先查整站后端权限框架或先翻库；把两个账号的菜单和同一次接口返回对比齐，就能判断是配置问题还是要提工单。",
+      "answerTextKind": "exact_complete_visible_dom_innerText",
+      "manualEvaluation": {
+        "verdict": "PASS",
+        "reason": "正确将换账号线索定位到角色/菜单下发、院区和owner独立差异，并保持菜单不推出接口403的已知边界。"
+      }
+    },
+    {
+      "id": "Q0042",
+      "conversationId": "C008",
+      "question": "Pad 个人中心点一条监护记录后打开哪个页面？",
+      "requirementId": "A20",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "answerText": "结论：点一条监护记录后，打开的是前端详情页\n\ntablet/pages/patient/info/custody.vue?careTypeId=<监护ID>\n\n（必带参数 careTypeId，同时会同步该记录的患者上下文。）\n\n对应关系（现场好核对）\n个人中心「我的监护」列表页：tablet/pages/ucenter/info/custody.vue\n点击某条记录 → 跳到上面的详情页（路由带 careTypeId）\n注意：/care/order 和 GET /pwrsapi/applet/follow/care?careTypeId= 都是后端接口，不是页面路由，别当成打开的页面地址。\n\n现场验证时，直接看浏览器/调试器里实际跳转的路径是否带了 careTypeId 即可。",
+      "answerTextKind": "exact_complete_visible_dom_innerText",
+      "manualEvaluation": {
+        "verdict": "PASS",
+        "reason": "准确区分列表页、详情路由与详情数据接口，并指出先同步患者上下文和必带careTypeId。"
+      }
+    },
+    {
+      "id": "Q0043",
+      "conversationId": "C008",
+      "question": "这个问题能稳定复现：Pad 点进监护记录后，页面地址和抓到的数据请求对不上。第一步怎么把范围缩小？",
+      "requirementId": "A20",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "answerText": "结论先说清楚：\n按说明书，Pad 点进监护记录后，页面地址和数据请求本来就不是同一个东西——对不上很常见，很多时候是预期设计，不是必有故障。\n\n页面路由：tablet/pages/patient/info/custody.vue?careTypeId=<监护ID>\n详情数据接口：GET /pwrsapi/applet/follow/care?careTypeId=（加载详情时才调）\n/care/order 只是后端接口，不是点击后打开的页面。\n\n第一步怎么缩小范围：\n别急着当 bug，先把「实际页面地址」和「实际数据请求」拆开各记一份，对照上面这两条预期。对上了就是预期行为；对不上再按分支往下查。\n\n现场最小动作（只观察、不改数据）\n确认入口与复现条件\n从个人中心「我的监护」列表（tablet/pages/ucenter/info/custody.vue）点进一条记录。\n记下：Pad 型号/系统、账号角色、当前版本、点的是哪条（有无 careTypeId 可从列表侧看到就记一下）。\n正常：能稳定复现；不正常：换账号/换入口（如患者详情里的监护菜单）表现不一致，说明和入口有关。\n只看点完后浏览器/调试器里的「页面地址」\n记录完整路径和参数（尤其有没有 careTypeId、值是多少）。\n正常：路径是 .../patient/info/custody 且带 careTypeId。\n不正常：路径不对、没带 careTypeId、或看起来像接口路径（例如出现 care/order 一类）→ 先当「路由/跳转」问题，别先查数据接口。\n同一操作只观察「详情加载时发出的数据请求」\n打开网络面板，点进记录后看有没有请求、实际 URL、参数里的 careTypeId、HTTP/业务码和响应大概情况。\n预期请求是：GET /pwrsapi/applet/follow/care?careTypeId=...（和页面路由不是一回事）。\n按三种情况判断：\n没发请求 → 路由或前端加载逻辑问题\n请求失败（4xx/5xx 或业务错误）→ 记状态码、业务码、入参\n请求成功但页面不对 → 记响应里关键字段是否有数据，再对页面显示\n对照判定（缩小分支）\n页面地址 = 预期详情页，且数据请求 = 上述 care 接口、careTypeId 一致 → 属于设计上的「地址和请求本就不一样」，不必当故障继续挖。\n页面不对但请求对 / 页面对但请求路径或参数不对 / 两者都和预期不符 → 把第 2、3 步的脱敏截图（页面 URL + 网络请求一行）留好，再往下查或转开发。\n本轮已确认 / 仍局部未知\n已核规则（持续有效）： 列表页、详情页路由、详情数据接口三条对应关系如上；禁止把 /care/order 当点击后打开的页面。\n本轮现场： 你已能稳定复现「地址和请求对不上」，但还没拆开具体是哪两个字符串在比。\n仍未知： 你抓到的「页面地址」和「数据请求」各自的实际内容（需你按上面 2、3 步贴出来才能定是预期还是异常）。\n\n把第 2 步的页面完整 URL 和第 3 步那条数据请求的 URL+参数（脱敏）发过来，就能直接判断落在哪个分支、还要不要继续查。",
+      "answerTextKind": "exact_complete_visible_dom_innerText",
+      "manualEvaluation": {
+        "verdict": "PASS",
+        "reason": "先按已核页面路由与数据接口拆分比对，给无请求/失败/响应正常页面异常的非破坏分支，未把地址不同误判成故障。"
+      }
+    },
+    {
+      "id": "Q0044",
+      "conversationId": "C008",
+      "question": "这次复测监护记录入口时，换了另一个账号就正常了，这个线索说明先看哪边？",
+      "requirementId": "A20",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "answerText": "结论：\n换另一个账号就正常，这个线索优先说明先看账号差异这一边（数据权限/可见范围、角色或带教关系、菜单授权），而不是先当“全局路由坏了”或“所有人接口都错”。\n\n说明书里监护列表明确有按当前登录用户的数据权限（例如带教老师能看学员创建的记录；本人创建且非带教则有固定状态），所以同一入口、不同账号表现不同是常见预期差异。Pad 个人中心「我的监护」本身也按账号聚合数据。\n\n现场先做这几步（只观察对比，不改数据）\n固定入口、只换账号复现\n两个账号都从同一个入口进：Pad 个人中心「我的监护」列表。\n记下：异常账号 vs 正常账号分别能看到几条、点的是不是同一条记录（或同一 careTypeId）、点完后页面是否正常。\n正常：正常账号有数据且能进详情；异常账号列表空/少数据/点进去异常 → 指向数据可见范围或列表权限。\n不正常：两个账号列表一样多，但只有一个账号点进后地址/请求异常 → 再往下看该账号的请求细节。\n对比两个账号的「身份侧」差异（页面上能看到的就够）\n角色/岗位是否不同（药师、带教老师、学员等）。\n异常账号是否应该有「我的监护」菜单（生产菜单是动态授权，账号侧差异很常见）。\n异常账号创建的记录，是否被正常账号以带教身份看到（或反过来）。\n看到：带教关系不一致 / 菜单有无差异 → 优先查账号权限与带教绑定；两边角色完全一样但数据不同 → 优先查列表过滤条件。\n同一条操作只抓「列表 + 点进详情」的请求差异（脱敏）\n网络面板分别记：列表请求是否成功、返回条数；点某条后详情请求的实际 URL、参数里的 careTypeId、HTTP/业务码。\n预期对照（已核规则）：\n页面路由应是 tablet/pages/patient/info/custody.vue?careTypeId=...\n详情数据请求应是 GET /pwrsapi/applet/follow/care?careTypeId=...\n分支判断：\n异常账号列表就没这条 / 返回空 → 数据权限/可见范围问题（先对齐账号与创建人关系）。\n列表有、点进后没发详情请求或参数没带 careTypeId → 该账号下前端跳转/上下文同步异常。\n请求发出且成功但页面不对 → 记响应是否有数据，再对页面显示。\n两个账号用同一条 careTypeId 时，一边成功一边失败 → 把两边请求 URL+参数+业务码截图留好（脱敏，不要带完整 token/密码）。\n快速收敛\n若正常账号一切符合预期、异常账号仅列表可见范围不同 → 按数据权限/带教处理，不必再查全局路由。\n若两边列表都正常，但只有异常账号点进后「页面地址 vs 数据请求」对不上（且对不上的方式违反上面两条预期）→ 把第 3 步两边对比截图整理，再转开发。\n本轮已确认 / 仍局部未知\n持续有效规则： Pad 列表页 → 详情页路由必须带 careTypeId；详情加载才调 /pwrsapi/applet/follow/care；列表有按登录用户的数据权限（含带教可见学员记录）。页面地址和数据请求本来就不是同一个路径。\n本轮现场已确认： 换账号后监护记录入口正常 → 强烈指向账号侧差异。\n仍需你补的最少信息（用来定分支）： 异常账号与正常账号的角色差异、异常账号列表是否能看到那条记录、点进后实际页面 URL 与详情请求 URL/参数/careTypeId 是否一致（脱敏发即可）。\n\n先做完 1～3 步的对比结果发过来，就能判断是权限预期还是该账号下的跳转/请求异常，避免无意义地全局查路由。",
+      "answerTextKind": "exact_complete_visible_dom_innerText",
+      "manualEvaluation": {
+        "verdict": "PASS",
+        "reason": "在保留监护入口/详情路由/请求契约前提下，先做同入口账号对比并按可见范围、身份差异、careTypeId请求差异分支排查。"
+      }
+    },
+    {
+      "id": "Q0045",
+      "conversationId": "C008",
+      "question": "现场还卡在监护记录入口这里，第一步看过了，没发现异常。接下来呢？",
+      "requirementId": "A20",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "answerText": "结论：\n第一步（固定同一入口、只换账号）没发现额外异常，说明「异常账号不行、正常账号可以」这个方向仍然成立，下一步不要回头查全局路由，直接做两边账号身份对比 + 异常账号「列表→点进详情」的请求对照。\n\n接下来做这几步（只观察、不改数据）\n对比两个账号在页面上能看到的身份差异\n看角色/岗位是否不同（例如是否带教老师、学员、普通药师）。\n异常账号个人中心是否本来就有「我的监护」、列表条数是否明显更少或为空。\n正常：差异落在角色/带教/可见范围 → 先按账号数据权限处理，不必当入口坏了。\n不正常：角色看起来一样、列表也都能看到同一条，但只有异常账号点进去才挂 → 进入第 2 步抓请求。\n异常账号固定操作一次：列表 → 点进同一条监护记录\n网络面板只记两件事：\n列表是否有数据、大概条数；\n点进去后有没有发详情请求、实际 URL、参数里有没有 careTypeId、HTTP/业务码。\n预期对照（已核规则）：\n页面地址应是详情页且带 careTypeId；\n详情数据请求应是 care 详情接口（和页面地址本来就不是同一条路径）。\n分支：\n列表就没有这条 → 可见范围/数据权限；\n列表有、点后没请求或没带 careTypeId → 该账号下跳转/上下文问题；\n请求成功但页面不对 → 记响应是否有数据，再对页面显示。\n用正常账号对同一条记录（同一 careTypeId）再点一次做对照\n同样只记：页面 URL、详情请求 URL+参数、业务码。\n正常：正常账号请求成功且页面正常 → 把「异常账号失败点」钉在账号侧（权限/参数/返回数据），而不是入口整体坏了。\n两边请求参数和业务码一致、只有页面表现不同 → 整理脱敏截图转开发看前端展示。\n整理最小留证（方便一次说清）\n异常/正常账号角色差异一句话；\n异常账号：列表有没有这条、点进后的页面完整 URL、详情请求 URL+参数+业务码；\n正常账号同一条的同样三项；\n发生时间 + 脱敏截图（不要密码、不要完整 token）。\n本轮已确认 / 仍局部未知\n持续有效： 换账号就正常 → 优先账号侧；页面地址和数据请求本就不是同一路径；列表按登录用户有数据权限（含带教可见关系）；入口是个人中心「我的监护」→ 详情页带 careTypeId。\n本轮现场已确认： 第一步固定入口换账号复测，未发现额外异常。\n仍缺、会改变判断的最少信息： 两个账号角色是否不同；异常账号列表是否看得到那条；异常账号点进后「页面 URL」和「详情请求 URL+careTypeId+业务码」分别是什么（和正常账号是否一致）。\n\n把第 1～2 步的对比结果（脱敏）发过来，就能定是权限预期还是该账号下的跳转/请求异常，以及还要不要转开发。",
+      "answerTextKind": "exact_complete_visible_dom_innerText",
+      "manualEvaluation": {
+        "verdict": "PASS",
+        "reason": "第一步正常后继续做账号身份和同记录请求对照，持续保留入口/详情/careTypeId事实，未回退未知或重复第一步。"
+      }
+    },
+    {
+      "id": "Q0046",
+      "conversationId": "C008",
+      "question": "HIS 查得到，Proxy 页面为空，现场至少要区分哪些层？",
+      "requirementId": "A30",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "answerText": "结论：\nHIS 能查到、Proxy 相关页面却是空的，不能直接当成「HIS 有问题」或「ETL 没数据」。现场至少要把下面几层拆开，看空发生在哪一层，再决定给谁看。\n\n页面本身不会直接查 ETL，一般是：页面 → PWRS 接口 →（按条件）Proxy → ETL → HIS。中间任何一层过滤、缓存、参数、空数组或异常，都会让页面空掉。\n\n现场至少要区分的层（按顺序看）\n页面 / 入口层\n用的是哪一端、哪个菜单/列表、查询条件是什么（院区、病区、科室、患者、就诊、时间、状态等）。\n页面有没有自己的二次筛选（只显示某类、某状态）。\n正常： 条件对、入口对。\n不正常： 条件比 HIS 查的更窄 → 先对齐条件，别急着报上游。\nPWRS 接口层（必先抓这一层）\n浏览器 Network / Pad 请求日志里，实际发出的 PWRS 路径、完整业务参数、HTTP/业务码、响应是空数组还是报错。\n是否命中「查自己/本地」还是「查医院/HIS（走 Proxy）」分支（患者列表等场景有分支：本地读 pwrs_patient 本地过滤；HIS 分支才调 Proxy）。\n正常： 请求发出、参数和现场查的患者/范围一致。\n不正常： 没请求 / 参数缺 hospitalId、patientId、visitId、院区病区等 / 业务失败 → 先停在 PWRS，别直接跳 ETL。\nProxy 层\n只有确认已经走到 Proxy 时，才看 Proxy 请求/响应：是空数组、被本地过滤/缓存挡掉，还是统一异常。\n响应里若有 requestId（ETL 侧请求主键），记下来给后面用。\n注意： 空数据多是空数组；超时/上游报错走异常。页面空 ≠ 患者真的没记录，要区分「真的空」和「请求失败」。\nETL / HIS 层\n仅当 已进入 Proxy 且 Proxy 仍空或异常时，才带 requestId、时间、关键参数找 Proxy/ETL owner。\n要区分：ETL 返回 code=0 且 result=[]（真的空），还是 code 非 0 / 解析失败 / 带 error（失败）。\nHIS 侧能查到，只说明上游库可能有数；不自动等于 Proxy/ETL 这次请求参数下一定有返回（参数、视图、权限、缓存、过滤都可能不一致）。\n（局部未知，不要硬猜）\n例如患者列表走 listProxyPatients 时，说明书能确认上游有患者视图相关字段证据，但不能从现有资料断定最终 ETL 的 interfaceCode 一定是某个固定编码；这一项要靠 Proxy 请求日志/源码或 owner 用 requestId 核实。\n最小可执行动作（只观察、不改数据）\n固定现象\n记下：哪一端、哪个页面、哪个患者/就诊、HIS 里怎么查到的、Proxy 页面哪里空、发生时间。\n抓 PWRS 请求（优先）\nNetwork 看实际 path、参数、响应码和 body 大概情况。\n判断：没请求 / 请求失败 / 成功但空 → 三选一，决定还往不往下。\n判断有没有真正进到 Proxy\n若是本地分支或 PWRS 就已空/失败 → 先查本地快照、过滤、参数，不要直接报 ETL。\n若确认走了 Proxy 且仍空/异常 → 记 Proxy 响应与 requestId。\n整理再交给 owner（需要时）\n已确认：端、页面、患者标识、PWRS 路径+参数+响应摘要。\n已做：是否进 Proxy、空还是失败。\n仍缺：requestId、Proxy/ETL 日志里该次结果。\n交给：Proxy/ETL 实施或对应 owner，不要一上来只说「HIS 有、页面没有」。\n本轮边界\n已确认规则： 页面先打 PWRS；数据源有本地/HIS(Proxy) 分支；排查链要区分请求失败、ETL 空数组、Proxy 过滤/缓存、PWRS 叠加、页面筛选；空态和失败要分开；requestId 是交给 ETL 的首选标识。\n不要混淆： 页面不直接查 ETL；本地患者快照 ≠ HIS 全量；不能把「HIS 查得到」直接等同「Proxy 页面必须有」。\n局部未知： 个别 Proxy 方法最终 interfaceCode 以请求日志/owner 核实为准，现有 PWRS 资料不能替你断定。\n\n把「哪个具体页面 + 抓到的那条 PWRS 请求 path/关键参数/响应是空还是报错」发过来，可以帮你缩到上面第 2 层还是第 3 层，避免整条链路一起报。",
+      "answerTextKind": "exact_complete_visible_dom_innerText",
+      "manualEvaluation": {
+        "verdict": "PASS",
+        "reason": "显式切到Proxy主题，准确区分页面筛选、PWRS、本地/Proxy、ETL/HIS层及空数组和异常，未知interfaceCode局部限定。"
+      }
+    },
+    {
+      "id": "Q0047",
+      "conversationId": "C008",
+      "question": "刚才这个Proxy 空结果问题，我只拿得到这张截图，没有日志，够不够？",
+      "requirementId": "A30",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "answerText": "结论：不够。\n只有一张页面空的截图，不能把问题定到 Proxy/ETL，也不够直接转开发/Proxy owner。\n截图最多证明「现场页面是空的」，分不清是：查询条件不对、PWRS 没请求/参数不对、本地分支过滤、还是真进了 Proxy 后空/失败。\n\n没有日志也没关系，下一步优先用浏览器 Network 自己补最小证据（只观察、不改数据），不用先等日志权限。\n\n现场最少补这几步\n先看截图本身能不能当「现象证明」\n截图里有没有：哪个端/哪个页面、哪个患者（姓名可打码）、院区/病区/科室或就诊信息、查询条件、发生大概时间。\n有：可当「页面层为空」的证据，继续第 2 步。\n没有：先补一张带页面标题 + 关键查询条件 + 患者标识（脱敏）的图，否则连入口都对不齐。\n同一操作再做一次，只开 Network 看有没有 PWRS 请求\n复现「页面为空」那一下，看有没有发出业务请求、实际 path、关键参数、HTTP/业务码、响应是空数组还是报错。\n三种结果怎么判断：\n没请求 → 停在页面/入口，先别报 Proxy。\n有请求但失败 → 记状态码、业务码、关键参数，先停在 PWRS。\n请求成功但 body 空 → 再判断有没有真正走到 Proxy（见第 3 步）。\n判断空发生在哪一层（没有日志也能做）\n若请求参数和 HIS 里查的患者/范围明显不一致 → 先对齐条件。\n若是「查自己/本地」类结果为空 → 先查本地可见范围，不要直接报 ETL。\n只有确认已走 Proxy，且响应仍空或异常时，才需要 requestId/Proxy 日志；这时单靠页面空截图仍然不够。\n没有日志时，最小留证包长这样即可\n页面空截图（含条件/患者脱敏）\nNetwork 里那条请求：URL、关键参数、状态码、响应是空还是报错（可截一行，打码 token）\n发生时间、端（Web/Pad）、账号角色一句话\n有 requestId 就记；没有就写「当前响应里看不到 requestId」\n怎么判断「够不够转下一步」\n你现在有的\t够做什么\t还不够做什么\n仅页面空截图\t证明现象存在\t定层、定责、查 ETL\n截图 + PWRS 请求 path/参数/空或失败\t缩到页面 / PWRS / 是否进 Proxy\t直接说「Proxy/ETL 坏了」\n再加 Proxy 响应摘要或 requestId\t才适合找 Proxy/ETL owner\t—\n边界说明\n已确认规则仍有效： 页面先打 PWRS，不是直接查 ETL；要区分没请求、请求失败、真的空数组；只有进 Proxy 且仍空/异常，才带 requestId 往上查。\n本轮现场： 你目前只有截图、没有日志 → 证据停在现象层，还没完成分层。\n局部未知： 具体是哪个业务页（患者列表 / 检验 / 病历等）决定关键参数名；你若补充「哪个页面 + Network 那一条请求」，才能把范围缩到具体一层。\n\n把 Network 里那条请求的 path、关键参数、响应是空还是报错（脱敏）发过来，就能告诉你下一步是继续停在 PWRS，还是已经可以整理给 Proxy owner。",
+      "answerTextKind": "exact_complete_visible_dom_innerText",
+      "manualEvaluation": {
+        "verdict": "PASS",
+        "reason": "只图只能证明页面空，明确不足以定Proxy/ETL；在无日志条件下给Network只读最小补证并保持新主题事实。"
+      }
+    },
+    {
+      "id": "Q0048",
+      "conversationId": "C009",
+      "question": "患者同步是 PWRS 自己的定时任务每天跑吗？",
+      "requirementId": "A37",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "answerText": "不是。 PWRS 自己内部定时任务目前全部禁用，患者同步不会由系统自己每天自动跑。\n\n直接结论\n患者同步（在院患者同步、出院患者同步）不是 PWRS 内部 @Scheduled 定时任务。\n所有内部定时注解都已注释掉，系统当前没有任何会自动触发的内部定时任务。\n患者同步由外部调度系统主动调用接口触发，PWRS 只负责提供入口并执行业务。\n具体每天跑几次、什么时间跑、用什么调度平台——这些不在 PWRS 代码/说明书事实里，得问现场运维/调度负责人。\n现场怎么理解/排查\n先确认是外部触发：\n\n同步是靠外部系统调这两个免鉴权接口完成的：\n\n在院患者同步：POST /comm/scheduled/sync/patients/in\n出院患者同步：POST /comm/scheduled/sync/patients/out\n\n接口返回耗时（毫秒），并上报任务状态。\n\n看有没有真正被调：\n找外部调度系统（运维/集成同事）确认：这两个接口有没有配 cron/定时任务、当前频率是多少、最近是否成功调用。\n不能因为接口能访问就默认“已经每天在跑”。\n注意幂等与重复触发：\n\n部分相关统计/同步是纯 INSERT，重复触发不是天然幂等。补跑或手动触发前，先评估是否会产生重复数据。\n\n还缺什么信息时\n\n如果你现场看到“患者数据没更新”，请先问清楚：\n\n外部调度平台是什么、部署在哪、实际调用频率/最近执行记录；\n有没有调用成功的日志/耗时返回。\n\n拿到这些后，就能判断是调度没配、调用失败，还是业务侧问题。说明书里明确写了：真实平台、部署位置和频率不在 PWRS 代码事实中，需要人工确认。\n\n（技术依据：模块地图经确认事实 + PWRS-SYS-05a 定时任务外部调度触发，内部 @Scheduled 全部禁用，患者同步走 /comm/scheduled/sync/patients/* 外部端点。）",
+      "answerTextKind": "exact_complete_visible_dom_innerText",
+      "manualEvaluation": {
+        "verdict": "PASS",
+        "reason": "明确不是PWRS内部每天定时；外部调度触发事实正确，频率/平台/owner局部未知，且提醒补跑副作用。"
+      }
+    },
+    {
+      "id": "Q0049",
+      "conversationId": "C009",
+      "question": "医院现在的现象是“患者同步很久没动，现场不知道谁在什么时间触发”。我在现场先查哪一步？",
+      "requirementId": "A37",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "answerText": "先查外部调度有没有在触发、最近什么时候成功过。\n\n患者同步不是 PWRS 自己每天自动跑的（内部定时任务全禁用了）。它完全靠外部调度系统主动调接口触发。现场现在“很久没动、不知道谁在什么时间触发”，最高频就是调度没配、停了、或调用失败——这一步先查最省事。\n\n现场先做这几步（只观察、不动数据）\n立刻找运维/集成负责人要三样东西\n外部调度平台叫什么、部署在哪\n这两个接口有没有配定时任务、实际 cron/频率是多少\n最近一次成功/失败的执行记录（时间、返回耗时、错误信息）\n正常：能看到明确的调用记录和频率。\n不正常：没有配置、很久没执行、或一直报错 → 就是同步停的直接原因，先让他们恢复/补跑。\n自己快速验证接口最近有没有被调过（有网关/访问日志权限时）\n去网关日志、Nginx/接入层日志，或 PWRS 服务访问日志，过滤这两个路径：\n\nPOST /comm/scheduled/sync/patients/in（在院同步）\nPOST /comm/scheduled/sync/patients/out（出院同步）\n\n看最近几天有没有请求进来、返回是成功（耗时毫秒数）还是失败。\n正常：有周期性请求且成功。\n不正常：完全没请求 → 调度端没触发；有请求但失败 → 记错误码/返回，继续往下。\n确认影响范围，避免瞎补跑\n问清楚：是所有患者都不更新，还是某个院区/病区？大概从哪天开始停的？\n部分相关任务不是天然幂等（重复调可能产生重复数据），没确认调度记录前，先别手动狂调接口补跑。\n拿到上面信息后怎么判断\n调度根本没配/很久没执行 → 直接让运维恢复配置和频率（说明书里明确：真实平台、部署位置、频率必须运维提供，不能因为接口能访问就默认已配）。\n调度有调但失败 → 拿 requestId/错误时间给开发/Proxy 继续查。\n调度正常、接口也成功，但页面患者还是旧的 → 再查 PWRS 本地 pwrs_patient 快照或 Proxy/HIS 数据源（那是下一层）。\n\n现在最少需要你带回的：调度平台名 + 这两个接口最近一次执行记录（成功/失败时间）。\n有了这些，基本就能定位是“调度没动”还是“调了但后面链路断了”，不用先猜内部定时或数据库。",
+      "answerTextKind": "exact_complete_visible_dom_innerText",
+      "manualEvaluation": {
+        "verdict": "PASS",
+        "reason": "先查外部调度配置与最近执行记录，保持内部定时禁用事实；对补跑给幂等安全警示。"
+      }
+    },
+    {
+      "id": "Q0050",
+      "conversationId": "C009",
+      "question": "回到患者同步任务这里，我只拿得到这张截图，没有日志，够不够？",
+      "requirementId": "A37",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "answerText": "不够完整，但先别急着找日志——取决于截图上到底显示什么。\n\n患者同步不是 PWRS 自己跑的，全靠外部调度主动调这两个接口：\nPOST /comm/scheduled/sync/patients/in（在院）\nPOST /comm/scheduled/sync/patients/out（出院）\n\n你现在只有一张截图、没有日志，最高频能直接用的就是看截图有没有“最近执行记录/任务配置/接口调用痕迹”。如果截图正好是调度平台那边的界面，就可能够初步定位；如果是患者列表空页面或其它无关界面，就还不够。\n\n现在立刻做这几步（只看截图，不动任何东西）\n先把截图内容口述/打字告诉我（最关键的3个点就够）\n截图是哪个系统的界面？（调度平台、运维控制台、浏览器 Network、患者列表页、还是别的？）\n有没有看到接口路径、任务名、最后执行时间、成功/失败状态、调用次数？\n截图上的时间大概是哪天？有没有显示“很久没执行”或错误信息？\n正常：能看到明确的执行时间和接口 → 基本能判断“谁在什么时间触发过/没触发”。\n不正常：完全看不出调度相关信息 → 这张截图帮不上忙。\n对照已知规则快速判断\n如果截图里有那两个 /comm/scheduled/sync/patients/* 的执行记录，且最后成功时间很久以前 → 就是调度停了，直接让运维恢复。\n如果截图里根本没有任务配置或执行历史 → 说明调度可能没配，或者你看的不是调度平台。\n如果截图只是患者页面空白/旧数据 → 只能证明“数据没更新”，还不能证明“没人触发”。\n截图本身能留的最小证据\n把截图保存好（带当前系统时间），再截一张包含完整 URL 栏或任务名称的图。\n不用碰数据库、不用手动调接口、不用重试。\n拿到你的描述后怎么继续\n\n你只要回复“截图是 XXX，显示了 YYY（时间/状态/接口）”，我就能立刻告诉你：\n\n这张够不够定位\n还差哪一条最少信息（比如再问运维要最近一次执行记录）\n下一步只观察什么\n\n现在先把截图上的关键文字/时间/界面名称发我，我们就能判断是不是“调度很久没动”这个最高频原因。",
+      "answerTextKind": "exact_complete_visible_dom_innerText",
+      "manualEvaluation": {
+        "verdict": "FAIL",
+        "reason": "保留外部调度事实，但在未知真实频率/owner/计划预期时断言‘最后成功很久以前就是调度停了，直接恢复’，结论过头且可能触发非幂等同步。"
+      }
+    }
+  ],
+  "limitations": [
+    "convId, route and inherited are not exposed by the visible DOM in this run, so they are recorded as unavailable rather than inferred.",
+    "The fixture wording references a screenshot in Q0047 and Q0050, but no image payload is attached to those fixture questions; evaluation therefore checks whether the answer safely states what a screenshot can and cannot prove without pretending to have seen it."
+  ]
+}
+
