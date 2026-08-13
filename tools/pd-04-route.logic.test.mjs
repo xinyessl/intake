@@ -443,7 +443,7 @@ test('AC-6 无地图产品：consult 源码分支——map=null 才走 specSearc
   assert.match(SRC, /const map = loadModuleMap\(proj, cver\); if \(map\) route = routeQuestion\(map, retrievalQuery, sub\)/, 'consult 先加载地图再路由');
   assert.match(SRC, /specHits = specSearch\(proj, cver, retrievalQuery, 5, sub\);\s+\/\/ 无地图产品/, '无地图分支仍用 specSearch');
   // PD-04 修复：miss 固定话术条件多了 specNoSpec（specSearch 底座也弱/空）——specSearch 强匹配时即便路由 miss 也不再走固定话术。
-  assert.match(SRC, /const noAnswer = routeMiss && specNoSpec && !\(b\.deep && codeHits && codeHits\.length\)/, 'miss 且 specSearch 弱/空 且（非 deep 或 deep 无源码）→ noAnswer');
+  assert.match(SRC, /const noAnswer = !conversationalTurn && routeMiss && specNoSpec && !\(b\.deep && codeHits && codeHits\.length\)/, '事实题 miss 且 specSearch 弱/空 且（非 deep 或 deep 无源码）→ noAnswer；对话性表达不短路');
 });
 
 // —— PD-04 修复：specSearch 作底座、路由作加成（assembleConsultSpecHits 纯函数单测）—— //

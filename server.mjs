@@ -1431,6 +1431,32 @@ function consultSystem(proj, ver, hits, specs, code, currentQuestion = '') {   /
   return renderPromptTpl(DATA_DIR, 'consultNormal', vars);
 }
 
+// 纯对话意图不需要 Spec 事实证据：寒暄、情绪反馈、评价上一条答复、请求换种说法/澄清对话。
+// 只认「整句就是对话意图」的窄模式；一旦同句还在问按钮、接口、配置、权限等系统事实，就不命中，继续走证据门。
+function consultConversationTurn(question) {
+  const q = String(question || '').trim().replace(/[\s。！？!?，,～~…]+$/g, '').trim();
+  if (!q || q.length > 80) return false;
+  const patterns = [
+    /^(?:你好|您好|嗨|哈喽|hello|hi|早上好|上午好|下午好|晚上好|在吗|辛苦了|谢谢|多谢|感谢|再见|拜拜)$/i,
+    /^(?:你(?:说话|回答|回复)?(?:也|怎么)?|这回答(?:也)?|回复(?:也)?)(?:太|很|有点|这么)?(?:冷漠|冷冰冰|生硬|机械|像机器人|没感情|不耐烦)(?:了)?(?:吧|啦|呀|啊|吗|呢)?$/,
+    /^(?:别|不要)(?:这么|那么)?(?:冷漠|冷冰冰|生硬|机械|像机器人|不耐烦)(?:的)?(?:了)?(?:吧|啦|呀|啊)?$/,
+    /^(?:(?:你)?(?:能不能|可以|麻烦|请)?)(?:说得|说话|回答得|回复得)(?:更)?(?:温柔|友好|自然|耐心|口语|简单|简短)(?:一点|点|些)?(?:吗|吧)?$/,
+    /^(?:我没听懂|我没看懂|没听懂|没看懂|什么意思|你刚才是什么意思|换(?:个|一种)说法|换句话说|再解释一下|再说清楚一点|说人话|讲简单点|简单说说|请说得更口语一点|能不能说得简单一点)$/,
+  ];
+  return patterns.some(re => re.test(q));
+}
+
+function consultConversationGuard(question, active) {
+  if (!active) return '';
+  return [
+    '【本轮为对话性表达，不是新增系统事实问题】',
+    `用户本轮表达：${String(question || '').trim().slice(0, 500)}`,
+    '先用一两句自然、有人情味的话承接用户的寒暄、情绪或表达偏好；如果用户觉得上一条太生硬，应简短承认并换成更自然的说法。',
+    '可以利用紧邻的当前会话理解用户在回应哪一条答案，并继续提供帮助；请求换种说法时可重述上一条已经给出的结论，但不得借机新增没有正文证据的具体系统事实。',
+    '本轮不要套用“说明书未覆盖/建议转工单”的固定模板。若用户之后再问具体按钮、接口、字段、配置、权限或业务规则，下一轮仍须重新按 Spec/源码证据门判断。',
+  ].join('\n');
+}
+
 // 咨询引用只从本次服务端真实召回结果派生；前端请求里的历史消息/元数据不能伪造引用。
 // 同一份精简结果同时用于 SSE 与 chat 持久化，保证流式提示、刷新草稿和历史会话恢复口径一致。
 function consultKbRefs(projId, hits) {
@@ -3044,6 +3070,7 @@ const server = http.createServer((req, res) => {
       const cfg = readModelCfg();
       try { refreshRepos(proj, false); } catch {}
       const lastUser = [...msgs].reverse().find(m => m.role === 'user'); const qtext = lastUser ? lastUser.content : '';
+      const conversationalTurn = consultConversationTurn(qtext);   // 寒暄/情绪反馈/换种说法不是新增事实题，不应被无Spec固定话术截断
       const retrievalQuery = expandRetrievalQuery(msgs, qtext);   // “它/这个/那…”短追问用上一条 user 问题补实体；只影响检索，不把旧答案当事实
       const sub = String(b.subsystem || '').trim();   // 用户指定的子系统（空=全部）
       const imgs = (Array.isArray(b.images) ? b.images : []).slice(0, 6);   // 本轮附的截图（data URL，≤6）→ 多模态并进末条 user，让 AI 结合图答疑；落库见下方 convId 已知处
@@ -3079,7 +3106,7 @@ const server = http.createServer((req, res) => {
       const codeHits = b.deep ? codeSearch(proj, cver, retrievalQuery, hasMap ? (specHits || []) : specHits, 4, sub) : null;
       // PD-04 miss 判定（修复）：路由未命中 且 specSearch 底座也弱/空（specNoSpec），且（非 deep，或 deep 但源码也无命中）→ 不调模型、返回固定话术。
       //   即：specSearch 强匹配时，即便路由未命中也不再走固定话术——由提示词功能级覆盖判定据 spec 底座答/说没覆盖。
-      const noAnswer = routeMiss && specNoSpec && !(b.deep && codeHits && codeHits.length);
+      const noAnswer = !conversationalTurn && routeMiss && specNoSpec && !(b.deep && codeHits && codeHits.length);
       // PD-03 检索诊断：把「实际喂给 AI 的三类检索内容」组装成紧凑 retrieval 对象，挂到本轮 assistant 消息（与 kbRefs 同位置、同持久化路径）。
       //   spec 复用上面已算的 searchScored（同 specSearch 召回口径、带 score）；kb 复用 kbScored；code 无分。捕获不阻断答疑（try 静默）。
       //   PD-04：把「路由决策」并进 retrieval.routing，并带上「是否用了 specSearch 底座 + specSearch 首条分」方便回放判断。
@@ -3099,7 +3126,7 @@ const server = http.createServer((req, res) => {
       else {
         // PD-04：命中 mustNotConfuse → 作负向提示注入 system（易混淆项，勿臆造）。answerFacts 已在 specHits 顶段（consultSystem 走 specExcerpts）。
         const mncNote = routeMnc.length ? '\n【以下为该问题的易混淆项，请勿臆造、勿张冠李戴】' + routeMnc.map(x => '\n· ' + x).join('') : '';
-        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
+        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationalTurn) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
           piece = String(piece == null ? '' : piece); if (!piece) return;
           if (!kbInjected && kbRefs.length) { kbInjected = true; sse({ kb: kbRefs, kbInjected: true }); }
           reply += piece; sse({ v: piece });
