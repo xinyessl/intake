@@ -1,0 +1,185 @@
+{
+  "schema": 1,
+  "evidenceId": "PWRS-SPEC-GROK-4.5-BROWSER-TAG27-Q0011-Q0020-20260813",
+  "createdAt": "2026-08-13",
+  "fixture": {
+    "questions": "tools/fixtures/pwrs-grok-browser-1000.questions.json",
+    "requirements": "tools/fixtures/pwrs-grok-browser-1000.question-requirements.json",
+    "range": "Q0011-Q0020"
+  },
+  "runtime": {
+    "product": "pwrs",
+    "version": "2.7.260813-27",
+    "model": "grok-4.5",
+    "intakeCommitAtRun": "fb03485",
+    "browser": "official Chrome Browser Plugin",
+    "visibleUi": true,
+    "standalonePlaywrightOrHttpUsedAsAnswerSource": false,
+    "imagesUploaded": 0,
+    "finalTabDisposition": "handoff"
+  },
+  "conversationExecution": [
+    {
+      "fixtureConversation": "C002-continuation",
+      "questions": ["Q0011", "Q0012"],
+      "actualConvId": "unavailable",
+      "newConversationButtonClickedBeforeFirstQuestion": true,
+      "isolationCheck": {"fMsgCount": 0, "bubbleCount": 0}
+    },
+    {
+      "fixtureConversation": "C003",
+      "questions": ["Q0013", "Q0014", "Q0015", "Q0016", "Q0017", "Q0018"],
+      "actualConvId": "unavailable",
+      "newConversationButtonClickedBeforeFirstQuestion": true,
+      "isolationCheck": {"fMsgCount": 0, "bubbleCount": 0}
+    },
+    {
+      "fixtureConversation": "C004",
+      "questions": ["Q0019", "Q0020"],
+      "actualConvId": "unavailable",
+      "newConversationButtonClickedBeforeFirstQuestion": true,
+      "isolationCheck": {"fMsgCount": 0, "bubbleCount": 0}
+    }
+  ],
+  "summary": {
+    "completed": 10,
+    "passed": 10,
+    "failed": 0,
+    "score": "10/10"
+  },
+  "results": [
+    {
+      "id": "Q0011",
+      "question": "页面当前选了医院，所以 sys_config 天然按医院隔离，对吧？",
+      "requirementId": "A36",
+      "requirement": "sys_config 当前不能保证按医院隔离；页面选医院不等于配置天然院区隔离",
+      "turnType": "topic_switch",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "answerText": "不对，不能这么假设。\n\n页面上当前选了医院，并不等于 sys_config 会按医院隔离。\n当前事实是：sys_config 是全局表，配置接口没有按医院过滤。你在这边改一项，有可能影响所有共用同一个 usercenter 的机构。\n\n现场怎么记、怎么防踩坑\n别拿“页面选了医院”当隔离依据\n页面上的医院选择是业务操作上下文，和 sys_config 的存储/接口过滤不是一回事。\n改配置前，先确认这套 usercenter 是不是多家机构共用。\n改之前先确认影响范围\n找配置 owner 或同环境同事确认：这个 usercenter 实例是否只服务当前医院。\n生产变更要留痕，避免一家改完、别家莫名其妙变了。\n改完后验证时注意\n生效还是走各端自己的读取时机（Web/Doctor 多数靠重新登录或初始化拿到的 configList；Pad 要清本地配置缓存或重登；后端看下次调用）。\n单点保存不会自动推送给所有已打开的终端。\n\n一句话：当前选了医院 ≠ 配置天然按医院隔离。 改 sys_config 时默认按“全局生效、可能跨机构”来处理，更稳妥。",
+      "manualEvaluation": {"verdict": "PASS", "reason": "明确否定页面选择医院即天然隔离，给出当前全局影响事实与实施核对动作。"}
+    },
+    {
+      "id": "Q0012",
+      "question": "回到医院配置隔离这里，我没太听懂，换成实施能照着做的话再说一遍。",
+      "requirementId": "A36",
+      "requirement": "sys_config 当前不能保证按医院隔离；页面选医院不等于配置天然院区隔离",
+      "turnType": "switched_followup",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "answerText": "行，这块我换大白话再说一遍，你按现场动作记就行。\n\n先记住这一句结论\n\n页面上当前选了哪家医院，和系统配置有没有“按医院隔离”没关系。\nsys_config 现在是全局一份，接口不会按医院过滤。你改了一项，只要别的医院也连着同一套 usercenter，有可能一起被改到。\n\n别拿“页面选了医院”当保险，那只是业务筛选，不是配置隔离。\n\n现场你就按这几步做\n改配置前，先问清：这套环境是不是多家医院共用\n问配置 owner / 环境同事一句就行：这个 usercenter 只服务当前医院，还是好几家医院共用？\n只服务一家：影响面小，但仍按全局配置处理，别乱改。\n多家共用：改之前必须评估，最好留变更记录，避免一家改完别家莫名其妙变了。\n改的时候默认按“会影响全局”处理\n不要假设“我页面选的是 A 医院，所以只改 A”。\n系统配置这边没有“按当前医院隔离”这层保护。\n改完后别指望立刻全员生效\n单点保存不会自动推到所有已打开的页面/终端。\n验证时：相关人退出重登，Pad 还要清本地配置缓存或重登后再看。\n页面没变化时，先别怀疑“是不是没按医院生效”，先查：这个端到底有没有读这项配置、有没有重登/清缓存。\n出问题排查时这样判断\n如果多家医院一起异常，优先怀疑是不是改到了全局 sys_config。\n如果只有一家异常，再查本端消费、缓存、登录态，别一上来就当“医院隔离坏了”。\n一句话记法\n\n选医院 ≠ 配置隔离；改配置 = 当全局改。\n共用 usercenter 时，先确认影响范围再动。",
+      "manualEvaluation": {"verdict": "PASS", "reason": "复述为实施可执行步骤，保持医院选择不等于配置隔离的已核事实。"}
+    },
+    {
+      "id": "Q0013",
+      "question": "配置改了以后只按浏览器刷新就一定生效吗？",
+      "requirementId": "A35",
+      "requirement": "配置更新不会实时推送所有客户端；Web/Pad 有缓存，通常需重新登录或已确认的重载链路，普通刷新不保证生效",
+      "turnType": "fact_or_incident",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "answerText": "结论：不一定。按说明书，Web 端多数配置是登录/初始化时装进 configList 的，普通浏览器刷新（F5 / 刷新按钮）不保证重新去拉配置，所以改完配置后只刷新页面，经常还是旧值。这是现有缓存规则的正常表现，不能先当成“保存失败”。现场怎么验证/让配置生效：先确认你改的是哪个端在用的配置；Web 上操作按 Web 方式处理；Pad 上不生效则按 Pad 缓存处理；后端使用的配置在下一次对应业务调用时读取。Web 端可靠做法是退出当前账号重新登录，或走已确认过的配置重载链路；当前资料没有写死统一的“重载配置/清缓存”按钮，不要找不存在的按钮。只刷新后仍旧符合规则；重新登录或确认重载后仍旧，再核对配置是否写入 usercenter、账号/院区作用域是否匹配、消费端取的是哪一份。Pad 只重启应用通常清不掉持久化配置，需要重登录或清配置缓存后再初始化；后端按调用读取。",
+      "manualEvaluation": {"verdict": "PASS", "reason": "明确普通刷新不保证生效，区分 Web、Pad、后端缓存与重新登录或已确认重载链路。"}
+    },
+    {
+      "id": "Q0014",
+      "question": "现场只确认了“后台配置改了，Web 刷新和 Pad 重进都还是旧值”，还缺哪两样关键信息？",
+      "requirementId": "A35",
+      "requirement": "配置更新不会实时推送所有客户端；Web/Pad 有缓存，通常需重新登录或已确认的重载链路，普通刷新不保证生效",
+      "turnType": "field_diagnostic",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "answerText": "结论：现场目前只确认了“后台改了配置 + Web 普通刷新 + Pad 重进仍旧”。按现有缓存规则，这两步本身就不保证拉到新配置，所以还不能判成“保存失败”或“配置没生效”。还缺两样关键信息：1. Web / Pad 是否都做了重新登录，以及重登之后还是不是旧值。Web 刷新不保证重取配置；Pad 只重进或重启 App 也不保证清掉持久化配置，需要退出账号重新登录（或清掉配置缓存后再初始化）。两边真正重登后变新，就是缓存时机问题；仍旧才进入下一步。2. 若重登后仍旧，确认保存是否真的成功、作用域是否对上。配置在统一用户中心维护，不在 PWRS 业务库；还要核对当前账号/机构能否读到这份配置。现场最少补：Web、Pad 退出重登后分别是新值还是旧值；若都仍旧，再补配置项、改前改后值、医院/账号和修改时间。当前资料没有确认统一重载按钮，不要让人点不存在的按钮。",
+      "manualEvaluation": {"verdict": "PASS", "reason": "聚焦真正重登后的结果，以及仍旧时的保存结果、作用域和配置变更信息。"}
+    },
+    {
+      "id": "Q0015",
+      "question": "上午反馈的配置缓存刷新问题，数据库这边暂时没权限查。仅靠页面和接口响应能先排除什么？",
+      "requirementId": "A35",
+      "requirement": "配置更新不会实时推送所有客户端；Web/Pad 有缓存，通常需重新登录或已确认的重载链路，普通刷新不保证生效",
+      "turnType": "partial_evidence",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "answerText": "结论：没库权限时，用页面表现 + 接口响应，主要能先分清客户端有没有真正拿到新配置。能先排除或收窄的是：只刷新没重登的假问题、请求没发出或请求失败、接口已是新值但页面仍旧（偏前端消费）。不能单靠页面排除的是：库里是否落库成功、是否改到了别的作用域或共用 usercenter 的其它机构。先固定终端并真正退出重登；重登后变新可按缓存时机结案，仍旧再抓登录/初始化后的配置类接口响应，只观察不提交业务。在响应里找配置项实际值：响应新、页面旧，收窄到本端页面消费或本地缓存；响应旧，排除纯前端渲染，转向保存侧、作用域或读取来源；无请求或请求失败，先查网络、登录态和权限。记录终端、是否重登、实际 URL/参数/HTTP 与业务码、响应实际值、页面结果和时间点。不能仅靠页面/接口证明库中行已更新，也不能证明是否误改其它机构。",
+      "manualEvaluation": {
+        "verdict": "PASS",
+        "reason": "明确页面和接口能排除与不能排除的边界，并给重登后接口值与页面值的只读分支判断。",
+        "minorObservation": "原回答将 GET /api/config/all 写为经验中常见示例，而非 PWRS 已确认接口；未据此作最终判断。"
+      }
+    },
+    {
+      "id": "Q0016",
+      "question": "这次复测配置缓存刷新时，如果这些都正常，转开发前我该把什么整理好？",
+      "requirementId": "A35",
+      "requirement": "配置更新不会实时推送所有客户端；Web/Pad 有缓存，通常需重新登录或已确认的重载链路，普通刷新不保证生效",
+      "turnType": "context_followup",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "answerText": "结论：如果真正退出重登后配置接口已是新值、页面也是新值，就是缓存生效时机的正常表现，不用转开发。值得转开发的是重登后接口仍旧、接口新但页面仍旧，或保存侧/作用域对不上而现场无库权限。转之前整理：问题一句话和分支归类；终端、账号角色、医院/机构、版本环境、是否真正退出重登、配置及复测时间；配置项名称、改前值和改后值；重登后配置下发请求的 URL、参数、HTTP/业务码、响应实际值；同一时刻页面结果和脱敏截图；已做排查、已排除项、剩余缺口及需要配置 Owner 或开发补查的内容。接口新+页面新不要转，接口仍旧或接口新页面旧再打包转。",
+      "manualEvaluation": {"verdict": "PASS", "reason": "给出转开发前最小证据包，并指出接口新且页面新无需转开发。"}
+    },
+    {
+      "id": "Q0017",
+      "question": "刚入院三天的患者打开体温单，默认窗口怎么受入院日期影响？",
+      "requirementId": "A10",
+      "requirement": "体温单默认窗口：住院不足7天时从入院日连续取7天；满7天时取今天往前6天至今天。翻页或显式换范围时传 startDate；startDate 支持 yyyy-MM-dd 或13位毫秒时间戳，服务端当前不校验其是否早于入院或晚于今天",
+      "turnType": "topic_switch",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "answerText": "结论：刚入院三天打开体温单，默认仍会从入院日起连续铺出 7 个日期槽，不是只显示入院到今天的 3 天。住院不足 7 天时，窗口从入院日起连续生成 7 个日期槽；住院已满 7 天时，默认才是今天往前 6 天到今天。只有翻页或显式换范围时才传 startDate。现场可找不足 7 天患者默认进入核对日期轴，再用满 7 天患者对照；若窗口不符，记录患者入院日、今天日期和页面实际起止日期。未显式传 startDate 时走体温单默认规则；服务端当前不校验 startDate 是否早于入院或晚于今天。",
+      "manualEvaluation": {"verdict": "PASS", "reason": "正确给出不足 7 天从入院日起连续 7 天、满 7 天今天往前 6 天至今天，并提供现场对照。"}
+    },
+    {
+      "id": "Q0018",
+      "question": "关于体温单日期，换了另一个账号就正常了，这个线索说明先看哪边？",
+      "requirementId": "A10",
+      "requirement": "体温单默认窗口：住院不足7天时从入院日连续取7天；满7天时取今天往前6天至今天。翻页或显式换范围时传 startDate；startDate 支持 yyyy-MM-dd 或13位毫秒时间戳，服务端当前不校验其是否早于入院或晚于今天",
+      "turnType": "switched_followup",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "answerText": "结论：先看账号侧差异，别先改体温单默认 7 天算法。同一患者、同一就诊时，窗口不应随药师账号变化；换账号正常更像院区/病区权限、真实院区路由、是否同一就诊或登录上下文不一致。先确认两账号是否打开同一患者、同一就诊、同一院区，入院日是否一致；再对比授权院区和当前选中院区/病区；都一致时，用异常账号重新登录，默认打开且不翻页、不改范围，与正常账号对照。记录两账号、同一患者/就诊/院区/入院日、授权和当前院区、默认日期起止及脱敏截图。不能据此断言具体表或字段错误。",
+      "manualEvaluation": {"verdict": "PASS", "reason": "正确优先比较同一患者、就诊、院区及账号权限和登录上下文，未武断归因。"}
+    },
+    {
+      "id": "Q0019",
+      "question": "PWRS Web 退出后应该跳 /pwrs/login 还是根路径 /login？",
+      "requirementId": "A02",
+      "requirement": "Web 回门户用 getPortalDomain，走根路径 /login 或 /home；开发门户端口 9999，不加 /pwrs/",
+      "turnType": "fact_or_incident",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "answerText": "结论：PWRS Web 退出后必须跳门户 main-admin 根路径的 /home，未登录场景跳 /login，绝不能跳 /pwrs/login。PWRS 本身不提供业务登录页，本地 /login、/register 路由已注释。退出会清 token、动态路由后，用 getPortalDomain() 整页跳门户根路径；开发环境指向 hostname:9999，生产用当前域名。拼 /pwrs/login 是错的。现场验证退出后应到门户域名根路径，不应停在 /pwrs/；未登录或 token 失效直接访问 PWRS 时应跳门户 /login 或 /register。不要用开发时会指回 PWRS 端口的普通 getUrlDomain()。",
+      "manualEvaluation": {"verdict": "PASS", "reason": "明确回门户根路径 /home 或 /login，绝不使用 /pwrs/login；开发门户端口 9999 且使用 getPortalDomain。"}
+    },
+    {
+      "id": "Q0020",
+      "question": "先不转开发，“开发环境退出后跳到了工作站自己的端口，登录页打不开”这个问题实施还能怎么往下定位？",
+      "requirementId": "A02",
+      "requirement": "Web 回门户用 getPortalDomain，走根路径 /login 或 /home；开发门户端口 9999，不加 /pwrs/",
+      "turnType": "field_diagnostic",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "answerText": "结论：开发环境退出后必须整页跳到门户 main-admin 的 hostname:9999 + /home，未登录场景是 /login，不能跳 PWRS 自己的端口或 /pwrs/login。现场先复现并记最终地址；再单独新开标签访问 hostname:9999/login 或 /home，能打开则门户服务正常、问题收窄到 PWRS 退出跳转逻辑，打不开则先看门户服务；随后只观察退出时 token/动态路由清理和最终跳转目标。记录终端、账号角色、开发端口、退出前后 URL、跳转目标和门户 9999 可达性。跳到 9999 但页面打不开优先门户服务或网关；跳到工作站端口或 /pwrs/login 则确认域名获取调用。",
+      "manualEvaluation": {
+        "verdict": "PASS",
+        "reason": "按已确认的 9999 门户根路径与工作站端口错误分支，给出地址、门户可达性和跳转目标的现场定位。",
+        "minorObservation": "原回答末尾额外建议清站点数据或重开浏览器；这不改变业务数据，但不是核心必要诊断动作。"
+      }
+    }
+  ],
+  "limitations": [
+    "实际 convId、route 与 inherited 没有出现在本轮可见 DOM，未按时间或题意猜测，统一标为 unavailable。",
+    "answerText 来源于每题完成后可见消息气泡；Q0011-Q0012 保留逐字 innerText，Q0013-Q0020 为当轮完整 DOM 回答的忠实归一化文本，去掉重复排版、反馈卡和转工单卡，不作为逐字原文。",
+    "本文件是人工浏览器评测证据，不替代业务人员最终验收。"
+  ]
+}
