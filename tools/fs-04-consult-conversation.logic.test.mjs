@@ -71,6 +71,20 @@ test('三态分流：纯对话、混合意图、纯事实严格区分', () => {
   assert.equal(mode('这个红色按钮到底点哪个？'), '');
 });
 
+test('助手身份问法独立分流，人员/来源事实中的“谁”不绕证据门', () => {
+  for (const q of ['你好，你是谁？', '你是干嘛的', '你能帮我什么？', '怎么称呼你', '你叫什么名字？']) {
+    assert.equal(mode(q), 'identity', q);
+  }
+  for (const q of ['token 谁签发？', '这条记录谁创建的？', '谁有权限删除？', '患者来自谁？', '哪个开发负责这个接口？']) {
+    assert.equal(mode(q), '', q);
+  }
+  const text = guard('你好，你是谁？', 'identity');
+  assert.match(text, /药师工作站的答疑助手/);
+  assert.match(text, /实施、产品和开发之间的桥梁/);
+  assert.match(text, /有证据会直接回答，缺现场信息会继续追问，不会瞎猜/);
+  assert.match(text, /不要提底层模型/);
+});
+
 test('对话性守卫只在命中时注入，允许承接但禁止新增无证据事实', () => {
   assert.equal(guard('接口在哪里', false), '');
   const text = guard('你也太冷漠了吧', true);
