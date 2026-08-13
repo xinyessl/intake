@@ -1,0 +1,170 @@
+{
+  "schema": 1,
+  "evidenceId": "PWRS-SPEC-GROK-4.5-BROWSER-TAG28-CONTEXT-CONTINUITY-20260813",
+  "createdAt": "2026-08-13",
+  "language": "zh-CN",
+  "scope": "tag28 同会话已核事实持续生效与显式新实体切题回归",
+  "runtime": {
+    "product": "pwrs",
+    "version": "2.7.260813-28",
+    "model": "grok-4.5",
+    "intakeCommit": "c2a7bf7",
+    "pwrsCommit": "1381aa2c",
+    "browser": "official Chrome Browser Plugin",
+    "visibleUi": true,
+    "standalonePlaywrightOrHttpUsedAsAnswerSource": false,
+    "finalTabDisposition": "handoff"
+  },
+  "deployment": {
+    "deployed": true,
+    "backup": "/opt/intake-backups/consult-context-continuity-tag28-20260813-193638",
+    "health": { "ok": true, "projects": 3, "intakes": 637, "kb": 7 },
+    "runtimeChecks": {
+      "externalNormalExact": true,
+      "externalDeepExact": true,
+      "requiredPlaceholders": true,
+      "continuityNormal": true,
+      "continuityDeep": true,
+      "dq001Route": true,
+      "portalFact": true,
+      "devFact": true,
+      "nodeCheck": true,
+      "pwrsDescribe": "2.7.260813-28"
+    }
+  },
+  "automatedRegression": {
+    "realMap": "75/75 pass",
+    "nodeCheck": true,
+    "jsonParse": true,
+    "diffCheck": true
+  },
+  "source": {
+    "answerChannel": "用户当前已登录 Chrome 中的实施端可见 UI",
+    "browserControl": "官方 Chrome Browser Plugin",
+    "visibility": "逐题在前台标签页真实点击新对话、选择 tag28、发送并等待完整 DOM；用户可见",
+    "rawDomRetention": "完整保留回答气泡 innerText；不含反馈卡与转工单卡",
+    "routeMetadata": "route/inherited 未出现在可见 DOM，不按题意伪造；expectedRoute/expectedInherited 来自真实地图回归契约，behaviorallyVerified 仅描述可见答案是否保留或切换事实"
+  },
+  "summary": {
+    "completed": 5,
+    "passed": 5,
+    "failed": 0,
+    "score": "5/5",
+    "originalQuestions": "3/3",
+    "naturalVariantAndTopicSwitch": "2/2"
+  },
+  "conversationExecution": [
+    {
+      "conversationId": "ZX-20260813-113",
+      "questions": ["TAG28-Q21", "TAG28-Q22", "TAG28-Q23"],
+      "newConversationButtonClicked": true,
+      "isolationCheck": { "messageCount": 0, "input": "" },
+      "versionVerified": "2.7.260813-28"
+    },
+    {
+      "conversationId": "ZX-20260813-114",
+      "questions": ["TAG28-V1", "TAG28-SWITCH"],
+      "newConversationButtonClicked": true,
+      "isolationCheck": { "messageCount": 0, "input": "" },
+      "versionVerified": "2.7.260813-28"
+    }
+  ],
+  "results": [
+    {
+      "id": "TAG28-Q21",
+      "conversationId": "ZX-20260813-113",
+      "question": "医院报的退出跳转问题，换了另一个账号就正常了，这个线索说明先看哪边？",
+      "route": "unavailable",
+      "expectedRoute": "DQ-001",
+      "inherited": "unavailable",
+      "expectedInherited": false,
+      "behaviorallyVerified": "首轮直接给出 DQ-001 门户跳转事实",
+      "rawDomAnswer": {
+        "status": "available",
+        "text": "结论：换另一个账号就正常，优先先看「这个出问题的账号」这边，而不是先怀疑整站门户跳转规则写错。\n\n退出跳到门户（Web 未登录/退出后回 main-admin 根路径 /login；Navbar「首页」本地登出后回 /home）是全局规则，通常不会只坑某一个账号。\n同一环境、同一终端下换账号就好，更像是：\n\n这个账号的 token/会话没清干净或失效异常\n这个账号相关的 本地缓存/页签残留\n这个账号的 授权/院区上下文异常（菜单、机构作用域等是按账号动态的）\n少见一点：该账号在 usercenter 侧状态 有问题\n\n全局门户域名、getPortalDomain()、部署网关之类，一般会让所有账号一起跳错，先往后排。\n\n现场可执行排查（按顺序做）\n固定同一台机器、同一浏览器，对比两个账号的退出结果\n用出问题的账号登录 → 正常退出 → 看最终落到哪个地址（是否门户 /login 或「首页」场景的 /home）\n换正常账号同样操作一遍\n正常：应回到门户根路径，而不是 /pwrs/login 或 PWRS 自己端口\n不正常：记下出问题账号实际停在哪（完整 URL、是否白屏/反复跳）\n只观察退出时的请求与页面跳转（不要反复瞎点）\n打开浏览器开发者工具 → Network\n点退出，看是否有退出相关请求\n看 HTTP 是否 200，还要看响应体业务 code（200 只说明传成功，不代表业务退出成功）\n再看浏览器实际 Location / 最终地址栏 是否符合门户域名 + /login（或首页场景 /home）\n开发环境门户是当前 hostname:9999，生产是当前域名；都不要带 /pwrs/ 前缀\n针对出问题账号清本地会话后再试一次（只清缓存/站点数据，别改配置）\n退出后清该站点的本地存储/缓存，或换无痕窗口\n只用同一个出问题账号再登再退\n若无痕/清缓存后该账号也正常：多半是该账号会话残留污染\n若无痕后该账号仍跳错、别的账号仍正常：更偏向该账号 token/授权/usercenter 状态\n核对这个账号和正常账号的差异（只记结论，别贴完整 token/密码）\n是否同一院区授权、菜单是否差很多\n出问题账号是否冻结、是否刚改过权限/机构\nWeb 还是 Pad（Pad 走自己的登录页，和 Web 回门户不是一条路）\n记录：终端类型、账号工号（脱敏）、出问题时间、实际跳转 URL、业务 code（不要贴完整 token）\n怎么判断往哪转\n现象\t优先看哪边\n只有这个账号跳错，别的账号同环境正常\t账号会话 / 该账号授权与 usercenter\n清缓存/无痕后该账号也正常\t浏览器本地残留（实施侧可先处理）\n所有账号都跳到 /pwrs/login 或 PWRS 自己端口\t才升到 门户域名/跳转契约/部署\nHTTP 200 但页面没跳、Location 不对\t按「业务 code + 实际 Location」只读对照门户根路径，不要只看 200\n\n下一步若还不行，现场最少补这些再找人：\n出问题账号 vs 正常账号各一次退出的：终端（Web/Pad）、最终 URL、退出请求的 HTTP + 业务 code、是否无痕复现。\n不要在问题单里贴密码或完整 token。\n\n全局门户跳转规则本身（Web 回 main-admin /login、首页回 /home、不得写 /pwrs/login）已有明确约定；「换账号就好」这条线索，第一步就是压在出问题账号的会话/授权侧，而不是先动全局路由。"
+      },
+      "manualEvaluation": {
+        "verdict": "PASS",
+        "reason": "以换账号正常作为账号会话/授权差异线索，同时保留 Web 回门户根路径、dev 9999、生产当前域名、不得 /pwrs/ 或工作站端口的基线；给出可执行对照与脱敏留证。",
+        "minorObservation": "回答较长，并把清站点数据/无痕作为后续隔离动作；核心判断仍以只读对照优先。"
+      }
+    },
+    {
+      "id": "TAG28-Q22",
+      "conversationId": "ZX-20260813-113",
+      "question": "回到退出跳转这里，第一步看过了，没发现异常。接下来呢？",
+      "route": "unavailable",
+      "expectedRoute": "DQ-001",
+      "inherited": "unavailable",
+      "expectedInherited": true,
+      "behaviorallyVerified": "可见答案明确写全局规则仍是基线，并继续复用上一轮换账号线索",
+      "rawDomAnswer": {
+        "status": "available",
+        "text": "结论：第一步（两账号对比）没看出异常时，不要回头查全局门户域名；下一步直接盯「退出那一刻的请求 + 业务结果 + 浏览器最终地址」。\n\n全局规则仍是基线：Web 退出应回门户根路径 /login（Navbar「首页」是回 /home），开发环境是当前 hostname:9999、生产是当前域名，不能带 /pwrs/、也不能落到 PWRS 自己端口。\n「换账号就好」还在，所以继续压在出问题账号的会话/退出是否真成功，而不是整站路由。\n\n接下来按这个顺序做（只观察、不改配置、不反复乱退）\n固定同一浏览器，只用出问题的那个账号，打开 Network 再点一次退出\n打开开发者工具 → Network（保留日志）\n点退出，看有没有发出退出相关请求\n有请求：记 HTTP 状态 + 响应体里的业务 code（不要只看 200；200 只说明传成功）\n没请求：页面若仍跳了或卡了，把「点退出前后地址栏变化」截下来（脱敏）\n判断：无请求 / 请求失败 / 业务 code 失败 → 先按「退出未真正成功」方向；业务 code 正常 → 往下看第 2 步\n对照浏览器最终停在哪（只读 Location / 地址栏）\n退出完成后看最终 URL 是否是门户根路径 /login（若点的是 Navbar「首页」则应是 /home）\n开发：是否像 当前hostname:9999/...；生产：是否当前域名\n异常样例（对照用）：落在 /pwrs/login、PWRS 自己端口、白屏、或在登录页和业务页之间来回跳\n业务正常但页面没跳/跳错：以实际地址栏为准，不要用“接口 200”当成跳转已完成\n出问题账号单独做一次「无痕 / 清站点数据」隔离\n无痕窗口（或清该站点本地数据后）只登出问题账号 → 再退出一次\n同时用正常账号在同一环境再退一次作对照\n无痕后该账号也正常：多半是该账号本地会话/缓存残留，实施侧可先按清缓存处理\n无痕后该账号仍异常、别的账号仍正常：更偏向该账号 token/会话或 usercenter 侧状态，准备交接账号侧\n把两边差异收成一张最小对照表（不要贴密码、不要贴完整 token）\n出问题账号 vs 正常账号各记一行：终端（Web/Pad）、是否无痕、退出后最终 URL、有无退出请求、HTTP、业务 code、是否白屏/反复跳\nPad 和 Web 不是一条路：Pad 走自己的登录页；Web 才必须回门户 /login\n若只有某一类终端有问题，在表里标清楚，避免混查\n怎么往下判断\n你看到的情况\t下一步含义\n业务 code 失败或根本没退出请求\t退出未走完，优先账号会话/鉴权链路，不是门户域名写错\n业务 code 正常，但最终 URL 不是门户 /login（或首页场景 /home）\t前端跳转目标与门户契约不一致，带着实际 Location 找前端/门户侧\n无痕后问题消失\t本地残留，先清站点数据再验证，暂不必升全局部署\n无痕后仍仅该账号异常\t整理第 4 步对照表，交给 usercenter / 账号授权负责人核对该账号状态\n\n若做到第 3 步仍只有该账号异常：把上面对照表 + 出问题时间 + 脱敏截图（最终 URL、业务 code）给 usercenter/门户侧即可；不要再先改生产域名或猜 /pwrs/login。\n\n全局跳转契约已经明确；「第一步两账号对比无异常」之后，标准下一刀就是 请求是否真退出成功 + 实际 Location 是否门户根路径 + 无痕隔离该账号。"
+      },
+      "manualEvaluation": {
+        "verdict": "PASS",
+        "reason": "没有再称说明书未覆盖；先复用 /login、/home 场景边界、dev hostname:9999、生产当前域名、不得 /pwrs/ 或工作站端口，再围绕请求业务结果与实际 Location 给诊断步骤。"
+      }
+    },
+    {
+      "id": "TAG28-Q23",
+      "conversationId": "ZX-20260813-113",
+      "question": "退出跳转这一段，接口是通的，返回也是 200，但页面还是没变化，下一步看哪？",
+      "route": "unavailable",
+      "expectedRoute": "DQ-001",
+      "inherited": "unavailable",
+      "expectedInherited": true,
+      "behaviorallyVerified": "可见答案再次保留门户契约，并以其作为 200 后判断基线",
+      "rawDomAnswer": {
+        "status": "available",
+        "text": "结论：接口通、HTTP 200 但页面没变，下一步不要再盯“请求有没有发出”，要盯两件事——响应体业务 code，以及浏览器实际最终地址（Location/地址栏）。\n\n规格已写明：HTTP 200 只说明传输成功，不能当成退出跳转已完成；业务若也正常但页面仍不跳，就只读对照浏览器实际落到的地址和门户契约是否一致。\n\n门户契约仍是基线：\n\nWeb 退出应回 main-admin 根路径 /login\nNavbar「首页」本地登出后回 /home（别和 /login 混）\n开发环境：当前 hostname:9999；生产：当前域名\n不得落到 /pwrs/login 或 PWRS 自己端口\n下一步按这个顺序看（只观察、不改配置）\n打开 Network，点开那次退出请求的响应体，看业务 code\n不要只看 Status = 200\n看响应 JSON 里的业务 code / success 类字段是否表示“退出成功”\n业务 code 失败：页面不跳是预期方向——先当“退出未真正成功”（会话/鉴权侧），别先查门户域名\n业务 code 成功：继续第 2 步\n看浏览器最终停在哪（地址栏 / 实际 Location）\n退出完成后，把地址栏完整 URL 记下来（脱敏即可）\n对照是否为门户根路径 /login（若点的是「首页」则应是 /home）\n开发是否像 当前hostname:9999/...；生产是否当前域名、没有 /pwrs/ 前缀\n业务成功但地址仍是业务页/白屏/错误路径：就是“前端跳转目标与门户契约不一致”这条分支\n分清三种常见落点（用来判断找谁）\n你看到的\t含义\t下一步找谁/做什么\n业务 code 失败\t退出接口业务未成功\t账号会话 / 鉴权（结合之前“换账号就好”，继续压出问题账号）\n业务 code 成功，但地址栏没变或仍停在业务页\t跳转没执行或目标写错\t带着实际 URL 找前端/门户跳转侧\n业务 code 成功，但跳到 /pwrs/login 或 PWRS 自己端口\t跳转目标违反门户契约\t按门户域名/getPortalDomain() 契约核对，不要当“正常登录页”\n仍只出问题账号异常时，做一次无痕隔离（验证本地残留）\n无痕窗口只登该账号 → 再退出一次\n同样记录：业务 code + 最终 URL\n无痕后正常 → 多半本地会话残留，清站点数据后再验\n无痕后仍不跳且仅该账号 → 整理对照信息交 usercenter/账号侧\n怎么只读判断（别被 200 带偏）\n“接口通 + 200” ≠ 退出完成，必须看业务 code\n业务正常但页面没变化 → 以地址栏实际 Location 为准，对照是否门户 /login（或首页场景 /home）\n不要据此断言“已跳到 /pwrs/login 就算对”——那是错误目标\n不要贴密码或完整 token；记工号（可脱敏）、时间、业务 code、最终 URL 即可\n\n若业务 code 已确认成功、最终 URL 仍不是门户根路径：把「出问题账号、业务 code、最终完整 URL（脱敏）、是否无痕」发给前端/门户侧即可；全局跳转规则本身不用再猜。\n\n一句话：200 之后看业务 code；业务也正常还不跳，就看浏览器实际 Location 是否门户 /login（或 /home）。"
+      },
+      "manualEvaluation": {
+        "verdict": "PASS",
+        "reason": "正确说明 HTTP 200 只代表传输；继续看业务 code 和实际 Location，并用已确认的门户 /login（首页 /home）与域名/端口规则判断，没有降级为未知。"
+      }
+    },
+    {
+      "id": "TAG28-V1",
+      "conversationId": "ZX-20260813-114",
+      "question": "PWRS 退出后落到工作站自己的 8083 端口，还提示 public base。实施现场先按什么规则核对跳转地址？",
+      "route": "unavailable",
+      "expectedRoute": "DQ-001",
+      "inherited": "unavailable",
+      "expectedInherited": false,
+      "behaviorallyVerified": "自然问法首轮命中门户跳转事实",
+      "rawDomAnswer": {
+        "status": "available",
+        "text": "结论：退出后落到 8083 并提示 public base，基本就是跳错了目标。\n正确规则是：PWRS 不提供业务登录页，退出/未登录/认证失败后必须走门户域名整页跳转，不能跳工作站自己的端口（开发常见 8083）或拼 /pwrs/login。\n\n现场核对跳转地址的规则（按这个对照）\n看最终落点，不看中间 HTTP 200\n正确：门户域名 + 根路径\n开发环境：当前 hostname:9999 + /home（Navbar「首页」/本地登出）或 /login（未登录/认证失败需重新登录）\n生产环境：当前域名 + /home 或 /login\n错误：xxx:8083、/pwrs/login、/pwrs/ 开头、或仍停在 PWRS 自己端口并出现 public base 提示。\nNavbar「首页」和重新登录要分开\n点 Navbar 下拉「首页」：本地登出后应跳门户根路径 /home\n未登录/认证失败需要重新登录：跳门户 /login\n两者都不要写成 /pwrs/login，也不要和 PWRS 自己的开发端口混写。\n域名取法必须对\n必须用 LcUtils.getPortalDomain() 拼门户根路径。\n开发：hostname:9999；生产：当前域名。\n禁止用会在开发时指回 8083 的 getUrlDomain()，也禁止加 /pwrs/ 前缀。\nHTTP 200 不能当跳转成功\n200 只说明传输成功，还要看业务 code；页面没跳时，只读对照浏览器地址栏实际 Location 是否符合上面的门户域名 + /home 或 /login。\n实施现场可执行核对步骤\n复现一次退出\n在 Web 端登录后，点 Navbar 下拉「首页」（或你们现场实际触发退出的入口）。\n正常：地址栏变成门户 hostname:9999/home（开发）或生产域名 /home，不应再停在 8083，也不应出现 public base。\n不正常：落到 *:8083 或带 /pwrs/ 的路径并提示 public base → 跳转目标写错。\n只读看浏览器实际 Location\n打开开发者工具 → Network / 地址栏，记录最终跳转的完整 URL（含端口、路径）。\n对照规则：\n是否为门户域名（开发 9999 / 生产当前域名）？\n路径是否为根路径 /home 或 /login？\n是否误成 8083、/pwrs/login 或 PWRS 自身 base？\n区分环境，避免误判生产\n开发端口的 base 提示不能直接当成生产路由故障。\n生产若也落到工作站自己端口，同样按「门户域名 + 根路径」核对，不要在问题单里写“应跳 /pwrs/login”。\n仍对不上时再留证（最少信息）\n记录：环境（开发/生产）、操作入口（Navbar「首页」还是其它）、最终 Location 完整 URL、是否出现 public base 文案。\n不要贴密码或完整 token。\n把上述结果给前端/门户侧，核对是否误用了 getUrlDomain() 或拼了 /pwrs/，而不是继续在 PWRS 本地找登录页。\n\n一句话记法： 退出后必须回 门户 的 /home 或 /login，开发看 9999，生产看 当前域名；落到 8083 + public base 就是跳错了，先按浏览器实际 Location 对照上述契约即可。"
+      },
+      "manualEvaluation": {
+        "verdict": "PASS",
+        "reason": "自然变体正确识别 8083 + public base 为开发目标误用，明确 getPortalDomain、dev 9999、生产当前域名、根路径 /login 或首页 /home，并给只读 Location 对照。"
+      }
+    },
+    {
+      "id": "TAG28-SWITCH",
+      "conversationId": "ZX-20260813-114",
+      "question": "换个问题，患者列表里的 p_id 在数据库是什么类型？",
+      "route": "unavailable",
+      "expectedRoute": "QR-PATIENT-ID-COLUMN-TYPE",
+      "inherited": "unavailable",
+      "expectedInherited": false,
+      "behaviorallyVerified": "显式换个问题后答案只给患者字段事实，未继续输出 DQ-001",
+      "rawDomAnswer": {
+        "status": "available",
+        "text": "结论：患者列表用的主表里，p_id 在数据库是 character varying(50)（varchar(50)）。\n\n它是 pwrs_patient 表的主键。\n业务代码里写入的是 UUID 字符串，但列类型不是 PostgreSQL 原生的 uuid。\n同样是 character varying(50) 的还有 patient_id、visit_id、district_code。\n别按名字猜成 bigint、integer 或原生 uuid，长度就是 50。\n\n现场核对时直接查 psp.pwrs_patient 表结构看 p_id 列类型即可，和上面一致就对了。"
+      },
+      "manualEvaluation": {
+        "verdict": "PASS",
+        "reason": "显式新实体覆盖旧 route；准确回答 p_id 为 character varying(50)、非 PostgreSQL 原生 uuid，未串入退出跳转上下文。"
+      }
+    }
+  ],
+  "limitations": [
+    "route 与 inherited 传输元数据未显示在可见 DOM，故 observed 字段标 unavailable；expected 字段仅记录回归契约，未冒充浏览器观测值。",
+    "本轮没有图片题；未上传图片。",
+    "完整答案来自可见 DOM 回答气泡 innerText，未使用独立 Playwright 或 HTTP 接口作为答题来源。"
+  ]
+}
