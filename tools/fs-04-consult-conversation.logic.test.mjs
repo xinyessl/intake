@@ -323,6 +323,8 @@ test('精确路径前缀守卫：保留尾斜杠且不扩写相似路径或中�
     assert.match(text, /`\/community`、路径中间仅包含 `comm`.*均不等价/);
     assert.match(text, /已经发生请求的完整 path/);
     assert.match(text, /证据里没有出现的路径、例外、端点类型或用途一律不要补/);
+    assert.match(text, /不得为了说明前缀规则自己构造任何“例如\/示例\/测试路径”/);
+    assert.match(text, /只能出现 route\/Spec\/源码已列出的路径字面量.*用户本轮实际提供的 path/);
   }
   assert.equal(fn('患教签名是否必填？', { matched: true, route: { title: '患教签名' } }), '');
 });
