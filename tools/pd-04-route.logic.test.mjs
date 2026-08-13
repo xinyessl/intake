@@ -580,6 +580,30 @@ test('真实PWRS地图回归：tag26新路由不抢 token、患者列表、无�
   assert.ok(!['QR-ORDER-AUDIT-PAGINATION', 'QR-MEDICAL-CONSULT-VISIBILITY', 'QR-STAT-ORDER-AUDIT-DRILLDOWN', 'QR-ASSESS-DRUG-DOCTOR-INBOX'].includes(red.route?.id));
 });
 
+test('真实PWRS地图回归：多组一次返回的页签只读验证，不要求逐页请求或改状态', { skip: !process.env.PWRS_REAL_MAP }, () => {
+  const S = buildRoutingSandbox(makeDeps());
+  const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
+  for (const question of [
+    '医生端药物重整首次加载已返回四组，切tab没发新请求是筛选失效吗？',
+    '全部已读未读星标怎么只读核对，别让我点开记录改状态？',
+    '药物重整页签本地切换没走网络请求，只看全部、已读、未读和星标各组成员能验证吗？',
+  ]) {
+    const hit = S.routeQuestion(map, question, '');
+    assert.equal(hit.route?.id, 'QR-ASSESS-DRUG-DOCTOR-INBOX', `${question}，topN=${JSON.stringify(hit.topN)}`);
+    assert.match(hit.answerFacts.join('\n'), /一次返回 all\/read\/unRead\/mask 四组/);
+    assert.match(hit.answerFacts.join('\n'), /不要求每次切页都重新发请求/);
+    assert.match(hit.answerFacts.join('\n'), /只读验证[\s\S]*数量和成员集合[\s\S]*read 与 unRead 互斥/);
+    assert.match(hit.mustNotConfuse.join('\n'), /不得通过点开未读或切换星标.*改变业务状态/);
+  }
+  const followUp = '那用药咨询患者端看不到怎么办？';
+  const changed = S.contextualRouteQuestion(map, [
+    { role: 'user', content: '药物重整四个页签怎么只读验证？' },
+    { role: 'assistant', content: '上一轮答案不作为事实。' },
+    { role: 'user', content: followUp },
+  ], followUp, '');
+  assert.equal(changed.route?.id, 'QR-MEDICAL-CONSULT-VISIBILITY', '显式新实体必须覆盖上一轮药物重整路由');
+});
+
 test('AC-2 tier-1 关键词 IDF 打分命中（无整串别名，纯关键词重叠）', () => {
   const S = buildRoutingSandbox(makeDeps());
   const r = S.routeQuestion(FIXTURE_MAP, '医嘱干预的时候说明书地址在哪里配置', '');

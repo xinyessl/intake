@@ -128,6 +128,11 @@ test('实施诊断守卫在 route 命中或缺失时都给安全最小留证，�
   assert.match(text, /没有请求 \/ 请求失败 \/ 响应正常但页面错误/);
   assert.match(text, /不得编造按钮名、接口路径、字段名、数据库表、状态值/);
   assert.match(text, /不得建议反复提交、重复保存、重试/);
+  assert.match(text, /首次加载会一次返回多个分组/);
+  assert.match(text, /不能要求每切一个页签都必须发新请求/);
+  assert.match(text, /除非正文\/源码\/接口契约明确要求逐页请求/);
+  assert.match(text, /各组数量、成员集合.*互斥\/包含关系/);
+  assert.match(text, /不得通过点开未读、切换已读、星标、审批或提交.*改变业务状态/);
 
   for (const q of [
     '我只有一张截图，拿不到 spec，转开发前最少补什么？',
