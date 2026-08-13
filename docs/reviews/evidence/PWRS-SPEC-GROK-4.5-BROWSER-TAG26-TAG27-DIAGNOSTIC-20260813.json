@@ -1,0 +1,332 @@
+{
+  "schema": 1,
+  "evidenceId": "PWRS-SPEC-GROK-4.5-BROWSER-TAG26-TAG27-DIAGNOSTIC-20260813",
+  "createdAt": "2026-08-13",
+  "language": "zh-CN",
+  "model": "grok-4.5",
+  "scope": "tag26 原始 7 题浏览器复测与 tag27 修复后 4 题浏览器复测",
+  "privacy": {
+    "desensitized": true,
+    "excluded": [
+      "登录账号",
+      "医院身份",
+      "服务器地址与凭据",
+      "图片绝对路径",
+      "请求头与会话令牌"
+    ],
+    "imagePolicy": "仅记录脱敏文件名、尺寸与 SHA-256，不嵌入图片内容或本机绝对路径"
+  },
+  "source": {
+    "answerChannel": "用户当前已登录 Chrome 中的实施端可见 UI",
+    "browserControl": "官方 Chrome Browser Plugin",
+    "visibility": "逐题在前台标签页操作，用户可见；未以独立 Playwright 或 HTTP 调用作为答题结果来源",
+    "imageInput": "每个新会话首轮通过输入框粘贴图片并在发送前确认缩略图",
+    "rawDomRetention": "本次收尾时未保留可逐字复原的完整 DOM 回答文本；所有 rawDomAnswer 均明确标记 unavailable，answerSummary 仅为测试时人工观察摘要",
+    "routeSource": "tag26 route/inherited 来自当轮只读诊断记录；tag27 未保留 route 时不反推"
+  },
+  "fixtures": {
+    "rec34-15.png": {
+      "sha256": "14eba7693a405a406806516f1e13f94a48997b06da0c4e62abf739abe50388eb",
+      "width": 2879,
+      "height": 1678
+    },
+    "rec35-16.png": {
+      "sha256": "22c30a4f50d706778ccebd30eccc6d1f949bdc9a956795f55b292bf41e871d4c",
+      "width": 2861,
+      "height": 1673
+    },
+    "rec37-18.png": {
+      "sha256": "4274b16a345b86fccc02b37aee8e3a074e1725b63403f64f8d87d85cfdc9350d",
+      "width": 2879,
+      "height": 1678
+    },
+    "rec39-18.png": {
+      "sha256": "9e84e23368534a2ed29c939a63ebaf556848ed931e03515d414a2253566f7f97",
+      "width": 2879,
+      "height": 1678
+    },
+    "rec40-24.png": {
+      "sha256": "0ebe975d8334060d10765a91aa83dc82cb716c71bd0d454dad614adb01a10584",
+      "width": 2867,
+      "height": 1682
+    }
+  },
+  "runs": [
+    {
+      "runId": "TAG26-ORIGINAL-7",
+      "version": "2.7.260813-26",
+      "intakeCommit": "22db0e4",
+      "pwrsCommit": "unavailable",
+      "deployment": {
+        "deployed": true,
+        "health": "ok",
+        "externalPromptCheck": "consultNormal safeDiagnostic=true",
+        "exactHealthPayload": "unavailable"
+      },
+      "browser": {
+        "visibleUi": true,
+        "newConversations": 5,
+        "questions": 7,
+        "firstTurnThumbnailVerified": true
+      },
+      "summary": {
+        "passed": 6,
+        "failed": 1,
+        "score": "6/7",
+        "failureIds": [
+          "TAG26-Q7"
+        ]
+      },
+      "results": [
+        {
+          "id": "TAG26-Q1",
+          "conversationId": "ZX-20260813-100",
+          "image": "rec35-16.png",
+          "question": "患者有4页医嘱，我切到第4页后重新筛选，为什么还停在第4页，现场应该怎么判断是不是分页问题？",
+          "route": "QR-ORDER-AUDIT-PAGINATION",
+          "inherited": false,
+          "rawDomAnswer": {
+            "status": "unavailable",
+            "text": null
+          },
+          "answerSummary": "回答将已确认的“保存后保持当前页、仅无有效数据时回退最后有效页”与未确认的“重新筛选是否重置页码”分开，并给出不改数据的请求参数和响应对照方法。",
+          "summaryIsVerbatim": false,
+          "manualEvaluation": {
+            "verdict": "PASS",
+            "reason": "已知事实边界正确，未知项局部限定；给了可执行、非破坏的现场核对动作，未虚构筛选重置规则。"
+          }
+        },
+        {
+          "id": "TAG26-Q2",
+          "conversationId": "ZX-20260813-100",
+          "image": "rec35-16.png",
+          "question": "我现场拿不到 spec，只有这张图。先怎么复现和留证，转开发前最少补哪些信息？",
+          "route": "QR-ORDER-AUDIT-PAGINATION",
+          "inherited": true,
+          "rawDomAnswer": {
+            "status": "unavailable",
+            "text": null
+          },
+          "answerSummary": "没有继续机械索要 Spec，而是按当前页码、筛选前后条件、同一次请求的参数与响应、时间点和脱敏截图整理最小复现与留证。",
+          "summaryIsVerbatim": false,
+          "manualEvaluation": {
+            "verdict": "PASS",
+            "reason": "遵守“只有图、拿不到 Spec”的用户边界，提供了实施可直接执行的最小诊断步骤。"
+          }
+        },
+        {
+          "id": "TAG26-Q3",
+          "conversationId": "ZX-20260813-101",
+          "image": "rec34-15.png",
+          "question": "这张用药咨询详情里，药师已经回复了内容。实施现场要确认哪些状态，才能判断患者端能看到这条回复？",
+          "route": "QR-MEDICAL-CONSULT-VISIBILITY",
+          "inherited": false,
+          "rawDomAnswer": {
+            "status": "unavailable",
+            "text": null
+          },
+          "answerSummary": "回答指出现有证据只覆盖医生与药师咨询，不能据此确认患者端查看能力；先核实实际终端、账号、页面和功能是否误认，并将真正患者端能力标为未知。",
+          "summaryIsVerbatim": false,
+          "manualEvaluation": {
+            "verdict": "PASS",
+            "reason": "没有把医生端能力外推到患者端，也没有编造患者可见状态或落库字段。"
+          }
+        },
+        {
+          "id": "TAG26-Q4",
+          "conversationId": "ZX-20260813-101",
+          "image": "rec34-15.png",
+          "question": "现在患者端确实看不到，但药师端显示已回复。先别让我找 spec，现场下一步最少查哪两处？",
+          "route": "QR-MEDICAL-CONSULT-VISIBILITY",
+          "inherited": true,
+          "rawDomAnswer": {
+            "status": "unavailable",
+            "text": null
+          },
+          "answerSummary": "先只读核对患者端是否发起对应请求，再区分无请求、请求失败、响应正常但页面未展示；同时保留时间点、账号终端和脱敏截图，不要求先找 Spec。",
+          "summaryIsVerbatim": false,
+          "manualEvaluation": {
+            "verdict": "PASS",
+            "reason": "给出了两处最小现场核查，未再要求 Spec，且未虚构 push_status、view、mark 等技术字段。"
+          }
+        },
+        {
+          "id": "TAG26-Q5",
+          "conversationId": "ZX-20260813-102",
+          "image": "rec37-18.png",
+          "question": "统计里这条医嘱干预只显示一行结果。实施怎么核对它和原始干预记录是不是同一条，先看哪些字段？",
+          "route": "QR-STAT-ORDER-AUDIT-DRILLDOWN",
+          "inherited": false,
+          "rawDomAnswer": {
+            "status": "unavailable",
+            "text": null
+          },
+          "answerSummary": "先对照规格已确认的患者、干预时间、状态、结果和人员等可见信息；若仍需唯一关联，则只读比较列表与详情请求中共同出现的稳定标识，不指定未经证据确认的字段名。",
+          "summaryIsVerbatim": false,
+          "manualEvaluation": {
+            "verdict": "PASS",
+            "reason": "正确路由到统计下钻并局部标明关联键未知，没有虚构 groupNo 或 audit 主键。"
+          }
+        },
+        {
+          "id": "TAG26-Q6",
+          "conversationId": "ZX-20260813-103",
+          "image": "rec39-18.png",
+          "question": "这个列表要批量录入医生采纳结果。实施现场最容易漏核对哪几个状态，什么情况下不该直接批量提交？",
+          "route": "DQ-009",
+          "inherited": false,
+          "rawDomAnswer": {
+            "status": "unavailable",
+            "text": null
+          },
+          "answerSummary": "回答覆盖可选记录资格、已完成/创建人、未选择、理由缺失和避免误覆盖等批量提交前检查，并明确不满足条件时不直接提交。",
+          "summaryIsVerbatim": false,
+          "manualEvaluation": {
+            "verdict": "PASS",
+            "reason": "批量采纳场景命中正确，已确认规则和安全提交边界完整。"
+          }
+        },
+        {
+          "id": "TAG26-Q7",
+          "conversationId": "ZX-20260813-104",
+          "image": "rec40-24.png",
+          "question": "医生端这张药物重整列表里有全部、已读、未读和星标。实施现场怎么验证这几个筛选真的生效，不只是页面数字变了？",
+          "route": "QR-ASSESS-DRUG-DOCTOR-INBOX",
+          "inherited": false,
+          "rawDomAnswer": {
+            "status": "unavailable",
+            "text": null
+          },
+          "answerSummary": "虽然识别了四个分组，但把切换页签未发新请求错误视为异常，并建议通过点开未读记录、切换星标等会改变业务状态的动作验证。",
+          "summaryIsVerbatim": false,
+          "manualEvaluation": {
+            "verdict": "FAIL",
+            "reason": "接口可在首次加载一次返回多个分组，页签允许前端本地过滤；逐页请求并非已确认契约，而且改变已读或星标状态违反只读、非破坏诊断原则。"
+          }
+        }
+      ]
+    },
+    {
+      "runId": "TAG27-FIXED-4",
+      "version": "2.7.260813-27",
+      "intakeCommit": "20c675b",
+      "pwrsCommit": "47b3668f",
+      "deployment": {
+        "deployed": true,
+        "backup": "consult-grouped-tabs-tag27-20260813-1845",
+        "health": {
+          "ok": true,
+          "projects": 3,
+          "intakes": 629,
+          "kb": 7
+        },
+        "runtimeChecks": [
+          "server.mjs node --check 通过",
+          "外置 prompts.json 可解析",
+          "consultNormal 与 consultDeep 均包含多分组本地过滤和只读诊断规则"
+        ]
+      },
+      "browser": {
+        "visibleUi": true,
+        "newConversations": 3,
+        "questions": 4,
+        "firstTurnThumbnailVerified": true,
+        "handoff": "复测结束后按官方插件规范保留当前标签页为 handoff",
+        "incident": "原 Q1 发送后旧已认领标签页连接超时；只读确认未重复发送，并从对话记录恢复同一答案后继续。"
+      },
+      "summary": {
+        "passed": 4,
+        "failed": 0,
+        "score": "4/4",
+        "fixedRegression": "TAG26-Q7"
+      },
+      "results": [
+        {
+          "id": "TAG27-Q1",
+          "conversationId": "ZX-20260813-105",
+          "image": "rec40-24.png",
+          "question": "医生端这张药物重整列表里有全部、已读、未读和星标。实施现场怎么验证这几个筛选真的生效，不只是页面数字变了？",
+          "route": "unavailable",
+          "inherited": false,
+          "rawDomAnswer": {
+            "status": "unavailable",
+            "text": null
+          },
+          "answerSummary": "明确首次列表接口可一次返回 all/read/unRead/mask，页签可以本地过滤，不要求逐页签产生请求；建议只读比较数量、成员集合及互斥/包含关系，并禁止点开未读或切换星标来验证。",
+          "summaryIsVerbatim": false,
+          "manualEvaluation": {
+            "verdict": "PASS",
+            "reason": "原 TAG26-Q7 的错误要求和有副作用动作均已消除，已知事实、局部边界和只读动作正确。",
+            "minorObservation": "回答提到刷新、重新进入或搜索可能触发请求；其中搜索是否存在未获保留证据，但不影响核心判定。"
+          }
+        },
+        {
+          "id": "TAG27-Q2",
+          "conversationId": "ZX-20260813-106",
+          "image": "rec40-24.png",
+          "question": "接口首次加载已经一次返回全部、已读、未读、星标四组，实施怎么只读核对每组数据和页面页签一致？",
+          "route": "unavailable",
+          "inherited": false,
+          "rawDomAnswer": {
+            "status": "unavailable",
+            "text": null
+          },
+          "answerSummary": "以首次响应为基线核对页面四组数量和成员集合，检查已读与未读互斥、星标可与读取状态重叠，全程不改变记录状态。",
+          "summaryIsVerbatim": false,
+          "manualEvaluation": {
+            "verdict": "PASS",
+            "reason": "正确覆盖首次加载多组和只读集合验证，没有强制逐页签请求。"
+          }
+        },
+        {
+          "id": "TAG27-Q3",
+          "conversationId": "ZX-20260813-107",
+          "image": "rec40-24.png",
+          "question": "我切换药物重整页签时 Network 没有新请求，这就说明筛选没生效吗？现场只能只读检查，别改状态。",
+          "route": "unavailable",
+          "inherited": false,
+          "rawDomAnswer": {
+            "status": "unavailable",
+            "text": null
+          },
+          "answerSummary": "明确回答没有新请求不等于筛选失效；先看首次响应是否已有四组，再只读比较页签数量、成员集合和分组关系，不打开未读、不切星标、不提交。",
+          "summaryIsVerbatim": false,
+          "manualEvaluation": {
+            "verdict": "PASS",
+            "reason": "自然变体下仍保持本地过滤和无副作用诊断规则。",
+            "minorObservation": "回答一处将 all 数量与 read+unRead 写成近似关系，后文对 all 包含两组及成员关系的说明正确。"
+          }
+        },
+        {
+          "id": "TAG27-Q4",
+          "conversationId": "ZX-20260813-107",
+          "image": "rec40-24.png",
+          "question": "换个问题：用药咨询详情里药师已经回复，但患者端看不到。现场先确认什么？不要沿用药物重整四组规则。",
+          "route": "unavailable",
+          "inherited": true,
+          "rawDomAnswer": {
+            "status": "unavailable",
+            "text": null
+          },
+          "answerSummary": "正确切换到用药咨询：现有证据只确认医生与药师咨询，患者端查看能力未知；先确认终端、账号、页面和功能，再只读区分无请求、请求失败、响应正常但未展示，并明确不沿用药物重整四组规则，也不编造接口、字段或状态。",
+          "summaryIsVerbatim": false,
+          "manualEvaluation": {
+            "verdict": "PASS",
+            "reason": "同会话显式切换新实体后没有继承上一实体的四组规则，事实门和安全诊断均未退化。"
+          }
+        }
+      ]
+    }
+  ],
+  "comparison": {
+    "tag26": "6/7，唯一失败是药物重整四组页签验证要求逐次请求并建议改变业务状态",
+    "tag27": "4/4，原题和三个自然变体均改为允许一次返回多组后的本地过滤，并采用数量、成员集合、互斥/包含关系的只读核对",
+    "regressionGuard": "只有明确接口契约证明切页应请求时才能要求逐次请求；否则不得据“无新请求”判定筛选失败，也不得通过改变已读、星标、采纳或提交状态来验证"
+  },
+  "limitations": [
+    "完整 DOM 回答正文在收尾时不可用，因此没有从摘要重建或伪造原文。",
+    "tag26 的 PWRS commit 未在现有证据中保留，标记为 unavailable。",
+    "tag27 的 route 未在现有证据中保留，标记为 unavailable；未根据题意反推路由。",
+    "本文件记录人工浏览器验收证据，不替代自动测试日志或业务人员最终验收。"
+  ]
+}
