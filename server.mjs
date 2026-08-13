@@ -888,12 +888,14 @@ function routeQuestion(map, query, subKey = '') {
 // 不读取、也不把上一条模型自由文本当证据。当前轮若明确切到另一个业务实体，当前 route 始终优先。
 function consultContextFollowupIntent(question) {
   const q = String(question || '').trim();
-  if (!q || q.length > 160) return false;
-  // 除代词式承接外，现场常用“第一步正常了/接口通了/下一步呢”汇报排查进度。
+  if (!q || q.length > 260) return false;
+  // 除代词式承接外，现场还会用“第一步正常了/接口通了/数据库没权限/只能靠页面/还缺什么”等
+  // 汇报排查进度或说明证据限制。这些都仍属于原主题，不能因为当前句只讲“我现在拿到什么”就丢掉已核事实。
   // 这里只判断是否值得尝试继承；contextualRouteQuestion 后续仍会用当前直达 route、显式新实体和高风险 UI 门阻止串话。
-  const anaphoric = /^(?:那|那么|这个|那个|它|刚才|上面|前面|所以|然后|还有|其中|该功能|该接口|该页面|回到|关于(?:刚才|上面|前面|这个|该)|针对(?:刚才|上面|前面|这个|该)|这(?:里|块|一段|一步)|刚才这(?:里|块|一段)|填完(?:以后|后)?|提交(?:完|后)|保存(?:完|后)|发送(?:完|后)|完成(?:后)?|药师想复核这次|医生想复核这次|现场想复核这次|复核这次)/i.test(q);
+  const anaphoric = /^(?:那|那么|这个|那个|它|刚才|上面|前面|所以|然后|还有|其中|该功能|该接口|该页面|回到|上午反馈(?:的)?|之前反馈(?:的)?|前次反馈(?:的)?|关于(?:刚才|上面|前面|这个|该)|针对(?:刚才|上面|前面|这个|该)|这(?:里|块|一段|一步)|刚才这(?:里|块|一段)|填完(?:以后|后)?|提交(?:完|后)|保存(?:完|后)|发送(?:完|后)|完成(?:后)?|药师想复核这次|医生想复核这次|现场想复核这次|复核这次|这次复测|复测(?:时|到|这里|这个))/i.test(q);
   const progress = /^(?:(?:第[一二三四五六七八九十\d]+步|前(?:一|两|几)步)(?:已经|也|都|先)?[^，。；]{0,36}(?:正常|完成|看过|查过|没发现异常|对上|没对上)|(?:接口|请求|响应)(?:已经|也|都|是)?[^，。；]{0,36}(?:正常|成功|通了|返回(?:也是|为)?\s*(?:HTTP\s*)?200)|(?:接下来|下一步|后面)(?:呢|怎么|查|看|做|先))/i.test(q);
-  return anaphoric || progress;
+  const partialEvidence = /(?:目前|现在|这次|现场)?(?:只能|只)(?:确认|看到|拿到|靠|看)|(?:数据库|日志|源码|后台)(?:这边)?(?:暂时)?(?:没|没有|拿不到|无)(?:权限|法)?(?:查|看|拿)|仅靠(?:页面|截图|接口|响应)|只靠(?:页面|截图|接口|响应)|还缺(?:什么|哪些)|缺(?:什么|哪些)(?:信息|证据)|先说(?:说)?能确定的部分|能先排除什么/i.test(q);
+  return anaphoric || progress || partialEvidence;
 }
 
 function contextualRouteQuestion(map, messages, currentQuestion, subKey = '') {
@@ -909,24 +911,43 @@ function contextualRouteQuestion(map, messages, currentQuestion, subKey = '') {
   }
   if (!previous) return direct;
   let prior = routeQuestion(map, previous, subKey);
-  // 连续多轮都只汇报“第一步看过了/下一步呢”时，中间句本身可能没有任何业务词。
-  // 只有中间句也是纯承接、且没有显式业务实体时，才向前寻找最近的已核 route；红色按钮/医嘱/患者等新实体会形成屏障。
+  // 连续多轮都只汇报排查进度/证据限制时，中间句本身可能没有足够词命中 route。
+  // 向前找“最近一个仍属于同主题的已核 route”：中间轮即使重复“配置/权限/反馈”等原主题实体也可跨越；
+  // 但只要中间轮已明确命中另一 route，或出现候选 route 完全不含的新实体，就形成主题屏障。
   if (!prior.matched && consultContextFollowupIntent(previous)) {
-    const interveningEntity = /按钮|菜单|医嘱|收费|监护|患教|反馈|药品|检验|体温单|权限|角色|token|登录|退出|登出|缓存|配置|模板|处方|病历|评估/i.test(previous);
-    if (!interveningEntity) {
-      for (let i = previousIndex - 1; i >= 0; i--) {
-        const candidateQuestion = String(users[i].content || '').trim();
-        if (!candidateQuestion) continue;
-        const candidate = routeQuestion(map, candidateQuestion, subKey);
-        if (candidate.matched) { prior = candidate; break; }
+    for (let i = previousIndex - 1; i >= 0; i--) {
+      const candidateQuestion = String(users[i].content || '').trim();
+      if (!candidateQuestion) continue;
+      const candidate = routeQuestion(map, candidateQuestion, subKey);
+      if (!candidate.matched) {
         if (!consultContextFollowupIntent(candidateQuestion)) break;
+        continue;
       }
+      const candidateId = String(candidate.route && candidate.route.id || '');
+      const candidateCard = (Array.isArray(map && map.questionRoutes) ? map.questionRoutes : []).find(r => String(r && r.id || '') === candidateId);
+      const candidateText = String(candidateCard && candidateCard.searchText || [candidateCard && candidateCard.title, ...((candidateCard && candidateCard.aliases) || []), ...((candidateCard && candidateCard.keywords) || [])].filter(Boolean).join(' ')).toLowerCase();
+      let blocked = false;
+      for (let j = i + 1; j <= previousIndex; j++) {
+        const bridgeQuestion = String(users[j].content || '').trim(); if (!bridgeQuestion) continue;
+        const bridgeRoute = routeQuestion(map, bridgeQuestion, subKey);
+        const bridgeId = String(bridgeRoute.route && bridgeRoute.route.id || '');
+        if (bridgeRoute.matched && bridgeId && bridgeId !== candidateId) { blocked = true; break; }
+        const bridgeEntities = bridgeQuestion.match(/按钮|菜单|医嘱|收费|监护|患教|反馈|药品|检验|体温单|权限|角色|token|登录|退出|登出|缓存|配置|模板|处方|病历|评估/ig) || [];
+        if (bridgeEntities.some(term => !candidateText.includes(term.toLowerCase()))) { blocked = true; break; }
+      }
+      if (!blocked) prior = candidate;
+      break;
     }
   }
   if (!prior.matched) return direct;
   const directId = String(direct.route && direct.route.id || '');
   const priorId = String(prior.route && prior.route.id || '');
-  if (direct.matched && directId === priorId) return direct;
+  if (direct.matched && directId === priorId) return {
+    ...direct,
+    inherited: true,
+    inheritedFromQuestion: previous.slice(0, 240),
+    factLedger: true,
+  };
 
   // “显式新实体”按当前 route 的地图关键词判断：当前问法命中了上一 route 未包含的判别词，视为切模块。
   // 排除列表/页面/数据/接口/排查等跨模块通用词，避免“那页面没数据”错误覆盖上一轮具体 route。
@@ -953,6 +974,7 @@ function contextualRouteQuestion(map, messages, currentQuestion, subKey = '') {
     score: Math.round((Number(prior.score) || 0) * 0.82 * 1000) / 1000,
     inherited: true,
     inheritedFromQuestion: previous.slice(0, 240),
+    factLedger: true,
     directCandidate: direct.matched ? { id: directId, title: direct.route && direct.route.title, score: direct.score } : null,
   };
 }
@@ -1553,7 +1575,8 @@ function consultSafeDiagnosticIntent(question) {
   const direct = /(?:现场(?:要|怎么)?复现|怎么复现|如何复现|复现(?:步骤|条件)|怎么排查|如何排查|先查什么|从哪查起|哪里出问题|怎么留证|如何留证|现场留证|转开发前|交给开发前|(?:最少|至少)(?:要|需)?(?:补|提供|收集|记录)(?:什么|哪些)|抓什么|需要什么证据|只有(?:一张)?图|只有截图|拿不到\s*spec|没有\s*spec|先别让我找\s*spec)/i.test(q);
   const symptom = /(?:列表为空|查不到|没数据|没有数据|一个都看不到|不显示|看不到|没反应|没变化|对不上|失败|异常|错误|页码|分页|筛选|保存后|患者端|医生端|药师端|详情|下钻)/i.test(q);
   const diagnosticAsk = /(?:怎么查|如何查|查什么|排查|复现|留证|补什么|提供什么|抓什么|确认什么|怎么判断|如何判断|怎么办|怎么处理|接下来|下一步)/i.test(q);
-  return direct || (symptom && diagnosticAsk);
+  const partialEvidence = /(?:目前|现在|这次|现场)?(?:只能|只)(?:确认|看到|拿到|靠|看)|(?:数据库|日志|源码|后台)(?:这边)?(?:暂时)?(?:没|没有|拿不到|无)(?:权限|法)?(?:查|看|拿)|仅靠(?:页面|截图|接口|响应)|只靠(?:页面|截图|接口|响应)|还缺(?:什么|哪些)|缺(?:什么|哪些)(?:信息|证据)|先说(?:说)?能确定的部分|能先排除什么/i.test(q);
+  return direct || partialEvidence || (symptom && diagnosticAsk);
 }
 
 function consultDiagnosticGuard(question, route) {
@@ -1563,7 +1586,7 @@ function consultDiagnosticGuard(question, route) {
   return [
     '【本轮是实施现场诊断问题】',
     hasFacts
-      ? `先说明本轮${route && route.inherited ? '从同会话上一轮继承的' : '命中的'} route 能确认的业务事实，并把它作为本轮判断基线；不能因为当前轮改问“下一步怎么查”就降级成“说明书未覆盖”。只把 route/当前召回证据未确认的细节局部标为未知，不得用已知部分推测未知部分。`
+      ? `先说明本轮${route && route.inherited ? '从同会话主题事实账本继承的' : '命中的'} route 能确认的业务事实，并把它作为本轮判断基线；用户说“数据库没权限/只靠页面/目前只能确认请求已发出/还缺什么/复测到这里”只是在说明本轮现场证据边界，不能抹掉 route/正文此前已确认的系统事实，也不能因此整体降级成“说明书未覆盖”。随后分开写“本轮现场已确认”“仍局部未知”；只把 route/当前召回证据未确认的细节局部标为未知，不得用已知部分推测未知部分。`
       : '当前没有足够正文证据确认具体业务规则、按钮、接口、字段、表或状态值；先把这个边界说清，但不能因此只机械索要 spec 或立即转开发。',
     '随后给 2~4 步观察型、非破坏的最小动作：确认实际终端/页面、账号角色、版本和复现前后条件；只观察本次操作是否发出请求，并记录浏览器实际显示的 URL、请求参数、HTTP/业务码与响应；按“没有请求 / 请求失败 / 响应正常但页面错误”分支判断；整理发生时间与脱敏截图。',
     '如果已知首次加载会一次返回多个分组，页签允许只在前端切换这些已有分组：不能要求每切一个页签都必须发新请求，也不能把没有新请求当成失效，除非正文/源码/接口契约明确要求逐页请求。优先只读对比首次响应的各组数量、成员集合以及各组互斥/包含关系；不得通过点开未读、切换已读、星标、审批或提交等改变业务状态的动作来验证。',
@@ -1572,16 +1595,29 @@ function consultDiagnosticGuard(question, route) {
   ].join('\n');
 }
 
+// 同主题事实账本：route/facts 每轮都从模块地图与正文重新装配，不持久化模型自由文本。
+// 部分证据、现场限制和复测问法只能收窄“本轮能观测到哪”，不能反向抹掉已核系统事实。
+function consultEvidenceLedgerGuard(question, route) {
+  if (!route || !route.matched || !consultContextFollowupIntent(question)) return '';
+  return [
+    '【同主题已核事实账本（持续基线）】',
+    '本轮 route 的 answerFacts、mustNotConfuse 与重新召回的正文/源码，是这个主题当前仍有效的事实账本。除非用户明确切到新实体，或提供了有证据的新事实与旧规则冲突，否则这些已核事实持续有效。',
+    '历史 assistant 的解释、示例、猜测和假设不进入账本；只能继承 route/spec/source 证据。本轮没有再次重复业务名，也不代表旧事实失效。',
+    '答复顺序固定为：①先陈述持续有效的已知规则；②再说明本轮现场已经确认到哪；③只把仍缺日志、数据库权限、具体处理路径等未覆盖细节局部标为未知；④给最少、非破坏的下一步。禁止把第③项扩大成“说明书未覆盖整个主题”。',
+    '“上午反馈/数据库无权限/只靠页面或响应/目前只能确认请求发出/还缺什么/复测到某一步”等表达，都是同主题的证据限制或进度，不是推翻事实账本的新证据。明确新实体或新主题仍以当前新 route 为准，旧账本不得串入。',
+  ].join('\n');
+}
+
 // 命中经确认业务规则后，先判断现场现象是不是规则本身的正常结果，再决定要不要调查。
 // 这不是放松证据门：只允许使用当前 route/specHits 的已核事实，不能把历史模型自由文本当证据。
 function consultRuleApplicationGuard(question, route) {
   if (!route || !route.matched) return '';
   const q = String(question || '').trim();
-  const applying = /(?:现场|复测|实际|现在|结果|提示|报错|不能|不让|失败|不行|对不上|没变化|没生效|看不到|暂存|待完成|刷新|想(?:改|删|完成|保存|操作)|还能|是否|先查|怎么查|怎么处理|接下来|下一步|权限|创建人|本人|别人|无权限|没权限|拿不到|抓什么|补什么)/i.test(q);
+  const applying = /(?:现场|复测|上午反馈|之前反馈|实际|现在|目前|结果|提示|报错|不能|不让|失败|不行|对不上|没变化|没生效|看不到|暂存|待完成|刷新|想(?:改|删|完成|保存|操作)|还能|是否|先查|怎么查|怎么处理|接下来|下一步|权限|创建人|本人|别人|无权限|没权限|拿不到|只能确认|只靠|仅靠|还缺什么|缺哪些|能确定的部分|能先排除什么)/i.test(q);
   if (!applying) return '';
   return [
     '【先应用已核规则，再决定是否诊断】',
-    `本轮已经${route.inherited ? '从同会话上一轮继承' : '命中'}有经确认事实的功能 route。route/当前召回证据中的已确认事实必须继续作为判断基线，不能因为用户改问排查步骤就说“说明书未覆盖”。先把用户描述的现象/想做的操作与这些事实比较：若规则已经能直接解释（例如终态本就不可编辑、非 owner 本就会被拒绝、缓存本就不会因普通刷新必然更新），先明确告诉实施“这是规则内的预期行为”及正确可行做法，不要用“当前资料无法确认”开头，也不要启动无意义的日志/ID/数据库调查。`,
+    `本轮已经${route.inherited ? '从同会话主题事实账本继承' : '命中'}有经确认事实的功能 route。route/当前召回证据中的已确认事实必须继续作为判断基线，不能因为用户改问排查步骤、说明数据库/日志无权限、只拿到页面或请求证据，就说“说明书未覆盖”或把整个主题改成未知。先把用户描述的现象/想做的操作与这些事实比较：若规则已经能直接解释（例如终态本就不可编辑、非 owner 本就会被拒绝、缓存本就不会因普通刷新必然更新），先明确告诉实施“这是规则内的预期行为”及正确可行做法，不要用“当前资料无法确认”开头，也不要启动无意义的日志/ID/数据库调查。`,
     '只有用户观察到的结果与已核规则冲突时，才按异常处理，并只索取能区分冲突分支的最少证据，说明在哪里取、拿到后怎么判断。',
     '如果用户只说“这一步对不上/还是不行”而没有讲清具体落在哪个分支，不得整体回复“当前资料无法确认”：先依据已核规则给出条件式结论（符合规则→这是预期、停止异常调查；与规则冲突→继续排查），再只追问一个能区分这两个分支的现象或字段。',
     '若当前轮出现新的明确业务实体，仍以当前 route 为准；不得沿用旧功能事实。历史 assistant 自由文本始终不是证据。',
@@ -3263,7 +3299,7 @@ const server = http.createServer((req, res) => {
       else {
         // PD-04：命中 mustNotConfuse → 作负向提示注入 system（易混淆项，勿臆造）。answerFacts 已在 specHits 顶段（consultSystem 走 specExcerpts）。
         const mncNote = routeMnc.length ? '\n【以下为该问题的易混淆项，请勿臆造、勿张冠李戴】' + routeMnc.map(x => '\n· ' + x).join('') : '';
-        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationMode) + '\n' + consultRuleApplicationGuard(qtext, route) + '\n' + consultDiagnosticGuard(qtext, route) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
+        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationMode) + '\n' + consultEvidenceLedgerGuard(qtext, route) + '\n' + consultRuleApplicationGuard(qtext, route) + '\n' + consultDiagnosticGuard(qtext, route) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
           piece = String(piece == null ? '' : piece); if (!piece) return;
           if (!kbInjected && kbRefs.length) { kbInjected = true; sse({ kb: kbRefs, kbInjected: true }); }
           reply += piece; sse({ v: piece });

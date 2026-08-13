@@ -664,6 +664,81 @@ test('真实PWRS地图回归：退出跳转已核事实跨多轮诊断持续生�
   assert.notEqual(switched.route?.id, 'DQ-001', '显式患者新实体不得继承退出route');
 });
 
+test('真实PWRS地图回归：Q30-Q33 配置作用域事实跨现场限制持续生效', { skip: !process.env.PWRS_REAL_MAP }, () => {
+  const S = buildRoutingSandbox(makeDeps());
+  const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
+  const questions = [
+    '改一条系统配置只会影响当前医院吗？',
+    '医院电话里只说“A 医院改了配置，B 医院看到的值也跟着变”。我应该先让他们做哪个验证？',
+    '医院配置隔离这一段，按这个顺序查到第二步就对不上了，后面先停还是继续？',
+    '刚才这个医院配置隔离问题，我目前只能确认请求发出去了，后端具体走到哪还不知道。你先说能确定的部分。',
+  ];
+  const messages = [];
+  for (const [index, question] of questions.entries()) {
+    messages.push({ role: 'user', content: question });
+    const hit = S.contextualRouteQuestion(map, messages, question, '');
+    assert.equal(hit.route?.id, 'DQ-012', `${question}，direct=${JSON.stringify(hit.directCandidate)}`);
+    assert.match(hit.answerFacts.join('\n'), /usercenter sys_config/);
+    assert.match(hit.answerFacts.join('\n'), /未按医院过滤/);
+    assert.match(hit.answerFacts.join('\n'), /影响共用(?:同一)? usercenter 的机构/);
+    if (index === 3) assert.equal(hit.inherited, true, '承接式部分证据轮应显式标记来自事实账本');
+    messages.push({ role: 'assistant', content: '这段助手文字可能含示例或假设，但不进入事实账本。' });
+  }
+});
+
+test('真实PWRS地图回归：配置、退出、反馈、权限的部分证据问法继承已核route，新实体仍切题', { skip: !process.env.PWRS_REAL_MAP }, () => {
+  const S = buildRoutingSandbox(makeDeps());
+  const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
+  const cases = [
+    {
+      routeId: 'DQ-012',
+      start: '改一条系统配置只会影响当前医院吗？',
+      follow: '上午反馈的配置串院问题，数据库没权限，只靠页面和接口响应，能先排除什么？',
+      facts: /未按医院过滤/,
+    },
+    {
+      routeId: 'DQ-001',
+      start: 'PWRS 退出以后应该跳到哪个地址？',
+      follow: '这次复测只看到页面地址，后端日志拿不到，还缺什么？',
+      facts: /getPortalDomain\(\)[\s\S]*\/login/,
+    },
+    {
+      routeId: 'QR-FEEDBACK-SEND-DEDUP',
+      start: '药师反馈发出去以后还能改正文或删除吗？',
+      follow: '上午反馈的锁定问题，数据库无权限，只靠页面能先排除什么？',
+      facts: /发送后正文锁定/,
+    },
+    {
+      routeId: 'QR-LOGIN-PERMISSION',
+      start: '我看不到某个菜单，是不是后台接口也一定返回403？',
+      follow: '刚才菜单和接口权限这块，我目前只能确认请求发出了，复测还缺什么？',
+      facts: /菜单不可见不能推出后端接口一定 403/,
+    },
+  ];
+  for (const item of cases) {
+    const hit = S.contextualRouteQuestion(map, [
+      { role: 'user', content: item.start },
+      { role: 'assistant', content: '假设后端使用 fake_table；该模型猜测不得继承。' },
+      { role: 'user', content: item.follow },
+    ], item.follow, '');
+    assert.equal(hit.route?.id, item.routeId, `${item.follow}，direct=${JSON.stringify(hit.directCandidate)}`);
+    assert.equal(hit.inherited, true);
+    assert.match(hit.answerFacts.join('\n'), item.facts);
+    assert.doesNotMatch(hit.answerFacts.join('\n'), /fake_table/, 'assistant 自由文本不能写入route事实');
+  }
+
+  const switchedQuestion = '换个问题，药师反馈发送后正文还能改吗？';
+  const switched = S.contextualRouteQuestion(map, [
+    { role: 'user', content: '改一条系统配置只会影响当前医院吗？' },
+    { role: 'assistant', content: '配置主题结束。' },
+    { role: 'user', content: '刚才配置我只看到请求发出，后端日志没权限查。' },
+    { role: 'assistant', content: '仍不把自由文本当证据。' },
+    { role: 'user', content: switchedQuestion },
+  ], switchedQuestion, '');
+  assert.equal(switched.route?.id, 'QR-FEEDBACK-SEND-DEDUP');
+  assert.notEqual(switched.route?.id, 'DQ-012');
+});
+
 test('AC-2 tier-1 关键词 IDF 打分命中（无整串别名，纯关键词重叠）', () => {
   const S = buildRoutingSandbox(makeDeps());
   const r = S.routeQuestion(FIXTURE_MAP, '医嘱干预的时候说明书地址在哪里配置', '');

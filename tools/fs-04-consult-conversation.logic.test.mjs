@@ -125,7 +125,9 @@ test('实施诊断守卫在 route 命中或缺失时都给安全最小留证，�
   const text = fn('那页面一个患者都看不到，实施现场先查什么？', { matched: true });
   assert.match(text, /命中的 route 能确认的业务事实/);
   assert.match(text, /作为本轮判断基线/);
-  assert.match(text, /不能因为当前轮改问“下一步怎么查”就降级成“说明书未覆盖”/);
+  assert.match(text, /不能抹掉 route\/正文此前已确认的系统事实/);
+  assert.match(text, /不能因此整体降级成“说明书未覆盖”/);
+  assert.match(text, /本轮现场已确认.*仍局部未知/);
   assert.match(text, /2~4 步观察型、非破坏/);
   assert.match(text, /没有请求 \/ 请求失败 \/ 响应正常但页面错误/);
   assert.match(text, /不得编造按钮名、接口路径、字段名、数据库表、状态值/);
@@ -149,7 +151,7 @@ test('实施诊断守卫在 route 命中或缺失时都给安全最小留证，�
   assert.equal(intent('密码最少要几位？'), false, '业务取值中的“最少要”不是现场诊断意图');
 
   const inherited = fn('接口是通的，返回也是 200，但页面没变化，下一步看哪？', { matched: true, inherited: true });
-  assert.match(inherited, /从同会话上一轮继承的 route/);
+  assert.match(inherited, /从同会话主题事实账本继承的 route/);
   assert.match(inherited, /只把.*未确认的细节局部标为未知/);
 });
 
@@ -173,11 +175,30 @@ test('已核规则应用守卫：先判预期行为，冲突时才收最少证�
     assert.match(text, /只追问一个/);
     assert.match(text, /历史 assistant 自由文本始终不是证据/);
     assert.match(text, /已确认事实必须继续作为判断基线/);
-    assert.match(text, /不能因为用户改问排查步骤就说“说明书未覆盖”/);
+    assert.match(text, /不能因为用户改问排查步骤.*就说“说明书未覆盖”/);
   }
 
   const inherited = fn('第一步看过了，下一步呢？', { matched: true, inherited: true });
-  assert.match(inherited, /从同会话上一轮继承/);
+  assert.match(inherited, /从同会话主题事实账本继承/);
+});
+
+test('同主题事实账本只继承 route/spec/source，部分现场证据不能抹掉已核事实', () => {
+  const intent = new Function(extractFn(SRC, 'consultContextFollowupIntent') + '\nreturn consultContextFollowupIntent;')();
+  const fn = new Function('consultContextFollowupIntent', extractFn(SRC, 'consultEvidenceLedgerGuard') + '\nreturn consultEvidenceLedgerGuard;')(intent);
+  for (const q of [
+    '上午反馈的问题，数据库没权限查，只靠页面还能先排除什么？',
+    '目前只能确认请求发出去了，复测还缺什么？',
+    '这次仅靠接口响应，先说能确定的部分。',
+  ]) {
+    const text = fn(q, { matched: true, inherited: true });
+    assert.match(text, /同主题已核事实账本/);
+    assert.match(text, /历史 assistant 的解释、示例、猜测和假设不进入账本/);
+    assert.match(text, /只能继承 route\/spec\/source 证据/);
+    assert.match(text, /先陈述持续有效的已知规则/);
+    assert.match(text, /禁止把第③项扩大成“说明书未覆盖整个主题”/);
+  }
+  assert.equal(fn('患者接口是什么？', { matched: false }), '');
+  assert.equal(fn('患者接口是什么？', { matched: true }), '', '非同主题追问不注入账本守卫');
 });
 
 test('模糊的“第二步对不上”仍须先给规则条件分支，不能退回整体拒答', () => {
@@ -197,6 +218,7 @@ test('模糊的“第二步对不上”仍须先给规则条件分支，不能�
 test('consult prompt 同时注入规则应用与现场诊断，且规则应用在诊断前', () => {
   const call = SRC.match(/consultSystem\(proj, cver, hits, specHits, codeHits, qtext\)[\s\S]{0,900}?messages: msgs/);
   assert.ok(call, '应定位 consult 模型调用');
+  assert.ok(call[0].indexOf('consultEvidenceLedgerGuard') < call[0].indexOf('consultRuleApplicationGuard'));
   assert.ok(call[0].indexOf('consultRuleApplicationGuard') < call[0].indexOf('consultDiagnosticGuard'));
 });
 
@@ -207,4 +229,5 @@ test('安全诊断意图绕过机械 miss，但普通无证据事实题仍保持
   assert.match(route, /const safeDiagnostic = consultSafeDiagnosticIntent\(qtext\)/);
   assert.match(route, /const noAnswer = !conversationMode && !safeDiagnostic && routeMiss && specNoSpec/);
   assert.match(route, /consultDiagnosticGuard\(qtext, route\)/);
+  assert.match(route, /consultEvidenceLedgerGuard\(qtext, route\)/);
 });
