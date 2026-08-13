@@ -428,7 +428,7 @@
           "title": "咨询答疑 Spec 完整目录路由→候选正文 Top5 两阶段召回，并隔离当前问题与历史其它模块事实",
           "status": "doing",
           "specRef": "FS-04",
-          "note": "已实现、推送并部署生产，待用户验收：通用完整目录→候选文件→正文片段召回、概念归一、当前轮实体优先、answerFacts+全文底座与无证据门控均已落地；生产大地图spawnSync缓冲故障已修。Qwen-Max严格200题tag12 198/200=99.0%仅作历史证据。当前生产实际Grok 4.5已在tag16完成患者列表部分证据专项：9个单轮自然问法9/9、同会话追问3/3、新对话无证据1/1，均从生产MySQL持久记录复核；浏览器tag16验收由主流程继续。证据见docs/reviews/PWRS-SPEC-GROK-4.5-PARTIAL-EVIDENCE-20260813.md。未改库/KB/PWRS业务代码，task保持doing/accept=wait。"
+          "note": "已实现、推送并部署生产，待用户验收：两阶段召回、局部证据、对话意图与解决率优先均已落地。Qwen-Max严格200题tag12 198/200仅作历史证据；当前生产Grok 4.5 tag21承接型现场诊断API 13/13、浏览器3/3、自动回归62/62通过。只继承已验证route/facts，显式新实体覆盖，无证据不猜；PWRS业务代码/数据库未改。证据见docs/reviews/PWRS-SPEC-GROK-4.5-PARTIAL-EVIDENCE-20260813.md，task保持doing/accept=wait。"
         }
       ]
     }

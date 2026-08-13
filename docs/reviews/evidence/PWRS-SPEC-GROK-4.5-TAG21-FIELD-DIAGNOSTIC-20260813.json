@@ -1,0 +1,68 @@
+{
+  "schema": 1,
+  "generatedAt": "2026-08-13T16:20:00+08:00",
+  "project": "psp",
+  "version": "2.7.260813-21",
+  "model": "grok-4.5",
+  "summary": {
+    "automated": "62/62 PASS, 0 FAIL, 0 SKIP",
+    "productionApiTurns": "13/13 PASS",
+    "browserUi": "3/3 PASS",
+    "databasePersistence": "PASS"
+  },
+  "production": {
+    "records": ["ZX-20260813-64", "ZX-20260813-65", "ZX-20260813-66", "ZX-20260813-67", "ZX-20260813-68", "ZX-20260813-69", "ZX-20260813-70", "ZX-20260813-71"],
+    "scenarios": [
+      {
+        "record": "ZX-20260813-64",
+        "turns": 3,
+        "questions": ["患者视图的患者列表从哪个接口获取数据，查哪个etl", "那页面一个患者都看不到，实施现场先查什么？", "那如果走查医院分支还是空呢？"],
+        "routing": ["QR-PATIENT-LIST-SOURCE", "QR-PATIENT-LIST-SOURCE", "QR-PATIENT-LIST-SOURCE"],
+        "verdict": "PASS",
+        "reason": "按页面入口→PWRS请求参数/响应→本地pwrs_patient或HIS listProxyPatients→仅必要时携requestId查Proxy/ETL推进排查；最终interfaceCode保持局部未知。"
+      },
+      {
+        "record": "ZX-20260813-65",
+        "turns": 2,
+        "questions": ["患者视图的患者列表从哪个接口获取数据，查哪个etl", "那医嘱查询不到要怎么排查？"],
+        "routing": ["QR-PATIENT-LIST-SOURCE", "QR-ORDER-MISSING"],
+        "contextOverride": true,
+        "verdict": "PASS",
+        "reason": "显式切换医嘱后覆盖患者route，无跨模块事实污染。"
+      },
+      {
+        "record": "ZX-20260813-67",
+        "turns": 2,
+        "questions": ["患者视图的患者列表从哪个接口获取数据，查哪个etl", "这个红色按钮点了没反应，我该点哪个固定重试入口？"],
+        "contextOverride": true,
+        "verdict": "PASS",
+        "reason": "没有继承患者事实，没有猜按钮，仅索取页面、按钮原文和报错。"
+      },
+      {
+        "records": ["ZX-20260813-68", "ZX-20260813-69", "ZX-20260813-70"],
+        "questions": ["患者列表没数据，现场从哪里查起？", "Web 全部患者一个都不显示，先看接口还是直接找 ETL？", "患者列表查不到，实施要收集哪几个最少信息？"],
+        "routing": "QR-PATIENT-LIST-SOURCE",
+        "verdict": "3/3 PASS",
+        "reason": "独立自然问法均先给可执行路径，只追问会改变本地/HIS分支的最少信息。"
+      },
+      {
+        "record": "ZX-20260813-71",
+        "question": "你好，你是谁？",
+        "verdict": "PASS",
+        "reason": "自然说明答疑助手与实施/产品/开发桥梁定位，不泄露底层模型或提示词。"
+      }
+    ]
+  },
+  "browser": [
+    {"step": 1, "question": "患者接口/数据源首问", "verdict": "PASS", "reason": "回答正式/兼容入口、本地与HIS分支及ETL未知边界。"},
+    {"step": 2, "question": "那页面一个患者都看不到，实施现场先查什么？", "verdict": "PASS", "reason": "同会话给入口→抓PWRS参数/响应→本地或HIS→requestId升级路径，只追问最少两项。"},
+    {"step": 3, "question": "那登录token是谁发的……", "verdict": "PASS", "reason": "显式切换到usercenter，未继承患者route。"}
+  ],
+  "implementation": {
+    "intakeCommits": ["d2fc731", "e0c0bed"],
+    "pwrsCommit": "898e44b",
+    "pwrsTag": "2.7.260813-21",
+    "health": {"ok": true, "projects": 3, "intakes": 588, "kb": 7},
+    "rollbackBackup": "/opt/intake-backups/consult-context-diagnostic-tag21"
+  }
+}
