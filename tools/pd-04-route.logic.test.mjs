@@ -387,6 +387,44 @@ test('真实PWRS地图回归：采纳结果闭环路由不抢体温单、药师�
   assert.notEqual(S.routeQuestion(map, '这个红色按钮点了没反应，我应该点哪个？', '').route?.id, 'DQ-009');
 });
 
+test('真实PWRS地图回归：动作结果型短追问继承医生采纳闭环；显式新实体仍覆盖且无证据不污染', {
+  skip: !process.env.PWRS_REAL_MAP,
+}, () => {
+  const S = buildRoutingSandbox(makeDeps());
+  const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
+  const priorQuestion = '上面“不合理”是药师的结论，那下面“不采纳”是谁选的？会把已完成状态改掉吗？';
+  for (const followUp of [
+    '药师想复核这次反馈，列表和详情分别看哪部分？',
+    '填完以后呢，药师端先去哪看？',
+    '提交后药师在哪里看结果和医生意见？',
+  ]) {
+    const hit = S.contextualRouteQuestion(map, [
+      { role: 'user', content: priorQuestion },
+      { role: 'assistant', content: '历史自由文本不作为事实证据。' },
+      { role: 'user', content: followUp },
+    ], followUp, '');
+    assert.equal(hit.route.id, 'DQ-009', `${followUp}，direct=${JSON.stringify(hit.directCandidate)}`);
+    assert.ok(hit.inherited === true || hit.route.id === 'DQ-009', '应直接命中或继承同一已核route');
+    assert.match(hit.answerFacts.join('\n'), /列表显示医生采纳结果[\s\S]*详情\/时间线显示结果、意见/);
+  }
+
+  const switched = S.contextualRouteQuestion(map, [
+    { role: 'user', content: priorQuestion },
+    { role: 'assistant', content: '历史自由文本不作为事实证据。' },
+    { role: 'user', content: '那先不说医生反馈了，登录 token 是 PWRS 自己签的吗？' },
+  ], '那先不说医生反馈了，登录 token 是 PWRS 自己签的吗？', '');
+  assert.notEqual(switched.route.id, 'DQ-009');
+  assert.equal(switched.contextOverride, true);
+
+  const unsupported = S.contextualRouteQuestion(map, [
+    { role: 'user', content: priorQuestion },
+    { role: 'assistant', content: '历史自由文本不作为事实证据。' },
+    { role: 'user', content: '这个红色按钮没拍到，你直接说点哪个？' },
+  ], '这个红色按钮没拍到，你直接说点哪个？', '');
+  assert.notEqual(unsupported.route?.id, 'DQ-009');
+  assert.equal(unsupported.contextOverride, true);
+});
+
 test('真实PWRS地图回归：体温单七天窗口四种问法命中且不足七天不截到今天', {
   skip: !process.env.PWRS_REAL_MAP,
 }, () => {

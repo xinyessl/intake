@@ -889,7 +889,9 @@ function routeQuestion(map, query, subKey = '') {
 function contextualRouteQuestion(map, messages, currentQuestion, subKey = '') {
   const current = String(currentQuestion || '').trim();
   const direct = routeQuestion(map, current, subKey);
-  const contextual = /^(?:那|那么|这个|那个|它|刚才|上面|前面|所以|然后|还有|其中|该功能|该接口|该页面)/i.test(current);
+  // 除代词式承接外，也覆盖“动作完成后/复核这次结果”这类现场短追问：它们常不重复业务实体，
+  // 但语义明确要求沿用上一轮已核 route。这里只扩大候选，后面的显式新实体门仍可阻止串话。
+  const contextual = /^(?:那|那么|这个|那个|它|刚才|上面|前面|所以|然后|还有|其中|该功能|该接口|该页面|填完(?:以后|后)?|提交(?:完|后)|保存(?:完|后)|发送(?:完|后)|完成(?:后)?|药师想复核这次|医生想复核这次|现场想复核这次|复核这次)/i.test(current);
   if (!contextual || current.length > 160) return direct;
   const users = (Array.isArray(messages) ? messages : []).filter(m => m && m.role === 'user' && String(m.content || '').trim());
   let previous = '';
@@ -914,15 +916,16 @@ function contextualRouteQuestion(map, messages, currentQuestion, subKey = '') {
   // 当前轮即使没路由成功，只要显式出现上一轮没有的新业务实体，也不能继承旧 route。
   // 例如患者列表后问“这个红色按钮点哪个”：按钮实体没有证据，应保持 miss，不能被“这个”污染成患者事实。
   const entityTerms = current.match(/按钮|菜单|医嘱|收费|监护|患教|反馈|药品|检验|体温单|权限|角色|token|登录|缓存|配置|模板|处方|病历|评估/ig) || [];
+  const highRiskUiUnknown = entityTerms.some(term => /^(?:按钮|菜单)$/.test(term) && !previous.toLowerCase().includes(term.toLowerCase()));
+  if (highRiskUiUnknown) return { ...direct, contextOverride: true, contextPreviousRouteId: priorId };
   const explicitUnknownEntity = entityTerms.some(term => !previous.toLowerCase().includes(term.toLowerCase()) && !priorText.includes(term.toLowerCase()));
   if (explicitUnknownEntity && !direct.matched) return { ...direct, contextOverride: true, contextPreviousRouteId: priorId };
   const discriminator = ((directCard && directCard.keywords) || []).map(x => String(x || '').trim()).filter(x => x.length >= 2 && !generic.has(x));
   const explicitSwitch = direct.matched && directId && directId !== priorId && discriminator.some(term => current.toLowerCase().includes(term.toLowerCase()) && !priorText.includes(term.toLowerCase()));
   if (explicitSwitch) return { ...direct, contextOverride: true, contextPreviousRouteId: priorId };
 
-  // 专用 QR 优先于当前轮仅凭“没数据/怎么排查”等通用诊断词命中的 DQ；继承分仅用于诊断展示。
-  // 若当前已经命中另一个专用 QR，则尊重当前轮，防跨模块串话。
-  if (direct.matched && directId.startsWith('QR-')) return { ...direct, contextOverride: true, contextPreviousRouteId: priorId };
+  // 进入本分支说明当前问法已属于承接型短追问；显式新实体/切模块已在上方先行返回。
+  // 因此即便短句被泛化 QR/DQ 抢到，也应复用上一轮已核 route，而不是让弱当前词覆盖上下文事实。
   return {
     ...prior,
     score: Math.round((Number(prior.score) || 0) * 0.82 * 1000) / 1000,
