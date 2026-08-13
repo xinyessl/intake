@@ -216,6 +216,53 @@ test('真实PWRS地图回归：患者产品身份键与Proxy路由字段不混�
   }
 });
 
+test('真实PWRS地图回归：患者列表接口、数据源与ETL局部未知走专用QR', {
+  skip: !process.env.PWRS_REAL_MAP,
+}, () => {
+  const S = buildRoutingSandbox(makeDeps());
+  const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
+  for (const question of [
+    '患者视图的患者列表从哪个接口获取数据，查哪个etl',
+    '患者视图列表调用什么接口？后面查哪个 ETL？',
+    'Web 患者列表的数据来源和 ETL interfaceCode 是什么？',
+    '患者列表是查 PWRS 本地表还是查 HIS？',
+    '查自己和查医院分别走什么数据源？',
+    'POST /pwrsapi/patients/search 后面调用哪个服务？',
+    '患者视图的数据最终来自 V_IPT_PATIENT 吗？',
+    '全部患者列表查哪个接口、哪张表？',
+    '患者列表的 Controller、Service、Proxy 调用链是什么？',
+  ]) {
+    const hit = S.routeQuestion(map, question, '');
+    assert.equal(hit.route.id, 'QR-PATIENT-LIST-SOURCE', `${question}，topN=${JSON.stringify(hit.topN)}`);
+    assert.match(hit.answerFacts.join('\n'), /POST \/pwrsapi\/patients\/search/);
+    assert.match(hit.answerFacts.join('\n'), /pwrs_patient[\s\S]*listProxyPatients/);
+    assert.match(hit.mustNotConfuse.join('\n'), /不得仅凭 V_IPT_PATIENT.*interfaceCode/);
+  }
+  const repoPath = path.resolve(path.dirname(process.env.PWRS_REAL_MAP), '..', '..');
+  const project = { id: 'pwrs', repoPath };
+  const worktreeDeps = {
+    safeRef: () => '',
+    specSources: proj => [{ sub: '', repoPath: proj.repoPath }],
+    specFileText: (repo, ref, rel) => fs.readFileSync(path.join(repo, rel), 'utf8'),
+  };
+  const W = buildRoutingSandbox(worktreeDeps);
+  const loadedMap = W.loadModuleMap(project, '');
+  const routed = W.routeQuestion(loadedMap, '患者视图的患者列表从哪个接口获取数据，查哪个etl', '');
+  const context = W.loadRouteContext(project, '', routed, 7);
+  assert.match(context.specHits[0].text, /人工整理的经确认事实[\s\S]*页面先调用 PWRS 患者列表接口/);
+  assert.match(context.specHits.map(item => item.text).join('\n'), /患者视图列表接口、数据源与 ETL 证据边界/);
+});
+
+test('真实PWRS地图回归：患者数据源QR不抢患者身份DQ、检验ETL或完全无证据问法', {
+  skip: !process.env.PWRS_REAL_MAP,
+}, () => {
+  const S = buildRoutingSandbox(makeDeps());
+  const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
+  assert.equal(S.routeQuestion(map, '两个院区有相同 patientId 和 visitId，页面该怎么避免串人？', '').route.id, 'DQ-003');
+  assert.equal(S.routeQuestion(map, '检验报告存在但小项搜不到，ETL 应查哪个接口？', '').route.id, 'DQ-005');
+  assert.notEqual(S.routeQuestion(map, '这个红色按钮没反应，该点哪个固定重试入口？', '').route?.id, 'QR-PATIENT-LIST-SOURCE');
+});
+
 test('真实PWRS地图回归：体温单七天窗口四种问法命中且不足七天不截到今天', {
   skip: !process.env.PWRS_REAL_MAP,
 }, () => {
