@@ -1,0 +1,160 @@
+{
+  "schema": "pwrs-spec-grok-browser-evidence/v1",
+  "generatedAt": "2026-08-13T22:20:00+08:00",
+  "product": "pwrs",
+  "model": "grok-4.5",
+  "version": "2.7.260813-32",
+  "environment": "production",
+  "commits": {
+    "intake": "0f88fc3",
+    "pwrs": "eb9c27fa"
+  },
+  "deployment": {
+    "target": "125.122.34.110",
+    "backup": "/opt/intake-backups/tag32-20260813-2205",
+    "health": {
+      "httpStatus": 200,
+      "body": {
+        "ok": true,
+        "projects": 3,
+        "intakes": 654,
+        "kb": 7
+      }
+    },
+    "promptConfig": {
+      "consultNormalFileArtifactRule": true,
+      "consultDeepFileArtifactRule": true
+    },
+    "runtimeFileArtifactGuard": true
+  },
+  "browser": {
+    "surface": "Official Chrome Browser Plugin",
+    "visibleUI": true,
+    "url": "http://intake.lcpharmacy.cn/field.html",
+    "system": "药师工作站",
+    "newConversationIsolationChecked": true,
+    "note": "全程在用户当前登录 Chrome 的可见实施端逐题发送并等待完整 DOM；未以独立 Playwright 或 HTTP API 作为答题来源。浏览器 DOM 未公开 convId、route、inherited，按 unavailable 记录。"
+  },
+  "summary": {
+    "total": 9,
+    "pass": 9,
+    "fail": 0
+  },
+  "sessions": [
+    {
+      "id": "TAG32-C012",
+      "fixtureConversationId": "C012",
+      "questions": [
+        "Q0066",
+        "Q0067",
+        "Q0068",
+        "Q0069"
+      ],
+      "browserConversationId": "unavailable"
+    },
+    {
+      "id": "TAG32-VARIANTS",
+      "fixtureConversationId": "not_applicable",
+      "questions": [
+        "V1-200-JSON",
+        "V2-DOCX-MAGIC",
+        "V3-PDF-DOCX-STRUCTURE",
+        "V4-CORRECT-FILE",
+        "V5-EXPLICIT-SWITCH"
+      ],
+      "browserConversationId": "unavailable"
+    }
+  ],
+  "cases": [
+    {
+      "id": "Q0066",
+      "session": "TAG32-C012",
+      "question": "导出接口返回 200 就算成功了吗？",
+      "rawAnswer": "AI\n\n不算。 导出接口返回 HTTP 200，只说明传输层通了，不能单独证明文件有效/导出成功。\n\n必须下载并验证文件本体，按下面顺序只读核对；任一层失败都判失败：\n\n先确认响应体是真正的文件字节\n不是伪装成 200 的 JSON 错误体、HTML 错误页。\n正常：响应内容是二进制文件流；不正常：打开后是 {code:xxx, msg:...} 或报错页面。\n文件长度 > 0\n零字节直接失败。\nmagic/文件签名 与 扩展名、Content-Type/MIME 一致\n例如扩展名是 .docx 但签名不是 ZIP 类，判失败。\n具体格式未知时，先看实际文件名、扩展名和 MIME，再按真实声明格式验，不要硬猜。\n结构可解析\nPDF：至少有可识别 header、EOF/xref，且能被结构解析器解析。\nDOCX/XLSX/ZIP：至少 central directory 与必要 entries 可解析。\n“某个软件能打开”只说明阅读器容错，不能替代签名和结构检查。\n抽检正文/业务内容正确\n不是空壳、错误页、缺关键内容或错数据。\n\n现场可执行核对（用已有请求/已下载文件，只读）：\n\n固定同环境、同入口、同筛选、同一条已有记录，保存本次响应类型、状态码、响应体/文件、大小、错误提示。\n用文本/十六进制工具或结构检查工具按上面 1～5 层逐项看。\n若换账号后正常：只读对比两边权限/数据范围/模板上下文，以及两边文件的响应类型、字节、签名、结构、正文——不要改权限、模板或业务数据来验证。\n\n补充说明（现状）：\n\n部分 Excel 分支会吞异常，仍可能返回 200。\n患教 Word 等当前实现也不等于返回可用文件。\n仅看 code=0、Content-Disposition、非空或能打开，都不能定成功。\n\n若你已有一份具体导出的响应头 + 文件（或截图/大小/打开报错），发过来可继续帮你判断卡在哪一层；需要开发介入时再整理成工单。",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "PASS",
+      "reason": "明确200非充分，覆盖错误体、字节、magic/MIME、PDF/DOCX/XLSX/ZIP结构、正文与只读账号对比"
+    },
+    {
+      "id": "Q0067",
+      "session": "TAG32-C012",
+      "question": "先不转开发，“导出请求是 200，下载下来的文件却打不开”这个问题实施还能怎么往下定位？",
+      "rawAnswer": "AI\n\n结论先说：\n导出请求 HTTP 200 只说明传输通了，不能说明文件可用。\n“下载下来打不开”时，实施可以只用已经拿到的那份文件 + 当时的请求/响应，按下面固定顺序做只读核对，不用改权限、模板、业务数据，也不用再触发新导出。任一层过不了，都能定位到“坏在响应体 / 长度 / 签名 / 结构 / 正文”哪一层，再决定要不要升级。\n\n实施可直接照着做的只读定位（用已有文件）\n先确认“200 的响应体到底是不是文件字节”\n用文本编辑器或十六进制工具打开已下载的文件（或浏览器开发者工具里保存的 response body）。\n正常：一堆乱码/二进制，开头有文件特征。\n不正常：开头是 {、[、code、msg、html、错误页面文字——说明 200 里装的是 JSON/HTML 错误体，文件根本没生成成功。\n同时记下：实际 Content-Type、Content-Disposition 里的文件名/扩展名、文件大小（字节数）。\n核对长度是否 > 0\n看本地文件属性或下载时的字节数。\n0 字节 → 直接判失败（空文件）。\n有大小但很小（比如只有几百字节）→ 高度怀疑是错误体或空壳，继续下一步。\n核对 magic/文件签名 与 扩展名、MIME 是否一致\n先看实际文件名扩展名 + 响应里的 Content-Type。\n用十六进制看文件头几个字节（常见特征）：\nDOCX/XLSX/ZIP 一般以 PK（50 4B）开头\nPDF 一般以 %PDF 开头\n扩展名是 .docx 但签名不是 ZIP 类、或扩展名与 MIME 明显对不上 → 判失败。\n格式未知时：只按“实际文件名 + 扩展名 + MIME”去验，不要硬猜它一定是 PDF 或 Word。\n按真实声明格式做结构完整性检查\n如果声明是 PDF：至少能识别 header、有 EOF/xref，且能被 PDF 结构工具解析。缺 EOF 或 xref 损坏 → 失败。\n如果声明是 DOCX/XLSX/ZIP：至少 central directory 可解析，并有必要 entries（DOCX 如 [Content_Types].xml、word/document.xml；XLSX 如 [Content_Types].xml、xl/workbook.xml）。\n“某个软件勉强能打开”只能说明阅读器容错，不能替代这一步。结构过不了就判损坏。\n抽检正文/业务内容\n结构过了之后，再打开看：是不是空白、只有错误提示、缺关键业务字段、内容明显错位。\n空壳或错数据 → 仍判失败（生成链路或模板问题）。\n若换账号后正常：只做同条件只读对比（不要改任何配置）\n固定：同一环境、同一入口、同一筛选条件、同一条已有记录。\n分别保存两边的：响应类型（是文件流还是 JSON）、字节数、magic、结构能否解析、正文抽检结果。\n再只读对比：账号权限/数据范围/模板上下文差异。\n同条件下一边坏一边好 → 更像账号上下文/模板/数据范围影响；两边签名或结构都坏 → 更像文件生成/下载链本身。\n禁止为了验证去改权限、模板或业务数据。\n每步怎么判断、怎么留证\n任一层失败 → 这一层就是当前定位结果（例如：“200 但响应体是 JSON 错误体”“签名与扩展名不符”“PDF 缺 EOF”）。\n把下面这些原样保存（脱敏后）：\n请求 URL、参数、HTTP 状态、业务 code（如有）\n响应头（Content-Type、Content-Disposition、长度）\n实际文件大小、扩展名、文件头截图或 hex 前几十字节\n结构检查结果 / 打开时报错原文\n若做了账号对比：两边的对比结论\n还卡在哪一层时再补什么\n如果 1～5 层都过了但业务内容不对 → 把“同条件下正常/异常两份文件 + 正文差异”整理好。\n如果完全打不开且结构/签名都坏 → 上面留证已经够定位到“文件本体无效”，可直接带着证据找开发（部分 Excel 会吞异常、患教 Word 当前实现也不等于可用文件，这些现状本身就可能返回 200 却给坏文件）。\n暂时不要再点导出、不要改数据；现有文件和响应就够往下走。\n\n按上面做完，你基本能自己判断卡在“假成功响应 / 空文件 / 签名错 / 结构坏 / 内容空”哪一类。有具体文件头截图、大小或打开报错时，发过来我可以帮你看落在哪一层。",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "PASS",
+      "reason": "仅用已有文件/响应，完整分层只读定位，不要求重导或修改配置数据"
+    },
+    {
+      "id": "Q0068",
+      "session": "TAG32-C012",
+      "question": "医院报的导出文件问题，换了另一个账号就正常了，这个线索说明先看哪边？",
+      "rawAnswer": "AI\n\n结论：先看账号上下文这一边，不是先认定“导出链路本身坏了”。\n\n“换另一个账号就正常”这个线索，按说明书经确认规则，应优先只读区分：\n\n账号权限 / 数据范围 / 模板上下文是否不同\n还是同条件下文件本体（响应类型、字节、签名、结构、正文）本身就坏\n\n不能只凭“另一个账号正常”就归因到权限或文件生成；必须固定同环境、同入口、同筛选、同一条已有记录做只读对比。\n禁止为了验证去改权限、改模板、改业务数据。\n\n实施可照着做的只读定位\n固定对照条件（两边完全一致）\n同一环境、同一导出入口、同一筛选条件\n同一条已经存在的业务记录（不要新开记录、不要改数据）\n记下：哪个账号异常、哪个账号正常；两边的院区/病区/科室可见范围（页面上能看到的即可）\n分别保存两边已经发生过的导出结果（用已有文件/响应，不要再为验证而反复点导出）\n响应是不是真正文件流，还是 200 包着的 JSON/HTML 错误体\n文件大小（是否 > 0）\n扩展名 / Content-Type\n文件头签名（magic）是否和扩展名一致\n结构能否解析（PDF 的 header+EOF/xref；DOCX/XLSX 的 ZIP central directory 与必要 entries）\n正文抽检：是不是空壳、错内容、缺关键字段\n只读对比“账号差异”和“文件差异”\n同条件下：异常账号文件签名/结构/正文坏，正常账号好 → 更像账号权限、授权院区/数据范围、或该账号拿到的模板上下文不同\n两边文件本体都坏（或响应都是错误体） → 更像生成/下载链问题，不能只怪账号\n两边文件都正常，但业务内容范围不同 → 更像导出按账号授权范围出数（权限/院区口径），不是“坏文件”\n范围不同只能说明账号上下文可能影响结果；不能据此改权限做试验\n把对比结果留证（脱敏）\n两个账号各自：可见院区/范围说明、请求 URL/参数摘要、HTTP 200、响应类型、文件大小、签名是否一致、结构是否过、正文是否空/错\n明确写清：固定了同一条已有记录，没有改权限/模板/数据\n怎么判断“先看哪边”\n对比结果\t优先往哪边查\n同条件、同记录，坏账号文件签名/结构失败，好账号正常\t先看账号权限、数据范围、模板上下文\n同条件两边都是 200 但响应体是 JSON/HTML 或 0 字节/签名错\t先看文件生成/下载本体（别只盯账号）\n文件都能打开且结构过，只是明细范围不同\t先看授权院区/病区/科室与导出同口径\n信息不够（没固定同一条记录、没两边文件）\t先补上面第 1～2 步，再判断\n注意\nHTTP 200、能下载、非空、某个软件勉强打开，都不能单独算成功；必须验文件本体。\n部分 Excel 会吞异常仍返回 200；患教 Word 等现状也不等于可用文件——所以换账号正常时更要对比文件本身，别停在“页面提示成功”。\n全程只读：刷新、看已有记录、对比已下载文件可以；不要新建/修改/删除、不要改权限或模板来“试一下”。\n\n把两边（异常账号 vs 正常账号）在同一条已有记录下的：文件大小、能否打开报错原文、文件头几个字节或“是不是 JSON 错误体”，发过来，我可以帮你看更偏向权限/范围还是文件本体。",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "PASS",
+      "reason": "换账号线索局部限定，固定同环境入口筛选同记录，只读区分账号上下文与文件本体"
+    },
+    {
+      "id": "Q0069",
+      "session": "TAG32-C012",
+      "question": "回到导出文件这里，第一步看过了，没发现异常。接下来呢？",
+      "rawAnswer": "AI\n\n结论：\n第一步（确认 200 响应体是真实文件字节，不是 JSON/HTML 错误体）没异常，说明至少不是“假成功错误页”。\n接下来不要停、也不要再点导出，继续用已经下载下来的那份文件，按固定顺序只做只读核对：长度 → 签名/MIME → 结构 → 正文。任一层不过都算失败，并直接能定位到哪一层。\n\n接下来照着做（用已有文件，只读）\n核对文件长度是否 > 0\n看本地下载文件属性，或当时响应/下载记录里的字节数。\n正常：明确大于 0。\n不正常：0 字节 → 直接判失败（空文件），后面不用再验。\n若只有几百字节、特别小，先标出来，高度怀疑空壳或残缺，继续下一步。\n核对 magic/文件签名 与 扩展名、Content-Type/MIME 是否一致\n先记下：实际文件名、扩展名、响应里的 Content-Type（有就记）。\n用十六进制/文本工具看文件头几个字节：\n常见：ZIP 系（DOCX/XLSX 等）多以 PK 开头；PDF 多以 %PDF 开头。\n正常：签名与扩展名、MIME 对得上。\n不正常：扩展名是 .docx/.xlsx 但头不是 ZIP 类、或扩展名/MIME 明显对不上 → 判失败。\n格式不确定时：只按实际文件名 + 扩展名 + MIME 去验，不要硬猜一定是 PDF 或 Word。\n按真实声明格式做结构完整性检查\n声明/实际是 PDF：至少能识别 header，有 EOF/xref，并能被 PDF 结构工具解析。缺 EOF、xref 坏、解析失败 → 失败。\n声明/实际是 DOCX、XLSX 或 ZIP：至少 central directory 可解析，并有该格式必要 entries（例如 DOCX 要有 [Content_Types].xml、word/document.xml；XLSX 要有 [Content_Types].xml、xl/workbook.xml）。\n“某个软件勉强能打开”不能当通过；结构过不了就判文件损坏。\n把结构检查结果/报错原文原样留下。\n抽检正文/业务内容\n结构过了再打开看内容：是否空白、只有错误提示、缺关键业务字段、内容明显错位或不是这次要导的那条。\n空壳、错误页、错数据 → 仍判失败（生成或模板/数据问题）。\n正常：关键业务内容在、和当时选的那条已有记录对得上。\n若现场是“换另一个账号就正常”：在以上都做完后，再做同条件只读对比\n固定：同一环境、同一入口、同一筛选、同一条已有记录。\n对比两边：响应类型、字节数、签名、结构、正文。\n同条件下只有异常账号坏 → 优先看账号权限/数据范围/模板上下文。\n两边文件本体都坏 → 更像生成/下载链，不只是账号。\n不要为了验证去改权限、模板或业务数据。\n每步怎么用结果\n本步结果\t含义\t下一步\n长度 = 0\t空文件\t可停，留证升级\n签名/扩展名/MIME 不符\t文件类型或下载内容错\t可停，留证\n结构解析失败\t容器损坏/生成不完整\t可停，留证\n结构过、正文空/错\t文件壳在、业务内容不对\t带着正文差异继续对比账号或升级\n1～4 全过，仅账号范围不同\t更像授权/院区口径，不是坏文件\t只读记两边可见范围差异\n建议现在就留的证据（脱敏）\n异常账号：文件大小、扩展名、Content-Type、文件头几字节（或截图）、结构是否通过、打开时报错原文\n若已有正常账号对照：同一条已有记录下两边的上述对比\n请求侧已有：URL/参数摘要、HTTP 200、业务 code（如有）\n\n注意：\n\n全程只用已下载文件和已发生的响应，不要再触发导出、不要改数据。\n部分 Excel 会吞异常仍 200；患教 Word 等也不等于返回可用文件——所以第二步起必须验本体，不能停在“能下下来”。\n\n你这步做完后，直接告诉我：长度是多少、扩展名是什么、文件头几个字节（或像不像 PK/%PDF）、结构能不能解析、打开时报什么错。我可以根据结果帮你判断卡在哪一层、要不要升级以及升级时带什么。",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "PASS",
+      "reason": "持续继承文件主题与第一步进度，按长度→签名/MIME→结构→正文推进，未回退未知"
+    },
+    {
+      "id": "V1-200-JSON",
+      "session": "TAG32-VARIANTS",
+      "question": "接口返回 200，但响应体开头是 {\"code\":500,\"message\":\"error\"}，文件名却叫 report.pdf。实施怎么判？",
+      "rawAnswer": "AI\n\n结论：直接判失败，不是有效 PDF 文件。\n\nHTTP 200 + 文件名 report.pdf 都不够。响应体开头已经是 JSON {\"code\":500,\"message\":\"error\"}，说明返回的是错误体，不是文件字节。这是文件下载/导出最常见的“假成功”，不能当成功处理。\n\n实施现场怎么判（只读、不重下、不改数据）\n先看响应体本身是不是文件字节\n用浏览器开发者工具 / 抓包 / 已下载内容，直接看响应 body 前几十字节。\n如果是 { 开头、长得像 {\"code\":...} 或 HTML，就立刻判失败。\n正常 PDF 开头应该是类似 %PDF- 的二进制特征，绝不是 JSON 文本。\n对照声明信息\n文件名虽叫 report.pdf，Content-Disposition / Content-Type 再怎么写 application/pdf，都覆盖不了“body 是 JSON 错误”的事实。\n业务 code=500（或 message=error）已经明确失败，和 HTTP 200 无关。\n后续结构校验不用做了\n第一层（body 是否真实文件字节）已经失败，magic、EOF/xref、能否用 PDF 解析器打开、正文内容抽检都不必再做。任一层失败即整次失败。\n“某个软件勉强能打开”也无效——那只是阅读器容错，不能证明文件有效。\n记录给研发/Owner 时最少留这些\n实际 URL、请求参数、HTTP 状态码（200）。\n响应头（尤其 Content-Type、Content-Disposition、文件名）。\n响应体前 200～500 字符（脱敏后，证明是 JSON 错误体）。\n发生时间、账号、入口页面。\n\n一句话记法：200 只是传输成功；body 开头是 JSON 错误就当文件下载失败，别被文件名骗了。这正是系统要求必须先核“响应体是文件字节而不是 JSON/HTML 错误体”的原因。",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "PASS",
+      "reason": "直接判200 JSON错误体失败，文件名/MIME不能覆盖body事实，留证非破坏"
+    },
+    {
+      "id": "V2-DOCX-MAGIC",
+      "session": "TAG32-VARIANTS",
+      "question": "下载文件后缀是 .docx，Content-Type 也像 Word，但 magic 不是 ZIP，能算成功吗？",
+      "rawAnswer": "AI\n\n结论：不能算成功，直接判失败。\n\n后缀叫 .docx、Content-Type 看起来像 Word（比如 application/vnd.openxmlformats-officedocument.wordprocessingml.document 或类似），都不能单独证明文件有效。DOCX 本质是 ZIP 容器，magic/文件签名必须是 ZIP 特征（通常以 PK 开头）。magic 不是 ZIP = 扩展名与签名不一致，属于“扩展名与签名不符”，按系统验收规则任一层失败都不能判成功。\n\n“某个软件勉强能打开”也不行——那只是阅读器容错，不能替代 magic、容器结构和正文抽检。\n\n实施现场只读怎么核（用已下载的文件，不要重新点导出）\n先确认响应体是文件字节，不是 JSON/HTML 错误体\n看 body 前几十字节。如果是 { 开头或 HTML，直接失败。\n这步过了再往下。\n核长度\n文件大小必须 > 0。零字节直接失败。\n核 magic/签名是否与扩展名 + MIME 一致（当前关键失败点）\n用十六进制查看器 / 文件命令 / 在线工具看文件开头。\n.docx 必须匹配 ZIP magic（PK\\x03\\x04 等）。\n不是 ZIP → 本层失败，整次失败。后面结构、正文都不用再验。\n如果 magic 对了，再验结构（本问已失败可跳过）\nDOCX/XLSX/ZIP 至少能解析 central directory，并具备必要 entries（如 [Content_Types].xml、word/document.xml 等）。\n结构坏了同样判失败。\n最后抽检正文\n打开后不是空壳、错误页或错数据。\n留证给研发时最少带这些\n实际文件名、扩展名、Content-Type/MIME。\n文件大小（bytes）。\nmagic/签名截图或十六进制前 16～32 字节。\n响应头（Content-Disposition、Content-Type）。\n发生时间、账号、入口。\n\n一句话记法：后缀和 Content-Type 只是“声明”，magic 必须对上。.docx magic 不是 ZIP = 假文件，不能当成功。这正是系统要求必须依次核“bytes > 0 → magic 一致 → 结构可解析 → 正文正确”的原因。",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "PASS",
+      "reason": "明确DOCX为ZIP容器、magic非ZIP直接失败，并给central directory与必要entries边界"
+    },
+    {
+      "id": "V3-PDF-DOCX-STRUCTURE",
+      "session": "TAG32-VARIANTS",
+      "question": "一个 PDF 有 %PDF- header，但没有 %%EOF/xref；另一个 DOCX 能解压却缺 word/document.xml。分别怎么判？",
+      "rawAnswer": "AI\n\n结论：两个都直接判失败，不能算有效文件。\n\n系统验收要求结构层必须过：\n\nPDF：光有 %PDF- header 不够，还要有 %%EOF / xref，并且能被 PDF 结构解析器正常解析。缺 %%EOF 或 xref = 结构不完整 → 失败。\nDOCX：能解压只说明 ZIP 容器大致能读，但必须能解析 central directory，并且具备必要 entries（至少包含 word/document.xml，以及通常还有 [Content_Types].xml 等）。缺 word/document.xml = 必要 entries 损坏/缺失 → 失败。\n\n“能打开”“能解压”“header 对了”都不能单独过关，阅读器容错也不算数。任一层（这里是结构层）失败，整次导出/下载都判失败。\n\n实施现场只读怎么核（用已下载的文件，不要重新点导出）\n先确认基础层都过了\n响应体是真实文件字节（不是 JSON/HTML 错误体）。\n文件长度 > 0。\nmagic 与扩展名 / MIME 一致：PDF 开头是 %PDF-；DOCX 开头是 ZIP（PK）。\n这几步不过就直接失败，不用往下看结构。\nPDF 结构核（针对第一个文件）\n用文本/十六进制查看器或 PDF 结构工具看是否有可识别的 xref 表和结尾的 %%EOF。\n再用能严格解析结构的工具（不要只用“能预览”的阅读器）尝试解析。\n有 header 但缺 %%EOF / xref，或解析器报结构损坏 → 判失败。\nDOCX 结构核（针对第二个文件）\n确认能解析 ZIP 的 central directory。\n列出包内 entries，重点看是否存在 word/document.xml（以及 [Content_Types].xml 等必要文件）。\n能解压但缺 word/document.xml → 判失败。\n有这些文件后再抽检正文是否为空壳/错数据。\n最后才抽检正文\n结构都过了，再打开看业务内容对不对。结构不过的就不用做到这一步。\n留证给研发时最少带这些\n实际文件名、扩展名、Content-Type、文件大小。\nPDF：header 截图/片段 + 是否存在 %%EOF/xref 的说明或解析报错信息。\nDOCX：解压后的文件列表（证明缺 word/document.xml）或 central directory 相关错误。\n响应头、发生时间、账号、入口页面。\n\n一句话记法：\n\nPDF = header + EOF/xref + 结构可解析，缺一不可。\nDOCX = ZIP magic + central directory 可解析 + 必要 entries（含 word/document.xml）齐全，缺一不可。\n\n两个例子都属于“结构损坏”，按规格应判失败。",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "PASS",
+      "reason": "PDF缺EOF/xref、DOCX缺必要entry均判结构失败，未以能打开/能解压替代"
+    },
+    {
+      "id": "V4-CORRECT-FILE",
+      "session": "TAG32-VARIANTS",
+      "question": "附件字节非空、magic/MIME/扩展名一致，容器结构可解析，正文抽检也正确。还需要因为 HTTP 200 再怀疑失败吗？",
+      "rawAnswer": "AI\n\n结论：不需要。已经可以判成功。\n\nHTTP 200 本身不是怀疑失败的理由。它只代表传输层把响应送过来了。系统规则强调的是：\n\n200、业务 code=0、下载响应头、非空、扩展名、某个软件能打开——都不能单独证明文件有效。\n必须按顺序把文件本体验完：响应体是真实文件字节（不是 JSON/HTML 错误体）→ bytes>0 → magic/签名与扩展名及 MIME 一致 → 容器结构可解析 → 正文/业务内容正确。\n任一层失败才判失败；你描述的情况是这几层都过了。\n你现在的核对结果怎么对应\n字节非空 → 过了长度层。\nmagic / MIME / 扩展名一致 → 过了签名一致性层（也同时说明 body 不是 JSON/HTML 错误体，否则 magic 对不上）。\n容器结构可解析 → 过了结构层（PDF 的 header+EOF/xref 或 DOCX 的 central directory + 必要 entries 等）。\n正文抽检正确 → 过了内容层。\n\n以上齐全，就没有剩余层可失败，不必再因为“返回的是 200”而回头怀疑。\n\n现场一句话记法\n200 单独出现 → 不够，必须验文件本体。\n200 + 文件本体全链路都过 → 成功，别再多疑。\n真正要失败的是：body 是 {\"code\":500...}、magic 对不上、结构缺 EOF/xref 或 word/document.xml、内容空壳/错数据等。\n留证建议（可选，已成功时）\n保留：实际文件名/扩展名、大小、Content-Type、magic 前几字节、结构校验结果、正文抽检说明。\n这些就够证明“文件有效”，不用额外因为 200 再找问题。\n\n一句话总结：200 只是正常下载常见状态码；你已经把规格要求的文件验收全做完且都通过了，直接判成功即可，不必再因 HTTP 200 怀疑失败。",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "PASS",
+      "reason": "所有分层均过时明确判成功，不因HTTP200本身无限怀疑"
+    },
+    {
+      "id": "V5-EXPLICIT-SWITCH",
+      "session": "TAG32-VARIANTS",
+      "question": "换个问题，非创建人重复提交同组医嘱的错误码和数据结果是什么？",
+      "rawAnswer": "AI\n\n结论：会返回错误码 ORDER_NOT_USER，原审核记录完全不变。\n\n场景是：同一个 groupNo 下已经有审核记录，但创建人不是当前登录用户时，非创建人再次 POST 提交。\n\n结果是什么\n接口侧：直接返回业务错误 ORDER_NOT_USER（含义：无法修改其他药师的审核医嘱）。\n数据侧：校验失败后不做任何变更，原来那条审核记录保持原样（不会被覆盖、不会被改状态、不会新增一条）。\n\n这是已确认的规则预期行为，不是异常。非创建人本来就不能改别人的审核，重复提交同组医嘱也会被拦下并保持数据不变。\n\n现场怎么快速对上\n看接口响应里的业务错误码是否是 ORDER_NOT_USER。\n再核对原审核记录（创建人、内容、状态）是否和提交前一致——应完全一致。\n\n如果现场看到的是别的错误码、或者原记录被改动了，那才和已确认规则冲突，需要把实际响应码、请求参数（尤其 groupNo）、账号是否非创建人、以及提交前后记录对比一起留证后再升级。",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "PASS",
+      "reason": "显式切到医嘱审核，正确回答ORDER_NOT_USER且原记录不变，未串文件主题"
+    }
+  ]
+}
