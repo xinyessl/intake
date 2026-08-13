@@ -71,5 +71,13 @@ test('consult 接线：对话性表达不走固定miss，事实题仍保留原�
   assert.match(route, /const conversationalTurn = consultConversationTurn\(qtext\)/);
   assert.match(route, /const noAnswer = !conversationalTurn && routeMiss && specNoSpec/);
   assert.match(route, /consultConversationGuard\(qtext, conversationalTurn\)/);
+  assert.match(route, /retrieval\.conversationIntent = conversationalTurn/);
   assert.match(route, /if \(noAnswer\)[\s\S]*?说明书里没有找到相关描述/);
+});
+
+test('检索回放也标记对话意图，便于诊断事实miss与对话绕行', () => {
+  const start = SRC.indexOf("if (url.pathname === '/api/retrieval-replay'");
+  const end = SRC.indexOf("if (url.pathname === '/api/retrieval-log'", start);
+  const replay = SRC.slice(start, end);
+  assert.match(replay, /retrieval\.conversationIntent = consultConversationTurn\(query\)/);
 });

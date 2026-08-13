@@ -2657,6 +2657,7 @@ const server = http.createServer((req, res) => {
       try { kbScored = await kbRetrieveScored(proj.id, query, 5, 2); } catch {}
       if (deep) { try { codeHits = codeSearch(proj, ver, query, specSearch(proj, ver, query, 5, sub), 4, sub); } catch {} }
       const retrieval = buildRetrieval({ query, deep, ver, subsystem: sub }, specScored, kbScored, codeHits);
+      retrieval.conversationIntent = consultConversationTurn(query);
       retrieval.routing = routingDiag(hasMap, route);
       // PD-04 修复：回放也带上 specSearch 底座首条分 + 阈值，方便调 SPEC_MIN_RELEVANT（路由未命中但 specSearch 强 → consult 现会据 spec 底座作答，不再固定话术）。
       if (retrieval.routing && retrieval.routing.enabled) {
@@ -3113,6 +3114,7 @@ const server = http.createServer((req, res) => {
       let retrieval = null;
       try {
         retrieval = buildRetrieval({ query: qtext, deep: !!b.deep, ver: cver, subsystem: sub }, searchScored, kbScored, codeHits);
+        retrieval.conversationIntent = conversationalTurn;
         retrieval.routing = routingDiag(hasMap, route);
         if (retrieval.routing && retrieval.routing.enabled) { retrieval.routing.usedSpecSearch = usedSpecSearch; retrieval.routing.specTop = Math.round(searchTop * 1000) / 1000; retrieval.routing.specMinRelevant = SPEC_MIN_RELEVANT; }
       } catch {}
