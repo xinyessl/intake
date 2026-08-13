@@ -787,6 +787,61 @@ test('真实PWRS地图回归：调度事实可在同主题诊断继承，显式�
   }
 });
 
+test('真实PWRS地图回归：权限与归属后续排查保持事实并优先只读证据，显式新实体仍切题', { skip: !process.env.PWRS_REAL_MAP }, () => {
+  const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
+  const S = buildRoutingSandbox(makeDeps());
+  for (const question of [
+    'PWRS 服务端现在有方法级权限校验吗？',
+    '方法授权和业务归属问题下一步怎么只读排查？',
+    '不改数据怎么对照 owner 和院区拦截？',
+  ]) {
+    const hit = S.routeQuestion(map, question, '');
+    assert.equal(hit.route?.id, 'QR-INTERFACE-AUTH-BOUNDARY', `${question}，top=${JSON.stringify(hit.topN)}`);
+    const facts = hit.answerFacts.join('\n');
+    assert.match(facts, /当前 PWRS Controller 基本没有方法级/);
+    assert.match(facts, /已有正常与异常记录、已经发生的请求响应和历史日志审计/);
+    assert.match(facts, /不得为了验证 owner 或范围规则而新建、修改、删除或提交业务记录/);
+    assert.match(facts, /隔离测试环境或专用数据.*执行授权.*回滚清理方案.*幂等性与影响范围/);
+  }
+
+  const follow = '医院报的方法授权与业务归属问题，这一步正常，但问题还在。你直接告诉我下一个检查点。';
+  const inherited = S.contextualRouteQuestion(map, [
+    { role: 'user', content: 'PWRS 服务端现在有方法级权限校验吗？' },
+    { role: 'assistant', content: '只复述已核 route，不提供自由猜测。' },
+    { role: 'user', content: follow },
+  ], follow, '');
+  assert.equal(inherited.route?.id, 'QR-INTERFACE-AUTH-BOUNDARY');
+  assert.match(inherited.answerFacts.join('\n'), /不得为了验证 owner 或范围规则而新建、修改、删除或提交业务记录/);
+
+  const rephrase = '回到方法授权与业务归属这里，我没太听懂，换成实施能照着做的话再说一遍。';
+  const rephrased = S.contextualRouteQuestion(map, [
+    { role: 'user', content: 'PWRS 服务端现在有方法级权限校验吗？' },
+    { role: 'assistant', content: '方法级和业务归属是不同层。' },
+    { role: 'user', content: follow },
+    { role: 'assistant', content: '继续只读核对已有证据。' },
+    { role: 'user', content: rephrase },
+  ], rephrase, '');
+  assert.equal(rephrased.route?.id, 'QR-INTERFACE-AUTH-BOUNDARY');
+
+  const weakFollow = '这一步正常了，但问题还在，直接告诉我下一个检查点。';
+  const weakInherited = S.contextualRouteQuestion(map, [
+    { role: 'user', content: 'PWRS 服务端现在有方法级权限校验吗？' },
+    { role: 'assistant', content: '只使用route事实。' },
+    { role: 'user', content: weakFollow },
+  ], weakFollow, '');
+  assert.equal(weakInherited.route?.id, 'QR-INTERFACE-AUTH-BOUNDARY');
+  assert.equal(weakInherited.inherited, true);
+
+  const switchedQuestion = '换个问题，药师反馈发送后正文还能改吗？';
+  const switched = S.contextualRouteQuestion(map, [
+    { role: 'user', content: '方法授权和业务归属下一步怎么查？' },
+    { role: 'assistant', content: '继续按权限事实账本。' },
+    { role: 'user', content: switchedQuestion },
+  ], switchedQuestion, '');
+  assert.equal(switched.route?.id, 'QR-FEEDBACK-SEND-DEDUP');
+  assert.notEqual(switched.route?.id, 'QR-INTERFACE-AUTH-BOUNDARY');
+});
+
 test('AC-2 tier-1 关键词 IDF 打分命中（无整串别名，纯关键词重叠）', () => {
   const S = buildRoutingSandbox(makeDeps());
   const r = S.routeQuestion(FIXTURE_MAP, '医嘱干预的时候说明书地址在哪里配置', '');

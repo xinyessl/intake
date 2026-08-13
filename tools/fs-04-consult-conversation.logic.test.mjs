@@ -233,6 +233,40 @@ test('批处理/同步/调度守卫：观测不直接定故障，补跑须满足
   assert.equal(fn('反馈发送后正文还能改吗？', { matched: true, route: { title: '反馈锁定' }, answerFacts: ['发送后锁定'] }), '');
 });
 
+test('通用非破坏诊断守卫：写操作不能包装成只做一次，四项条件齐备才可受控验证', () => {
+  const safeIntent = new Function(extractFn(SRC, 'consultSafeDiagnosticIntent') + '\nreturn consultSafeDiagnosticIntent;')();
+  const fn = new Function('consultSafeDiagnosticIntent', extractFn(SRC, 'consultNonDestructiveDiagnosticGuard') + '\nreturn consultNonDestructiveDiagnosticGuard;')(safeIntent);
+  const route = {
+    matched: true,
+    inherited: true,
+    route: { title: '方法授权与业务归属' },
+    answerFacts: ['当前基本没有方法级权限注解', '具体业务仍可能执行 owner 与院区数据作用域校验'],
+    mustNotConfuse: ['token 有效不等于业务归属校验通过'],
+  };
+  for (const q of [
+    '医院报的方法授权与业务归属问题，这一步正常但问题还在，下一个检查点是什么？',
+    '能不能新建一条再改删一条，只做一次抓请求？',
+    '收费异常用测试数据提交一次验证，之后可以回滚吧？',
+    '患教签名和审批状态怎么现场复测？',
+    '打开未读记录再切星标，怎么判断筛选有没有生效？',
+  ]) {
+    const text = fn(q, route);
+    assert.match(text, /实施现场诊断默认只读、非破坏/);
+    assert.match(text, /新建、修改、删除、保存、提交、审批、签名、切换星标、打开会导致已读/);
+    assert.match(text, /“只做一次”“测试数据”“之后能回滚”都不能自动/);
+    assert.match(text, /已有正常记录与异常记录、历史日志\/审计、用户刚才已经发生的请求与响应/);
+    assert.match(text, /隔离测试环境或专用测试数据/);
+    assert.match(text, /明确执行授权/);
+    assert.match(text, /回滚\/清理方案/);
+    assert.match(text, /幂等性与影响范围/);
+    assert.match(text, /任一项没有确认.*升级开发或产品确认/);
+    assert.match(text, /方法授权、owner、机构范围或状态规则仍须作为判断基线/);
+  }
+  const readOnly = fn('刷新页面并切只读页签、查看不会标已读的详情，可以这样验证吗？', route);
+  assert.match(readOnly, /刷新、切换已确认是纯前端或只读的页签、查看已确认不会触发已读或业务状态变化的详情/);
+  assert.equal(fn('token 是谁签发的？', { matched: true, route: { title: '登录 token' } }), '');
+});
+
 test('模糊的“第二步对不上”仍须先给规则条件分支，不能退回整体拒答', () => {
   const fn = new Function(extractFn(SRC, 'consultRuleApplicationGuard') + '\nreturn consultRuleApplicationGuard;')();
   for (const q of [
@@ -253,6 +287,7 @@ test('consult prompt 同时注入规则应用、运行安全与现场诊断，�
   assert.ok(call[0].indexOf('consultEvidenceLedgerGuard') < call[0].indexOf('consultRuleApplicationGuard'));
   assert.ok(call[0].indexOf('consultRuleApplicationGuard') < call[0].indexOf('consultOperationalSafetyGuard'));
   assert.ok(call[0].indexOf('consultOperationalSafetyGuard') < call[0].indexOf('consultDiagnosticGuard'));
+  assert.ok(call[0].indexOf('consultDiagnosticGuard') < call[0].indexOf('consultNonDestructiveDiagnosticGuard'));
 });
 
 test('安全诊断意图绕过机械 miss，但普通无证据事实题仍保持短路', () => {
@@ -264,4 +299,5 @@ test('安全诊断意图绕过机械 miss，但普通无证据事实题仍保持
   assert.match(route, /consultDiagnosticGuard\(qtext, route\)/);
   assert.match(route, /consultOperationalSafetyGuard\(qtext, route\)/);
   assert.match(route, /consultEvidenceLedgerGuard\(qtext, route\)/);
+  assert.match(route, /consultNonDestructiveDiagnosticGuard\(qtext, route\)/);
 });

@@ -1595,6 +1595,25 @@ function consultDiagnosticGuard(question, route) {
   ].join('\n');
 }
 
+// 实施诊断默认只读：模型不能把新建/修改/删除等业务写操作包装成“只做一次的验证”。
+// 只有隔离环境/专用数据、授权、回滚清理、幂等与影响范围同时明确时，才允许给受控写操作步骤。
+function consultNonDestructiveDiagnosticGuard(question, route) {
+  const q = String(question || '').trim();
+  const routeText = route && route.matched
+    ? [route.route && route.route.title, ...(route.answerFacts || []), ...(route.mustNotConfuse || [])].filter(Boolean).join(' ')
+    : '';
+  const diagnostic = consultSafeDiagnosticIntent(q)
+    || /(?:验证|复测|排查|留证|对照|试一下|测试|检查点|下一步|问题还在|怎么判断|如何判断|抓请求|新建|新增|修改|改删|删除|保存|提交|审批|签名|星标|已读|补跑|重跑|重新触发|刷新|只读页签|查看详情)/i.test(`${q} ${routeText}`);
+  if (!diagnostic) return '';
+  return [
+    '【最高优先：实施现场诊断默认只读、非破坏】',
+    '禁止为了验证而要求实施新建、修改、删除、保存、提交、审批、签名、切换星标、打开会导致已读的记录、补跑、重跑或重新触发任何业务动作。这些都会改变数据、状态或留痕；“只做一次”“测试数据”“之后能回滚”都不能自动把它们变成只读动作。不得把“观察一次请求”误写成“主动执行一次写操作再抓请求”。',
+    '优先复用已经存在的证据：对比已有正常记录与异常记录、历史日志/审计、用户刚才已经发生的请求与响应、页面当前只读信息，或测试环境里已存在且明确授权的对照数据。刷新、切换已确认是纯前端或只读的页签、查看已确认不会触发已读或业务状态变化的详情，属于可用观察动作；若详情打开会标已读，则仍禁止用它验证。',
+    '如果只读证据仍不足，而确实必须做会改状态的验证，必须同时明确：1. 隔离测试环境或专用测试数据；2. 明确执行授权；3. 回滚/清理方案；4. 幂等性与影响范围。任一项没有确认，就停止给现场写操作步骤，整理“已知事实、已有正常/异常证据、仍缺哪一层”后升级开发或产品确认。',
+    '当前 route/Spec 已确认的方法授权、owner、机构范围或状态规则仍须作为判断基线；本守卫只限制诊断动作，不得把已知事实重新降级为未知，也不得借安全名义改用猜测。',
+  ].join('\n');
+}
+
 // 批处理/同步/调度类现场诊断有额外的副作用边界：截图和“最后成功时间”只能证明观测到的现象，
 // 不能单独证明调度已停止；恢复、重跑、补跑也不能在幂等/范围/运行态未知时直接建议。
 function consultOperationalSafetyGuard(question, route) {
@@ -3318,7 +3337,7 @@ const server = http.createServer((req, res) => {
       else {
         // PD-04：命中 mustNotConfuse → 作负向提示注入 system（易混淆项，勿臆造）。answerFacts 已在 specHits 顶段（consultSystem 走 specExcerpts）。
         const mncNote = routeMnc.length ? '\n【以下为该问题的易混淆项，请勿臆造、勿张冠李戴】' + routeMnc.map(x => '\n· ' + x).join('') : '';
-        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationMode) + '\n' + consultEvidenceLedgerGuard(qtext, route) + '\n' + consultRuleApplicationGuard(qtext, route) + '\n' + consultOperationalSafetyGuard(qtext, route) + '\n' + consultDiagnosticGuard(qtext, route) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
+        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationMode) + '\n' + consultEvidenceLedgerGuard(qtext, route) + '\n' + consultRuleApplicationGuard(qtext, route) + '\n' + consultOperationalSafetyGuard(qtext, route) + '\n' + consultDiagnosticGuard(qtext, route) + '\n' + consultNonDestructiveDiagnosticGuard(qtext, route) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
           piece = String(piece == null ? '' : piece); if (!piece) return;
           if (!kbInjected && kbRefs.length) { kbInjected = true; sse({ kb: kbRefs, kbInjected: true }); }
           reply += piece; sse({ v: piece });
