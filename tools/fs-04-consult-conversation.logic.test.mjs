@@ -194,6 +194,9 @@ test('同主题事实账本只继承 route/spec/source，部分现场证据不�
     assert.match(text, /同主题已核事实账本/);
     assert.match(text, /历史 assistant 的解释、示例、猜测和假设不进入账本/);
     assert.match(text, /只能继承 route\/spec\/source 证据/);
+    assert.match(text, /承接型泛化诊断，只允许沿当前继承 route/);
+    assert.match(text, /不得主动引入用户未点名的新业务实体/);
+    assert.match(text, /不得列出该相邻实体的接口、字段、表名、按钮或状态/);
     assert.match(text, /先陈述持续有效的已知规则/);
     assert.match(text, /禁止把第③项扩大成“说明书未覆盖整个主题”/);
   }
