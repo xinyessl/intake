@@ -919,8 +919,21 @@ test('真实PWRS地图回归：JWT 前缀精确边界与患教链路命中专用
     '患教完成、消息送达和签名是不是同一个状态？',
   ]) {
     const hit = S.routeQuestion(map, question, '');
-    assert.ok(['QR-CONSULT-WORKFLOW-SEPARATION', 'DQ-010'].includes(hit.route?.id), `${question}，top=${JSON.stringify(hit.topN)}`);
+    assert.ok(['QR-EDU-DRAFT-COMPLETE', 'QR-CONSULT-WORKFLOW-SEPARATION', 'DQ-010'].includes(hit.route?.id), `${question}，top=${JSON.stringify(hit.topN)}`);
     assert.match(hit.answerFacts.join('\n'), /保存|消息|完成|签名/);
+  }
+
+  for (const question of [
+    '患教规则已经确认签名非必填，能让创建人点一次完成验证吗？',
+    '患教没有患者签名能不能完成，完成后还能重开吗？',
+  ]) {
+    const hit = S.routeQuestion(map, question, '');
+    assert.equal(hit.route?.id, 'QR-EDU-DRAFT-COMPLETE', `${question}，top=${JSON.stringify(hit.topN)}`);
+    const facts = hit.answerFacts.join('\n') + '\n' + hit.mustNotConfuse.join('\n');
+    assert.match(facts, /患者签名始终非必填/);
+    assert.match(facts, /只有患教创建人可以完成/);
+    assert.match(facts, /完成后记录只读、不可再次完成或重开/);
+    assert.match(facts, /不得把监护单、查房或其它模块/);
   }
 
   const switchedQuestion = '换个问题，PWRS 的 token 到底是谁签发的？';
