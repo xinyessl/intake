@@ -896,6 +896,43 @@ test('真实PWRS地图回归：权限与归属后续排查保持事实并优先�
   assert.notEqual(switched.route?.id, 'QR-INTERFACE-AUTH-BOUNDARY');
 });
 
+test('真实PWRS地图回归：JWT 前缀精确边界与患教链路命中专用事实，显式切题不串', { skip: !process.env.PWRS_REAL_MAP }, () => {
+  const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
+  const S = buildRoutingSandbox(makeDeps());
+  for (const question of [
+    '业务路径中间带 comm 会不会绕过 JWT？',
+    '/comm/ 和 /comm 是不是同一个白名单前缀？',
+    '/community 会命中免鉴权 allowlist 吗？',
+    '现有请求只看到路径，怎么按 startsWith 判断是否免鉴权？',
+  ]) {
+    const hit = S.routeQuestion(map, question, '');
+    assert.equal(hit.route?.id, 'QR-JWT-ANON-PREFIX', `${question}，top=${JSON.stringify(hit.topN)}`);
+    const facts = hit.answerFacts.join('\n') + '\n' + hit.mustNotConfuse.join('\n');
+    assert.match(facts, /前缀为 \/comm\/、\/external、\/swagger、\/v3\/api-docs/);
+    assert.match(facts, /路径中间包含 comm.*不会命中/);
+    assert.match(facts, /\/comm\/ 带尾斜杠/);
+  }
+
+  for (const question of [
+    '没有患者签名就绝对不能完成患教，对吧？',
+    '业务保存成功但患者没收到，能直接推出签名失败吗？',
+    '患教完成、消息送达和签名是不是同一个状态？',
+  ]) {
+    const hit = S.routeQuestion(map, question, '');
+    assert.ok(['QR-CONSULT-WORKFLOW-SEPARATION', 'DQ-010'].includes(hit.route?.id), `${question}，top=${JSON.stringify(hit.topN)}`);
+    assert.match(hit.answerFacts.join('\n'), /保存|消息|完成|签名/);
+  }
+
+  const switchedQuestion = '换个问题，PWRS 的 token 到底是谁签发的？';
+  const switched = S.contextualRouteQuestion(map, [
+    { role: 'user', content: '业务路径中间带 comm 会不会绕过 JWT？' },
+    { role: 'assistant', content: '只复述精确前缀事实。' },
+    { role: 'user', content: switchedQuestion },
+  ], switchedQuestion, '');
+  assert.notEqual(switched.route?.id, 'QR-JWT-ANON-PREFIX');
+  assert.match(switched.answerFacts.join('\n'), /usercenter.*签发|统一用户中心.*签发/i);
+});
+
 test('AC-2 tier-1 关键词 IDF 打分命中（无整串别名，纯关键词重叠）', () => {
   const S = buildRoutingSandbox(makeDeps());
   const r = S.routeQuestion(FIXTURE_MAP, '医嘱干预的时候说明书地址在哪里配置', '');

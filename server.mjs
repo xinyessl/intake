@@ -1595,6 +1595,24 @@ function consultDiagnosticGuard(question, route) {
   ].join('\n');
 }
 
+// 路径前缀/allowlist 的分隔符属于契约本身：不得把 `/x/` 擅自归一化成 `/x`，
+// 也不得把路径中间包含同名片段当成前缀命中。该守卫只约束如何复述已核路径事实，
+// 不在没有 route/Spec 证据时创造新的白名单路径。
+function consultExactPathBoundaryGuard(question, route) {
+  const q = String(question || '').trim();
+  const routeText = route && route.matched
+    ? [route.route && route.route.title, ...(route.answerFacts || []), ...(route.mustNotConfuse || [])].filter(Boolean).join(' ')
+    : '';
+  const topic = `${q} ${routeText}`;
+  if (!/(?:路径|前缀|白名单|allowlist|免鉴权|放行|startsWith|中间包含|URL)/i.test(topic)) return '';
+  return [
+    '【路径前缀与 allowlist 的精确边界】',
+    '只能逐字复述 route/Spec/源码已经确认的路径字面量；每一个斜杠和路径段都是契约的一部分。不得去掉或补上尾斜杠，不得把一个已核前缀“归一化”为更宽的形式，也不得新增“部分端点还使用另一个写法”之类没有证据的例外。',
+    '若权威事实是 `/comm/`，就只能写 `/comm/`：不得改写成 `/comm`。`/community`、路径中间仅包含 `comm`、或其它相似片段均不等价，也不能据此放行。其它路径前缀同样按完整字面量和分隔符边界判断。',
+    '现场判断优先使用已经发生请求的完整 path（从开头到 query 之前）与已有响应；只有路径从第一个字符开始逐字命中已核前缀时，才能按该前缀规则解释。证据里没有出现的路径、例外、端点类型或用途一律不要补。',
+  ].join('\n');
+}
+
 // 实施诊断默认只读：模型不能把新建/修改/删除等业务写操作包装成“只做一次的验证”。
 // 只有隔离环境/专用数据、授权、回滚清理、幂等与影响范围同时明确时，才允许给受控写操作步骤。
 function consultNonDestructiveDiagnosticGuard(question, route) {
@@ -1607,9 +1625,10 @@ function consultNonDestructiveDiagnosticGuard(question, route) {
   if (!diagnostic) return '';
   return [
     '【最高优先：实施现场诊断默认只读、非破坏】',
-    '禁止为了验证而要求实施新建、修改、删除、保存、提交、审批、签名、切换星标、打开会导致已读的记录、补跑、重跑或重新触发任何业务动作。这些都会改变数据、状态或留痕；“只做一次”“测试数据”“之后能回滚”都不能自动把它们变成只读动作。不得把“观察一次请求”误写成“主动执行一次写操作再抓请求”。',
+    '禁止为了验证而要求实施新建、修改、删除、保存、提交、完成、审批、签名、切换星标、打开会导致已读的记录、补跑、重跑或重新触发任何业务动作。这些都会改变数据、状态或留痕；“只做一次”“测试数据”“之后能回滚”都不能自动把它们变成只读动作。不得把“观察一次请求”误写成“主动执行一次写操作再抓请求”。',
+    '“再点一次”“重做一遍”“复现一下”“验证一下”“试试看”“用创建人点”“正常点完成/提交”都不是安全措辞：只要触发动作是否只读、是否会改状态尚未确认，就不得建议执行。即使当前 route 已经确认按钮、角色、状态或业务结果，也只允许把它作为事实结论，不能顺手追加一次真实完成、提交、签名、审批等现场验证。',
     '优先复用已经存在的证据：对比已有正常记录与异常记录、历史日志/审计、用户刚才已经发生的请求与响应、页面当前只读信息，或测试环境里已存在且明确授权的对照数据。刷新、切换已确认是纯前端或只读的页签、查看已确认不会触发已读或业务状态变化的详情，属于可用观察动作；若详情打开会标已读，则仍禁止用它验证。',
-    '如果只读证据仍不足，而确实必须做会改状态的验证，必须同时明确：1. 隔离测试环境或专用测试数据；2. 明确执行授权；3. 回滚/清理方案；4. 幂等性与影响范围。任一项没有确认，就停止给现场写操作步骤，整理“已知事实、已有正常/异常证据、仍缺哪一层”后升级开发或产品确认。',
+    '如果缺少本次请求，默认接受“当前无法安全补抓”，先用已有请求、日志、审计或历史记录；只有已经确认该动作无副作用，才可让现场单次执行以观察请求。若动作会改状态，则必须同时明确：1. 隔离测试环境或专用测试数据；2. 明确执行授权；3. 回滚/清理方案；4. 幂等性与影响范围。任一项没有确认，就停止给现场写操作步骤，整理“已知事实、已有正常/异常证据、仍缺哪一层”后升级开发或产品确认。',
     '当前 route/Spec 已确认的方法授权、owner、机构范围或状态规则仍须作为判断基线；本守卫只限制诊断动作，不得把已知事实重新降级为未知，也不得借安全名义改用猜测。',
   ].join('\n');
 }
@@ -3356,7 +3375,7 @@ const server = http.createServer((req, res) => {
       else {
         // PD-04：命中 mustNotConfuse → 作负向提示注入 system（易混淆项，勿臆造）。answerFacts 已在 specHits 顶段（consultSystem 走 specExcerpts）。
         const mncNote = routeMnc.length ? '\n【以下为该问题的易混淆项，请勿臆造、勿张冠李戴】' + routeMnc.map(x => '\n· ' + x).join('') : '';
-        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationMode) + '\n' + consultEvidenceLedgerGuard(qtext, route) + '\n' + consultRuleApplicationGuard(qtext, route) + '\n' + consultOperationalSafetyGuard(qtext, route) + '\n' + consultFileArtifactGuard(qtext, route) + '\n' + consultDiagnosticGuard(qtext, route) + '\n' + consultNonDestructiveDiagnosticGuard(qtext, route) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
+        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationMode) + '\n' + consultEvidenceLedgerGuard(qtext, route) + '\n' + consultRuleApplicationGuard(qtext, route) + '\n' + consultExactPathBoundaryGuard(qtext, route) + '\n' + consultOperationalSafetyGuard(qtext, route) + '\n' + consultFileArtifactGuard(qtext, route) + '\n' + consultDiagnosticGuard(qtext, route) + '\n' + consultNonDestructiveDiagnosticGuard(qtext, route) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
           piece = String(piece == null ? '' : piece); if (!piece) return;
           if (!kbInjected && kbRefs.length) { kbInjected = true; sse({ kb: kbRefs, kbInjected: true }); }
           reply += piece; sse({ v: piece });

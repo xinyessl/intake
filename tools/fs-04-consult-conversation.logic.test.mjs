@@ -287,7 +287,7 @@ test('通用非破坏诊断守卫：写操作不能包装成只做一次，四�
   ]) {
     const text = fn(q, route);
     assert.match(text, /实施现场诊断默认只读、非破坏/);
-    assert.match(text, /新建、修改、删除、保存、提交、审批、签名、切换星标、打开会导致已读/);
+    assert.match(text, /新建、修改、删除、保存、提交、完成、审批、签名、切换星标、打开会导致已读/);
     assert.match(text, /“只做一次”“测试数据”“之后能回滚”都不能自动/);
     assert.match(text, /已有正常记录与异常记录、历史日志\/审计、用户刚才已经发生的请求与响应/);
     assert.match(text, /隔离测试环境或专用测试数据/);
@@ -300,6 +300,55 @@ test('通用非破坏诊断守卫：写操作不能包装成只做一次，四�
   const readOnly = fn('刷新页面并切只读页签、查看不会标已读的详情，可以这样验证吗？', route);
   assert.match(readOnly, /刷新、切换已确认是纯前端或只读的页签、查看已确认不会触发已读或业务状态变化的详情/);
   assert.equal(fn('token 是谁签发的？', { matched: true, route: { title: '登录 token' } }), '');
+});
+
+test('精确路径前缀守卫：保留尾斜杠且不扩写相似路径或中间子串', () => {
+  const fn = new Function(extractFn(SRC, 'consultExactPathBoundaryGuard') + '\nreturn consultExactPathBoundaryGuard;')();
+  const route = {
+    matched: true,
+    route: { title: 'JWT 免鉴权白名单前缀匹配' },
+    answerFacts: ['当前 JwtFilter 使用 startsWith；仅 /comm/、/external、/swagger、/v3/api-docs 匿名放行'],
+    mustNotConfuse: ['路径中间包含 comm 不放行'],
+  };
+  for (const q of [
+    '业务路径中间带 comm 会绕过认证吗？',
+    '/comm/ 和 /comm 是不是一样？',
+    '/community 会不会命中白名单？',
+    '现有请求怎么判断是否匹配 allowlist？',
+  ]) {
+    const text = fn(q, route);
+    assert.match(text, /每一个斜杠和路径段都是契约的一部分/);
+    assert.match(text, /不得去掉或补上尾斜杠/);
+    assert.match(text, /若权威事实是 `\/comm\/`.*不得改写成 `\/comm`/);
+    assert.match(text, /`\/community`、路径中间仅包含 `comm`.*均不等价/);
+    assert.match(text, /已经发生请求的完整 path/);
+    assert.match(text, /证据里没有出现的路径、例外、端点类型或用途一律不要补/);
+  }
+  assert.equal(fn('患教签名是否必填？', { matched: true, route: { title: '患教签名' } }), '');
+});
+
+test('未知动作不得为抓包重做，事实正确也不得委婉追加真实写操作验证', () => {
+  const safeIntent = new Function(extractFn(SRC, 'consultSafeDiagnosticIntent') + '\nreturn consultSafeDiagnosticIntent;')();
+  const fn = new Function('consultSafeDiagnosticIntent', extractFn(SRC, 'consultNonDestructiveDiagnosticGuard') + '\nreturn consultNonDestructiveDiagnosticGuard;')(safeIntent);
+  const route = { matched: true, route: { title: '患教完成与签名' }, answerFacts: ['签名非必填，没有签名也能完成患教'] };
+  for (const q of [
+    '没有请求，能让现场再点一次抓包吗？',
+    '让创建人正常点完成验证一下不就行了吗？',
+    '这个提交只试试看一次，怎么留证？',
+    '审批问题重做一遍复现一下可以吗？',
+  ]) {
+    const text = fn(q, route);
+    assert.match(text, /“再点一次”“重做一遍”“复现一下”“验证一下”“试试看”“用创建人点”/);
+    assert.match(text, /即使当前 route 已经确认按钮、角色、状态或业务结果/);
+    assert.match(text, /不能顺手追加一次真实完成、提交、签名、审批/);
+    assert.match(text, /默认接受“当前无法安全补抓”/);
+    assert.match(text, /只有已经确认该动作无副作用/);
+  }
+  const readOnly = fn('这个只读列表刷新不会改状态，确认无副作用后可以刷新一次吗？', route);
+  assert.match(readOnly, /刷新、切换已确认是纯前端或只读的页签/);
+  const controlled = fn('隔离测试环境、专用数据、授权、回滚清理、幂等和影响范围都已确认，能受控测一次吗？', route);
+  assert.match(controlled, /隔离测试环境或专用测试数据/);
+  assert.match(controlled, /明确执行授权/);
 });
 
 test('模糊的“第二步对不上”仍须先给规则条件分支，不能退回整体拒答', () => {
@@ -320,7 +369,8 @@ test('consult prompt 同时注入规则应用、运行安全、文件验收与�
   const call = SRC.match(/consultSystem\(proj, cver, hits, specHits, codeHits, qtext\)[\s\S]{0,1100}?messages: msgs/);
   assert.ok(call, '应定位 consult 模型调用');
   assert.ok(call[0].indexOf('consultEvidenceLedgerGuard') < call[0].indexOf('consultRuleApplicationGuard'));
-  assert.ok(call[0].indexOf('consultRuleApplicationGuard') < call[0].indexOf('consultOperationalSafetyGuard'));
+  assert.ok(call[0].indexOf('consultRuleApplicationGuard') < call[0].indexOf('consultExactPathBoundaryGuard'));
+  assert.ok(call[0].indexOf('consultExactPathBoundaryGuard') < call[0].indexOf('consultOperationalSafetyGuard'));
   assert.ok(call[0].indexOf('consultOperationalSafetyGuard') < call[0].indexOf('consultFileArtifactGuard'));
   assert.ok(call[0].indexOf('consultFileArtifactGuard') < call[0].indexOf('consultDiagnosticGuard'));
   assert.ok(call[0].indexOf('consultDiagnosticGuard') < call[0].indexOf('consultNonDestructiveDiagnosticGuard'));
@@ -336,5 +386,6 @@ test('安全诊断意图绕过机械 miss，但普通无证据事实题仍保持
   assert.match(route, /consultOperationalSafetyGuard\(qtext, route\)/);
   assert.match(route, /consultFileArtifactGuard\(qtext, route\)/);
   assert.match(route, /consultEvidenceLedgerGuard\(qtext, route\)/);
+  assert.match(route, /consultExactPathBoundaryGuard\(qtext, route\)/);
   assert.match(route, /consultNonDestructiveDiagnosticGuard\(qtext, route\)/);
 });
