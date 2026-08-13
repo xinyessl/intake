@@ -326,6 +326,31 @@ test('真实PWRS地图回归：患者数据源QR不抢患者身份DQ、检验ETL
   assert.notEqual(S.routeQuestion(map, '这个红色按钮没反应，该点哪个固定重试入口？', '').route?.id, 'QR-PATIENT-LIST-SOURCE');
 });
 
+test('真实PWRS地图回归：业务规则正反例能召回“预期行为→冲突才排查”事实', {
+  skip: !process.env.PWRS_REAL_MAP,
+}, () => {
+  const S = buildRoutingSandbox(makeDeps());
+  const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
+  const cases = [
+    ['反馈已经发送，现场不能改正文，先抓什么？', 'QR-FEEDBACK-SEND-DEDUP', /预期行为[\s\S]*已发送仍能改删/],
+    ['患教只是点了保存，患者端显示待完成，这正常吗？', 'QR-EDU-DRAFT-COMPLETE', /eduState=false[\s\S]*完成接口成功后仍未完成/],
+    ['老师看得到学员入院评估，但保存时报非创建人，正常吗？', 'QR-ADMISSION-ASSESS-SAVE', /CREATOR 是规则内预期[\s\S]*创建人本人被拒绝/],
+    ['配置改完普通刷新还是旧值，没库权限先查什么？', 'QR-CONFIG-NOT-EFFECTIVE', /符合现有缓存规则[\s\S]*重新登录/],
+  ];
+  for (const [q, id, fact] of cases) {
+    const hit = S.routeQuestion(map, q, '');
+    assert.equal(hit.route.id, id, `${q} topN=${JSON.stringify(hit.topN)}`);
+    assert.match(hit.answerFacts.join('\n'), fact);
+  }
+  const switched = S.contextualRouteQuestion(map, [
+    { role: 'user', content: '药师反馈发出去还能改吗？' },
+    { role: 'assistant', content: '旧自由文本不是证据。' },
+    { role: 'user', content: '那患教只是保存，患者端为什么还是待完成？' },
+  ], '那患教只是保存，患者端为什么还是待完成？', '');
+  assert.equal(switched.route.id, 'QR-EDU-DRAFT-COMPLETE');
+  assert.equal(switched.contextOverride, true, '显式患教新实体必须覆盖反馈route');
+});
+
 test('真实PWRS地图回归：体温单七天窗口四种问法命中且不足七天不截到今天', {
   skip: !process.env.PWRS_REAL_MAP,
 }, () => {

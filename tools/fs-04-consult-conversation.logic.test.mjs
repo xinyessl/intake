@@ -128,3 +128,28 @@ test('实施诊断守卫要求先给可执行路径，未知仍局部受证据�
   assert.match(text, /最少信息/);
   assert.match(text, /不能猜/);
 });
+
+test('已核规则应用守卫：先判预期行为，冲突时才收最少证据，route miss 不放松证据门', () => {
+  const fn = new Function(extractFn(SRC, 'consultRuleApplicationGuard') + '\nreturn consultRuleApplicationGuard;')();
+  assert.equal(fn('这个红色按钮点哪个？', { matched: false }), '', '无证据按钮保持安全门');
+  assert.equal(fn('反馈接口路径是什么？', { matched: true }), '', '单纯事实问答无需诊断守卫');
+  for (const q of [
+    '反馈已经发送了，现场还想改正文，先抓什么？',
+    '患教只是暂存，患者端却显示没完成，这正常吗？',
+    '老师看得到学员评估，但保存时报非创建人，接下来查什么？',
+    '普通刷新后配置还是旧值，我没有数据库权限怎么办？',
+  ]) {
+    const text = fn(q, { matched: true });
+    assert.match(text, /先应用已核规则/);
+    assert.match(text, /预期行为/);
+    assert.match(text, /与已核规则冲突/);
+    assert.match(text, /最少证据/);
+    assert.match(text, /历史 assistant 自由文本始终不是证据/);
+  }
+});
+
+test('consult prompt 同时注入规则应用与现场诊断，且规则应用在诊断前', () => {
+  const call = SRC.match(/consultSystem\(proj, cver, hits, specHits, codeHits, qtext\)[\s\S]{0,900}?messages: msgs/);
+  assert.ok(call, '应定位 consult 模型调用');
+  assert.ok(call[0].indexOf('consultRuleApplicationGuard') < call[0].indexOf('consultDiagnosticGuard'));
+});

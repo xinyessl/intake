@@ -1534,6 +1534,21 @@ function consultDiagnosticGuard(question, route) {
   ].join('\n');
 }
 
+// 命中经确认业务规则后，先判断现场现象是不是规则本身的正常结果，再决定要不要调查。
+// 这不是放松证据门：只允许使用当前 route/specHits 的已核事实，不能把历史模型自由文本当证据。
+function consultRuleApplicationGuard(question, route) {
+  if (!route || !route.matched) return '';
+  const q = String(question || '').trim();
+  const applying = /(?:现场|复测|实际|现在|结果|提示|报错|不能|不让|失败|没变化|没生效|看不到|暂存|待完成|刷新|想(?:改|删|完成|保存|操作)|还能|是否|先查|怎么查|怎么处理|接下来|下一步|权限|创建人|本人|别人|无权限|没权限|拿不到|抓什么|补什么)/i.test(q);
+  if (!applying) return '';
+  return [
+    '【先应用已核规则，再决定是否诊断】',
+    '本轮已经命中有经确认事实的功能 route。先把用户描述的现象/想做的操作与这些事实比较：若规则已经能直接解释（例如终态本就不可编辑、非 owner 本就会被拒绝、缓存本就不会因普通刷新必然更新），先明确告诉实施“这是规则内的预期行为”及正确可行做法，不要用“当前资料无法确认”开头，也不要启动无意义的日志/ID/数据库调查。',
+    '只有用户观察到的结果与已核规则冲突时，才按异常处理，并只索取能区分冲突分支的最少证据，说明在哪里取、拿到后怎么判断。',
+    '若当前轮出现新的明确业务实体，仍以当前 route 为准；不得沿用旧功能事实。历史 assistant 自由文本始终不是证据。',
+  ].join('\n');
+}
+
 // 咨询引用只从本次服务端真实召回结果派生；前端请求里的历史消息/元数据不能伪造引用。
 // 同一份精简结果同时用于 SSE 与 chat 持久化，保证流式提示、刷新草稿和历史会话恢复口径一致。
 function consultKbRefs(projId, hits) {
@@ -3208,7 +3223,7 @@ const server = http.createServer((req, res) => {
       else {
         // PD-04：命中 mustNotConfuse → 作负向提示注入 system（易混淆项，勿臆造）。answerFacts 已在 specHits 顶段（consultSystem 走 specExcerpts）。
         const mncNote = routeMnc.length ? '\n【以下为该问题的易混淆项，请勿臆造、勿张冠李戴】' + routeMnc.map(x => '\n· ' + x).join('') : '';
-        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationMode) + '\n' + consultDiagnosticGuard(qtext, route) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
+        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationMode) + '\n' + consultRuleApplicationGuard(qtext, route) + '\n' + consultDiagnosticGuard(qtext, route) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
           piece = String(piece == null ? '' : piece); if (!piece) return;
           if (!kbInjected && kbRefs.length) { kbInjected = true; sse({ kb: kbRefs, kbInjected: true }); }
           reply += piece; sse({ v: piece });
