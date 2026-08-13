@@ -1,0 +1,124 @@
+{
+  "schema": 1,
+  "source": "Browser Plugin DOM answers + read-only persisted retrieval diagnostics",
+  "version": "2.7.260813-25",
+  "model": "grok-4.5",
+  "constraints": {
+    "browserPluginOnly": true,
+    "standalonePlaywright": false,
+    "consultHttpAsAnswerSource": false,
+    "safeImagesOnly": true
+  },
+  "implementation": {
+    "intakeCommit": "8c7e391",
+    "pwrsTag": "2.7.260813-25",
+    "mechanism": "承接型动作结果/复核短追问可继承上一轮已核 route；当前轮显式新实体优先，按钮等无证据高风险实体不继承。",
+    "automatedRegression": "48/48 PASS",
+    "productionHealth": { "ok": true, "projects": 3, "intakesAtDeploy": 616, "kb": 7 }
+  },
+  "summary": {
+    "browserQuestions": 5,
+    "passed": 5,
+    "failed": 0,
+    "score": "5/5",
+    "technicalRetries": 1
+  },
+  "conversations": [
+    {
+      "conversationId": "ZX-20260813-92",
+      "version": "2.7.260813-25",
+      "imagePath": "/Users/lsy/lc-work/psp/pwrs/docs/.intake/Lm3rbOi2SaktHfsTbjacsGqonqd/rec40-19.png",
+      "persistedMedia": "media/ZX-20260813-92/img-1.png",
+      "attachmentPreviewConfirmed": true,
+      "turns": [
+        {
+          "id": "TAG25-01",
+          "turn": 1,
+          "question": "医生现在卡在这个页面，你先告诉我提交前最关键的一件事。",
+          "uiAnswer": "提交前最关键的一件事：选了「其他」时，「其他原因」必须先填上，不能留空。规格写得很清楚——医生选「不采纳」或「其他」时原因是必填的；只有选「采纳」时原因才可以为空。截图里「其他」已经勾上、原因框还是空的，直接点「提交」会校验不过去，医生就卡在这里。让医生在「其他原因」框里写上说明，再点提交就行。",
+          "routing": { "enabled": true, "routeId": "DQ-009" },
+          "manualVerdict": "PASS",
+          "manualReason": "准确用图中状态和 CLIN-04a 已核规则给出提交前唯一关键动作。"
+        },
+        {
+          "id": "TAG25-02",
+          "turn": 2,
+          "question": "填完以后呢，药师端先去哪看？",
+          "uiAnswer": "填完并提交后，药师端先看医嘱干预的「列表」。医生提交后，采纳结果和意见会回传到药师工作站：列表上会直接显示医生的采纳结果（采纳 / 不采纳 / 其他）——这是最先看的地方。要看完整意见、录入来源、录入人和时间，再进该条的详情或时间线。另外：这次采纳反馈不会改医嘱干预本身的已完成状态，列表/详情里状态仍按原来的完成态显示，只是多了医生的采纳结果和意见。",
+          "routing": {
+            "enabled": true,
+            "routeId": "DQ-009",
+            "routeTitle": "医嘱干预通知、医生采纳结果与药师端闭环",
+            "score": 7.403,
+            "inherited": true,
+            "inheritedFromQuestion": "医生现在卡在这个页面，你先告诉我提交前最关键的一件事。",
+            "directCandidate": "QR-FEEDBACK-SEND-DEDUP",
+            "contextOverride": false
+          },
+          "manualVerdict": "PASS",
+          "manualReason": "原失败短追问现继承 DQ-009，先回答列表，再区分详情/时间线，未重复索取已有信息。"
+        }
+      ]
+    },
+    {
+      "conversationId": "ZX-20260813-93",
+      "version": "2.7.260813-25",
+      "imagePath": "/Users/lsy/lc-work/psp/pwrs/docs/.intake/Lm3rbOi2SaktHfsTbjacsGqonqd/rec40-20.png",
+      "persistedMedia": "media/ZX-20260813-93/img-1.png",
+      "attachmentPreviewConfirmed": true,
+      "turns": [
+        {
+          "id": "TAG25-03",
+          "turn": 1,
+          "question": "上面“不合理”是药师的结论，那下面“不采纳”是谁选的？会把已完成状态改掉吗？",
+          "uiAnswer": "一句话结论：上面「不合理」是药师做干预时给出的结论；下面「不采纳」是医生自己选的，提交后不会把医嘱干预本身的已完成状态改掉。具体说明：药师完成干预并通知医生后，医生打开这条已通知的医嘱干预记录，会看到上面的干预结果（不合理）和干预意见。医生在下面自主选择：1=采纳、2=不采纳、3=其他。选「不采纳」或「其他」必须填原因（可用快捷理由）。医生点提交后，采纳结果和意见会回传到药师工作站（列表能看到采纳结果，详情/时间线能看到结果、意见、录入来源、录入人和时间）。这个反馈只更新采纳相关字段，不更改医嘱干预记录本身的已完成状态（completion_status 保持不变）。",
+          "routing": { "enabled": true, "routeId": "DQ-009" },
+          "manualVerdict": "PASS",
+          "manualReason": "正确区分药师干预结论与医生采纳选择，并说明状态不变。"
+        },
+        {
+          "id": "TAG25-04",
+          "turn": 2,
+          "question": "药师想复核这次反馈，列表和详情分别看哪部分？",
+          "uiAnswer": "直接结论：药师要复核医生这次的采纳反馈时，列表主要看“医生采纳结果”；详情（或时间线）看完整反馈内容：结果、意见、录入来源、录入人和时间。具体分开看：列表只显示医生最终选的采纳结果（采纳 / 不采纳 / 其他），一眼就能判断医生对这条干预的态度。详情 / 时间线展开后能看到完整回传信息——采纳结果本身、医生填写的意见（不采纳/其他时必有原因）、录入来源、谁录的、什么时间录的。这些都是医生提交后回传过来的，不会改动干预本身的“已完成”状态。",
+          "routing": {
+            "enabled": true,
+            "routeId": "DQ-009",
+            "routeTitle": "医嘱干预通知、医生采纳结果与药师端闭环",
+            "score": 8.05,
+            "inherited": true,
+            "inheritedFromQuestion": "上面“不合理”是药师的结论，那下面“不采纳”是谁选的？会把已完成状态改掉吗？",
+            "directCandidate": "DQ-006",
+            "contextOverride": false
+          },
+          "manualVerdict": "PASS",
+          "manualReason": "第二个原失败短追问现继承 DQ-009；弱 DQ-006 候选不再抢路由，答案覆盖列表/详情所问事实。"
+        },
+        {
+          "id": "TAG25-05",
+          "turn": 3,
+          "question": "那先不说医生反馈了，登录 token 是 PWRS 自己签的吗？",
+          "uiAnswer": "直接结论：不是。登录 token 不是 PWRS 自己签的，也不是 PWRS 主库管的。依据现有规格能确认的是：PWRS 主库没有登录/账户/token 表；登录数据全部由 usercenter 持有；PWRS 本身也不提供业务登录页（Web 必须回 main-admin 的 /login，Pad 走自己的登录页）。所以 token 签发、存储、校验都在 usercenter 那边，PWRS 只做接收和校验。",
+          "routing": {
+            "enabled": true,
+            "routeId": "DQ-001",
+            "routeTitle": "登录后反复跳转、白屏或回不到门户",
+            "score": 9.17,
+            "inherited": false,
+            "contextOverride": true
+          },
+          "technicalAttempt": "第一次模型调用返回“AI 暂时连不上，请稍后重试”，未作产品判定；同题有限重试一次成功。",
+          "manualVerdict": "PASS",
+          "manualReason": "显式 token 新实体覆盖旧图文 route，切到 DQ-001，答案无医生采纳主题串话。"
+        }
+      ]
+    }
+  ],
+  "acceptance": {
+    "sameConversationContinuation": "PASS",
+    "verifiedRouteInheritance": "PASS",
+    "explicitEntityTopicSwitch": "PASS",
+    "noAnswerGeneratedOutsideBrowserUI": true
+  },
+  "status": { "task": "doing", "accept": "wait" }
+}
