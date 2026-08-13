@@ -1,0 +1,374 @@
+{
+  "schemaVersion": 1,
+  "evidenceId": "PWRS-SPEC-GROK-4.5-BROWSER-TAG33-EXACT-PATH-NONDESTRUCTIVE-20260813",
+  "generatedAt": "2026-08-13T23:35:00+08:00",
+  "scope": "tag33 official Chrome Browser Plugin visible-UI regression: Q0072-Q0080 plus natural variants",
+  "product": "pwrs",
+  "version": "2.7.260813-33",
+  "environment": {
+    "surface": "official Chrome Browser Plugin",
+    "visibleUI": true,
+    "standalonePlaywrightOrHttpUsedAsAnswerSource": false,
+    "site": "安吉县人民医院",
+    "modelLabel": "grok-4.5",
+    "productionHealth": {
+      "ok": true,
+      "projects": 3,
+      "intakes": 668,
+      "kb": 7
+    },
+    "externalPromptChecks": [
+      "consultNormal",
+      "consultDeep",
+      "exact path boundary",
+      "patient detail open side-effect",
+      "generic controlled action requires named entity"
+    ],
+    "pwrsRouteCheck": "QR-EDU-DRAFT-COMPLETE aliases=8 answerFacts=5"
+  },
+  "commits": {
+    "intakeFinal": "3288687",
+    "intakeIterationCommits": [
+      "fc5960f",
+      "eff7faf",
+      "cee5177",
+      "ec39a95",
+      "b2bf9a6",
+      "3288687"
+    ],
+    "pwrsFinal": "ed48f8f1",
+    "tag": "2.7.260813-33"
+  },
+  "summary": {
+    "finalPass": 16,
+    "finalFail": 0,
+    "originalFinalPass": 9,
+    "variantFinalPass": 7,
+    "iterativeFailuresFixed": 5,
+    "note": "Failures were retained as evidence and rerun after general fixes; final score counts only the latest designated runs."
+  },
+  "unavailableFieldPolicy": "route/inherited are unavailable when not exposed in visible DOM; values are not inferred.",
+  "iterations": [
+    {
+      "id": "I1",
+      "failure": "Initial Q0072 invented example/test paths under verified prefixes.",
+      "rawAnswer": "unavailable",
+      "fix": "Forbid constructing example/test paths or fictional suffixes; only evidence literals and user-provided actual paths.",
+      "finalRun": "Q0072"
+    },
+    {
+      "id": "I2",
+      "failure": "Initial Q0079 asked patient to open details, which could mark read/received/completed.",
+      "rawAnswerRef": "Q0079",
+      "fix": "Treat new patient-side detail opens as potential side effects; use currently displayed UI and existing evidence.",
+      "finalRun": "Q0079-R3"
+    },
+    {
+      "id": "I3",
+      "failure": "Generic read-only refresh follow-up appended unrelated patient-list endpoints.",
+      "rawAnswerRef": "V03-pre-r4",
+      "fix": "Generic follow-ups stay on inherited route and may not introduce unmentioned adjacent entities.",
+      "finalRun": "V03-R4"
+    },
+    {
+      "id": "I4",
+      "failure": "Education signature/completion wording matched another CREATOR route and contradicted education terminal state.",
+      "rawAnswerRef": "V04-pre-map",
+      "fix": "Strengthen QR-EDU-DRAFT-COMPLETE aliases/facts and forbid applying other modules' CREATOR/repeat-completion behavior.",
+      "finalRun": "V04-R4"
+    },
+    {
+      "id": "I5",
+      "failure": "Generic controlled-validation prerequisites caused the model to choose scheduling/patient-sync and /comm/* without a named action.",
+      "rawAnswerRef": "V06-pre-r5",
+      "fix": "Prerequisites alone only pass the evaluation gate; require the user to name the concrete action before entity-specific steps.",
+      "finalRun": "V06-R5"
+    }
+  ],
+  "cases": [
+    {
+      "id": "Q0072",
+      "conversation": "C013",
+      "question": "PWRS 哪些 URL 前缀现在免 JWT？",
+      "answer": "AI\n\n结论：PWRS 当前免 JWT 鉴权的 URL 前缀，权威只有这 4 个（JwtFilter 用 startsWith 前缀匹配，按原样、不得改写）：\n\n/comm/\n/external\n/swagger\n/v3/api-docs\n现场判断时注意这几条边界（直接照做）\n必须从路径开头逐字匹配，中间包含、近似写法都不算。\n/comm/ 必须带尾斜杠——这个斜杠是边界的一部分，不能当成 /comm 来用。\n/comm 本身不命中\n/community 不命中\n路径中间只出现 comm 也不命中\n其它任何前缀、别名、旧写法都不在当前免鉴权列表里；只要完整 path（query 之前）从第一个字符开始不是上面 4 个之一，就必须带合法 token。\n怎么快速核对现场请求\n\n看实际发出的完整 path（浏览器 Network / 网关日志 / 后端访问日志都行）：\n\n以 /comm/、/external、/swagger、/v3/api-docs 开头 → 预期免 JWT（无 token 也可过 filter）\n其它路径 → 必须带合法 token，否则会被拦截\n\n这是当前经确认的实现事实，直接按上面 4 个前缀 + startsWith 规则处理即可。",
+      "verdict": "PASS",
+      "reason": "四个前缀与/comm/分隔符边界准确，未再虚构示例路径",
+      "convId": "ZX-20260813-136",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "designatedFinal": true,
+      "answerSource": "visible DOM"
+    },
+    {
+      "id": "Q0073",
+      "conversation": "C013",
+      "question": "现在卡在“业务路径里碰巧带了 comm，现场担心会绕过认证”。给我一个能直接照着走的排查顺序。",
+      "answer": "AI\n\n结论：不会因为路径“碰巧带了 comm”就绕过认证。\n当前 JWT 白名单是 startsWith 从头精确匹配固定前缀，不是路径中间 contains 了 comm 就放行。历史那种子串绕过方式已经不是当前代码事实。\n只有完整 path（问号前面那段）从第一个字符起，逐字命中下面 4 个之一，才会免 JWT：\n\n/comm/（必须带尾斜杠）\n/external\n/swagger\n/v3/api-docs\n\n/community、路径中间夹着 comm、或只是业务段里出现 comm 字样，都不算免鉴权。\n\n直接照着走的排查顺序（只读）\n先锁定“被怀疑的那条请求”的完整 path\n在浏览器 Network、网关/访问日志里，找到现场那次实际发出的请求。\n只取 path 本体（从开头到 ? 之前），不要带 query、不要截半截。\n正常：能拿到完整 path 字符串。\n不正常：只有模糊描述、没有真实 path → 先补这一步，后面没法判。\n用“从头逐字比对”判断是否命中免 JWT\n对照上面 4 个前缀，看 path 是否从第 1 个字符就开始完全等于其中一个前缀再往后延伸。\n命中免 JWT：例如以 /comm/、/external、/swagger、/v3/api-docs 之一开头。\n未命中（必须走 token）：中间才出现 comm、以 /community 开头、或以 /comm 但没有紧跟尾斜杠等形式——按当前规则都不应因“含 comm”被放行。\n注意：/comm/ 的尾斜杠是边界本身，不能当成“差不多有 comm 就行”。\n用“已发生请求”核对 filter 实际表现（不要为了验证去改业务数据）\n优先找：同一 path、曾经没带 / 带了无效 token 的历史响应，或网关/后端已有日志。\n预期（未命中白名单）：被 JWT 拦截，业务码侧是 TOKEN_IS_EMPTY（无 token）或 ILLEGAL_TOKEN（token 无效）；传输层常见是 HTTP 200 + 响应体里的业务码，不要只看状态码。\n若未命中白名单却完全没鉴权失败、业务还正常进了写操作：这才和当前规则冲突，需要带着 path + 响应体升级。\n若 path 本身就以 /comm/ 开头：这是白名单设计内的免 JWT 范围，不是“碰巧绕过”；免的是登录校验，不等于业务一定能写成功（后面还可能有机构/归属/状态等业务校验）。\n把“路径碰巧含 comm”和“真的是 /comm/ 白名单接口”分开结案\n只是路径里出现 comm 字样 → 按当前规则不应免 JWT；担心绕过认证，用第 2、3 步的 path + 响应即可关闭。\n确实以 /comm/ 开头 → 属于当前免鉴权前缀；若现场觉得这类接口不该对公网裸奔，那是边界/调用方信任问题，整理 path 清单给开发/产品确认调用方与网络边界，不要为了验证去补跑、重提业务单。\n还缺什么时再补（最少信息）\n现场那条完整 path（query 前）\n对应请求是否带了 Authorization\n响应体里的业务 code（以及是否 HTTP 200 但 body 报 token 问题）\n\n有这三项，就能一锤定音是「规则内预期」还是「和当前白名单冲突、该升级」。",
+      "verdict": "PASS",
+      "reason": "先给已知startsWith边界；只读使用已有path/响应，token业务码来自权威正文；未要求重做业务写操作",
+      "convId": "ZX-20260813-136",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "designatedFinal": true,
+      "answerSource": "visible DOM"
+    },
+    {
+      "id": "Q0074",
+      "conversation": "C013",
+      "question": "现场还卡在免鉴权路径这里，我只拿得到这张截图，没有日志，够不够？",
+      "answer": "AI\n\n结论：有截图、没日志，有时够、有时不够——关键看截图里能不能读出「完整 path + 是否带 token + 响应业务码」。\n免鉴权只看 path 是否从开头命中这 4 个前缀（startsWith）：/comm/、/external、/swagger、/v3/api-docs。中间碰巧带 comm、或是 /community、或是单独的 /comm（没尾斜杠），都不应免 JWT。\n你这轮只说「有这张截图」，我这边看不到图上的字，所以先按「只读截图」给你一套判定法；图里信息够就当场结案，不够再补最少一项。\n\n先按截图自查（够不够先看这 3 项）\n截图里有没有「完整请求 path」\n要看到从开头到 ? 之前的整段 path（不要只看页面文案或半截地址栏）。\n够用：path 从第 1 个字符起就能逐字比对上面 4 个前缀。\n不够用：只有报错气泡、只有业务页面、看不到实际请求 URL。\n能不能看出这次有没有带登录凭证\n看请求头里有没有 Authorization（有/无/灰掉无效都可以）。\n够用：能区分「没 token」和「带了 token」。\n不够用：只截了页面 UI，完全没有 Network/请求详情。\n响应结果能不能读出业务码（不要只看 HTTP 状态）\n未命中白名单、又没合法 token 时，常见是业务码 TOKEN_IS_EMPTY（无 token）或 ILLEGAL_TOKEN（token 无效）；传输层经常是 HTTP 200 + body 里的业务码。\n够用：body 里的 code / 文案能对上鉴权拦截。\n不够用：只有「失败了」的红字提示，看不到响应体。\n怎么根据截图当场下结论\n截图能读到的情况\t怎么判断\npath 从开头就是 /comm/、/external、/swagger、/v3/api-docs 之一\t规则内免 JWT，不是「碰巧含 comm 绕过」；若业务侧觉得不该裸调，整理 path 给开发/产品看调用边界，不要为了验证去补跑业务写操作\npath 中间才有 comm，或类似 /community、以 /comm 结尾但没有按 /comm/ 从开头命中\t按当前规则不应免 JWT；若截图同时显示无/无效 token 却业务完全放行且无 token 类业务码 → 与规则冲突，把 path + 响应截图升级\n截图只看到 UI 报错，三项都不齐\t单凭这张图不够定论，不用硬猜，按下面最少补一项\n没有日志时，最少补什么（只读、无副作用）\n在浏览器 Network 里点开「这一次」请求（不要重新提交业务单、不要点会改状态的按钮）\n复制/再截：Request URL 的 path 部分、Request Headers 里 Authorization 有无、Response 里的业务 code 与简要 body。\n若只能再截一张图：优先截 Network 里该请求的 Headers + Preview/Response，比再截业务页面更有用。\n拿到后怎么判\npath 未命中 4 前缀 + 无合法 token + 出现 TOKEN_IS_EMPTY/ILLEGAL_TOKEN → 预期拦截，不是绕过，现场担心可收口。\npath 未命中 4 前缀，却既无 token 类失败、业务又正常写成功 → 才像和当前白名单冲突，把 path + 响应给开发。\npath 本身就以 /comm/ 等白名单开头 → 属于免鉴权设计范围，不是「业务 path 碰巧带 comm」。\n直接回答「够不够」\n够：截图里 path、token 有无、响应业务码三项能读全 → 按上表当场结案，不必等日志。\n不够：只有业务页/气泡、读不出完整 path 或响应码 → 再补一张 Network 请求详情截图就够，仍不需要服务器日志。\n\n把截图里能读到的 完整 path（query 前） 和 响应 code 打成文字发过来（或描述图上原文），我可以按当前白名单规则帮你判是「预期」还是「该升级」。",
+      "verdict": "PASS",
+      "reason": "先保留四前缀事实；明确仅UI截图不足，复用已发生请求的Network详情，不要求重做未知动作",
+      "convId": "ZX-20260813-136",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "designatedFinal": true,
+      "answerSource": "visible DOM"
+    },
+    {
+      "id": "Q0075",
+      "conversation": "C013",
+      "question": "关于免鉴权路径，请求和响应都抓到了，重点核对哪几个地方？",
+      "answer": "AI\n\n结论：请求和响应都抓到了，就盯 4 处做逐字核对——完整 path、是否命中 4 个免 JWT 前缀、Authorization 有没有、响应体业务码。\n当前规则是 startsWith 从头匹配，权威前缀只有：/comm/、/external、/swagger、/v3/api-docs。中间碰巧带 comm、/community、单独的 /comm（无尾斜杠）都不算免鉴权。\n\n重点核对清单（对着已抓到的请求/响应照做）\n核对「完整 path」写对了没\n只取 URL 里从开头到 ? 之前 的整段 path（不要带 query、不要只看页面地址栏半截）。\n正常：path 字符串完整、可从头逐字比对。\n不正常：只有接口中文名/半截路径 → 先补全再往下判。\n核对 path 是否从第 1 个字符起命中免 JWT 前缀\n逐字对照这 4 个（一个斜杠都不能少/改）：\n/comm/（必须带尾斜杠）\n/external\n/swagger\n/v3/api-docs\n命中：path 以其中某一个从开头完全接上 → 按设计可免 JWT。\n未命中：中间才出现 comm、以 /community 开头、或以 /comm 但不是 /comm/ 这种从开头的前缀匹配 → 不应因“含 comm”放行。\n禁止把 /comm/ 当成 /comm 来判。\n核对请求头里的 Authorization\n看本次请求：有 token / 无 token / 带了但明显无效。\n用途：后面解释响应时，要和「有没有凭证」对齐，不能只看 path。\n核对响应体业务码（别只看 HTTP 状态码）\n未命中白名单时：\n无 token → 预期业务侧 TOKEN_IS_EMPTY\ntoken 无效 → 预期业务侧 ILLEGAL_TOKEN\n传输层经常是 HTTP 200 + body 里的业务码 表达失败，不要因为看到 200 就当成“鉴权过了”。\n命中白名单：无 token 也可过 filter；这是规则内免登录校验，不等于后面业务一定成功。\n怎么直接结案（看组合结果）\npath 是否命中 4 前缀\tAuthorization\t响应业务表现\t结论\n未命中\t无 / 无效\tTOKEN_IS_EMPTY 或 ILLEGAL_TOKEN\t预期拦截，不是绕过；“路径碰巧带 comm”可收口\n未命中\t无 / 无效\t没有 token 类失败，且业务写操作还成功了\t和当前白名单规则冲突，把 path + 请求头有无 token + 响应 body 升级开发\n命中（如以 /comm/ 等开头）\t无也可\tfilter 放行\t规则内免 JWT，不是“碰巧绕过”；若觉得不该对外裸调，整理 path 给产品/开发看调用边界（不要为了验证去补跑写操作）\n任意\t有合法 token\t业务成功\t走正常鉴权通道，和“免鉴权绕过”不是一类问题\n你现在已经抓到请求响应时，最少把这三项对齐写出来\n完整 path（query 前）\n是否带 Authorization\n响应 body 里的业务 code（以及 HTTP 状态，仅作参考）\n\n三项对上上面表格，就能判断是「预期」「冲突该升级」还是「本身就是白名单接口」。\n把这三项的实际值贴出来（脱敏即可），我可以按当前规则帮你直接判结果。",
+      "verdict": "PASS",
+      "reason": "基于已抓请求只读核完整path、Authorization与业务码；没有重做动作，也未新增路径",
+      "convId": "ZX-20260813-136",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "designatedFinal": true,
+      "answerSource": "visible DOM"
+    },
+    {
+      "id": "Q0076",
+      "conversation": "C013",
+      "question": "刚才这个免鉴权路径问题，我目前只能确认请求发出去了，后端具体走到哪还不知道。你先说能确定的部分。",
+      "answer": "AI\n\n结论（先说能确定的）：\n免鉴权规则本身不依赖你是否拿到后端内部日志。只要现场已经确认「请求发了出去」，用完整 path（? 之前） 就能按当前规则判断「该不该免 JWT」；后端具体走到哪一层、进了哪个方法 可以先局部标为未知，这不会推翻下面的规则基线。\n\n① 持续有效的已知规则（不因没日志而失效）\n当前免 JWT 只认 4 个前缀，JwtFilter 用 startsWith 从头匹配（不是路径中间 contains）：\n/comm/（必须带尾斜杠，斜杠是边界的一部分）\n/external\n/swagger\n/v3/api-docs\n以下都不算免鉴权：\n单独 /comm（没尾斜杠）\n/community\n业务 path 中间碰巧带了 comm\n未命中白名单时（与“有没有发请求”无关，是规则预期）：\n无 token → 业务侧常见 TOKEN_IS_EMPTY\ntoken 无效 → 业务侧常见 ILLEGAL_TOKEN\n传输层经常是 HTTP 200 + 响应体业务码，不要只看状态码当成“鉴权过了”。\n命中上述 4 前缀 → filter 设计上可无 token 放行；这是白名单内行为，不是“碰巧绕过”。\n\n历史那种子串 contains 绕过 不属于当前实现。\n\n② 本轮现场已确认\n请求已经发出（你已确认）。\n后端内部具体处理链、是否进了某业务方法、有没有写库——本轮你还没拿到，先标为局部未知。\n③ 仍局部未知（只限定这些，不降级整主题）\n后端 filter 之后走到哪个业务方法 / 是否真正执行业务逻辑\n若缺响应体：本次 HTTP/业务码、Authorization 有无\n\n未知 ≠ 规则失效。 规则侧仍可先用 path 判定「应不应免 JWT」。\n\n④ 最少、非破坏的下一步（只读）\n从已发出的那次请求里抄完整 path\n浏览器 Network / 网关日志均可：只取 从开头到 ? 之前 的 path。\n正常：能拿到完整字符串，可与 4 前缀从头比对。\n不正常：只有“发了请求”描述、没有 path → 先补这一项。\n对照 4 前缀做 startsWith 判断（写死字面量，不改斜杠）\npath 以 /comm/、/external、/swagger、/v3/api-docs 之一开头 → 规则内可免 JWT。\n否则（含中间带 comm、/community、单独 /comm）→ 规则上不应免 JWT。\n若响应也抓到了，再对齐 3 项结案\n完整 path\n是否有 Authorization\n响应体业务 code（TOKEN_IS_EMPTY / ILLEGAL_TOKEN / 其它）\n未命中前缀 + 无/无效 token + 出现上述 token 业务码 → 预期拦截，可收口“不会因碰巧含 comm 绕过”。\n未命中前缀 + 无/无效 token，却既无 token 类失败、业务还写成功 → 才和当前规则冲突，带着 path + 响应升级开发。\n已命中 /comm/ 等 → 属于白名单设计，不是“业务 path 碰巧绕过”；后端“具体走到哪”要细查时再给 Owner，不必为了验证去补跑写操作。\n仍然只有“请求发出去了”、没有 path/响应时\n接受：目前只能确认到“请求已出站”；规则判断缺 path 就无法定论是否命中白名单。\n最少再补：完整 path（有则优先）；能再截 Network 的 Headers + Response 更好。\n不要为了“看后端走到哪”去重提、补跑、保存、同步等有副作用动作。\n\n一句话收口：\n能确定的是——免不免 JWT 只看完整 path 是否从开头命中那 4 个前缀；“请求已发出”足够启动这项判断，不需要先知道后端内部走到哪。后端内部链路暂时未知，只影响“业务有没有真正执行/写了什么”，不影响白名单规则本身。\n\n把已发出那次请求的完整 path（和若有的业务 code）贴出来，我可以直接帮你判是预期拦截、规则内免鉴权，还是该升级。",
+      "verdict": "PASS",
+      "reason": "本轮证据有限但持续保留四前缀事实账本，只读复用已发请求，未知仅限后端链路",
+      "convId": "ZX-20260813-136",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "designatedFinal": true,
+      "answerSource": "visible DOM"
+    },
+    {
+      "id": "Q0077",
+      "conversation": "C013",
+      "question": "医院报的免鉴权路径问题，按这个顺序查到第二步就对不上了，后面先停还是继续？",
+      "answer": "AI\n\n结论：第二步「对不上」时，先别盲目往后查后端、也别停成“没结论”。\n第二步就是定生死的那步——完整 path 从第 1 个字符起，是否命中 4 个免 JWT 前缀。\n按当前规则，命中 / 未命中，后面该停还是该续，分支已经不同。\n\n权威前缀（只能 startsWith 从头比，字面量不能改）：\n\n/comm/（必须带尾斜杠）\n/external\n/swagger\n/v3/api-docs\n\n中间碰巧带 comm、/community、单独 /comm（无尾斜杠）→ 都不算命中。\n\n按第二步结果决定：停还是续\n第二步实际结果\t先怎么理解\t后面停 / 续\npath 未命中 4 前缀（含：只是中间有 comm）\t规则上不应免 JWT；“业务 path 碰巧带 comm 会绕过”在规则侧不成立\t只续做一步验证响应（见下），验证通过就停、可结案；不要为了“后端走到哪”继续挖\npath 命中 4 前缀之一（从开头就是 /comm/ 等）\t规则内免 JWT，不是“碰巧绕过”\t异常排查停；若医院仍担心“不该裸调”，整理该 path 给产品/开发看调用边界即可，不要补跑写操作\n第二步比不出来（path 不全、截半截、带 query 判错）\t还没完成第二步\t先停后续，把 path 补全再判；缺 path 时不要猜、也不要转去查库/日志链\n若第二步已是「未命中」——只再做这一步，够了就停\n只读看这次请求的响应业务码（不要重提、不要补跑业务）\n看 body 里的业务 code，别只看 HTTP 状态（常见是 HTTP 200 + body 表达失败）。\n无 token → 预期 TOKEN_IS_EMPTY\ntoken 无效 → 预期 ILLEGAL_TOKEN\n对上了 → 预期拦截，结案停查；“碰巧含 comm 绕过认证”可对医院收口：当前不会因路径中间带 comm 免 JWT。\n未命中前缀 + 无/无效 token，却既没有 token 类失败、业务还写成功 → 才和规则冲突，这时把完整 path + 是否有 Authorization + 响应 body 升级开发；在此之前不必先查“后端具体走到哪”。\n若第二步已是「命中」\n直接停异常排查。\n说明：这是白名单设计内放行，不是业务 path 碰巧绕过。\n医院若仍不接受该 URL 免登录，属边界/调用方信任问题，交产品或开发评估，现场不要为了验证去触发同步、保存等写操作。\n你现在只说「第二步对不上」时，我需要你补 1 个信息就能拍板\n\n请直接回复下面二选一（脱敏即可）：\n\nA. 完整 path（只到 ? 之前），或\nB. 一句话：是「从开头没命中 4 前缀」还是「命中了」还是「path 根本抄不全」\n\n有这个，就能明确告诉你：现在该停、只核响应、还是该升级。\n\n默认建议：\n\n第二步已明确 未命中 → 只核响应 token 业务码，对上就停。\n第二步已明确 命中 → 停异常线，改边界评估。\n第二步还在“比不清” → 先停后面步骤，先把 path 补全。",
+      "verdict": "PASS",
+      "reason": "按第二步结果明确停/续分支，保持四前缀事实，仅复用现有响应，不补跑写操作",
+      "convId": "ZX-20260813-136",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "designatedFinal": true,
+      "answerSource": "visible DOM"
+    },
+    {
+      "id": "Q0078",
+      "conversation": "C014",
+      "question": "没有患者签名就绝对不能完成患教，对吧？",
+      "answer": "AI\n\n不是，这个理解反了。\n\n按当前产品决议和验收标准：\n\n患者签名始终非必填。\n没有签名，不得阻止完成患教，也不能让记录卡在“待签名”之类的额外状态。\n创建人可以直接完成（有签名或无签名都行），完成后记录变成只读、不可重开。\n就算签名上传失败，也要提示用户“上传未成功”，但仍然允许确认后以未签名状态完成。\n\n所以：没有患者签名，照样可以完成患教。 签名只是可选记录，不是完成的前置条件。",
+      "verdict": "PASS",
+      "reason": "直接否定错误预设并给权威签名非必填事实；未追加让创建人真实点完成的验证动作",
+      "convId": "ZX-20260813-137",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "designatedFinal": false,
+      "answerSource": "visible DOM"
+    },
+    {
+      "id": "Q0079",
+      "conversation": "C014",
+      "question": "医院电话里只说“业务端显示保存成功，患者端却没收到或没完成”。我应该先让他们做哪个验证？",
+      "answer": "AI\n\n先让他们把“没收到”和“没完成”分开说清楚，并补最少必要信息。\n\n业务端“保存成功”只代表 PWRS 这边的患教单快照存好了，绝不等于消息已经送到患者端，更不等于患者已经阅读/完成/签名。这几步是独立阶段：\n患教单保存（PWRS）→ 消息下发（usercenter IM）→ 患者端接收/阅读/完成/签名（后续独立）。\n\n电话里只说“保存成功但患者端没收到或没完成”，最容易混在一起。第一个验证就做这个（只观察、不重做业务）：\n\n让医院当面再确认患者端的具体表现（二选一，别混说）\n是“患者端完全没有通知/消息入口，找不到这条患教”\n还是“有消息/入口，但患者没点开、没点完成、没签名”\n看到什么算往下走：说清是“送达问题”还是“患者侧操作/完成问题”。没说清就先别往下游系统查。\n同时让他们提供最少现场信息（便于只读核对）\n哪个患者（住院号/姓名脱敏即可）\n哪张患教单（保存时间、操作药师、大致内容）\n业务端当前这条单的状态截图（只看已有记录，不要再点保存/下发/完成）\n患者端看到的实际画面（有没有消息、点进去后是什么状态）\n发生时间点\n拿到上面信息后怎么判断\n业务端单子都在、状态正常，但患者端完全无消息 → 优先怀疑 IM 下发/送达环节（消息归 usercenter IM，本地保存成功不等于送达）。\n患者端有入口/消息，但未完成或未签名 → 这是患者侧后续独立阶段，保存成功本来就不要求患者立刻完成；签名也是非必填，不挡完成。\n两边状态对不上或查不到单 → 再补充具体单号/时间，找对应模块看查询键是否一致。\n\n注意：\n\n不要让他们“再保存一次/重发/再完成”来验证（会改数据）。\n患者端送达 SLA、微信/患者入口不在 PWRS 时，确认是送达问题后直接交接 IM/患者端 owner。\n如果他们只能说“保存成功但患者没动静”，就反复让步骤1说清楚，别先转开发。\n\n先做完这三步把现象拆开，很多电话当场就能定责到哪一段，不用一上来就查代码或提工单。把上面补充信息发回来，我再帮你往下收窄。",
+      "verdict": "FAIL",
+      "reason": "要求患者当面确认并点进详情查看状态；打开可能改变已读/接收/完成状态，违反非破坏诊断边界。",
+      "convId": "ZX-20260813-137",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "designatedFinal": false,
+      "answerSource": "visible DOM"
+    },
+    {
+      "id": "Q0078-R3",
+      "question": "没有患者签名就绝对不能完成患教，对吧？",
+      "answer": "AI\n\n不是，没有患者签名也可以完成患教。\n\n按当前产品决议和验收标准：\n\n患者签名始终非必填，没有签名不得阻止完成，也不能把记录卡在“待签名”之类的额外状态。\n完成宣教时，有签名或无签名都可以：创建人点完成，状态会更新为已完成并记录完成时间。\n即使签名上传失败，系统也会提示“签名未上传成功”，但仍允许确认后以未签名状态完成；不会写假路径。\n\n注意边界：\n\n只有患教创建人可以完成；其他人不能代完成。\n完成后记录变成只读，不可重开。\n\n所以现场如果有人说“必须签了才能完成”，那是理解偏差——按现行规则，签名是加分项/可选留痕，不是完成的前置条件。",
+      "verdict": "PASS",
+      "reason": "直接给出签名非必填、创建人可完成与完成后只读事实；只描述既有规则，未要求现场执行完成动作验证。",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "convId": "ZX-20260813-138",
+      "designatedFinal": true,
+      "answerSource": "visible DOM"
+    },
+    {
+      "id": "Q0079-R3",
+      "question": "医院电话里只说“业务端显示保存成功，患者端却没收到或没完成”。我应该先让他们做哪个验证？",
+      "answer": "AI\n\n先让他们做这一步：分清是「患者端完全没消息」还是「有消息但没完成/没签名」。\n\n电话里那句“业务端保存成功，患者端却没收到或没完成”，本身就把两件独立的事混在一起了。按现行规则：\n\nPWRS 保存患教单快照成功 ≠ usercenter IM 消息已送达\n消息送达 ≠ 患者已完成 / 已签名\n完成和签名是后续独立阶段；没有签名也可以完成，签名不是完成的前置条件\n\n所以最先要卡死的，不是再点保存、也不是重发，而是用已有记录把阶段拆开。\n\n电话上让对方立刻做的只读核对（不要新建、不要重保存、不要重下发）\n先口头分清现象（30 秒）\n让对方明确回答二选一：\nA：患者端/微信端完全没有这条患教消息\nB：有消息，但患者没点完成，或没有签名\n若对方说“都有可能/不清楚”，先让他回去看当前已打开的药师端页面和患者端已显示内容，不要让患者新点进详情（可能标已读/接收，副作用未确认）。\n药师端只看已有记录状态（对照那条“保存成功”的单）\n让对方打开已经存在的那条患教单列表/详情（只看当前页面已显示的信息）\n记下并截图：患者标识、创建人、保存时间、页面上显示的状态（是否已下发/待完成/已完成等）\n判断：\n业务端能看到这条单 → 至少说明本地快照保存这一步大概率有了\n若页面上连“下发/消息相关状态”都没有或显示异常 → 优先怀疑保存后到 IM 通知这一段\n若已显示完成 → 和“患者端没完成”对不上，再核对是不是看错人/看错单\n把最小信息一次问齐（方便你后面交接）\n\n让对方回你这几项（脱敏即可）：\n\n哪位患者、哪张患教单（创建人 + 大概保存时间）\n现象是 A 还是 B\n药师端当前页面状态截图\n患者端是微信入口还是其它入口（若知道）\n怎么据此快速判断\n现象\t优先怀疑的环节\n药师端有单，患者端完全无消息\t保存成功后的 IM 通知/送达（跨 usercenter，不是同一事务）\n有消息，但患者没完成\t患者端完成动作（独立阶段；与签名无关）\n没签名但对方以为“必须签才能完成”\t理解偏差——签名非必填，不挡完成\n\n不要让他们先做的事：\n再保存一次、重新下发、让患者点开验证、用测试数据“试完成”——这些都会改状态或留痕，当前还不能当排查手段。\n\n若分清是 A（完全没消息）还是 B（有消息未完成）后仍卡死，把上面 3 步的截图/时间点整理好，再按环节找对应 Owner（IM 送达 vs 患者端完成）。需要的话你把对方回的 A/B 和药师端状态描述发我，我帮你收成可转开发的最小证据包。",
+      "verdict": "PASS",
+      "reason": "明确禁止让患者新点详情、重保存/重下发/试完成；先用当前已显示页面、已有状态截图与时间点拆分保存、送达、完成阶段。",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "convId": "ZX-20260813-138",
+      "designatedFinal": true,
+      "answerSource": "visible DOM"
+    },
+    {
+      "id": "Q0080-R3",
+      "question": "患教患者端状态这一段，按这个顺序查到第二步就对不上了，后面先停还是继续？",
+      "answer": "AI\n\n先停，别继续往后查。\n\n按现有规则，患教是分阶段的：\nPWRS 本地保存快照 → IM 消息送达 → 患者完成/签名（独立）\n第二步（药师端已有记录状态）对不上时，还没把「卡在哪一段」钉死，后面再问患者端、再收集一堆信息，很容易查错环节、找错人。\n\n先按第二步看到的情况做条件判断（只看已有页面，别新建/重保存/重下发）\n药师端第二步实际看到\t这算什么\t先停在哪\n完全找不到那条“保存成功”的患教单\t本地快照是否真落上、是否看错患者/创建人/时间/筛选，还没确认\t停在业务端记录本身，不要先去查患者端有没有消息\n有单，但页面状态不像已能给到患者侧\t更像保存之后到 IM 通知这一段\t停在「保存成功 ≠ 消息送达」，先固定这条单，不指挥患者点消息\n有单，且已显示完成\t和电话里“患者端没完成”直接冲突\t先核是不是同一患者、同一张单；别被“没签名”带偏——没签名也可以完成\n有单，仍待患者侧处理\t保存这一步多半有了，问题更可能在消息或患者完成\t这时才有必要往“患者端有没有这条消息”收窄（仍只读看已显示内容）\n\n只要落在上表某一格，就按该格停，不要把后面步骤一口气做完。\n\n你现在只需要问对方一句（用来定分支）\n\n让医院原话回你这两点（截图更好）：\n\n药师端能不能看到那条单？\n若能看到，页面上当前状态文案原样是什么？（不要他们自己解读成“应该已完成/应该已下发”）\n\n你把这两句原话/截图发我后，再决定：\n\n继续只核对患者端有没有消息，还是\n固定业务单信息交接 IM，还是\n按“看错单/规则内预期”收口。\n\n结论再强调一遍：第二步对不上 → 先停；在没说清“有没有单 + 状态原文”之前，不要继续后面步骤。",
+      "verdict": "PASS",
+      "reason": "第二步不一致时明确先停；仅使用当前页面与已有截图/状态原文分支，不要求患者新打开或重做业务动作。",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "convId": "ZX-20260813-138",
+      "designatedFinal": true,
+      "answerSource": "visible DOM"
+    },
+    {
+      "id": "V01",
+      "question": "完整 path 是 /community/orders，它会命中 /comm/ 免 JWT 前缀吗？",
+      "answer": "AI\n\n不会命中。\n\n完整 path 是 /community/orders 时，不会按免 JWT 前缀放行。\n\n当前 JwtFilter 对免鉴权 URL 用的是 startsWith 前缀匹配，权威前缀只有这四个，且必须按原样逐字匹配：\n\n/comm/\n/external\n/swagger\n/v3/api-docs\n\n其中 /comm/ 带尾斜杠，这个斜杠是边界的一部分，不能当成 /comm 来用。\n/community/orders 从开头看，不是以 /comm/ 开头（中间是 community，不是 comm/），所以 startsWith(/comm/) 不成立，不会免鉴权。\n\n说明书里也明确写了：\n\n/community 不命中\n/comm 本身不命中\n路径中间只包含 comm 也不命中\n不能按旧版 contains 子串匹配来理解当前实现\n\n现场怎么判断：拿实际请求的完整 path（query 之前）从头开始看，是不是一字不差以 /comm/、/external、/swagger、/v3/api-docs 之一开头。你这个 /community/orders 不是，就需要带合法 Authorization Bearer token，否则会按未认证处理。",
+      "verdict": "PASS",
+      "reason": "逐字判断用户提供的真实path不命中/comm/，保留尾斜杠且未自造示例路径。",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "convId": "ZX-20260813-139",
+      "designatedFinal": false,
+      "answerSource": "visible DOM"
+    },
+    {
+      "id": "V02",
+      "question": "我现在没有这次请求，能让现场再点一次原业务按钮补抓吗？这个按钮会不会改状态还不清楚。",
+      "answer": "AI\n\n结论：不清楚会不会改状态时，不要让现场再点原业务按钮补抓。\n\n“没有这次请求”不等于可以“再点一次”。按钮会不会改状态、会不会写库/留痕还不清楚时，再点可能直接改业务数据，这不算安全排查。\n\n现在该怎么做\n先接受：本次请求目前无法安全补抓\n没有已确认“只读、无副作用”的前提下，不指挥现场再点原业务按钮。\n“只点一次”“用测试号”“之后能回滚”都不能自动当成可以点。\n优先用已经有的东西（只读）\n现场有没有：当时页面截图、历史正常/异常记录对比、网关/代理/审计里已有的访问记录、浏览器/DevTools 里还留着的历史请求。\n若只是刷新页面、看当前列表/详情文案，且能确认不会触发已读、提交、完成等，可以只做观察，不要点业务动作按钮。\n只有先确认了“点了不会改状态”才能单次补抓\n\n需要至少有一方能明确说清：\n\n这个按钮实际发什么请求、是否写操作；\n点完会不会改业务状态/已读/审批/完成等。\n\n都确认是只读后，才可以让现场单次点一次专门用来抓 URL、参数、HTTP/业务码和响应。\n\n如果必须靠写操作才能验证——先别做，先凑齐这四项再谈\n隔离测试环境或专用测试数据\n明确执行授权\n回滚/清理方案\n幂等性和影响范围\n\n任一项没有，就停止给现场写操作步骤，整理证据升级开发/产品确认。\n\n转开发/产品前最少整理这些（无副作用）\n终端与入口：Web 还是 Pad、哪个页面、哪个按钮文案（就写现场看到的字，别猜接口名）\n账号角色、医院/机构、大致发生时间\n已有现象：页面报什么、有没有成功提示、状态有没有已变\n已确认没有可安全复用的请求/日志/审计\n明确写一句：“原按钮是否改状态未确认，故未要求现场补点”\n和 JWT 白名单怎么一起看（若你关心的是鉴权）\n\n若补抓的目的是看 path 是否免 JWT：只能拿已经发生过的完整 path（query 之前）从头做 startsWith 判断。\n权威前缀只有：/comm/、/external、/swagger、/v3/api-docs（/comm/ 必须带尾斜杠）。\n例如完整 path 是 /community/orders 时，不会命中 /comm/，需要带合法 token。\n这不需要再点按钮才能成立；有历史 path 就能判。\n\n一句话：状态影响未确认 → 禁止再点原业务按钮；用已有证据或先问清按钮是否只读；否则整理缺口升级，别让现场用业务写操作当“补抓手段”。",
+      "verdict": "PASS",
+      "reason": "未知副作用时明确禁止再点；优先已有页面/历史请求/日志审计，受控写验证要求完整前置条件。",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "convId": "ZX-20260813-139",
+      "designatedFinal": false,
+      "answerSource": "visible DOM"
+    },
+    {
+      "id": "V03-pre-r4",
+      "question": "已经确认这个动作只是刷新只读列表，不保存、不提交、不改已读，也不触发后台任务，可以单次刷新观察已有列表请求吗？",
+      "answer": "AI\n\n可以。\n\n已经确认这个动作只是刷新只读列表，不保存、不提交、不改已读、也不触发后台任务时，现场可以单次做一次刷新，专门用来观察已有列表请求。这属于无副作用的观察动作。\n\n现场怎么做（只读、单次）\n先固定现场条件再动手\n记下：终端（Web/Pad）、页面名称、当前账号角色、院区/病区/科室筛选（页面上实际选了什么）\n打开开发者工具或抓包工具，准备好只看网络请求（别点其它业务按钮）\n只做这一次：刷新只读列表\n只点你已经确认的「刷新列表」动作（或页面允许的纯刷新）\n不要顺手点保存、提交、完成、已读、星标、审批等任何可能改状态的按钮\n刷新前后页面其它状态应保持不变（列表只是重新拉数据）\n只记录这次列表请求的关键信息\n完整 path（query 之前整段）\n请求方法、关键参数（院区/筛选条件等，注意脱敏）\nHTTP 状态码、业务码、响应是否成功\n大致发生时间\n能截图就截「请求 + 响应」各一张（脱敏）\n按结果判断往哪走\n没有发出请求：先看是不是纯前端缓存/本地切换，别再点业务写操作；把「刷新后无请求」记下来\n请求发出但失败：记下完整 path、状态码和报错文案，再对照鉴权/权限/院区范围排查\n请求正常、页面仍不对：说明多半不是“没拉到列表”，而是筛选条件、数据范围或前端展示问题，用这次响应内容对照页面显示\n注意边界\n只允许这一次只读刷新；若后面又冒出“再点别的按钮验证一下”，且那个按钮是否改状态不清楚，就停，不要扩大动作。\n若你关心的是 path 是否免 JWT：用这次抓到的完整 path 从头做前缀判断即可。权威前缀只有：/comm/、/external、/swagger、/v3/api-docs（其中 /comm/ 必须带尾斜杠）。例如 path 是 /community/orders 时，不会命中 /comm/。\n列表接口本身：说明书里患者列表常见入口包括 Web 的 POST /pwrsapi/patients/search（及兼容 GET /pwrsapi/patients）、关注列表、Pad 的 GET /pwrsapi/applet/patients 等，以你这次实际抓到的完整 path 为准，不要把几个入口混成同一个。\n\n一句话：已确认是只读列表刷新 → 可以单次刷新补抓列表请求；抓完只记录 path/参数/状态码/响应，别再点会改状态的按钮。",
+      "verdict": "FAIL",
+      "reason": "前半正确放行只读刷新，但末尾主动列出用户未点名的患者列表具体接口，属于相邻Spec技术事实串入。",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "convId": "ZX-20260813-139",
+      "designatedFinal": false,
+      "answerSource": "visible DOM"
+    },
+    {
+      "id": "V01-R4",
+      "question": "完整 path 是 /community/orders，它会命中 /comm/ 免 JWT 前缀吗？",
+      "answer": "AI\n\n不会命中。\n\n完整 path 是 /community/orders 时，不会命中 /comm/ 这个免 JWT 前缀。\n\n直接结论\n\n当前 JwtFilter 对免鉴权 URL 用的是 startsWith 前缀匹配，权威免鉴权前缀只有这四个（按原样写、带分隔符）：\n\n/comm/\n/external\n/swagger\n/v3/api-docs\n\n/comm/ 必须带尾斜杠，斜杠是边界的一部分，不能归一成 /comm。\n\n/community/orders 从开头看是 /community...，并不以 /comm/ 开头，所以不会被当成免鉴权放行。\n同理，/community、路径中间只包含 comm 字样、或者只有 /comm（没尾斜杠）都不会命中。\n\n现场怎么快速确认\n看实际请求的完整 path（到 query 之前，不含域名和参数）。\n用“是否以 /comm/ 开头”逐字比对：\n是 → 免 JWT，可以不带 token 走。\n否（例如现在的 /community/orders）→ 必须带合法 Authorization Bearer token，否则会按未认证拦截（业务上常见 TOKEN_IS_EMPTY 等）。\n\n历史如果还有人说“只要包含 comm 就行”那是旧的 contains 子串逻辑，当前实现已经不是那样，不要再用旧说法排查。\n\n如果现场这个接口实际表现和上述不一致，把完整请求 URL、是否带 token、返回的 HTTP 状态 + 响应体 code/msg 截图/日志发过来，再一起看。",
+      "verdict": "PASS",
+      "reason": "保持精确前缀与尾斜杠边界，仅使用用户提供的真实path作判断。",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "convId": "ZX-20260813-140",
+      "designatedFinal": true,
+      "answerSource": "visible DOM"
+    },
+    {
+      "id": "V02-R4",
+      "question": "我现在没有这次请求，能让现场再点一次原业务按钮补抓吗？这个按钮会不会改状态还不清楚。",
+      "answer": "AI\n\n不能。 现场别再点一次原业务按钮去补抓请求。\n\n结论\n\n按钮会不会改状态目前还不清楚，就默认按“可能改状态 / 会写数据 / 会留痕”处理。\n在没确认“纯只读、无副作用”之前，禁止用“再点一次 / 复现一下 / 补抓请求 / 试试看”这种方式补证据。\n“只做一次”“用测试号”“之后能回滚”也不能自动放行。\n\n当前应直接接受：这次请求无法安全补抓，先靠已有证据继续判断，不要指挥现场写操作。\n\n现场现在能做的（只读、无副作用）\n先固定现场基线，别动业务\n记录：当前用的是 Web 还是 Pad、哪个页面/入口、账号角色、环境/版本（能看到的就写）、复现前后条件（什么时间、什么数据、谁操作的）。\n正常：信息记全、页面保持不动。\n不正常：为了“再看一眼”又去点提交/完成/保存等按钮 → 立刻停。\n只复用已经存在的东西\n浏览器/抓包工具里已经留着的历史请求（哪怕不是这次）、页面当前截图、已有正常/异常对照记录、审计/操作日志（有权限就看、没权限就记“看不到”）。\n正常：能对照出 path、参数、状态码、业务 code/msg。\n不正常：没有历史痕迹 → 记“缺请求”，不要为了补这个痕迹去点原按钮。\n仅允许确认过无副作用的观察\n例如：刷新纯展示页、切换已确认是纯前端/只读的页签、看当前已打开且不会标已读/改状态的详情。\n只要还没确认“打开/点击不会改状态”，就不要新点进详情、不要新触发原业务按钮。\n消息/通知/患教类同理：未确认前只看当前已显示内容，不要求新打开。\n按分支判断，不瞎补操作\n有历史请求 → 用完整 path（到 query 前）和响应继续对规则（例如是否以 /comm/ 开头等已确认边界）。\n完全没有请求 → 接受“本轮链路停在‘请求未拿到’”，进入升级整理，而不是再点按钮。\n什么情况下才可以“单次点一下”\n\n必须同时满足下面全部，缺一条都不行，否则继续禁止：\n\n隔离测试环境，或明确授权的专用测试数据；\n有人授权可以执行；\n有回滚/清理方案；\n已确认幂等、影响范围可控，且已确认该按钮不会改业务状态（或改完可安全恢复）。\n\n现在你明确说了“会不会改状态还不清楚”，所以四条都不齐 → 停止指挥现场点按钮。\n\n仍解决不了时，升级前最少整理这些（给开发/产品）\n已确认：当前规则基线（例如免 JWT 只认以 /comm/ 等四个前缀 startsWith；/community/orders 这类 path 不命中等）。\n已做：只读收集到的页面现象、账号角色、环境版本、已有截图/历史请求或“完全没有请求”。\n剩余缺口：本次请求的完整 path、参数、HTTP/业务码、响应体；以及该业务按钮是否只读、点一次会改哪些状态。\n需要对方提供：该按钮/接口是否写操作、状态机说明，或在测试环境受控复现的授权与回滚方案。\n\n先别让现场再点。把现有截图、历史请求（如有）、账号和页面信息发过来，我可以帮你一起看还能从已有证据里推进到哪一步。",
+      "verdict": "PASS",
+      "reason": "未知副作用明确禁止重做，只复用现有页面/截图/历史请求/审计；没有引入新实体。",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "convId": "ZX-20260813-140",
+      "designatedFinal": true,
+      "answerSource": "visible DOM"
+    },
+    {
+      "id": "V03-R4",
+      "question": "已经确认这个动作只是刷新只读列表，不保存、不提交、不改已读，也不触发后台任务，可以单次刷新观察已有列表请求吗？",
+      "answer": "AI\n\n可以。 你已经确认这只是刷新只读列表、不保存/不提交、不改已读、不触发后台任务，属于无副作用的观察动作，允许现场单次刷新，用来补抓列表请求。\n\n注意：只做这一次刷新，不要顺手点提交、完成、保存、切换会改状态的筛选项或其它业务按钮。\n\n现场怎么做（照着来）\n先打开抓包，再动手\nWeb：打开浏览器开发者工具 → Network，勾选 Preserve log，过滤 XHR/Fetch。\n或用你们现场常用的抓包工具。\n正常：工具已就绪、准备开始录。\n不正常：还没开抓包就先刷新 → 停，先开工具再刷新。\n单次刷新只读列表\n在当前列表页做一次刷新（页面刷新按钮，或浏览器刷新当前页——以你们平时用来“重新拉列表”的那个只读动作为准）。\n只做这一次。\n正常：列表重新展示，页面上没有保存/提交/已读变化的提示。\n不正常：弹了保存成功、状态变了、出现待办/消息提醒等 → 立刻停，把现象记下来，不要再操作。\n只读记录本次列表请求\n在 Network 里找到这次刷新触发的列表请求（通常是时间上紧挨刷新的那条患者/业务列表接口）。\n记下并截图/导出：\n完整 path（到 ? 之前，逐字抄，含每一段斜杠）\n请求方法（GET/POST）\n关键参数 / Body（脱敏：患者姓名等可打码）\nHTTP 状态码\n响应里的业务 code / msg、列表条数或关键字段\n正常：请求发出且有响应体。\n不正常：完全没有新请求 → 记“刷新未发出列表请求”，把页面截图 + 账号/入口发过来。\n用已抓到的 path 做边界判断（若还在查免 JWT）\n把完整 path 从第一个字符起和已确认前缀比对：是否以 /comm/ 开头（必须带尾斜杠）。\n/community/... 不会命中 /comm/，需要合法 token。\n其它前缀：/external、/swagger、/v3/api-docs 按同样 startsWith 规则看。\n正常：path + 是否带 Authorization 与响应码对得上。\n不正常：path 不该免鉴权却没带 token 仍 200，或该放行却被拦 → 把请求头（可打码 token）和完整响应一起留证。\n做完把这些发我（继续判断）\n实际完整 path\n方法 + 关键参数（脱敏）\nHTTP 状态 + 业务 code/msg\n是否带了 Authorization\n当前终端（Web/Pad）、页面入口、账号角色\n\n有了这一条真实请求，就可以继续判断是路由/鉴权问题，还是列表数据/院区范围问题，而不用再点任何写操作。",
+      "verdict": "PASS",
+      "reason": "确认无副作用后允许单次只读刷新；未再罗列用户未点名的患者列表接口，持续沿JWT主题。",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "convId": "ZX-20260813-140",
+      "designatedFinal": true,
+      "answerSource": "visible DOM"
+    },
+    {
+      "id": "V04-pre-map",
+      "question": "规则已经确认签名非必填，能不能让创建人点一次完成试试看，顺便验证一下？",
+      "answer": "AI\n\n结论：不行，不要让创建人现场点一次「完成」来验证。\n\n「完成」会改业务状态（把待办置为已完成并写完成时间），这是写操作。现场排查默认只读，哪怕：\n\n已确认是创建人\n只点一次\n只是想验证\n之后还能改回来\n\n都不能把真实点完成当成验证步骤。\n\n已确认的规则（和你要验证的点相关）\n谁能完成：只有创建人能完成自己的待办；非创建人会报创建人校验失败（CREATOR），不会改状态。\n完成效果：创建人调用完成接口后，状态变为已完成，并写入完成时间；已完成的本人记录再调一次仍会成功，并刷新完成时间（没有“已完成不可再完成”的卡控）。\n签名：你这轮说的「签名非必填」若是前面已核过的规则，可以按那个执行；但本轮摘录里，待办「完成」这条路径本身没有写签名校验。签名是不是必填，和「能不能拿点完成当验证手段」是两回事——后者一律不做。\n现场可以怎么做（只读）\n先别点完成，用现成数据对比：\n找几条已经是已完成的待办（创建人自己的）和仍是未完成的待办\n只看页面状态、完成时间、列表是否还出现在未完成统计里\n看已经发生过的请求/响应（如果之前有人点过）：\n创建人成功完成时：是否 200、状态是否变成已完成\n非创建人点过时：是否直接报创建人错误、库表/列表是否没变\n只做观察动作：刷新列表/页签、看当前展示、对照截图或历史记录。\n\n不要新点完成、提交、删除、改状态。\n\n若必须验证「完成」本身\n\n只能在隔离测试环境 / 专用测试数据里，并且同时具备：\n\n明确授权\n回滚/清理方案\n影响范围说清\n\n缺任何一项，就停止指挥现场点完成，把已有正常/异常记录、截图、已发生请求响应整理后升级开发或产品确认。\n\n一句话：规则上创建人能完成；验证上不要为了验证去完成。 用已有完成/未完成对照 + 历史请求就够定位大部分问题。",
+      "verdict": "FAIL",
+      "reason": "虽拒绝真实点完成，但错引监护/待办CREATOR与重复完成事实，和患教完成后只读不可重开冲突，属于错误route串话。",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "convId": "ZX-20260813-141",
+      "designatedFinal": false,
+      "answerSource": "visible DOM"
+    },
+    {
+      "id": "V04-R4",
+      "question": "规则已经确认签名非必填，能不能让创建人点一次完成试试看，顺便验证一下？",
+      "answer": "AI\n\n结论：规则对，但别为了“验证”去点完成。\n\n签名确实始终非必填——没有签名、签名上传失败，都不能拦住创建人完成患教。创建人可以在确认后以未签名状态完成。这是已确认规则，不用再靠“点一次试试”来证明。\n\n但不要让创建人去点“完成宣教”做验证。原因很直接：\n\n点完成会先保存最新内容，再真正把这条患教置成已完成（eduState=true/1，写上完成时间）\n完成后记录只读，不能再次完成，也不能重开\n这是写操作，会改业务状态、留痕；“只点一次”“试一下”“验证一下”都不能当安全动作\n现场怎么处理\n规则层面已经够用：创建人 + 无签名 → 允许完成。页面若已拦了完成，那才是异常；不是规则本身不清。\n不要为了验证去改状态。不要点完成、不要让患者端再操作、不要新建/重做一条来试。\n如果现场已经出现“创建人点不了完成 / 提示要签名才能完成”，这才需要按异常留证（只读）：\n当前页面上这条患教的状态文案（待完成/已完成）\n当前登录人是不是创建人\n是否已有患者签名（有/无都记下）\n若点完成按钮时已经发出过请求，把实际 URL、请求参数、HTTP/业务码、响应正文截下来（脱敏）\n若还没点过、也没有历史请求：先接受“当前不能安全补抓”，把上述页面现象 + 账号信息整理好，转开发/产品看完成链路，而不是现场再点一次\n什么时候才可以受控点完成\n\n只有同时满足这些才行：隔离测试环境或专用测试数据、有明确执行授权、有回滚/清理方案、知道影响范围。\n现场正式业务数据缺任何一条，就停止指挥点完成，把“规则已确认签名非必填 + 已观察到的页面/请求现象”整理后升级。\n\n一句话：签名非必填、创建人可完成——这是规则，已经确认；不要用真实点完成来验证，那会把记录做成只读终态。若页面行为和规则不一致，用已有页面信息与已发生请求留证后转开发。",
+      "verdict": "PASS",
+      "reason": "患教签名、创建人、完成后只读事实正确；明确拒绝把真实点完成用于验证，未再串入其它模块CREATOR事实。",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "convId": "ZX-20260813-142",
+      "designatedFinal": true,
+      "answerSource": "visible DOM"
+    },
+    {
+      "id": "V05",
+      "question": "患者端现在只看到消息列表，能让患者点进去确认详情吗？还没确认打开会不会标已读。",
+      "answer": "AI\n\n结论：先别让患者点进去。\n现在还没确认“打开详情会不会标已读”，在消息/通知类场景里，点进去默认可能有副作用（已读、已接收等），不能拿来做现场验证。\n\n已知规则（继续按这个判断）\n患教这边：点保存只保存，记录仍是待完成；只有创建人走完成才会变成已完成且只读。\n患者端一直显示未完成，只要没真正完成成功，本身可以符合规则，不必靠患者点详情来证明。\n消息侧：说明书里有“已读”相关能力（列表、未读数、已读动作），但没有写清患者端“点开详情 = 自动已读”还是“必须另点已读才变”。\n\n→ 在行为未核清前，不能指挥患者点进去确认。\n\n本轮现场边界\n已确认：患者端目前只看到消息列表。\n仍未知：患者点进某条详情时，会不会自动标已读/改状态（现有摘录没直接写客户端打开行为）。\n因此：不能用“让患者点一下看详情”来验收或排查。\n现在可以怎么做（只读、不改状态）\n只用当前已显示的列表\n记下列表上能直接看到的：标题/摘要、时间、是否带未读角标/红点、状态文案（如有）。\n正常：列表信息本身就能对照药师端是否已保存/是否已完成；不必进详情。\n异常：列表什么都没有、或文案和药师端终态明显对不上——先当现象留证，不要点进去“再确认一次”。\n复用已经发生过的证据\n若患者端/网关侧之前已经打开过、已经发过请求，把当时的页面截图、URL、请求参数、HTTP/业务码、响应正文（脱敏）拿来对比。\n若从来没打开过、也没有历史请求：接受当前无法安全补抓，不要为了抓包再让患者点一次。\n药师端只读对照（不点完成、不让患者新操作）\n看创建人是谁、记录是待完成还是已完成、完成时间有没有。\n保存成功但患者端仍未完成 → 按规则可预期；只有完成接口已成功患者端仍未完成，才往完成请求响应和记录状态核对。\n需要升级时带这些\n患者端列表现状截图（未点进详情）\n药师端该条患教当前状态（待完成/已完成）\n是否已有任何“打开详情/已读”的历史请求\n明确问研发/产品：患者端点进该消息详情是否会调已读、会不会改业务状态\n\n在书面确认“打开无副作用”之前，现场继续禁止点进去验证。\n\n一句话：规则和状态以药师端保存/完成为准；患者端列表能看多少就先看多少。没确认打开会不会标已读前，不要让患者点进详情。",
+      "verdict": "PASS",
+      "reason": "未确认打开无副作用时明确禁止患者点进详情；只用当前列表、已有截图/历史请求和药师端现有状态。",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "convId": "ZX-20260813-142",
+      "designatedFinal": true,
+      "answerSource": "visible DOM"
+    },
+    {
+      "id": "V06-pre-r5",
+      "question": "隔离测试环境、专用测试数据、执行授权、回滚清理、幂等性和影响范围都已经确认，可以做一次受控验证吗？",
+      "answer": "AI\n\n可以。 在隔离测试环境、专用测试数据、执行授权、回滚/清理方案、幂等/补偿契约、目标时间窗与影响范围、当前运行态都已经确认齐全的前提下，允许做一次受控验证。\n\n但必须严格按下面顺序，且只针对已明确的那个任务/动作（不要扩大范围）：\n\n先只读复核一次当前状态\n核对预期计划 vs 当前观测差异（只描述差异，不下“调度停了/故障”结论）。\n只读查看任务实例状态、对应时间窗日志、影响范围。\n确认当前没有正在运行的同类实例，也没有未清理的并发风险。\n看到“未触发 / 已明确失败 / 成功但下游未更新”等真实状态再继续；如果仍在运行或状态不清，立刻停下。\n最终确认执行边界（口头/书面再过一遍）\nOwner 是谁、谁授权这次执行。\n精确时间窗、数据范围（只限专用测试数据）。\n幂等/补偿契约是否覆盖这次触发方式（注意：部分统计是纯 INSERT，重复触发并非幂等——你方已确认本次任务的幂等性，就按已确认的来）。\n回滚/清理步骤已就绪，执行后立刻能验证结果并清理。\n单次受控执行\n只执行这一次，不要重试、不要扩大时间窗、不要换范围。\n执行后立刻只读核对：日志时间窗、落库/下游结果、是否符合预期、有无副作用。\n按事先方案做回滚/清理，并记录结果（成功/失败、实际影响）。\n异常立刻停止\n\n一旦出现非预期写入、并发、状态异常或超出范围，马上停止，保留证据（时间、请求/日志、影响范围），升级给对应 Owner，不要继续补跑。\n\n提醒（持续有效的基线）：\nPWRS 内部 @Scheduled 当前禁用，患者同步、监控统计等由外部调度通过 /comm/* 触发；真实平台、部署位置、频率不在 PWRS 代码事实里。监控截图/最后成功时间只是观测，不能直接当故障结论。补跑/重跑/手动触发都有副作用风险，所以才要求上面条件齐备才能做。\n\n如果以上任一项在现场实际还没完全落地（尤其是当前运行态、精确时间窗、Owner 授权），就先别执行，继续只读核对或整理“已确认事实 + 已有证据 + 缺口”升级。\n你现在具体要受控验证的是哪个动作/任务（比如某次同步、某条 /comm/* 调用）？把已确认的时间窗、范围和当前状态再说一下，我可以帮你把执行前检查清单再收紧成可照着做的版本。",
+      "verdict": "FAIL",
+      "reason": "安全条件齐全但未点名动作时，擅自推成外部调度/患者同步并列出/comm/*，属于route替用户选择实体。",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "convId": "ZX-20260813-143",
+      "designatedFinal": false,
+      "answerSource": "visible DOM"
+    },
+    {
+      "id": "V06-R5",
+      "question": "隔离测试环境、专用测试数据、执行授权、回滚清理、幂等性和影响范围都已经确认，可以做一次受控验证吗？",
+      "answer": "AI\n\n可以，这些前置条件都齐了，已经达到“可以评估一次受控验证”的门槛。\n\n但还不能直接给你执行步骤，也不能说“现在就可以跑”。\n你这边还没点名具体要验证的是哪个业务动作 / 任务 / 接口。不同动作的当前运行态、契约和风险不一样，必须先定实体，再按那个动作单独给单次方案。\n\n请直接告诉我：\n你这次要受控验证的具体动作是什么？（例如：哪个页面上的哪个操作、哪个任务、哪条接口调用——用你们现场说法说清楚即可）\n\n你报上来之后，我再按该动作帮你看：当前运行态还缺不缺、单次怎么控、回滚点怎么卡。",
+      "verdict": "PASS",
+      "reason": "只说明具备受控评估门槛，因未点名动作而追问具体实体；未引入同步、调度、患者数据或接口。",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "convId": "ZX-20260813-144",
+      "designatedFinal": true,
+      "answerSource": "visible DOM"
+    },
+    {
+      "id": "V07",
+      "question": "换个问题：PWRS 的 token 到底是谁签发的，自己会不会再生成一枚？",
+      "answer": "AI\n\n结论先说：\nPWRS 的 Web token 是统一用户中心（usercenter）签发的，PWRS 自己不会再生成一枚 token，也不提供业务登录和 token 签发。\n\n现场怎么理解\n登录时，token 由统一用户中心下发。\nPWRS 只做校验：JwtRealm 通过 usercenter 的 Dubbo verifyToken(token) 去验这枚 token 是否有效。\n账号、角色、菜单、token 都归 usercenter 管；PWRS 主库不会为登录再建“本地用户/会话”记录，只是把 token 里的用户/医院上下文带进后续业务表的 owner/院区字段。\n因此排查时：\n“登录失败 / token 拿不到 / token 无效” → 先看 usercenter\n“登录后能进系统但看不到/改不了业务数据” → 再看各业务自己的 owner、院区作用域校验（菜单不可见 ≠ 接口一定拒绝，但有 token 也不等于所有业务接口都能成功）\n禁止混淆（说明书已明确）\n不要说“PWRS 登录时自己生成 token”\n不要说“PWRS 把 token 存进自己的会话”\n不要说“只要 token 有效，所有业务接口都能正常处理”\n\n需要我帮你对照具体现象（比如某账号登录后报什么、接口返回什么）往下拆的话，把现象或请求/响应贴出来即可。",
+      "verdict": "PASS",
+      "reason": "显式新实体正确切到token签发链，回答usercenter签发且PWRS不再生成，未继承受控验证或调度事实。",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "convId": "ZX-20260813-144",
+      "designatedFinal": true,
+      "answerSource": "visible DOM"
+    }
+  ]
+}
