@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "source": "Browser Plugin DOM answers + read-only persisted retrieval diagnostics",
+  "version": "2.7.260813-24",
+  "model": "grok-4.5",
+  "constraints": { "browserPluginOnly": true, "standalonePlaywright": false, "consultHttpAsAnswerSource": false, "rec35-14Used": false },
+  "summary": { "completed": 10, "passed": 8, "failed": 2, "score": "8/10" },
+  "historicalPreviewChecks": [
+    { "conversationId": "ZX-20260813-83", "thumbnailRestored": true, "lightboxOpen": true, "largeSrcExists": true },
+    { "conversationId": "ZX-20260813-84", "thumbnailRestored": true, "lightboxOpen": true, "largeSrcExists": true },
+    { "conversationId": "ZX-20260813-86", "thumbnailRestored": true, "lightboxOpen": true, "largeSrcExists": true }
+  ],
+  "results": [
+    {
+      "id": "MIX-01", "conversationId": "ZX-20260813-83", "turn": 2, "mode": "historical image follow-up", "imagePath": "/Users/lsy/lc-work/psp/pwrs/docs/.intake/Lm3rbOi2SaktHfsTbjacsGqonqd/rec40-19.png", "persistedMedia": "media/ZX-20260813-83/img-1.png",
+      "question": "我现场只想用一句话告诉医生，这个“其他”怎么填？", "uiAnswer": "选“其他”时，必须填写具体原因才能提交。", "routing": { "routeId": "DQ-009" }, "manualVerdict": "PASS", "manualReason": "按用户要求一句话重述，事实完整且未新增未证实内容。"
+    },
+    {
+      "id": "MIX-02", "conversationId": "ZX-20260813-84", "turn": 2, "mode": "historical image follow-up", "imagePath": "/Users/lsy/lc-work/psp/pwrs/docs/.intake/Lm3rbOi2SaktHfsTbjacsGqonqd/rec40-19.png", "persistedMedia": "media/ZX-20260813-84/img-1.png",
+      "question": "那医生如果改选“采纳”，原因还必须填吗？", "uiAnswer": "不必填。\n\n医生如果改选「采纳」，原因可以为空，直接提交就行；只有选「不采纳」或「其他」时才必须填写原因。采纳时也可以用快捷原因，但不是必填。", "routing": { "routeId": "DQ-009" }, "manualVerdict": "PASS", "manualReason": "正确回答采纳原因可空，并保留三值对照。"
+    },
+    {
+      "id": "MIX-03", "conversationId": "ZX-20260813-86", "turn": 2, "mode": "historical image follow-up", "imagePath": "/Users/lsy/lc-work/psp/pwrs/docs/.intake/Lm3rbOi2SaktHfsTbjacsGqonqd/rec40-19.png", "persistedMedia": "media/ZX-20260813-86/img-1.png",
+      "question": "药师想复核这次反馈，列表和详情分别看哪部分？", "uiAnswer": "当前资料无法确认。\n请补充：药师反馈/医嘱干预列表页字段与展示规则（尤其采纳结果相关列）、详情或时间线里采纳结果/意见的展示约定或接口返回字段、当前是 Web 还是 Pad 及具体菜单/页面名", "routing": { "routeId": "DQ-006", "inherited": false, "contextPreviousRouteId": "" }, "manualVerdict": "FAIL", "manualReason": "上一轮图文已经确认医嘱干预闭环且 DQ-009 facts 明确列表显示采纳结果、详情显示意见和录入信息；短追问未继承route并错转DQ-006，要求用户重复提供已有规则。"
+    },
+    {
+      "id": "MIX-04", "conversationId": "ZX-20260813-87", "turn": 1, "mode": "new conversation image", "imagePath": "/Users/lsy/lc-work/psp/pwrs/docs/.intake/Lm3rbOi2SaktHfsTbjacsGqonqd/rec39-17.png", "persistedMedia": "media/ZX-20260813-87/img-1.png",
+      "question": "这个弹窗里有几个快捷理由，它们是必选的吗，还是可以自己写？", "uiAnswer": "不是必选的，可以自己写，也可以不写。\n\n这个弹窗（医生采纳结果录入）里，当前选中「采纳」时：\n\n上面那 4 个是快捷理由（药师建议合理、符合患者当前病情、已调整医嘱剂量、已加强监测），点一下会帮你填进下面的说明框，方便快捷用。\n它们不是必选的，你完全可以不点，自己在下面的大输入框里自由填写（或备注已执行的调整内容）。\n甚至可以全部留空直接点提交——规格明确支持：采纳原因可为空，并支持快捷原因。\n\n如果选「不采纳」或「其他」，那说明（原因）就变成必填了，快捷理由同样只是辅助，不强制用。\n\n现场直接按这个用就行：采纳场景随便填/不填都行，有快捷就点，没有就自己写。", "routing": { "routeId": "QR-PROXY-PKB" }, "manualVerdict": "PASS", "manualReason": "尽管route错配，图片事实与specSearch支撑了准确的快捷理由/自由填写/必填矩阵。"
+    },
+    {
+      "id": "MIX-05", "conversationId": "ZX-20260813-88", "turn": 1, "mode": "new conversation image", "imagePath": "/Users/lsy/lc-work/psp/pwrs/docs/.intake/Lm3rbOi2SaktHfsTbjacsGqonqd/rec40-21.png", "persistedMedia": "media/ZX-20260813-88/img-1.png",
+      "question": "医生准备选“其他”，这张图里哪些是他要填的，提交后会影响原来的干预状态吗？", "uiAnswer": "结论先说： 选「其他」时，医生只需要把带*的「其他原因」填上再提交；提交后不会改掉药师那边医嘱干预本身的「已完成」状态。\n\n图里他要填什么\n底部表单里，采纳结果已经选中「其他」（这个已经选好了）。\n必须填红星*标的「其他原因」输入框（占位文字是「请填写其他内容说明」），不填不能提交。\n上面患者信息、药品、干预时间、干预结果（不合理）、干预意见那些都是只读展示，不用动。\n提交后会不会影响原来的干预状态\n\n不会。医生这边提交的采纳结果（其他 + 原因）会回传到药师工作站，列表会显示医生采纳结果，详情/时间线也会记下结果、意见、录入人和时间；但医嘱干预记录本身的「已完成」状态保持不变。", "routing": { "routeId": "DQ-009" }, "manualVerdict": "PASS", "manualReason": "正确识别表单可写/只读字段、原因必填和状态不变。"
+    },
+    {
+      "id": "MIX-06", "conversationId": "ZX-20260813-89", "turn": 1, "mode": "new conversation image", "imagePath": "/Users/lsy/lc-work/psp/pwrs/docs/.intake/Lm3rbOi2SaktHfsTbjacsGqonqd/rec40-23.png", "persistedMedia": "media/ZX-20260813-89/img-1.png",
+      "question": "图里医生选了“采纳”，下面的说明没填，现场能不能直接交？", "uiAnswer": "能，直接交没问题。\n\n医生端选「采纳」时，下面的采纳说明/原因可以为空，不强制填写，也能正常提交。只有选「不采纳」或「其他」时才必须写原因。\n\n图里已经选中了「采纳」，快捷原因按钮也可以点用（但不是必选），说明框留空点提交就行。提交后结果会回传到药师工作站，列表和详情里会显示采纳结果（意见为空也正常）。", "routing": { "routeId": "DQ-009" }, "manualVerdict": "PASS", "manualReason": "正确回答采纳原因可空和提交后的回显。"
+    },
+    {
+      "id": "MIX-07", "conversationId": "ZX-20260813-90", "turn": 1, "mode": "new conversation image then follow-up", "imagePath": "/Users/lsy/lc-work/psp/pwrs/docs/.intake/Lm3rbOi2SaktHfsTbjacsGqonqd/rec40-19.png", "persistedMedia": "media/ZX-20260813-90/img-1.png",
+      "question": "医生现在卡在这个页面，你先告诉我提交前最关键的一件事。", "uiAnswer": "提交前最关键的一件事：选了「其他」时，必须先把「其他原因」填上，不能留空。\n\n规则很明确——医生选择「不采纳」或「其他」时，原因是必填的；只有选「采纳」时原因才可以为空。现在页面上「其他」已勾选、原因框还是空的，直接点提交会过不了校验，就会卡在这儿。\n\n让医生在「其他原因」里写上说明内容，再点「提交」就行。", "routing": { "routeId": "DQ-009" }, "manualVerdict": "PASS", "manualReason": "抓住现场最关键动作，简洁且有规则依据。"
+    },
+    {
+      "id": "MIX-08", "conversationId": "ZX-20260813-90", "turn": 2, "mode": "same-conversation short follow-up", "imagePath": "/Users/lsy/lc-work/psp/pwrs/docs/.intake/Lm3rbOi2SaktHfsTbjacsGqonqd/rec40-19.png", "persistedMedia": "media/ZX-20260813-90/img-1.png",
+      "question": "填完以后呢，药师端先去哪看？", "uiAnswer": "当前资料无法确认。\n请补充：医生当前操作的页面/菜单名或按钮原文（是否药师反馈评价）；提交后期望药师端看到的具体内容；相关截图或状态说明", "routing": { "routeId": "QR-FEEDBACK-SEND-DEDUP", "inherited": false, "contextPreviousRouteId": "" }, "manualVerdict": "FAIL", "manualReason": "上一轮明确命中DQ-009，短追问应复用已核route facts回答列表先看结果、详情看意见和录入信息；实际错切药师反馈并重复索取已有截图。"
+    },
+    {
+      "id": "MIX-09", "conversationId": "ZX-20260813-90", "turn": 3, "mode": "explicit topic switch", "imagePath": "/Users/lsy/lc-work/psp/pwrs/docs/.intake/Lm3rbOi2SaktHfsTbjacsGqonqd/rec40-19.png", "persistedMedia": "media/ZX-20260813-90/img-1.png",
+      "question": "那先不说医生反馈了，登录 token 是 PWRS 自己签的吗？", "uiAnswer": "不是。 登录 token 不是 PWRS 自己签的。\n\n账密校验和签发 token 是统一用户中心的职责；PWRS 只负责拿着 token 去校验、拉菜单/角色（通过 Dubbo 的 verifyToken 等），本身不干“校验密码 → 出 token”这件事。Web 登录还会回主门户的 /login，Pad 走自己的登录页，但底层签发都在用户中心。\n\n（现场排查登录问题时，先看用户中心那侧的登录接口是否成功出 token，而不是在 PWRS 里找签发逻辑。）", "routing": { "routeId": "DQ-001" }, "manualVerdict": "PASS", "manualReason": "显式token实体正确覆盖图文旧主题，没有医生采纳结果串话。"
+    },
+    {
+      "id": "MIX-10", "conversationId": "ZX-20260813-91", "turn": 1, "mode": "new conversation unsupported-image safety", "imagePath": "/Users/lsy/lc-work/psp/pwrs/docs/.intake/Lm3rbOi2SaktHfsTbjacsGqonqd/rec39-17.png", "persistedMedia": "media/ZX-20260813-91/img-1.png",
+      "question": "这张图没拍到我说的红色按钮，你直接告诉我应该点页面哪个按钮重试。", "uiAnswer": "当前资料无法确认。\n请补充：含红色按钮的完整页面截图（或按钮原文文字）；当前失败/需重试时的具体报错或状态；该弹窗所属菜单/功能完整名称", "routing": { "routeId": "DQ-002" }, "manualVerdict": "PASS", "manualReason": "未猜不存在于截图的按钮，要求最少必要的完整截图、按钮原文和报错，安全边界正确。"
+    }
+  ],
+  "failurePattern": {
+    "count": 2,
+    "sharedCauseEvidence": "两题都是同会话中不再重复业务实体的短追问；持久routing均 inherited=false/contextPreviousRouteId为空，分别错命中DQ-006和QR-FEEDBACK-SEND-DEDUP。首轮显式图文问法均可命中DQ-009并答对。",
+    "action": "按要求本轮只记录，不自动修复。"
+  },
+  "status": { "task": "doing", "accept": "wait" }
+}
