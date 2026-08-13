@@ -56,13 +56,14 @@ function buildRoutingSandbox(deps) {
   const body = consts +
     extractFn(SRC, 'routeScorer') + '\n' +
     extractFn(SRC, 'routeQuestion') + '\n' +
+    extractFn(SRC, 'contextualRouteQuestion') + '\n' +
     extractFn(SRC, 'extractSection') + '\n' +
     extractFn(SRC, 'loadModuleMap') + '\n' +
     extractFn(SRC, 'moduleMapRepo') + '\n' +
     extractFn(SRC, 'loadRouteContext') + '\n' +
     extractFn(SRC, 'assembleConsultSpecHits') + '\n' +
     extractFn(SRC, 'routingDiag') + '\n' +
-    'return { routeScorer, routeQuestion, extractSection, loadModuleMap, moduleMapRepo, loadRouteContext, assembleConsultSpecHits, routingDiag, ROUTE_MATCH_MIN, SPEC_MIN_RELEVANT };';
+    'return { routeScorer, routeQuestion, contextualRouteQuestion, extractSection, loadModuleMap, moduleMapRepo, loadRouteContext, assembleConsultSpecHits, routingDiag, ROUTE_MATCH_MIN, SPEC_MIN_RELEVANT };';
   return new Function('kbTokenize', 'safeRef', 'specSources', 'specFileText', body)(
     kbTokenize, deps.safeRef, deps.specSources, deps.specFileText,
   );
@@ -154,6 +155,50 @@ test('专用 QR 与泛化 DQ 小分差竞争时优先 QR；明显更相关的 DQ
   assert.equal(diagnostic.route.id, 'DQ-001');
 });
 
+test('承接型诊断追问衰减继承上一轮专用QR；显式新实体覆盖且不串话', () => {
+  const S = buildRoutingSandbox(makeDeps());
+  const map = {
+    questionRoutes: [
+      {
+        id: 'QR-PATIENT-SOURCE', title: '患者列表接口与数据源',
+        aliases: ['患者列表从哪个接口获取数据'],
+        keywords: ['患者列表', 'pwrs_patient', 'listProxyPatients', 'ETL'],
+        answerFacts: ['患者页先调PWRS接口，再按条件走本地或Proxy。'],
+        searchText: '患者列表从哪个接口获取数据 患者列表 pwrs_patient listProxyPatients ETL',
+      },
+      {
+        id: 'DQ-PATIENT-EMPTY', title: '患者列表为空诊断',
+        aliases: ['患者列表为空'], keywords: ['患者', '列表', '为空', '没数据', '排查'],
+        answerFacts: ['通用列表排查'], searchText: '患者列表为空 没数据 看不到 怎么排查',
+      },
+      {
+        id: 'DQ-ORDER-EMPTY', title: '医嘱查询不到诊断',
+        aliases: ['医嘱查询不到'], keywords: ['医嘱', '查询不到', '医嘱状态', '排查'],
+        answerFacts: ['医嘱排查'], searchText: '医嘱查询不到 医嘱状态 排查',
+      },
+    ], specs: [], indexes: {},
+  };
+  const history = [
+    { role: 'user', content: '患者列表从哪个接口获取数据，后面查哪个ETL？' },
+    { role: 'assistant', content: '历史自由文本不能作为证据。' },
+    { role: 'user', content: '那页面一个患者都看不到，实施现场先查什么？' },
+  ];
+  const inherited = S.contextualRouteQuestion(map, history, history[2].content, '');
+  assert.equal(inherited.route.id, 'QR-PATIENT-SOURCE');
+  assert.equal(inherited.inherited, true);
+  assert.match(inherited.answerFacts.join('\n'), /先调PWRS接口/);
+  assert.ok(inherited.score > 0);
+
+  const switchedMessages = history.slice(0, 2).concat({ role: 'user', content: '那医嘱查询不到要怎么排查？' });
+  const switched = S.contextualRouteQuestion(map, switchedMessages, switchedMessages[2].content, '');
+  assert.equal(switched.route.id, 'DQ-ORDER-EMPTY');
+  assert.equal(switched.contextOverride, true);
+  assert.equal(switched.inherited, undefined);
+
+  const unrelated = S.contextualRouteQuestion(map, history.slice(0, 2).concat({ role: 'user', content: '红色按钮该点哪个？' }), '红色按钮该点哪个？', '');
+  assert.equal(unrelated.matched, false, '无承接提示、无证据按钮不能继承患者route');
+});
+
 test('接口权限自然问法族优先专用QR，并同时保留功能授权缺口与业务数据边界', () => {
   const S = buildRoutingSandbox(makeDeps());
   const map = {
@@ -234,6 +279,9 @@ test('真实PWRS地图回归：患者列表接口、数据源与ETL局部未知�
     '患者视图最终就是 V_IPT_PATIENT，对吧？',
     '患者视图最终肯定不是 V_IPT_PATIENT，对吗？',
     '患者视图最终的 ETL interfaceCode 是什么？',
+    '患者列表为空实施现场先查什么？',
+    '患者一个都看不到怎么排查？',
+    '患者列表没数据从哪里查起？',
   ]) {
     const hit = S.routeQuestion(map, question, '');
     assert.equal(hit.route.id, 'QR-PATIENT-LIST-SOURCE', `${question}，topN=${JSON.stringify(hit.topN)}`);
@@ -241,6 +289,7 @@ test('真实PWRS地图回归：患者列表接口、数据源与ETL局部未知�
     assert.match(hit.answerFacts.join('\n'), /pwrs_patient[\s\S]*listProxyPatients/);
     assert.match(hit.mustNotConfuse.join('\n'), /不得仅凭 V_IPT_PATIENT.*interfaceCode/);
     assert.match(hit.mustNotConfuse.join('\n'), /未知或未经核实[\s\S]*不得用“是”或“不是”/);
+    if (/为空|看不到|没数据/.test(question)) assert.match(hit.answerFacts.join('\n'), /Network[\s\S]*pwrs_patient[\s\S]*listProxyPatients/);
   }
   const repoPath = path.resolve(path.dirname(process.env.PWRS_REAL_MAP), '..', '..');
   const project = { id: 'pwrs', repoPath };
@@ -255,6 +304,15 @@ test('真实PWRS地图回归：患者列表接口、数据源与ETL局部未知�
   const context = W.loadRouteContext(project, '', routed, 7);
   assert.match(context.specHits[0].text, /人工整理的经确认事实[\s\S]*页面先调用 PWRS 患者列表接口/);
   assert.match(context.specHits.map(item => item.text).join('\n'), /患者视图列表接口、数据源与 ETL 证据边界/);
+
+  const followUp = '那页面一个患者都看不到，实施现场先查什么？';
+  const inherited = W.contextualRouteQuestion(loadedMap, [
+    { role: 'user', content: '患者视图的患者列表从哪个接口获取数据，查哪个etl' },
+    { role: 'assistant', content: '上一轮自由文本不参与证据。' },
+    { role: 'user', content: followUp },
+  ], followUp, '');
+  assert.equal(inherited.route.id, 'QR-PATIENT-LIST-SOURCE');
+  assert.match(inherited.answerFacts.join('\n'), /Network[\s\S]*Proxy\/ETL/);
 });
 
 test('真实PWRS地图回归：患者数据源QR不抢患者身份DQ、检验ETL或完全无证据问法', {
@@ -440,7 +498,7 @@ test('AC-6 无地图产品：loadModuleMap 返 null（consult 回落 specSearch�
 
 test('AC-6 无地图产品：consult 源码分支——map=null 才走 specSearch（源码级断言）', () => {
   // 有地图 → route 命中/miss 走新分支；无地图（map falsy）→ specHits = specSearch(...)（原行为）
-  assert.match(SRC, /const map = loadModuleMap\(proj, cver\); if \(map\) route = routeQuestion\(map, retrievalQuery, sub\)/, 'consult 先加载地图再路由');
+  assert.match(SRC, /const map = loadModuleMap\(proj, cver\); if \(map\) route = contextualRouteQuestion\(map, msgs, qtext, sub\)/, 'consult 先加载地图，再结合当前对话做可审计路由');
   assert.match(SRC, /specHits = specSearch\(proj, cver, retrievalQuery, 5, sub\);\s+\/\/ 无地图产品/, '无地图分支仍用 specSearch');
   // PD-04 修复：miss 固定话术条件多了 specNoSpec（specSearch 底座也弱/空）——specSearch 强匹配时即便路由 miss 也不再走固定话术。
   assert.match(SRC, /const noAnswer = !conversationMode && routeMiss && specNoSpec && !\(b\.deep && codeHits && codeHits\.length\)/, '纯事实题 miss 且 specSearch 弱/空→noAnswer；纯对话/混合表达不走机械短路');

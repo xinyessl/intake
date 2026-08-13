@@ -883,6 +883,49 @@ function routeQuestion(map, query, subKey = '') {
   }
   return { matched: false, tier: 0, score: (typeof tier1TopN !== 'undefined' ? (tier1TopN[0] && tier1TopN[0].score) : 0) || 0, topN: (typeof tier1TopN !== 'undefined') ? tier1TopN : [] };
 }
+
+// 承接型短追问允许复用上一轮已经命中的功能 route，但只复用地图里的 route/facts：
+// 不读取、也不把上一条模型自由文本当证据。当前轮若明确切到另一个业务实体，当前 route 始终优先。
+function contextualRouteQuestion(map, messages, currentQuestion, subKey = '') {
+  const current = String(currentQuestion || '').trim();
+  const direct = routeQuestion(map, current, subKey);
+  const contextual = /^(?:那|那么|这个|那个|它|刚才|上面|前面|所以|然后|还有|其中|该功能|该接口|该页面)/i.test(current);
+  if (!contextual || current.length > 160) return direct;
+  const users = (Array.isArray(messages) ? messages : []).filter(m => m && m.role === 'user' && String(m.content || '').trim());
+  let previous = '';
+  for (let i = users.length - 1; i >= 0; i--) {
+    const value = String(users[i].content || '').trim();
+    if (value && value !== current) { previous = value; break; }
+  }
+  if (!previous) return direct;
+  const prior = routeQuestion(map, previous, subKey);
+  if (!prior.matched) return direct;
+  const directId = String(direct.route && direct.route.id || '');
+  const priorId = String(prior.route && prior.route.id || '');
+  if (direct.matched && directId === priorId) return direct;
+
+  // “显式新实体”按当前 route 的地图关键词判断：当前问法命中了上一 route 未包含的判别词，视为切模块。
+  // 排除列表/页面/数据/接口/排查等跨模块通用词，避免“那页面没数据”错误覆盖上一轮具体 route。
+  const generic = new Set(['页面', '列表', '数据', '接口', '功能', '问题', '异常', '查询', '显示', '排查', '步骤', '入口', '患者']);
+  const routes = Array.isArray(map && map.questionRoutes) ? map.questionRoutes : [];
+  const directCard = routes.find(r => String(r && r.id || '') === directId);
+  const priorCard = routes.find(r => String(r && r.id || '') === priorId);
+  const priorText = String(priorCard && priorCard.searchText || [priorCard && priorCard.title, ...((priorCard && priorCard.keywords) || [])].filter(Boolean).join(' ')).toLowerCase();
+  const discriminator = ((directCard && directCard.keywords) || []).map(x => String(x || '').trim()).filter(x => x.length >= 2 && !generic.has(x));
+  const explicitSwitch = direct.matched && directId && directId !== priorId && discriminator.some(term => current.toLowerCase().includes(term.toLowerCase()) && !priorText.includes(term.toLowerCase()));
+  if (explicitSwitch) return { ...direct, contextOverride: true, contextPreviousRouteId: priorId };
+
+  // 专用 QR 优先于当前轮仅凭“没数据/怎么排查”等通用诊断词命中的 DQ；继承分仅用于诊断展示。
+  // 若当前已经命中另一个专用 QR，则尊重当前轮，防跨模块串话。
+  if (direct.matched && directId.startsWith('QR-')) return { ...direct, contextOverride: true, contextPreviousRouteId: priorId };
+  return {
+    ...prior,
+    score: Math.round((Number(prior.score) || 0) * 0.82 * 1000) / 1000,
+    inherited: true,
+    inheritedFromQuestion: previous.slice(0, 240),
+    directCandidate: direct.matched ? { id: directId, title: direct.route && direct.route.title, score: direct.score } : null,
+  };
+}
 // 从 spec 正文按标题/锚点定位截取「指定章节」；定位不到 → 退回该 spec 前段。返回截取文本（≤900）。
 function extractSection(fullText, ref) {
   const body = String(fullText || '');
@@ -976,6 +1019,11 @@ function routingDiag(hasMap, route) {
     score: typeof route.score === 'number' ? route.score : 0,
     routeId: (route.route && route.route.id) || '',
     routeTitle: (route.route && route.route.title) || (route.exactName ? ('精确名:' + route.exactName) : ''),
+    inherited: !!route.inherited,
+    inheritedFromQuestion: route.inherited ? String(route.inheritedFromQuestion || '').slice(0, 240) : '',
+    contextOverride: !!route.contextOverride,
+    contextPreviousRouteId: String(route.contextPreviousRouteId || ''),
+    directCandidate: route.directCandidate || null,
     threshold: ROUTE_MATCH_MIN,
     topN: (Array.isArray(route.topN) ? route.topN : []).slice(0, 5).map(t => ({ id: String((t && t.id) || '').slice(0, 80), title: String((t && t.title) || '').slice(0, 120), score: typeof (t && t.score) === 'number' ? t.score : 0 })),
   };
@@ -1466,6 +1514,18 @@ function consultConversationGuard(question, mode) {
       : '先用一两句自然、有人情味的话承接用户的寒暄、情绪或表达偏好；如果用户觉得上一条太生硬，应简短承认并换成更自然的说法。',
     '可以利用紧邻的当前会话理解用户在回应哪一条答案，并继续提供帮助；请求换种说法时可重述上一条已经给出的结论，但不得借机新增没有正文证据的具体系统事实。',
     '本轮不要套用“说明书未覆盖/建议转工单”的固定模板。若用户之后再问具体按钮、接口、字段、配置、权限、人员归属或业务规则，下一轮仍须重新按 Spec/源码证据门判断。',
+  ].join('\n');
+}
+
+function consultDiagnosticGuard(question, route) {
+  const q = String(question || '').trim();
+  const diagnostic = /(?:列表为空|查不到|没数据|没有数据|一个都看不到|不显示|看不到|先查(?:什么|哪)|怎么排查|如何排查|从哪查起|哪里出问题)/i.test(q);
+  if (!diagnostic || !route || !route.matched) return '';
+  return [
+    '【本轮是实施现场诊断问题】',
+    '先根据本轮命中 route 的经确认事实，给出实施可以立即执行的分层排查路径；不要只回复“补充截图/入口/返回”。',
+    '排查顺序优先覆盖：确认实际页面入口 → 抓对应 PWRS 请求、关键参数和响应 → 按已知服务端分支检查本地过滤或 Proxy/外部数据源。',
+    '只追问会改变下一步判断分支的最少信息，并说明这项信息在哪里取得、拿到后分别如何判断。没有证据的最终外部接口码或内部实现仍只做局部限定，不能猜。',
   ].join('\n');
 }
 
@@ -3099,7 +3159,7 @@ const server = http.createServer((req, res) => {
       hits = consultKbFilter(kbScored).map(x => x.e);
       const cver = String(b.version || '').trim();
       // PD-04：先按提问路由到功能模块（仅对有「功能模块地图」的产品生效）。无地图 → map=null → 完全走原 specSearch（向后兼容）。
-      let route = null; try { const map = loadModuleMap(proj, cver); if (map) route = routeQuestion(map, retrievalQuery, sub); } catch { route = null; }
+      let route = null; try { const map = loadModuleMap(proj, cver); if (map) route = contextualRouteQuestion(map, msgs, qtext, sub); } catch { route = null; }
       const hasMap = !!route;   // 有地图且已跑路由
       const routeMiss = hasMap && !route.matched;   // 路由未命中任何功能模块
       // PD-04 修复：specSearch 始终作底座（有地图也跑）——用带分变体 specSearchScored（同 specSearch 召回口径 + 额外带 score），
@@ -3143,7 +3203,7 @@ const server = http.createServer((req, res) => {
       else {
         // PD-04：命中 mustNotConfuse → 作负向提示注入 system（易混淆项，勿臆造）。answerFacts 已在 specHits 顶段（consultSystem 走 specExcerpts）。
         const mncNote = routeMnc.length ? '\n【以下为该问题的易混淆项，请勿臆造、勿张冠李戴】' + routeMnc.map(x => '\n· ' + x).join('') : '';
-        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationMode) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
+        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationMode) + '\n' + consultDiagnosticGuard(qtext, route) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
           piece = String(piece == null ? '' : piece); if (!piece) return;
           if (!kbInjected && kbRefs.length) { kbInjected = true; sse({ kb: kbRefs, kbInjected: true }); }
           reply += piece; sse({ v: piece });

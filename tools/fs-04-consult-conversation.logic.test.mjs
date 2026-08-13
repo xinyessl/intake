@@ -117,3 +117,14 @@ test('检索回放也标记对话意图，便于诊断事实miss与对话绕行'
   const replay = SRC.slice(start, end);
   assert.match(replay, /retrieval\.conversationIntentMode = consultConversationMode\(query\)/);
 });
+
+test('实施诊断守卫要求先给可执行路径，未知仍局部受证据门约束', () => {
+  const fn = new Function(extractFn(SRC, 'consultDiagnosticGuard') + '\nreturn consultDiagnosticGuard;')();
+  assert.equal(fn('患者接口是什么？', { matched: true }), '');
+  const text = fn('那页面一个患者都看不到，实施现场先查什么？', { matched: true });
+  assert.match(text, /确认实际页面入口/);
+  assert.match(text, /PWRS 请求、关键参数和响应/);
+  assert.match(text, /本地过滤或 Proxy/);
+  assert.match(text, /最少信息/);
+  assert.match(text, /不能猜/);
+});
