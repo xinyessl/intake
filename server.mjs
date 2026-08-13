@@ -1436,14 +1436,14 @@ function consultSystem(proj, ver, hits, specs, code, currentQuestion = '') {   /
 function consultConversationTurn(question) {
   const q = String(question || '').trim().replace(/[\s。！？!?，,～~…]+$/g, '').trim();
   if (!q || q.length > 80) return false;
-  const patterns = [
-    /^(?:你好|您好|嗨|哈喽|hello|hi|早上好|上午好|下午好|晚上好|在吗|辛苦了|谢谢|多谢|感谢|再见|拜拜)$/i,
-    /^(?:你(?:说话|回答|回复)?(?:也|怎么)?|这回答(?:也)?|回复(?:也)?)(?:太|很|有点|这么)?(?:冷漠|冷冰冰|生硬|机械|像机器人|没感情|不耐烦)(?:了)?(?:吧|啦|呀|啊|吗|呢)?$/,
-    /^(?:别|不要)(?:这么|那么)?(?:冷漠|冷冰冰|生硬|机械|像机器人|不耐烦)(?:的)?(?:了)?(?:吧|啦|呀|啊)?$/,
-    /^(?:(?:你)?(?:能不能|可以|麻烦|请)?)(?:说得|说话|回答得|回复得)(?:更)?(?:温柔|友好|自然|耐心|口语|简单|简短)(?:一点|点|些)?(?:吗|吧)?$/,
-    /^(?:我没听懂|我没看懂|没听懂|没看懂|什么意思|你刚才是什么意思|换(?:个|一种)说法|换句话说|再解释一下|再说清楚一点|说人话|讲简单点|简单说说|请说得更口语一点|能不能说得简单一点)$/,
-  ];
-  return patterns.some(re => re.test(q));
+  const social = /^(?:你好|您好|嗨|哈喽|hello|hi|早上好|上午好|下午好|晚上好|在吗|辛苦了|谢谢|多谢|感谢|再见|拜拜)$/i.test(q);
+  if (social) return true;
+  // 对话提示词可以带“行/好/那/你”等口头前后缀，不再逐句 exact 匹配；但同句出现事实实体/操作追问时必须退出对话模式。
+  const conversationalCue = /(?:冷漠|冷冰冰|生硬|机械|像机器人|没感情|不耐烦|温柔一点|友好一点|自然一点|耐心一点|口语一点|简单(?:一)?点(?:说)?|说简单(?:一)?点|简短(?:一)?点|直白(?:一)?点|别(?:这么|那么)?官方|换(?:个|一种)说法|换句话说|再解释(?:一下|一遍)?|再说(?:清楚)?(?:一下|一遍)|重说(?:一下|一遍)|说人话|讲简单(?:一)?点|我没听懂|我没看懂|没听懂|没看懂|你刚才是什么意思)/i.test(q);
+  if (!conversationalCue) return false;
+  const factEntity = /(?:按钮|菜单|页面|入口|接口|字段|哪张表|表名|数据库|配置|开关|权限|角色|状态|规则|业务|步骤|路径|地址|缓存|日志|源码|代码|服务|controller|service|proxy|etl|interfacecode|v_[a-z0-9_]+|pwrsapi|患者|医嘱|药品|收费|监护|患教|反馈)/i.test(q);
+  const contextualFactRequest = /(?:这个|那个|它|该功能|该接口|该按钮|那)[^，。；]{0,20}(?:到底|具体|应该|该|怎么|如何|哪个|哪儿|能不能用|可不可以)/i.test(q);
+  return !factEntity && !contextualFactRequest;
 }
 
 function consultConversationGuard(question, active) {
