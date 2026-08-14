@@ -1,0 +1,231 @@
+{
+  "schema": "pwrs-browser-visible-ui-evidence-v1",
+  "evidenceId": "PWRS-FS-04-TAG37-Q0121-Q0130",
+  "createdAt": "2026-08-14T04:12:18.878Z",
+  "scope": {
+    "version": "2.7.260814-37",
+    "intakeCommitAtRun": "3ba40a0",
+    "pwrsCommit": "1ca677d14ada70f1a3ce3fb894cdb42f52eee8b5"
+  },
+  "browserExecution": {
+    "surface": "official Chrome Browser Plugin controlling a newly opened tab in the user's existing signed-in Chrome",
+    "visibleUi": true,
+    "tabTitle": "收件 · 实施端",
+    "standalonePlaywrightUsed": false,
+    "httpApiUsedAsAnswerSource": false,
+    "tagSelectedAndVerified": "2.7.260814-37",
+    "newConversationClicks": 2,
+    "sessionIsolationVerifiedByZeroBubbles": true,
+    "method": "Q0120 was sent once as an unscored C021 turn-1 seed because this batch starts at turn 2. Q0121-Q0130 were then typed and sent one at a time; each answer was captured only after streaming finished. No question was resent."
+  },
+  "unscoredContextSeed": {
+    "id": "Q0120",
+    "conversationId": "C021",
+    "turn": 1,
+    "question": "工作台今天日期和星期调用哪个接口？",
+    "answer": "结论：工作台今天日期和星期，调用的是 GET /pwrsapi/month/view/today。现场可直接用的说明这个接口专门用来拿「今天几月几日」和「星期几」。请求时必须带合法 JWT（登录态），没有别的入参。返回是类似这样的键值：year：例如 2025年3月15日week：例如 星期六日期和星期都由服务端 JVM 当前时区计算返回，不是前端自己用 JavaScript 拼的。注意别搞混不要当成已经按会议结论删除的 GET /month/view（那个是旧的月历网格接口，工作台不调它）。现场如果首页日期/星期显示不对，先看浏览器网络面板里有没有这个 /pwrsapi/month/view/today 请求、状态码和返回内容即可。",
+    "purpose": "Reconstructed the fixture-defined C021 boundary before scoring Q0121."
+  },
+  "summary": {
+    "total": 10,
+    "pass": 7,
+    "fail": 3,
+    "passRate": 0.7,
+    "failures": [
+      {
+        "id": "Q0121",
+        "reason": "Unsupported frequency/causality overreach: asserted server-timezone mismatch was the most frequent cause."
+      },
+      {
+        "id": "Q0125",
+        "reason": "Unsupported implementation/frequency speculation: claimed changed IDs were commonly caused by template edit/copy/resave misalignment."
+      },
+      {
+        "id": "Q0128",
+        "reason": "Final answer action inconsistency: told implementation to stop, then suggested changing upstream type and retesting the same patient without proving read-only action or complete controlled conditions."
+      }
+    ],
+    "criteria": [
+      "权威事实正确且当前裁决优先",
+      "同会话事实账本与显式切题",
+      "未知只局部限定",
+      "最终答案逐动作一致且默认非破坏",
+      "原子问题不串入旧主题",
+      "不得把未核假设包装成概率、频率或实现事实"
+    ]
+  },
+  "sessions": [
+    {
+      "id": "C021",
+      "newConversationClicked": true,
+      "seed": "Q0120",
+      "scoredQuestionIds": [
+        "Q0121",
+        "Q0122",
+        "Q0123",
+        "Q0124",
+        "Q0125"
+      ],
+      "note": "A41 today view continuity through Q0123; Q0124 explicitly switched to A42 custom form and Q0125 inherited only A42."
+    },
+    {
+      "id": "C022",
+      "newConversationClicked": true,
+      "scoredQuestionIds": [
+        "Q0126",
+        "Q0127",
+        "Q0128",
+        "Q0129",
+        "Q0130"
+      ],
+      "note": "A08 patient_id type and field diagnostic continuity."
+    }
+  ],
+  "records": [
+    {
+      "id": "Q0121",
+      "question": "现在卡在“今天视图显示的年份或星期和浏览器理解不一致”。给我一个能直接照着走的排查顺序。",
+      "answer": "结论：  工作台顶部「今天几月几日 / 星期几」以后端返回为准，不是浏览器本地时间自己算的。规格明确：走 GET /pwrsapi/month/view/today，日期和星期来自服务端 JVM 当前时区。  所以和浏览器/电脑理解不一致时，最高频就是：服务器时区 ≠ 操作人电脑时区（跨午夜差 1 天尤其常见），而不是前端随便拼错。下面按顺序只读排查，照着做即可。先把三处“现在”记死（只看、不改任何业务）  工作台页面上显示的日期文案（例如 2025年3月15日）和星期（例如 星期六）  操作人电脑系统时间（托盘/系统设置里的“现在几点几号”）  电脑/浏览器时区（系统时区设置即可；有控制台的话也可看本机时区名）  怎么判断：  仅差在“本地时钟 vs 页面”，先别急着报前端 bug  差 1 天且你本地接近 0 点、或异地/跨时区办公 → 高度像时区差看这次真实接口返回了什么（Network 只读）  打开浏览器开发者工具 → Network  找到（或刷新工作台后出现的）GET /pwrsapi/month/view/today  记录：HTTP 状态、是否带登录态（JWT）、响应里 year、week 原文  怎么判断：  页面显示 = 接口返回 → 前端没改字，问题在服务端返回值（或你本地理解的时区）  页面显示 ≠ 接口返回 → 才像前端展示/缓存/未用该响应（规格预期应直接用这个接口）  401/无请求/接口失败 → 先修登录态与接口是否打通，再谈日期对不对  别混： 不要去找已不用的 GET /month/view 月历网格接口用“服务端时区下的今天”对照接口返回  问一下运维/部署：应用 JVM / 服务器操作系统时区是什么（常见如 Asia/Shanghai）  按该时区算“请求发出那一刻”应该是几月几日、星期几，再和接口里的 year、week 比对  怎么判断：  接口返回 = 服务器时区下的正确今天 → 属规格内行为：页面以服务端为准，和浏览器本地不一致是预期  接口返回连服务器时区下也算错日/星期 → 再升级查 JVM 时区是否配错、系统时钟是否偏跨午夜再确认一次边界（仍只观察）  规格已写：当前日来自服务端，前端本地跨时区午夜可能和页面不一致  若差异只出现在本地临近 0 点前后、或两地已跨日 → 优先按时区解释，不要先当显示缺陷仍异常时，升级前最少留这些（脱敏）  页面截图（含显示的日期/星期）  Network 里该接口的请求时间、完整 path、响应 year/week 原文  操作人电脑本地时间 + 时区  服务器/JVM 时区说明（运维提供）  是否跨时区/远程访问、是否刚过午夜  有了「页面 = 接口返回，但 ≠ 本地」这一条，就可以明确告诉开发/运维：不是前端算错，请核 JVM 时区与机房时钟。  若「页面 ≠ 接口返回」，再让前端查工作台是否没用 getMonthToday 的响应。技术依据（研发参考）  接口：GET /pwrsapi/month/view/today（需合法 JWT）  响应：Map<String,String>，year=yyyy年M月d日，week=星期X  日期来源：服务端 JVM 当前时区，非前端 JS 自行拼接  工作台消费：monitoringApi.getMonthToday；勿与已删除/未使用的 GET /month/view 混淆",
+      "verdict": "FAIL",
+      "reason": "核心A41事实与只读分层正确，但无证据断言“最高频就是服务器时区≠电脑时区”，把可能成因包装成频率结论",
+      "order": 1,
+      "session": "C021",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "image": "none",
+      "answerCapture": "official Chrome plugin visible UI, complete last AI bubble DOM textContent"
+    },
+    {
+      "id": "Q0122",
+      "question": "现场还卡在今天视图时间这里，我只拿得到这张截图，没有日志，够不够？",
+      "answer": "结论：单靠一张页面截图，通常不够完全定性「为什么和浏览器理解不一致」。  它能证明页面上显示了什么，但分不清：  显示 = 接口返回（问题在服务端时区/时钟 vs 本机）  还是 显示 ≠ 接口返回（才像前端没用对返回）  没有日志也可以继续，但要用已显示页面 + 尽量补抓到的接口响应做只读对照。下面按顺序照着做。先确认这张截图本身够不够用（只读看图）  截图里最好同时有：工作台顶部「今天」的日期文案（如 xxxx年x月x日）和星期（如 星期x）、截图时间点（或你能补充「截图时电脑显示的本地时间」）。  怎么判断：  日期/星期都清晰可见 → 可以当作「页面实际展示值」的证据  只有一半、被挡住、或看不清年月日/星期 → 先补一张完整、不遮挡的同页截图（仍只截当前已打开页面，别改业务）用截图对照本机「现在」写三条对照（仍不点写操作）  页面显示的日期/星期（从截图抄原文）  截图当时（或现在）电脑系统托盘/设置里的本地日期时间  电脑时区（系统时区设置即可）  怎么判断：  仅差 1 天、且接近 0 点或异地/跨时区 → 很像「服务端时区 vs 本机时区」预期差异，还不能据此说系统坏了  年月日或星期明显离谱（不是差一天那种）→ 记下来，后面和接口返回一起比没有后端日志时，尽量只读补「接口实际返回」（浏览器 Network）  若还能打开浏览器开发者工具：刷新工作台后找 GET /pwrsapi/month/view/today，把状态码和响应里的 year、week 原文记下来（可截 Network 响应，脱敏 token）。  怎么判断：  页面显示 = 接口 year/week → 前端按返回展示，差异在服务端当前时间/时区 vs 本机；下一步只需运维确认 JVM/服务器时区，不必先挖业务日志  页面显示 ≠ 接口返回 → 才像前端展示/缓存问题，把「截图 + 响应原文」一起给前端/开发  打不开 Network、也抓不到该请求 → 接受「当前无法区分页面是否等于接口」，升级时如实写「仅有页面截图，无接口响应、无日志」整理成可升级的最小包（有多少带多少，不编造）  工作台今天日期/星期截图  操作人本地时间 + 时区  （有则带）/pwrsapi/month/view/today 的响应 year/week 与请求时间  （有则带）运维已知的服务器/JVM 时区  说明：是否跨时区办公、是否刚过午夜  直接回答「够不够」：  只够证明「页面上显示成什么样」，不够单独定责或断定「前端算错 / 调度停了 / 系统故障」。  若能补上第 3 步接口返回，即使没有日志，也够把问题二分到「服务端时区」或「前端展示」两条线。  若连 Network 都拿不到，就带着第 4 步已有材料找运维要服务器/JVM 时区，并让研发在同环境只读核对该接口返回，不要现场补跑、重提、改配置。不要做的：  不要为了验证去改系统时间、改业务数据、重跑同步或反复点会改状态的操作；今天日期来自服务端当前时间，与患者业务数据无关，也不要用业务补录/统计补跑来「修日期」。",
+      "verdict": "PASS",
+      "reason": "保留A41基线，准确限定截图只能证明页面值；无日志仍可按已有页面/响应只读二分，未知局部化",
+      "order": 2,
+      "session": "C021",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "image": "not_uploaded_fixture_text_references_screenshot_but_no_image_asset_was_mapped",
+      "answerCapture": "official Chrome plugin visible UI, complete last AI bubble DOM textContent"
+    },
+    {
+      "id": "Q0123",
+      "question": "关于今天视图时间，请求和响应都抓到了，重点核对哪几个地方？",
+      "answer": "结论：  请求和响应都已经抓到了，重点不要再“复现操作”，而是只读对照下面几处，把问题二分成：  1）页面是否按接口展示；  2）接口返回是否等于服务端时区下的今天/星期。按顺序核即可。先核请求本身对不对（看已抓到的 Request）  Path 是否就是今天接口（现场实际 path，常见带网关前缀，如 /pwrsapi/month/view/today；不要和已不用的月历网格 /month/view 混看）  Method 是否为 GET  是否带登录态（合法 JWT / Authorization）  Query 是否基本无业务入参（规格上就是“当前系统时间”，没有 startDate 一类参数）  怎么判断：  401/未带登录 → 先解决登录态，日期对错先不讨论  打到了别的接口 → 今天视图显示源可能不是这包响应  请求形态正常 → 进入第 2 步看响应再核响应结构与业务码（看已抓到的 Response）  HTTP 状态是否 200  响应体里是否有（且只有规格关心的）year、week 两个字符串字段  year 形态是否像：YYYY年M月D日（例如 2025年3月15日）  week 形态是否像：星期X（例如 星期六）  怎么判断：  非 200 / 返回错误 JSON / 缺字段 → 先记状态码、错误信息、时间点，升级时带上，别先怪前端排版  字段齐全、格式正常 → 进入第 3 步做“三方对照”三方对照（最关键：页面 vs 接口 vs 本机）     把三行原文抄齐：  A. 页面显示：工作台今天日期文案 + 星期（截图原文）  B. 接口返回：响应里的 year、week 原文  C. 本机理解：截请求时电脑本地日期时间 + 时区  怎么判断：  A = B，且 A/B ≠ C → 前端按接口展示，属“以服务端当前时间为准”；和浏览器不一致优先查服务器/JVM 时区与机房时钟，不是前端随便拼错  A ≠ B → 接口对了、页面没用这包数据（缓存、取错字段、未刷新到最新响应等），问题往前端展示链排查  A = B = C → 今天视图时间链路本身正常，若用户仍觉得“不对”，要另问他对比的是哪一个“标准时间”（别的系统、手写白板、HIS 等）若日期对但星期不对（或反过来），单独核星期映射  规格：星期由服务端按日历日映射（周日→日 … 周六→六），不是浏览器本地 Date 自己算  用接口返回的那一天（不要用本机日期）去核“那一天到底是星期几”  怎么判断：  日期对、按该日算星期也应对得上 → 映射正常  日期对、星期系统性偏一天 → 把 year/week 原文 + 请求时间留给开发核映射/时区边界  日期本身就偏（常见跨午夜差 1 天）→ 仍先回到服务端时区，不先改星期映射跨午夜/跨时区场景多看一眼时间窗（仍只读）  记录：请求发出的本地时间是否接近 0 点、是否异地/远程、服务器时区是否已知  怎么判断：  仅在本地临近 0 点或跨时区时差 1 天 → 高度像时区预期差异  任意时段都差很多天/星期乱跳 → 更像服务器时钟或 JVM 时区配置问题整理最小结论包（有多少带多少，不必再点业务）  请求：path、method、是否带 JWT、请求时间  响应：HTTP 状态 + year/week 原文  页面截图原文  本机时间 + 时区  （有则）运维确认的服务器/JVM 时区  一句话分支结论：A=B≠C / A≠B / 非200 / 日期对星期不对直接可执行的优先级：  先做第 3 步「页面 =? 接口」；  相等 → 找运维核 JVM/服务器时区与时钟；  不等 → 把响应原文和截图给前端/开发；  请求失败 → 先修登录与网关。  全程只用已抓到的请求/响应和当前页面截图，不要改系统时间、不要补跑同步、不要为了“验证”再去做会改业务状态的操作。",
+      "verdict": "PASS",
+      "reason": "先核现有GET请求与year/week，再做页面/响应/本机三方只读对照；旧接口反例正确且不要求重新复现",
+      "order": 3,
+      "session": "C021",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "image": "none",
+      "answerCapture": "official Chrome plugin visible UI, complete last AI bubble DOM textContent"
+    },
+    {
+      "id": "Q0124",
+      "question": "自定义表单、字段、选项和填写结果靠什么关联？",
+      "answer": "结论：  自定义表单、字段、选项、表格列和填写结果，是靠下面三段关联串起来的（共享业务键，不是真库外键）：模板 ↔ 字段结构 / 填写结果：靠 form_id  表单模板（pwrs_custom_form）的 form_id  同时关联：字段元素表（pwrs_custom_form_element.form_id）  以及：填报结果表（pwrs_custom_form_result.form_id）  页面能选到模板却没字段，或保存后结果对不上模板，优先查这层 form_id 是否一致、有没有断链。字段 ↔ 选项 / 表格列：靠 element_id  某个字段元素的 element_id  再关联：该字段下的选项、表格列等子数据（option / table 侧的 element_id）  不是用 form_id 直接去挂选项或表格列。填写内容本身：在结果表的 content JSON 里  pwrs_custom_form_result.content 存的是整份填写内容的 JSON 快照（含各元素取值、选项/表格数据）  渲染历史结果主要靠这份快照，不依赖当时结构表“再拼一遍”  结果还会带保存时的 form_name、form_type 等快照；定位某次结果时还会用到患者/住院、formType 等业务键。现场别混的三点  字段名一样、业务键一样，不等于数据库真外键；不能按“有外键就会自动级联/一对一”去假设。  删模板会物理删掉结构（元素/选项/表格列），不会级联清历史填报结果；删完后结果上的 form_id 可能悬空，但详情仍可凭 content 快照看。  没有版本号时，不能说历史结果和改完后的新模板完全隔离。一句话串起来：  模板用 form_id 挂字段元素和填报结果 → 字段用 element_id 挂选项/表格列 → 用户填了什么都在结果表的 content JSON 里。若还要继续查“页面无字段 / 结果找不到”，把模板名、formType、患者/住院、保存时间带上，再按这三段逐层对 form_id → element_id → content 即可。",
+      "verdict": "PASS",
+      "reason": "显式切换A42，准确给出form_id、element_id、result.content JSON三段关系并说明非数据库外键推断",
+      "order": 4,
+      "session": "C021",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "image": "none",
+      "answerCapture": "official Chrome plugin visible UI, complete last AI bubble DOM textContent"
+    },
+    {
+      "id": "Q0125",
+      "question": "医院报的自定义表单关联问题，按这个顺序查到第二步就对不上了，后面先停还是继续？",
+      "answer": "结论：第二步对不上就先别机械往第 3 步冲。  按已核的三段关系，第二步是：字段元素 element_id → 选项 / 表格列上的 element_id这一步断了，说明的是结构断链（有字段，但选项或表格列挂不上），和「填写结果 content 好不好找」不是同一件事。  是否继续，看医院报的是哪类现象，不要三段硬查完。第二步对不上时，先怎么理解现象和「第二步断链」的关系建议页面有字段，但单选/多选/下拉没选项，或表格没列高度吻合先停在结构层，把断链查清；不要先怪结果表页面根本没字段更像 第一步 form_id 挂 element 就有问题回到第一步再核，别在 option 上耗保存后再次进入找不到结果不一定是第二步的问题结果靠 form_id + 患者/住院/formType 等定位，内容在 content JSON；结构断了仍可能有历史结果模板改过/删过后再看历史删模板会物理级联 element/option/table，不会清历史结果；form_id 可能悬空，但详情仍可能靠 content 快照看别假设「有外键就会自动级联/一对一」建议动作（只读，按顺序）先钉死「第二步到底哪里对不上」（只记事实，不改数据）  模板对应的 form_id 下，元素表里是否有行、每条 element_id 是什么  选项表 / 表格列表里，是否有相同 element_id  怎么判断：  元素有、option/table 完全没有同 element_id → 结构断链，停在这里查「设计器是否存过选项/列、是否被删过」  有行但 element_id 对不上（ID 全变了）→ 常见于改过模板、复制/重存后子数据未按新 ID 对齐；仍先停在结构层  元素本身就没有 → 不是第二步问题，回到 form_id → element对照医院真实抱怨，决定停还是继续  只有「有框没选项 / 表格没列」 → 后面第 3 步可先停，先把 element↔option/table 对齐或确认是否历史删除导致  同时报「结果找不到」 → 结构查清后，再单独做结果侧：用同一 form_id + 患者/住院/formType/大致保存时间去对结果行，看 content 里是否有当时填写快照  只有结果找不到、页面字段和选项都正常 → 第二步其实不该作为主线；应转向结果定位键和 content，不要在 option 上打转升级或复盘前最少留这些（脱敏）  模板名、formType、出问题的患者/住院（若有结果问题）  该 form_id 下：element 条数与 element_id 列表  option/table 侧：是否存在、element_id 是否一致（可截「有元素无选项」的对照，不要改库）  现象是：无字段 / 无选项 / 结果找不到 / 模板改后历史异常——勾一种或多种  说明：第二步已确认断链，第 3 步是否已做、结果如何  直接回答你的问题第二步已经对不上：先停。 先把「哪个 element_id 缺选项/表格列」说清楚，并和医院现象对上号。  只有医院还明确报「保存后结果找不到 / 历史显示异常」，且字段选项本身不是主诉时，再继续查结果的 form_id 定位和 content JSON。  不要假设数据库真外键会自动修好；共享键断了就是断了，删除也不会级联清结果。如果你愿意，把「第二步对不上」的具体样子发一句即可继续往下收窄，例如：  「元素有 5 个，option 全空」还是「option 有数据但 element_id 对不上」——只需要这一种描述，不必先上日志。",
+      "verdict": "FAIL",
+      "reason": "主结论先停并按element_id断点分支正确，但无证据新增“ID全变常见于改模板、复制/重存后子数据未对齐”的实现/频率猜测",
+      "order": 5,
+      "session": "C021",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "image": "none",
+      "answerCapture": "official Chrome plugin visible UI, complete last AI bubble DOM textContent"
+    },
+    {
+      "id": "Q0126",
+      "question": "另一家医院又问：pwrs_patient.patient_id 在 PostgreSQL 里是什么类型和长度？",
+      "answer": "结论：pwrs_patient.patient_id 在 PostgreSQL 里是 character varying(50)（也就是 varchar，长度 50）。别当成 bigint、integer 或其它整数类型，也不是原生 uuid。按这个类型和长度对接/建表/导入就行。",
+      "verdict": "PASS",
+      "reason": "原子问题直接给character varying(50)/varchar(50)，未串入上一会话表单或today事实",
+      "order": 6,
+      "session": "C022",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "image": "none",
+      "answerCapture": "official Chrome plugin visible UI, complete last AI bubble DOM textContent"
+    },
+    {
+      "id": "Q0127",
+      "question": "医院电话里只说“对接方把患者号当数字传，长号码开始丢位”。我应该先让他们做哪个验证？",
+      "answer": "结论先说：  先让他们对着已经发生的一次请求核对两件事——患者号在报文里是“数字”还是“字符串”，以及报文里的完整位数是否已经和库里/对端认定的真值不一致。  pwrs_patient.patient_id 在库里是 varchar(50)，按字符串存；对接方若当成数字传，长号一进 JSON/中间层就会丢精度，这是最该先钉死的点。先让他们做的验证（只读、按顺序）抓一次已经出问题的原始报文（不要新触发业务）  用已有网关日志、对接日志、抓包、浏览器/接口工具里已经留下的请求体即可。  重点看传患者号的字段（常见叫 patientId / patient_id，以他们实际报文为准）。  正常： 带双引号的字符串，例如 \"patientId\":\"1234567890123456789\"。  异常： 不带引号的数字，例如 \"patientId\":1234567890123456789。  只要是 JSON number，超过 JS 安全整数范围就很容易末尾变 0 或少几位——这就是电话里说的“当数字传、长号丢位”。把报文里的患者号完整位数，和库里该患者的 patient_id 逐位对比  同一患者、同一 hospitalId + patientId + visitId 上下文。  正常： 报文里每一位都和库里一致，且按字符串原样进系统。  异常： 报文里已经短了/末尾变了，或和库里对不上——说明精度在进 PWRS 之前或解析成数字时就丢了，先别急着怀疑业务查询逻辑。看响应/下游是否沿用了“已经变短的号”  同一笔请求的响应、后续列表/详情里展示的患者号，是否和步骤 2 里那串变短的号一致。  若请求已丢位、后面全错：责任优先在对接传参类型（数字 vs 字符串），而不是院区授权或本地再加工。怎么判断、下一步怎么说现象判断报文里是 JSON 数字，且位数已和真值不一致对接方（或中间网关/序列化）把患者号当数字传了 → 先改成字符串传，再复测报文里已是 字符串 且位数正确，但系统里仍错再查后续解析/映射是否又把字符串转成了数字；把完整请求+响应脱敏后给开发报文正确，仅个别入口错固定同 hospitalId + patientId + visitId，对比正常/异常入口的请求体类型，不要按账号院区授权去猜跟医院/对接方怎么一句话要求> 请提供一条已失败请求的原始 JSON 请求体（脱敏即可）：看患者号字段有没有带引号；再和库里 pwrs_patient.patient_id 完整值逐位比对。  > 库字段是 varchar(50)，对接必须按字符串传患者号，不能当 Number/Long 传。注意边界不要先让他们改表、重导数据、补跑同步，也别为了验证去新建/改患者。  患者身份键仍是 hospitalId + patientId + visitId，缺 hospitalId 不能靠 token/默认院区补；本次问题优先钉死的是 patientId 传参类型与精度。  若他们只有口头描述、没有原始报文：就先要原始请求体截图/日志，没有这个先不往下拆业务模块。把“原始报文里是数字还是字符串 + 是否已丢位”这两点钉死，比先猜接口名、表结构或院区权限更快定位。",
+      "verdict": "PASS",
+      "reason": "先只读核已有原始报文中字符串/数字与逐位真值，沿用varchar(50)事实且不要求新触发业务或改数据",
+      "order": 7,
+      "session": "C022",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "image": "none",
+      "answerCapture": "official Chrome plugin visible UI, complete last AI bubble DOM textContent"
+    },
+    {
+      "id": "Q0128",
+      "question": "患者号字段这一段，按这个顺序查到第二步就对不上了，后面先停还是继续？",
+      "answer": "结论：先停，别往下做第三步当“继续深挖业务”。第二步已经对不上，说明问题在进 PWRS / 进库之前（或解析成数字时）精度就丢了。继续比响应、列表、详情，多半只是在跟一串已经错了的号往下走，定位价值不大，还会把时间耗在院区筛选、列表逻辑这类无关点上。第二步对不上时怎么定责（对照已知规则）库里 pwrs_patient.patient_id 是 varchar(50)，按字符串存。  报文里的号已经和库里逐位不一致时：若同时满足判断与动作第一步是 JSON 数字（没引号），且报文位数/末尾已经错就是对接当数字传导致丢位。停排查；让对接方改成字符串传，用同一笔患者号复测第一步已是字符串且引号齐全，但报文本身仍和库不一致错号在更上游生成/改写（HIS、网关、ETL 入参等）。停在 PWRS 业务侧深挖；把同一请求的原始报文 + 库里完整值（脱敏）交给对接/上游 Owner还不确定第一步是数字还是字符串先补齐第一步结论，不要跳到第三步停下来后你只需要留这三样（只读、用已有材料）第一步结论：患者号在请求体里是带引号字符串，还是不带引号的数字。  第二步两边原值（脱敏即可）：报文里的完整号 vs 库里 patient_id 完整号——写清是“短了几位”还是“末尾变了”。  同一上下文：尽量带上 hospitalId + patientId + visitId（缺 hospitalId 不算身份完整，别用 token/默认院区顶替）。有这三样，就可以明确对医院说：  > 丢位发生在请求进系统之前/传参类型错误，不是业务列表查错；请对接把患者号改成字符串（对应库字段 varchar(50)）。什么时候才“继续”只有第一步已是字符串、位数也对，但库里/页面仍错——再往下游解析/映射查，那才需要完整请求+响应脱敏给开发。  你现在描述的是第二步就对不上 → 默认先停，先让对接改类型/核上游，不要按第三步当主线继续。跟医院/对接方一句话> 按约定查到“报文患者号 vs 库 patient_id”已不一致，先停业务侧排查。请确认请求里患者号是否被当成 JSON 数字传输；库字段是 varchar(50)，必须按字符串传。请回传脱敏后的原始请求体片段和两边完整号对比。你如果方便，补一句就行：第一步报文里到底是数字还是字符串？报文和库分别差在哪（短了 / 末尾变 0）？ 有这两点就可以直接帮你写给对接方的定责话术，不必再往下拆模块。",
+      "verdict": "FAIL",
+      "reason": "主结论先停与已知varchar事实正确，但前文禁止继续后又建议改类型后用同一患者号复测；未确认该动作只读或满足完整受控条件，形成同答动作矛盾",
+      "order": 8,
+      "session": "C022",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "image": "none",
+      "answerCapture": "official Chrome plugin visible UI, complete last AI bubble DOM textContent"
+    },
+    {
+      "id": "Q0129",
+      "question": "刚才这个患者号字段问题，我目前只能确认请求发出去了，后端具体走到哪还不知道。你先说能确定的部分。",
+      "answer": "结论先说：  后端具体走到哪这一段，本轮可以先标成局部未知；这不会推翻前面已经钉死的患者号规则。你现在最该守住的，是「库字段类型 + 传参必须是字符串 + 第二步对不上时先停业务深挖」这几条。① 持续有效、已经能确定的部分（判断基线）库字段类型     pwrs_patient.patient_id 在 PostgreSQL 里是 varchar(50)（字符串），不是整型/数字类型。对接约定含义     患者号应按字符串传。若对接方（或中间层）当成 JSON 数字传，长号很容易在进系统前就丢精度、末尾变 0 或少位——这和「库里按字符串存」是对得上的。第二步对不上时的定责方向（你上轮已反馈）     报文里的号和库里 patient_id 逐位已经不一致时：  优先认定：丢位发生在请求进 PWRS 之前，或解析成数字时；  先停业务列表/院区/筛选方向的深挖；  先让对接改成字符串传，或把问题交回上游生成/改写链路。患者身份边界（只要还在谈这个患者）     完整身份是 hospitalId + patientId + visitId，缺 hospitalId 不算齐；不能用 token、默认院区顶替。「请求发出了、后端路径未知」本身     只说明本轮现场证据边界：处理路径局部未知。     不能因此把上面 1～4 条整体改成「说明书没覆盖」或「什么都不能定」。② 本轮现场已确认相关请求已经发出去了（你已确认）。  按排查顺序，第二步（报文号 vs 库完整号）已经对不上（上轮进度，仍作现场证据）。③ 仍局部未知（只限定这些，不扩大）后端具体落到哪段服务/哪次读写（你暂时看不到日志/处理链时，只能写「路径未知」）。  若还没留下可核对材料：第一步报文里到底是带引号字符串还是不带引号数字，需要用已发出的那次请求体钉死（不是再猜）。未知路径 ≠ 否定「varchar(50) / 应按字符串传 / 第二步对不上先停业务侧」。④ 最少、只读下一步（不要为了验证再点业务写操作）用已经发出的那次请求做留证即可，不要新提交、不要重做会改状态的操作：打开已有请求记录（浏览器网络面板历史、网关/对接日志、已有抓包均可）  看患者号字段在请求体里：是 \"patientId\":\"……\"（字符串）还是 \"patientId\":123…（数字）。  正常：字符串且位数与真值一致。  异常：数字，或位数/末尾已和真值不一致。把两边完整号并排写下来（脱敏）  左：报文里的完整号；右：库里该患者的 patient_id。  写清是「短了几位」还是「末尾变了」。  尽量带上同一上下文的 hospitalId + patientId + visitId。看同一次请求的响应里回显的患者号（若有）  若请求体已错、响应/后续展示跟着错号走 → 更支持「进系统前就丢了」，不必先假设后端某段业务逻辑改号。分支怎么用  已有材料显示你怎么定请求体是数字，且第二步已对不上对接/序列化当数字传 → 先改字符串，业务侧先停请求体已是字符串、位数也对，但库/页面仍错再查下游是否又转成数字；把脱敏请求+响应交给开发只有「请求发出了」，体还没打开先补步骤 1，不要在路径未知时猜表、猜接口实现跟医院/对接方可直接说的话> 库字段是 varchar(50)，患者号必须按字符串传。  > 我们已确认请求发出，且报文中的号与库中 patient_id 逐位不一致；后端细路径本轮暂未定位，但不影响上述定责：优先核对传参类型（数字 vs 字符串）和进系统前是否已丢位。  > 请提供该次请求的脱敏原始请求体片段 + 两边完整号对比。先停在哪：  第二步已对不上 → 先停业务模块继续拆；把「请求体类型 + 两边完整号」钉死后交给对接/上游。  后端走到哪属于局部未知，有日志/Owner 再补，不推翻当前已确认规则。若你手头已有那次请求体，直接回两句就行：是数字还是字符串？报文和库分别长什么样（可脱敏）？ 我可以按结果帮你写成给对接方的定责结论。",
+      "verdict": "PASS",
+      "reason": "保留varchar(50)与字符串传参当前事实，后端处理链局部未知；只查已发生请求且明确不重做业务操作",
+      "order": 9,
+      "session": "C022",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "image": "none",
+      "answerCapture": "official Chrome plugin visible UI, complete last AI bubble DOM textContent"
+    },
+    {
+      "id": "Q0130",
+      "question": "这次复测患者号字段时，这一步正常，但问题还在。你直接告诉我下一个检查点。",
+      "answer": "结论：下一个检查点只做一件事——核对「同一次已发出请求」的响应里回显的患者号，以及当前页面上展示的号，是否还和请求体/库里的完整字符串一致。前序规则不变：库里是 varchar(50)，应按字符串传；身份仍是 hospitalId + patientId + visitId。你说复测时「这一步」正常、问题还在——说明丢位不一定还卡在你刚通过的那一环，要往响应 / 展示是否沿用完整号推进，而不是回头再拆业务模块。下一个检查点（只读）打开「已经发出、且你认为这一步正常」的那一次请求（网络面板历史 / 网关或对接日志 / 已有抓包均可，不要为了验证再点提交、保存、关注、新建等写操作）同时看三处（能看几处看几处）：请求体里的患者号（完整串）同一次响应里回显/带回的患者号（若有）当前页面上看到的患者号正常： 三处位数、每一位都一致，且和库里 patient_id 一致。  异常： 请求体正确，但响应或页面已经短了 / 末尾变了 → 问题在进系统后的回显或前端展示，不是「库字段类型」本身。  仍异常： 请求体本身仍短 / 仍是数字 → 说明「正常」的不是传参这一环，对接/上游仍要先改字符串。怎么用结果（看完就停，别继续盲拆）你看到的定责与动作请求体对，响应/页面已丢位留脱敏：完整请求体 + 响应体片段 + 页面截图 → 转开发查回显/序列化是否又当数字处理请求体就错（数字或已短）仍是对接/进系统前问题；业务侧先停，让对接按字符串传请求、响应、页面都完整，但别处仍丢位固定同一 hospitalId + patientId + visitId，只对比已有正常入口 vs 出问题入口的历史请求，不要新点业务边界（避免跑偏）后端「具体走到哪」本轮仍可标局部未知，不推翻 varchar(50) / 必须按字符串传。  不要为了找下一个点去重做业务、补跑、改库。  缺 hospitalId 的上下文不要用 token/默认院区顶替。一句话：  下一步只查——同一次请求：请求体完整号 → 响应回显号 → 页面展示号，哪一截开始变短，责任就落在那一截之前。  看完后你只要回一句：请求对、是响应/页面错，还是请求体仍错？ 我按结果直接给你对接/开发话术。",
+      "verdict": "PASS",
+      "reason": "承接已核varchar与患者身份事实，下一点仅对照同一已有请求的请求体/响应/页面，明确禁止重做业务",
+      "order": 10,
+      "session": "C022",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "image": "none",
+      "answerCapture": "official Chrome plugin visible UI, complete last AI bubble DOM textContent"
+    }
+  ],
+  "limitations": [
+    "convId, route and inherited were not exposed in the captured visible DOM, so they are unavailable rather than inferred.",
+    "Q0122 refers to a screenshot but the fixture did not map an image asset for this question; no image was uploaded.",
+    "Rendered Markdown is flattened to DOM textContent while preserving the complete wording."
+  ]
+}
