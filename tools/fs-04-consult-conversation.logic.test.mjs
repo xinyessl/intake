@@ -585,14 +585,14 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
     '需要更细的话，把截图发来再一起看。',
   ].join('\n');
   const atomicAudit = audit(atomicDraft, '工作台今天日期和星期调用哪个接口？', atomicRoute);
-  assert.deepEqual(atomicAudit.violations, ['focused_fact_overreach']);
+  assert.deepEqual(atomicAudit.violations, ['unsupported_likelihood', 'focused_fact_overreach']);
   assert.equal(atomicAudit.focusedFactOverreach.length, 3);
   assert.deepEqual(audit('调用 GET /pwrsapi/month/view/today，返回 year/week；不得混淆已废止的 GET /month/view。', '工作台今天日期和星期调用哪个接口？', atomicRoute).violations, []);
   assert.ok(!audit('调用 GET /pwrsapi/month/view/today 后现场怎么核对？', '工作台接口为什么不一致，现场怎么验证？', atomicRoute).violations.includes('focused_fact_overreach'), '显式诊断题不触发原子止答审计');
   const failed = audit('页面等于接口但与浏览器不同，多半是服务端时区差。', '今天视图对不上，怎么排查？', route);
   assert.deepEqual(failed.violations, ['unsupported_likelihood']);
   assert.deepEqual(failed.likelihoodTerms, ['多半']);
-  for (const phrase of ['很常见', '较常见', '比较常见', '常见原因', '经常发生', '多发', '高发', '很多是规则内预期', '不少属于时区差', '多数是预期', '大多不是BUG', '绝大多数无需处理', '少数会异常', '极少出错', '大部分符合预期', '小部分对不上', '几乎全部正常', '频繁出现', '偶尔失败', '有时不同', '首要原因', '主要原因之一', '很像服务端缓存', '更像前端取错字段', '可能是异常兜底', '疑似配置问题', '倾向于时区问题', '最容易出现', '很容易丢精度', '尤其容易对不上', '易发生', '很可能就发生在序列化时']) {
+  for (const phrase of ['很常见', '较常见', '比较常见', '常见原因', '经常发生', '多发', '高发', '很多是规则内预期', '不少属于时区差', '多数是预期', '大多不是BUG', '绝大多数无需处理', '少数会异常', '极少出错', '大部分符合预期', '小部分对不上', '几乎全部正常', '频繁出现', '偶尔失败', '有时不同', '首要原因', '主要原因之一', '很像服务端缓存', '更像前端取错字段', '可能是异常兜底', '疑似配置问题', '倾向于时区问题', '最容易出现', '很容易丢精度', '尤其容易对不上', '易发生', '很可能就发生在序列化时', '超过精度就会直接丢位', '一定会导致字段少位', '必然会出现错误', '肯定会发生变化', '这就是对接方类型传错']) {
     assert.ok(audit(`接口和浏览器不一致${phrase}。`, '今天视图为什么不一致？', route).violations.includes('unsupported_likelihood'), phrase);
   }
   assert.deepEqual(audit('待验证假设：服务端时区和现场约定不一致；可能分支：页面没有照接口响应展示。', '今天视图为什么不一致？', route).violations, [], '明确标为不排序待验证分支时应放行');
@@ -641,6 +641,11 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
   assert.deepEqual(namedField.violations, [], '正文明确命名时允许照实引用“常见字段名”');
   assert.deepEqual(audit('这是一个可能分支，尚待验证。', '今天视图为什么不一致？', route).violations, [], '不排序的“可能分支”标签本身不是概率定论');
   assert.deepEqual(audit('这段说明很容易理解。', '请解释这段说明。', route).violations, [], '非故障结果的日常“容易理解”不应误拦');
+  assert.deepEqual(audit('缺 hospitalId 就会拒绝该请求。', '缺 hospitalId 会怎样？', {
+    matched: true,
+    route: { title: '患者身份边界' },
+    answerFacts: ['规则明确：缺 hospitalId 时必须拒绝该请求'],
+  }).violations, [], 'route 直接支持的确定因果规则应照实放行');
 });
 
 test('发布前确定性语义校验：跨主体副作用触发，否定句和完整受控条件不误拦', () => {
@@ -681,6 +686,8 @@ test('发布前确定性语义校验：跨主体副作用触发，否定句和�
   assert.equal(directUnsafe.unsafeDirectActionCount, 1);
   assert.deepEqual(audit('优先对齐服务端时区与业务日切要求。', '今天视图和浏览器不一致，怎么排查？', route).violations, ['cross_actor_side_effect'], '对齐配置/时区/业务日切仍是副作用动作');
   assert.deepEqual(audit('请运维校准系统时间并统一业务口径。', '今天视图和浏览器不一致，怎么排查？', route).violations, ['cross_actor_side_effect'], '跨主体校准/统一口径不能绕过动作门');
+  assert.deepEqual(audit('如果报文里是数字，就是对接方类型传错了，改成字符串再传。', '患者号丢位，下一步怎么查？', route).violations.sort(), ['cross_actor_side_effect', 'unsupported_likelihood'].sort(), '确定性归因与改类型再传必须同时被终稿审计拦截');
+  assert.deepEqual(audit('不要改成字符串再传，只核已有原始报文。', '患者号丢位，下一步怎么查？', route).violations, [], '否定副作用动作且回到已有报文不应误拦');
   assert.deepEqual(audit('把已有接口响应与页面显示并排对齐核对。', '今天视图和浏览器不一致，怎么排查？', route).violations, [], '只读对照已有请求与页面不按配置修改误拦');
   assert.deepEqual(audit('不得让运维重跑，也不能让开发重试。', '同步中断，能不能让运维重跑或开发重试？', route).violations, []);
   assert.deepEqual(audit('规范正文说明该设置可以修改。', '这个设置是否支持修改？', { matched: true, route: { title: '设置能力' }, answerFacts: ['该设置支持修改'] }).violations, [], '核心能力事实题不强塞诊断动作门');
@@ -755,6 +762,20 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.doesNotMatch(q127Fallback, /很容易|很可能|JSON\/中间层\/语言数值类型|序列化时/);
   assert.deepEqual(bundle.audit(q127Fallback, '对接方把患者号当数字传，长号码开始丢位，先验证什么？', route).violations, []);
 
+  const q127ProductionDraft = [
+    'patient_id 是 character varying(50)，是字符串字段。',
+    '长号码一旦被当数字传，超过精度就会直接丢位，这是契约层面的硬边界。',
+    '如果报文里已经是数字且少了位，就是对接方类型传错了，改成字符串再传。',
+    '先只读对比完整原号与已发生请求里的原始值。',
+  ].join('\n');
+  const q127ProductionAudit = bundle.audit(q127ProductionDraft, '对接方把患者号当数字传，长号码开始丢位，先让他们做哪个验证？', route);
+  assert.deepEqual(q127ProductionAudit.violations.sort(), ['cross_actor_side_effect', 'unsupported_likelihood'].sort());
+  const q127ProductionFallback = bundle.fallback(q127ProductionDraft, q127ProductionAudit);
+  assert.match(q127ProductionFallback, /patient_id 是 character varying\(50\)/);
+  assert.match(q127ProductionFallback, /只读对比完整原号与已发生请求里的原始值/);
+  assert.doesNotMatch(q127ProductionFallback, /超过精度就会|就是对接方|改成字符串再传/);
+  assert.deepEqual(bundle.audit(q127ProductionFallback, '对接方把患者号当数字传，长号码开始丢位，先让他们做哪个验证？', route).violations, []);
+
   const todayDraft = '今天视图由已核接口返回。页面日期可能是旧缓存或异常兜底。页面与接口不同，更像前端展示/取错字段。JVM 时区错了，由运维按规范改服务端时区（不在实施侧乱改前端）。';
   const todayAudit = bundle.audit(todayDraft, '今天视图和浏览器不一致，怎么处理？', { matched: true, route: { title: '工作台今天视图' }, answerFacts: ['日期来自服务端 JVM 当前时区'] });
   assert.deepEqual(todayAudit.violations, ['unsupported_likelihood', 'unsupported_component_fault', 'cross_actor_side_effect', 'out_of_scope_entity']);
@@ -784,7 +805,7 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     '需要更细的话，把截图发来再一起看。',
   ].join('\n');
   const atomicAudit = bundle.audit(atomicDraft, '工作台今天日期和星期调用哪个接口？', atomicRoute);
-  assert.deepEqual(atomicAudit.violations, ['focused_fact_overreach']);
+  assert.deepEqual(atomicAudit.violations, ['unsupported_likelihood', 'focused_fact_overreach']);
   assert.match(bundle.revision(atomicDraft, atomicAudit), /保留 current route answerFacts\/primary section 的直接答案/);
   const atomicFallback = bundle.fallback(atomicDraft, atomicAudit);
   assert.match(atomicFallback, /GET \/pwrsapi\/month\/view\/today/);
