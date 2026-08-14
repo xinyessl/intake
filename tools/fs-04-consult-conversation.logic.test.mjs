@@ -1029,6 +1029,28 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     route,
   ).violations, [], '表格定义的序号可在正文合法复用');
 
+  const skippedTopLevelStepDraft = [
+    '1. 核请求路径',
+    '只读查看已有请求。',
+    '2. 核响应字段',
+    '只读比较已有响应。',
+    '3. 对照页面',
+    '逐字比较页面与响应。',
+    '5. 整理材料',
+    '保留已有截图和响应。',
+  ].join('\n');
+  const skippedTopLevelStepAudit = bundle.audit(skippedTopLevelStepDraft, '请求和响应都抓到了，重点核哪几处？', route);
+  assert.ok(skippedTopLevelStepAudit.violations.includes('nonsequential_top_level_steps'), '顶层步骤1、2、3后直接跳5必须命中');
+  assert.deepEqual(skippedTopLevelStepAudit.nonSequentialTopLevelSteps.map(item => [item.expected, item.number]), [[4, 5]]);
+  assert.match(bundle.revision(skippedTopLevelStepDraft, skippedTopLevelStepAudit), /不得为补缺号新增步骤/);
+  const skippedTopLevelStepFallback = bundle.fallback(skippedTopLevelStepDraft, skippedTopLevelStepAudit);
+  assert.match(skippedTopLevelStepFallback, /^4\. 整理材料$/m);
+  assert.doesNotMatch(skippedTopLevelStepFallback, /^5\. 整理材料$/m);
+  assert.deepEqual(bundle.audit(skippedTopLevelStepFallback, '请求和响应都抓到了，重点核哪几处？', route).violations, []);
+  assert.deepEqual(bundle.audit('2. 继续核响应\n只读比较。\n3. 整理已有证据\n不执行写操作。', '已经做到第二步，后面怎么查？', route).violations, [], '承接现场既有第二步时允许从2开始但后续仍须连续');
+  assert.deepEqual(bundle.audit('1. 顶层步骤\n    7. 嵌套原始编号\n2. 下一顶层步骤', '怎么核对？', route).violations, [], '四空格嵌套编号不参与顶层连续性审计');
+  assert.deepEqual(bundle.audit('1. 顶层步骤\n```text\n9. 文件中的原文编号\n```\n2. 下一顶层步骤', '怎么核对？', route).violations, [], '代码围栏里的编号不参与顶层连续性审计');
+
   const incompleteThreeWayDraft = [
     '先做这一个验证：拿一条已有记录做三边原文对照。',
     '| 对照点 | 看什么 |',

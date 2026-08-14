@@ -1692,7 +1692,7 @@ function consultFinalActionConsistencyGuard(question, route) {
     '每个动作只能归入三类后保留：A. 读取当前已显示页面、已有请求/响应、原始报文、已有映射、截图、历史记录、日志或审计；B. route/Spec/源码已经明确证明无副作用的刷新、列表/只读页签切换或查看；C. 隔离环境或专用数据、明确授权、回滚/清理、幂等性与影响范围全部齐全后的条件式单次受控动作。',
     '编辑、删除、新建、保存、提交、发送、完成、签名、审批、星标、可能标记已读的打开、改参数、改报文类型、改映射、改配置、重试、复现、补跑或重跑，只要不能归入 B 或 C，就必须从最终答案所有位置删除，改成检查已有页面、请求、响应、报文、映射、截图、日志或审计。动作换成由第三方执行也不改变副作用：不得写成“让对接方改字符串/参数/映射/配置后用同一患者复测”“让运维重跑”或“让开发重试”来绕过守卫。不能因为同一答案别处写了“不要操作”“只读”“别重复”，就保留这里的正向点击或重做指令；否定提醒不能抵消冲突动作。',
     '若最终答案任何一处说“不要操作/不要重复/只读”，则其它任何一处都不得再建议点击编辑、删除、发送、完成等未知动作来观察是否发请求，也不得用“点了是否被拦住”“试一下看看”之类问句变相放行。用户只问“这个按钮是否发请求”时，只能查已有请求、日志、审计、代码或契约；没有既有证据就局部说明当前无法安全确认，不能让现场点击未知按钮补抓。',
-    '发布前还要核对步骤和对照项的编号引用：后文引用①②③④等序号时，每个序号都必须在本答案前文有明确对应项；不得出现“共三项”却引用④、表格只定义①②③却在判断或小结写③/④等未定义引用。发现后必须删除含未定义序号的完整句/完整表格行，或在不新增事实的前提下改回已经定义的序号。',
+    '发布前还要核对步骤和对照项的编号引用：后文引用①②③④等序号时，每个序号都必须在本答案前文有明确对应项；不得出现“共三项”却引用④、表格只定义①②③却在判断或小结写③/④等未定义引用。顶层阿拉伯数字步骤必须按正文出现顺序连续递增，不得从1、2、3直接跳到5或重复编号；已有完整步骤只能重编号，不能为补缺号新增步骤或事实。发现后必须删除含未定义序号的完整句/完整表格行，或在不新增事实的前提下改回已经定义的序号。',
     '结构化答案还必须逐项核对“声明数量 → 实际内容”：声称二/三/四边、项、份、件、条、处或个对照时，紧随其后的对照表或 Markdown 清单必须确实给出相同数量的完整项；不得用一行表格冒充“三边对照”，也不得说“核两件事”却只列一项。同一小节里“确认/回复/补充/核对 N 件/项/点/条”等结构数量不得从 1 漂成 2；统一数量或删除不必要的数量承诺。“例如：/如下：/包括：/分别为：”后必须有实际内容，不能直接跳到下一步骤；任何以冒号结尾的标题/提示语都不得出现在正文末尾而没有子内容。清理并列项后不得留下孤立的“还是页面…/或者接口…”等后半分支，也不得留下以“还是/或者/或是/或”结尾却没有后一项的前半分支；不得在答案开头或“结论/判断”等纯标题后直接留下没有前述主张的“但/但是/不过/然而”转折残句。删除示例或引用正文时必须连同整句引号一起删除，不得留下单独一行的「/」/“/”/『/』等孤立引号。明确要求对照/比较/分支判断时，若使用“一致/不一致、是/否、有/无、成功/失败、存在/不存在、命中/未命中”等成对标签，必须给齐两边，或改写成不承诺另一边的单一直接结论；不得只列“一致”后直接跳到未标注的另一种判断。“不要做/禁止/避免/切勿”等否定标题下不得只剩“可以/建议/请/应该/优先/最好/即可/帮你”等正向建议；正向替代动作必须移到独立的“可以做/下一步”标题下。用户明确只问“先做哪个验证/第一步做什么”时，只给一个最小只读验证，不追加第二、第三步或可转发的修改指令。',
     '该审计只删除不安全或互相矛盾的动作，不新增业务事实，也不给纯事实回答强加诊断步骤。若用户只问事实且现有证据已经足够，直接回答后停止；若已明确动作只读，可保留相应只读观察；若受控条件全部齐全，可条件式说明单次受控验证。',
   ].join('\n');
@@ -2174,7 +2174,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   // 冒号式引导语必须真正引出内容；若下一非空行已经进入新步骤/标题或已结束，
   // 说明模型删掉示例后留下了空壳。
   const incompleteLeadIns = [];
-  const topLevelStepRe = /^\s*(?:\*\*|__)?\s*([1-9]\d*)[.、．]\s+/u;
+  const topLevelStepRe = /^(?![ \t]{4})[ \t]{0,3}(?:\*\*|__)?[ \t]*([1-9]\d*)[.、．][ \t]+/u;
   for (let index = 0; index < documentLines.length; index++) {
     const explicitLead = /(?:例如|如下|包括|分别为|具体为|可见|重点看)\s*[：:]\s*(?:\*\*|__)?\s*$/u.test(documentLines[index]);
     const genericColonLead = /[：:]\s*(?:\*\*|__)?\s*$/u.test(documentLines[index]);
@@ -2307,10 +2307,23 @@ function consultAnswerSemanticAudit(answer, question, route) {
   // 明确只问“先做哪个验证/第一步做什么”时，回答只能给一个最小只读验证。
   // 这里按文档顶层编号审计，不限制一个验证内部的表格或无编号对照项。
   const singleStepQuestion = /(?:先(?:让[^。！？\n]{0,20})?(?:做|查|核|看)?(?:哪个|哪一(?:个|项|步)?|什么)(?:验证|检查|核对|动作|步骤)|第一步(?:先)?(?:做|查|核|看)(?:什么|哪一(?:个|项|步)?))/u.test(String(question || ''));
-  const topLevelSteps = documentLines.map((line, lineIndex) => {
+  const topLevelSteps = [];
+  let insideCodeFence = false;
+  for (let lineIndex = 0; lineIndex < documentLines.length; lineIndex++) {
+    const line = documentLines[lineIndex];
+    if (/^\s*```/u.test(line)) { insideCodeFence = !insideCodeFence; continue; }
+    if (insideCodeFence) continue;
     const match = line.match(topLevelStepRe);
-    return match ? { number: Number(match[1]), lineIndex, line: line.trim() } : null;
-  }).filter(Boolean);
+    if (match) topLevelSteps.push({ number: Number(match[1]), lineIndex, line: line.trim() });
+  }
+  const nonSequentialTopLevelSteps = [];
+  if (topLevelSteps.length > 1) {
+    let expected = topLevelSteps[0].number;
+    for (const step of topLevelSteps) {
+      if (step.number !== expected) nonSequentialTopLevelSteps.push({ ...step, expected });
+      expected += 1;
+    }
+  }
   const singleStepOverreach = singleStepQuestion && topLevelSteps.length > 1
     ? { steps: topLevelSteps, truncateFromLine: topLevelSteps[1].lineIndex }
     : null;
@@ -2402,6 +2415,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (missingPrimaryPath) violations.push('missing_primary_path');
   if (focusedFactOverreach.length) violations.push('focused_fact_overreach');
   if (undefinedOrdinalReferences.length) violations.push('undefined_ordinal_reference');
+  if (nonSequentialTopLevelSteps.length) violations.push('nonsequential_top_level_steps');
   if (cardinalityMismatches.length) violations.push('inconsistent_structured_cardinality');
   if (conflictingCountDeclarations.length) violations.push('conflicting_count_declaration');
   if (incompleteLeadIns.length) violations.push('incomplete_structured_lead_in');
@@ -2412,7 +2426,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (contradictoryNegativeSections.length) violations.push('contradictory_negative_section');
   if (singleStepOverreach) violations.push('single_step_diagnostic_overreach');
   if (malformedMarkdown.length) violations.push('malformed_markdown');
-  return { checked: true, focusedFactQuestion, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, cardinalityMismatches, conflictingCountDeclarations, incompleteLeadIns, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
+  return { checked: true, focusedFactQuestion, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, nonSequentialTopLevelSteps, cardinalityMismatches, conflictingCountDeclarations, incompleteLeadIns, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -2445,6 +2459,9 @@ function consultAnswerRevisionPrompt(draft, audit) {
       : '',
     audit.violations.includes('undefined_ordinal_reference')
       ? `草稿存在未定义的圈号步骤/对照项引用：${(audit.undefinedOrdinalReferences || []).join('、')}。逐项核对前文表格、列表和正文，只能引用已经明确给出含义的序号；“共三项”不得再写④，表格只定义①②③时不得在判断或小结引用③/④或“含④”。删除含未定义序号的完整句/完整表格行，或在不新增事实的前提下改回已定义序号；不得凭空补造第四项。`
+      : '',
+    audit.violations.includes('nonsequential_top_level_steps')
+      ? `草稿的顶层步骤编号不连续：${(audit.nonSequentialTopLevelSteps || []).map(item => `“${item.line}”应为${item.expected}、实际为${item.number}`).join('；')}。只按现有完整步骤的正文顺序连续重编号；不得为补缺号新增步骤、动作、字段或事实。嵌套清单和代码块不参与顶层编号。`
       : '',
     audit.violations.includes('inconsistent_structured_cardinality')
       ? `草稿声明的对照数量与实际结构不一致：${(audit.cardinalityMismatches || []).map(item => `${item.kind === 'list' ? '清单' : '表格'}声明${item.expected}项、实际${item.actual}项`).join('；')}。只有草稿中已经存在的内容才能保留；把声明改成实际数量，或删除数量声明/不完整表格或清单，禁止为了凑数新增字段、来源或观测点。`
@@ -2520,6 +2537,21 @@ function consultAnswerSafeFallback(draft, audit) {
     return true;
   };
   let fallbackDraft = String(draft || '');
+  if (audit.violations.includes('nonsequential_top_level_steps')) {
+    const stepLineRe = /^((?![ \t]{4})[ \t]{0,3}(?:\*\*|__)?[ \t]*)([1-9]\d*)([.、．][ \t]+)/u;
+    let insideFence = false;
+    let nextNumber = null;
+    fallbackDraft = fallbackDraft.split('\n').map(line => {
+      if (/^\s*```/u.test(line)) { insideFence = !insideFence; return line; }
+      if (insideFence) return line;
+      const match = line.match(stepLineRe);
+      if (!match) return line;
+      if (nextNumber === null) nextNumber = Number(match[2]);
+      const normalized = `${match[1]}${nextNumber}${match[3]}${line.slice(match[0].length)}`;
+      nextNumber += 1;
+      return normalized;
+    }).join('\n');
+  }
   if (audit.singleStepOverreach && Number.isInteger(audit.singleStepOverreach.truncateFromLine)) {
     fallbackDraft = fallbackDraft.split('\n').slice(0, audit.singleStepOverreach.truncateFromLine).join('\n');
   }
