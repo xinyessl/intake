@@ -1645,15 +1645,32 @@ function consultFinalActionConsistencyGuard(question, route) {
     : '';
   const topic = `${q} ${routeText}`;
   const actionOrDiagnostic = consultSafeDiagnosticIntent(q)
-    || /(?:按钮.*(?:请求|抓包|发出)|是否发请求|有没有请求|验证|复测|排查|留证|下一步|怎么判断|如何判断|怎么确认|检查|观察|点击|点开|打开|编辑|删除|新建|保存|提交|发送|完成|签名|审批|星标|已读|重试|复现|补跑|重跑|刷新|页签|详情)/i.test(topic);
+    || /(?:按钮.*(?:请求|抓包|发出)|是否发请求|有没有请求|验证|复测|排查|留证|下一步|怎么判断|如何判断|怎么确认|检查|观察|点击|点开|打开|编辑|删除|新建|保存|提交|发送|完成|签名|审批|星标|已读|改(?:参数|报文|类型|映射|配置)|对接方|运维|开发.*(?:重试|复测)|重试|复现|补跑|重跑|重新触发|刷新|页签|详情)/i.test(topic);
   if (!actionOrDiagnostic) return '';
   return [
     '【发布前动作一致性审计：必须在输出最终答案前完成】',
-    '先在内部逐条扫描准备输出的整份答案，包括开头结论、正文、Markdown 表格每个单元格、编号步骤、条件分支、补充说明、示例和结尾追问；找出每一条让实施去执行、点击、打开、重做或观察的动作。不要向用户展示审计过程，只输出审计后的答案。',
-    '每个动作只能归入三类后保留：A. 读取当前已显示页面、已有请求/响应、截图、历史记录、日志或审计；B. route/Spec/源码已经明确证明无副作用的刷新、列表/只读页签切换或查看；C. 隔离环境或专用数据、明确授权、回滚/清理、幂等性与影响范围全部齐全后的条件式单次受控动作。',
-    '编辑、删除、新建、保存、提交、发送、完成、签名、审批、星标、可能标记已读的打开、重试、复现、补跑或重跑，只要不能归入 B 或 C，就必须从最终答案所有位置删除，改成检查已有页面、请求、响应、截图、日志或审计。不能因为同一答案别处写了“不要操作”“只读”“别重复”，就保留这里的正向点击或重做指令；否定提醒不能抵消冲突动作。',
+    '先在内部逐条扫描准备输出的整份答案，包括开头结论、正文、Markdown 表格每个单元格、编号步骤、条件分支、补充说明、示例和结尾追问；找出每一条让实施、用户、患者、对接方、运维或开发去执行、点击、打开、修改、重做或观察的动作。不要向用户展示审计过程，只输出审计后的答案。',
+    '每个动作只能归入三类后保留：A. 读取当前已显示页面、已有请求/响应、原始报文、已有映射、截图、历史记录、日志或审计；B. route/Spec/源码已经明确证明无副作用的刷新、列表/只读页签切换或查看；C. 隔离环境或专用数据、明确授权、回滚/清理、幂等性与影响范围全部齐全后的条件式单次受控动作。',
+    '编辑、删除、新建、保存、提交、发送、完成、签名、审批、星标、可能标记已读的打开、改参数、改报文类型、改映射、改配置、重试、复现、补跑或重跑，只要不能归入 B 或 C，就必须从最终答案所有位置删除，改成检查已有页面、请求、响应、报文、映射、截图、日志或审计。动作换成由第三方执行也不改变副作用：不得写成“让对接方改字符串/参数/映射/配置后用同一患者复测”“让运维重跑”或“让开发重试”来绕过守卫。不能因为同一答案别处写了“不要操作”“只读”“别重复”，就保留这里的正向点击或重做指令；否定提醒不能抵消冲突动作。',
     '若最终答案任何一处说“不要操作/不要重复/只读”，则其它任何一处都不得再建议点击编辑、删除、发送、完成等未知动作来观察是否发请求，也不得用“点了是否被拦住”“试一下看看”之类问句变相放行。用户只问“这个按钮是否发请求”时，只能查已有请求、日志、审计、代码或契约；没有既有证据就局部说明当前无法安全确认，不能让现场点击未知按钮补抓。',
     '该审计只删除不安全或互相矛盾的动作，不新增业务事实，也不给纯事实回答强加诊断步骤。若用户只问事实且现有证据已经足够，直接回答后停止；若已明确动作只读，可保留相应只读观察；若受控条件全部齐全，可条件式说明单次受控验证。',
+  ].join('\n');
+}
+
+// 最终证据/概率语言审计：不允许把没有正文、源码、已核经验或统计样本支撑的成因写成
+// “最高频/常见/大概率”，也不允许核心事实答完后顺手补经验性实现故事。
+function consultEvidenceLikelihoodGuard(question, route) {
+  const q = String(question || '').trim();
+  if (!q) return '';
+  const routeText = route && route.matched
+    ? [route.route && route.route.title, ...(route.answerFacts || []), ...(route.mustNotConfuse || [])].filter(Boolean).join(' ')
+    : '';
+  return [
+    '【最终证据与概率语言审计：必须在输出最终答案前完成】',
+    '逐句扫描最终答案里的原因、归因、优先级与概率措辞。只有当前有效的 Spec 正文、源码、已核经验库或统计样本直接写明频率、默认值、排序或典型性时，才能照实使用“最高频”“最常见”“通常”“一般”“大概率”“多半”“往往”“典型原因”“常见于”等词，并保留证据限定。route 标题相似、行业经验、模型常识或本轮单一现象都不构成频率证据。',
+    '没有直接频率证据时，删除上述概率定性和任何隐含排序；只能列不排序的“待验证假设/可能分支”。排查顺序只能依据本轮已有页面、请求、响应、原始报文、日志或审计里已经观察到的差异来决定，并明确写出该证据差异，不能把待验证假设包装成“先看这一边”。',
+    '核心事实题或已定位的共享键、字段类型、接口契约答清后立即停止；不得追加“改过模板、复制/重存、历史兼容、行业里经常如此”等经验成因。若用户明确问原因但证据只支持链路边界，就只说能定位到哪一层以及仍待验证的分支。',
+    '本轮问题与已核 route 主题仅供证据边界判断，不自动生成事实：' + (routeText || '当前无 route 直接事实') + '。审计过程不要展示给用户，只输出删除无证据概率判断后的最终答案。',
   ].join('\n');
 }
 
@@ -3488,7 +3505,7 @@ const server = http.createServer((req, res) => {
       else {
         // PD-04：命中 mustNotConfuse → 作负向提示注入 system（易混淆项，勿臆造）。answerFacts 已在 specHits 顶段（consultSystem 走 specExcerpts）。
         const mncNote = routeMnc.length ? '\n【以下为该问题的易混淆项，请勿臆造、勿张冠李戴】' + routeMnc.map(x => '\n· ' + x).join('') : '';
-        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationMode) + '\n' + consultEvidenceLedgerGuard(qtext, route) + '\n' + consultCurrentRulingGuard(qtext, route) + '\n' + consultRuleApplicationGuard(qtext, route) + '\n' + consultPatientIdentityGuard(qtext, route) + '\n' + consultCriticalContextGuard(qtext, route) + '\n' + consultFocusedFactGuard(qtext) + '\n' + consultExactPathBoundaryGuard(qtext, route) + '\n' + consultGenericControlledActionGuard(qtext) + '\n' + consultOperationalSafetyGuard(qtext, route) + '\n' + consultFileArtifactGuard(qtext, route) + '\n' + consultDiagnosticGuard(qtext, route) + '\n' + consultNonDestructiveDiagnosticGuard(qtext, route) + '\n' + consultFinalActionConsistencyGuard(qtext, route) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
+        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationMode) + '\n' + consultEvidenceLedgerGuard(qtext, route) + '\n' + consultCurrentRulingGuard(qtext, route) + '\n' + consultRuleApplicationGuard(qtext, route) + '\n' + consultPatientIdentityGuard(qtext, route) + '\n' + consultCriticalContextGuard(qtext, route) + '\n' + consultFocusedFactGuard(qtext) + '\n' + consultExactPathBoundaryGuard(qtext, route) + '\n' + consultGenericControlledActionGuard(qtext) + '\n' + consultOperationalSafetyGuard(qtext, route) + '\n' + consultFileArtifactGuard(qtext, route) + '\n' + consultDiagnosticGuard(qtext, route) + '\n' + consultNonDestructiveDiagnosticGuard(qtext, route) + '\n' + consultFinalActionConsistencyGuard(qtext, route) + '\n' + consultEvidenceLikelihoodGuard(qtext, route) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
           piece = String(piece == null ? '' : piece); if (!piece) return;
           if (!kbInjected && kbRefs.length) { kbInjected = true; sse({ kb: kbRefs, kbInjected: true }); }
           reply += piece; sse({ v: piece });

@@ -1277,3 +1277,40 @@ test('真实PWRS地图审计：凡同时出现 patientId 与 visitId 的 route �
   }).map((route) => route.id);
   assert.deepEqual(offenders, []);
 });
+
+test('真实PWRS地图回归：今天视图、自定义表单和患者号链按显式实体切换且后续继承', { skip: !process.env.PWRS_REAL_MAP }, () => {
+  const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
+  const S = buildRoutingSandbox(makeDeps());
+  const todayMessages = [
+    { role: 'user', content: '工作台今天日期和星期调用哪个接口？' },
+    { role: 'assistant', content: '历史回答只用于对话位置，不作事实证据。' },
+  ];
+  const today = S.contextualRouteQuestion(map, todayMessages, '现在卡在“今天视图显示的年份或星期和浏览器理解不一致”。给我一个能直接照着走的排查顺序。', '');
+  assert.equal(today.route.id, 'QR-WORKBENCH-TODAY');
+  assert.match(today.answerFacts.join(' '), /服务端 JVM 当前时区/);
+
+  const form = S.contextualRouteQuestion(map, todayMessages.concat(
+    { role: 'user', content: '自定义表单的 form_id、element_id 和结果 content 分别怎么关联？' },
+    { role: 'assistant', content: '历史回答不作证据。' },
+  ), '医院报的自定义表单关联问题，按这个顺序查到第二步就对不上了，后面先停还是继续？', '');
+  assert.equal(form.route.id, 'QR-CUSTOM-FORM-RELATION');
+  assert.match(form.answerFacts.join(' '), /element_id/);
+
+  const patientMessages = [
+    { role: 'user', content: 'pwrs_patient.patient_id 在 PostgreSQL 里是什么类型和长度？' },
+    { role: 'assistant', content: '历史回答不作证据。' },
+  ];
+  for (const question of [
+    '医院说这个患者号有时会少一位，我先查请求还是先查库？',
+    '上午反馈的患者号字段问题，数据库这边暂时没权限查。仅靠页面和接口响应能先排除什么？',
+    '患者号字段这一段，按这个顺序查到第二步就对不上了，后面先停还是继续？',
+  ]) {
+    const hit = S.contextualRouteQuestion(map, patientMessages, question, '');
+    assert.equal(hit.route.id, 'QR-PATIENT-ID-COLUMN-TYPE', question);
+    assert.match(hit.answerFacts.join(' '), /character varying\(50\)/);
+  }
+
+  const switched = S.contextualRouteQuestion(map, patientMessages, '换个问题，PWRS 的 token 到底是谁签发的？', '');
+  assert.equal(switched.route.id, 'QR-TOKEN-AUTH-CHAIN');
+  assert.notEqual(switched.inherited, true);
+});

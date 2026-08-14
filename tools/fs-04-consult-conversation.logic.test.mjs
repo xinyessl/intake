@@ -482,12 +482,16 @@ test('发布前动作一致性审计覆盖整份答案，禁止同答先劝停�
     const text = fn(q, routes[i]);
     assert.match(text, /发布前动作一致性审计/);
     assert.match(text, /Markdown 表格每个单元格、编号步骤、条件分支/);
-    assert.match(text, /A\. 读取当前已显示页面、已有请求\/响应、截图、历史记录、日志或审计/);
+    assert.match(text, /A\. 读取当前已显示页面、已有请求\/响应、原始报文、已有映射、截图、历史记录、日志或审计/);
     assert.match(text, /不能因为同一答案别处写了“不要操作”“只读”“别重复”/);
     assert.match(text, /否定提醒不能抵消冲突动作/);
     assert.match(text, /不得再建议点击编辑、删除、发送、完成等未知动作来观察是否发请求/);
     assert.match(text, /只问“这个按钮是否发请求”.*不能让现场点击未知按钮补抓/);
     assert.match(text, /不给纯事实回答强加诊断步骤/);
+    assert.match(text, /实施、用户、患者、对接方、运维或开发/);
+    assert.match(text, /改参数、改报文类型、改映射、改配置/);
+    assert.match(text, /让对接方改字符串\/参数\/映射\/配置后用同一患者复测/);
+    assert.match(text, /动作换成由第三方执行也不改变副作用/);
   });
 
   const readOnly = fn('这个列表刷新已确认纯只读，可以刷新后看现有数量吗？', { matched: true });
@@ -497,14 +501,58 @@ test('发布前动作一致性审计覆盖整份答案，禁止同答先劝停�
   assert.equal(fn('p_id 列类型是什么？', { matched: true, route: { title: '字段类型' } }), '', '显式新实体的原子事实题不强塞诊断审计');
 });
 
-test('consult 接线在非破坏守卫之后追加最终动作一致性审计', () => {
+test('最终证据概率守卫禁止无依据成因排序，并让核心事实题止于证据', () => {
+  const fn = new Function(extractFn(SRC, 'consultEvidenceLikelihoodGuard') + '\nreturn consultEvidenceLikelihoodGuard;')();
+  const routes = [
+    { matched: true, route: { title: '工作台今天视图' }, answerFacts: ['日期来自服务端 JVM 当前时区'] },
+    { matched: true, route: { title: '自定义表单关联' }, answerFacts: ['element_id 关联选项和表格列'] },
+    { matched: true, route: { title: '患者号字段' }, answerFacts: ['patient_id 是 varchar(50)'] },
+  ];
+  for (const [q, route] of [
+    ['年份或星期不一致，最常见是什么原因？', routes[0]],
+    ['element_id 第二步对不上，通常是复制模板吗？', routes[1]],
+    ['患者号丢位，大概率是哪边改坏的？', routes[2]],
+    ['配置没生效，多半是缓存吧？', { matched: true, route: { title: '配置缓存' } }],
+    ['ETL 同步中断，典型原因是什么？', { matched: true, route: { title: 'ETL 同步' } }],
+  ]) {
+    const text = fn(q, route);
+    assert.match(text, /最终证据与概率语言审计/);
+    assert.match(text, /Spec 正文、源码、已核经验库或统计样本直接写明频率/);
+    assert.match(text, /“最高频”“最常见”“通常”“一般”“大概率”“多半”“往往”“典型原因”“常见于”/);
+    assert.match(text, /只能列不排序的“待验证假设\/可能分支”/);
+    assert.match(text, /排查顺序只能依据本轮已有页面、请求、响应、原始报文、日志或审计/);
+    assert.match(text, /核心事实题或已定位的共享键、字段类型、接口契约答清后立即停止/);
+    assert.match(text, /不得追加“改过模板、复制\/重存、历史兼容、行业里经常如此”/);
+  }
+});
+
+test('跨主体副作用动作不能通过对接方、运维或开发外包绕过', () => {
+  const safeIntent = new Function(extractFn(SRC, 'consultSafeDiagnosticIntent') + '\nreturn consultSafeDiagnosticIntent;')();
+  const fn = new Function('consultSafeDiagnosticIntent', extractFn(SRC, 'consultFinalActionConsistencyGuard') + '\nreturn consultFinalActionConsistencyGuard;')(safeIntent);
+  for (const q of [
+    '让对接方把患者号改成字符串后，用同一个患者再复测一次可以吗？',
+    '让运维重跑这个同步任务抓日志行不行？',
+    '让开发改映射配置后拿生产数据再试一次呢？',
+    '实施不操作，让第三方改参数后重新触发就安全了吧？',
+  ]) {
+    const text = fn(q, { matched: true, route: { title: '对接诊断' } });
+    assert.match(text, /让实施、用户、患者、对接方、运维或开发/);
+    assert.match(text, /动作换成由第三方执行也不改变副作用/);
+    assert.match(text, /改成检查已有页面、请求、响应、报文、映射、截图、日志或审计/);
+    assert.match(text, /隔离环境或专用数据、明确授权、回滚\/清理、幂等性与影响范围全部齐全/);
+  }
+});
+
+test('consult 接线在非破坏守卫之后追加最终动作与证据概率审计', () => {
   const start = SRC.indexOf("if (url.pathname === '/api/consult'");
   const end = SRC.indexOf("if (url.pathname === '/api/consult-to-intake'", start);
   const route = SRC.slice(start, end);
   const nonDestructive = route.indexOf('consultNonDestructiveDiagnosticGuard(qtext, route)');
   const finalAudit = route.indexOf('consultFinalActionConsistencyGuard(qtext, route)');
+  const likelihoodAudit = route.indexOf('consultEvidenceLikelihoodGuard(qtext, route)');
   assert.ok(nonDestructive >= 0, '应接入非破坏守卫');
   assert.ok(finalAudit > nonDestructive, '最终动作一致性审计应在其它动作守卫之后，作为发布前最后检查');
+  assert.ok(likelihoodAudit > finalAudit, '最终证据概率审计应在动作一致性之后，删除无依据概率和经验成因');
 });
 
 test('通用受控条件齐备但未点名动作时，不得由检索命中替用户选择业务实体', () => {
