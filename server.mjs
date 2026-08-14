@@ -2588,9 +2588,15 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const focusedCoverageText = text.split(/(?<=[。！？；\n])/u)
     .map(part => part.trim()).filter(part => part && !focusedFactOverreach.includes(part)).join('\n');
   const lowerAnswer = focusedCoverageText.toLowerCase();
+  const compactLowerAnswer = lowerAnswer.replace(/\s+/g, '');
+  const normalizeQualifierText = value => String(value || '').toLowerCase().replace(/\s+/g, '')
+    .replace(/不需要|不校验|免(?:于)?/gu, '无需')
+    .replace(/需要|必须|要求|应当|须/gu, '需')
+    .replace(/认证|登录校验/gu, '鉴权');
+  const normalizedQualifierAnswer = normalizeQualifierText(compactLowerAnswer);
   const missingFocusedRelationshipFacts = focusedRelationshipFacts.map(item => ({
     ...item,
-    missingTokens: item.tokens.filter(token => !lowerAnswer.includes(token.toLowerCase())),
+    missingTokens: item.tokens.filter(token => !normalizedQualifierAnswer.includes(normalizeQualifierText(token))),
   })).filter(item => item.missingTokens.length > 0);
   const focusedMustNotConfuse = focusedFactQuestion && route && route.matched
     ? (route.mustNotConfuse || []).map(String).filter(fact => {
@@ -2794,7 +2800,7 @@ function consultAnswerRevisionPrompt(draft, audit) {
       ? '用户本轮只是问单个接口、路径、状态码、字段属性或一个是非事实。保留 current route answerFacts/primary section 的直接答案和回答它所必需的 mustNotConfuse 限定；删除现场排查、无当前观察的失败原因、诊断优先级、操作建议、截图/日志邀约及其它未问扩写。用户明确问“为什么/排查/现场/怎么验证/接下来”或提出多个子问题时才可给对应步骤。'
       : '',
     audit.violations.includes('focused_fact_incomplete')
-      ? `用户本轮点名的对象关系没有覆盖完整。只从 current route answerFacts 补回这些已经确认的直接关系/表示边：${(audit.missingFocusedRelationshipFacts || []).map(item => item.clause).join('；')}。不得因此扩写删除、级联、历史、渲染、兼容、保存操作或现场排查。`
+      ? `用户本轮的原子事实没有覆盖完整。唯一主接口必须同时保留同一 answerFact 直接绑定的请求方法、认证/访问限定和必要固定参数；对象关系题必须覆盖已确认的直接关系/表示边。只从 current route answerFacts 补回：${(audit.missingFocusedRelationshipFacts || []).map(item => item.clause).join('；')}。不得因此扩写响应字段、数据来源、JVM/时区、删除、级联、历史、渲染、兼容、保存操作或现场排查，也不得把相邻接口的认证背景强塞进当前接口。`
       : '',
     audit.violations.includes('undefined_ordinal_reference')
       ? `草稿存在未定义的圈号步骤/对照项引用：${(audit.undefinedOrdinalReferences || []).join('、')}。逐项核对前文表格、列表和正文，只能引用已经明确给出含义的序号；“共三项”不得再写④，表格只定义①②③时不得在判断或小结引用③/④或“含④”。删除含未定义序号的完整句/完整表格行，或在不新增事实的前提下改回已定义序号；不得凭空补造第四项。`
@@ -3140,7 +3146,7 @@ function consultFocusedFactGuard(question) {
   if (!focused || operational || multiQuestion) return '';
   return [
     '【单一事实题止答边界】',
-    '用户只询问或用陈述句确认一个接口、路径、状态码、字段/列的类型/长度/取值、对象之间的关联键/关系或一个是非事实。先从 current route 的 answerFacts/primary section 给直接答案，只补回答该事实所必需的限定与 mustNotConfuse 边界；关系题必须逐一覆盖用户点名对象在 current route 中已确认的直接挂接边与内容表示/存储边，不能因为止答而漏掉其中一个对象；答到这里就停止。',
+    '用户只询问或用陈述句确认一个接口、路径、状态码、字段/列的类型/长度/取值、对象之间的关联键/关系或一个是非事实。先从 current route 的 answerFacts/primary section 给直接答案，只补回答该事实所必需的限定与 mustNotConfuse 边界；唯一主接口题还必须保留同一 answerFact 直接绑定的请求方法、认证/访问限定与必要固定参数，不得把“止答”误解为只剩路径；关系题必须逐一覆盖用户点名对象在 current route 中已确认的直接挂接边与内容表示/存储边，不能因为止答而漏掉其中一个对象；答到这里就停止。',
     '不得主动扩写同表其它列、本地身份元组、联合键、索引、唯一约束、数据库迁移、SQL 用法、相邻模块事实、实施步骤、现场排查、原因假设、动作建议或“把截图发来”等继续邀约。只有用户在本轮明确问到这些内容，且当前有效证据直接覆盖时，才逐项回答。',
     '即使相邻事实本身真实，只要不改变本问答案，也不要作为“顺便提醒”加入；显式切题后不得带入上一主题事实。',
   ].join('\n');
@@ -3164,8 +3170,17 @@ function consultFocusedFactOverreach(answer, question, route) {
       const paths = consultConcretePaths(statement);
       const hasAllowedPath = paths.some(pathValue => allowedPaths.has(pathValue));
       // 原子接口题只保留“方法 + 精确路径”及带精确路径的必要防混淆。
-      // 即使响应字段、参数、来源时区等事实本身存在于同一 route，也不是本问目标。
-      const adjacentContract = /(?:响应|返回(?:值|体)?|字段|参数|请求体|数据来源|来自|时区|\bJVM\b|\byear\b|\bweek\b|Map\s*<)/i.test(statement);
+      // 即使响应字段、普通参数、来源时区等事实本身存在于同一 route，也不是
+      // 本问目标。例外只限同一 answerFact 与当前路径直接绑定的固定/必传参数。
+      const compactStatement = statement.toLowerCase().replace(/\s+/g, '');
+      const fixedParamFacts = (route && route.answerFacts || []).filter(fact => {
+        const factText = String(fact || '');
+        return consultConcretePaths(factText).some(pathValue => paths.includes(pathValue))
+          && /(?:固定|必须|需(?:要)?|要求)[^，,。；;\n]{0,24}(?:参数|入参|query|header)|(?:参数|入参|query|header)[^，,。；;\n]{0,24}(?:固定为|必须为|需传|必传|不能为空)/i.test(factText);
+      });
+      const hasBoundFixedParam = fixedParamFacts.some(fact => compactStatement.includes(String(fact).toLowerCase().replace(/\s+/g, '')));
+      const adjacentContract = /(?:响应|返回(?:值|体)?|字段|请求体|数据来源|来自|时区|\bJVM\b|\byear\b|\bweek\b|Map\s*<)/i.test(statement)
+        || (/(?:参数|入参|query|header)/i.test(statement) && !hasBoundFixedParam);
       const shortConfirmation = /^(?:结论[：:]\s*)?(?:对|是|没错|正确)[。！!]?$/u.test(statement.replace(/[*_`]/g, '').trim());
       return !shortConfirmation && (adjacentContract || !hasAllowedPath);
     }
@@ -3199,7 +3214,34 @@ function consultFocusedFactOverreach(answer, question, route) {
 function consultFocusedRelationshipFacts(question, route) {
   const q = String(question || '').trim();
   const relationshipOnly = /(?:(?:靠|通过|使用|用)(?:什么|哪个|哪些)?(?:字段|键|key|ID|id)?(?:来)?关联|关联(?:关系|键|字段|key|ID|id)(?:是|为|什么|哪个|哪些)|(?:怎么|如何)关联)/i.test(q);
-  if (!relationshipOnly || !route || !route.matched) return [];
+  const interfaceOnly = /(?:(?:调用|使用|走|用)(?:的|哪|哪个|什么)?接口|哪个接口|接口(?:是|为|叫|地址|路径)?什么|路径(?:是|为)?什么|(?:调用|使用|走|接口|路径)[^。！？；\n]{0,28}\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/)/i.test(q);
+  if ((!relationshipOnly && !interfaceOnly) || !route || !route.matched) return [];
+  if (interfaceOnly) {
+    const forbiddenPaths = new Set(consultConcretePaths((route.mustNotConfuse || []).join('\n')));
+    const candidates = [];
+    for (const factValue of route.answerFacts || []) {
+      const fact = String(factValue || '').trim();
+      const paths = consultConcretePaths(fact).filter(pathValue => pathValue.startsWith('/') && !pathValue.includes('*') && !forbiddenPaths.has(pathValue));
+      for (const pathValue of paths) candidates.push({ path: pathValue, fact });
+    }
+    const uniquePaths = Array.from(new Map(candidates.map(item => [item.path, item])).values());
+    if (uniquePaths.length !== 1) return [];
+    const primary = uniquePaths[0];
+    const fact = primary.fact;
+    const tokens = [];
+    const authPhrases = fact.match(/(?:需(?:要)?|必须|要求|应当|须|携带|带上|使用)\s*(?:合法|有效)?\s*(?:JWT|token)|(?:无需|免|不需要|不校验)\s*(?:鉴权|认证|登录)|(?:需(?:要)?|必须|要求|应当|须)\s*(?:鉴权|认证|登录)/ig) || [];
+    for (const phrase of authPhrases) {
+      const normalized = phrase.trim().replace(/\s+/g, ' ');
+      if (normalized) tokens.push(normalized);
+    }
+    const fixedParamPhrases = fact.match(/(?:固定|必须|需(?:要)?|要求)[^，,。；;\n]{0,24}(?:参数|入参|query|header)[^，,。；;\n]{0,32}|(?:参数|入参|query|header)[^，,。；;\n]{0,24}(?:固定为|必须为|需传|必传|不能为空)[^，,。；;\n]{0,20}/ig) || [];
+    for (const phrase of fixedParamPhrases) {
+      const normalized = phrase.trim().replace(/\s+/g, ' ');
+      if (normalized) tokens.push(normalized);
+    }
+    const uniqueTokens = Array.from(new Set(tokens));
+    return uniqueTokens.length ? [{ clause: fact, tokens: uniqueTokens, kind: 'interface_qualifier', path: primary.path }] : [];
+  }
   const directRelation = /(?:关联|关系|关联键|共享键|外键|串(?:起|联|起来)?|挂(?:到|接)?|指向|引用|映射|对应|所属|连接|↔|→|<-|->)/i;
   const directRepresentation = /(?:保存|存储|承载|序列化|快照|JSON|json)/i;
   const asksRepresentation = /(?:结果|填写|填报|内容|值|载荷|payload|快照)/i.test(q);
@@ -3208,7 +3250,7 @@ function consultFocusedRelationshipFacts(question, route) {
     .filter(clause => directRelation.test(clause) || (asksRepresentation && directRepresentation.test(clause)))
     .map(clause => {
       const tokens = Array.from(new Set(Array.from(clause.matchAll(/\b(?:[A-Za-z][A-Za-z0-9_]*(?:_id|Id|ID|_key|Key)|content|payload|value)\b/g), match => match[0])));
-      return { clause, tokens };
+      return { clause, tokens, kind: 'relationship' };
     })
     .filter(item => item.tokens.length > 0);
 }

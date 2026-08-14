@@ -413,6 +413,7 @@ test('单一事实止答守卫：接口/路径/状态码/字段/对象关联/是
     const text = fn(q);
     assert.match(text, /单一事实题止答边界/);
     assert.match(text, /current route 的 answerFacts\/primary section/);
+    assert.match(text, /认证\/访问限定与必要固定参数/);
     assert.match(text, /不得主动扩写同表其它列、本地身份元组、联合键、索引、唯一约束/);
     assert.match(text, /现场排查、原因假设、动作建议/);
   }
@@ -948,9 +949,51 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   ]);
   const todayAtomicFallback = bundle.fallback(todayAtomicDraft, todayAtomicAudit);
   assert.match(todayAtomicFallback, /GET \/pwrsapi\/month\/view\/today/);
+  assert.match(todayAtomicFallback, /需合法 JWT/);
   assert.match(todayAtomicFallback, /GET \/month\/view/);
   assert.doesNotMatch(todayAtomicFallback, /Map<String,String>|\byear\b|\bweek\b|JVM 当前时区/);
   assert.deepEqual(bundle.audit(todayAtomicFallback, '工作台今天日期和星期调用哪个接口？', todayAtomicRoute).violations, []);
+
+  const q120R72ProductionDraft = '工作台今天的日期和星期，调用的是：GET /pwrsapi/month/view/today 别跟已删除的 GET /month/view 月历网格接口搞混。';
+  const q120R72Audit = bundle.audit(q120R72ProductionDraft, '工作台今天的日期和星期调用哪个接口？', todayAtomicRoute);
+  assert.ok(q120R72Audit.violations.includes('focused_fact_incomplete'), '唯一主接口漏同一fact的JWT访问限定必须拦截');
+  assert.equal(q120R72Audit.missingFocusedRelationshipFacts[0].kind, 'interface_qualifier');
+  assert.deepEqual(q120R72Audit.missingFocusedRelationshipFacts[0].missingTokens, ['需合法 JWT']);
+  assert.match(bundle.revision(q120R72ProductionDraft, q120R72Audit), /认证\/访问限定/);
+  const q120R73Fallback = bundle.fallback(q120R72ProductionDraft, q120R72Audit);
+  assert.match(q120R73Fallback, /需合法 JWT/);
+  assert.match(q120R73Fallback, /GET \/pwrsapi\/month\/view\/today/);
+  assert.match(q120R73Fallback, /GET \/month\/view/);
+  assert.doesNotMatch(q120R73Fallback, /\byear\b|\bweek\b|JVM|Map/);
+  assert.deepEqual(bundle.audit(q120R73Fallback, '工作台今天的日期和星期调用哪个接口？', todayAtomicRoute).violations, []);
+
+  const publicRoute = {
+    matched: true,
+    route: { title: '公开状态接口' },
+    answerFacts: ['公开状态使用无需鉴权的 GET /public/status'],
+  };
+  const publicMissingAudit = bundle.audit('公开状态调用 GET /public/status。', '公开状态调用哪个接口？', publicRoute);
+  assert.ok(publicMissingAudit.violations.includes('focused_fact_incomplete'), '明确无需鉴权也是同一接口的直接访问限定');
+  assert.deepEqual(bundle.audit('公开状态使用无需鉴权的 GET /public/status。', '公开状态调用哪个接口？', publicRoute).violations, []);
+
+  const fixedParamRoute = {
+    matched: true,
+    route: { title: '当前报表接口' },
+    answerFacts: ['当前报表调用 GET /report/current，必须携带参数 scope=current'],
+  };
+  const fixedParamMissingAudit = bundle.audit('当前报表调用 GET /report/current。', '当前报表调用哪个接口？', fixedParamRoute);
+  assert.ok(fixedParamMissingAudit.violations.includes('focused_fact_incomplete'), '同一fact直接绑定的固定参数不能因原子止答被删掉');
+  assert.deepEqual(bundle.audit('当前报表调用 GET /report/current，必须携带参数 scope=current。', '当前报表调用哪个接口？', fixedParamRoute).violations, []);
+
+  const adjacentAuthRoute = {
+    matched: true,
+    route: { title: '当前状态接口' },
+    answerFacts: ['当前状态调用 GET /current/status'],
+    mustNotConfuse: ['相邻管理接口 GET /admin/status 需要合法 JWT，不是当前状态接口'],
+  };
+  const adjacentAuthAnswer = '当前状态调用 GET /current/status；不要混淆需要合法 JWT 的 GET /admin/status。';
+  assert.ok(!bundle.audit(adjacentAuthAnswer, '当前状态调用哪个接口？', adjacentAuthRoute).violations.includes('focused_fact_incomplete'), '相邻接口JWT不得强塞成当前接口限定');
+
   const todayStatementQuestion = '工作台今天的日期和星期，调用的是 GET /pwrsapi/month/view/today（需要合法 JWT）。别跟已经按会议结论删除的 GET /month/view 月历网格接口搞混。';
   const todayStatementDraft = [
     '结论：对。',
