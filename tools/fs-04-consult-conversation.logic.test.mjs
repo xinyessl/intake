@@ -327,7 +327,9 @@ test('安全必填上下文守卫：缺身份/租户/院区不得靠历史兼容
     assert.match(text, /缺失时按证据拒绝或提示回到可信入口重新选择/);
     assert.match(text, /不得自行补充“历史链接会兼容”“系统会自动补齐”/);
     assert.match(text, /token、默认租户\/默认院区、相邻路由字段/);
-    assert.match(text, /旧链接处理、本地唯一约束、缓存规则、数据库约束或自动映射.*局部未知/);
+    assert.match(text, /历史、已覆盖或已废止的旧方案不能补充进当前答案/);
+    assert.match(text, /用户没问实现细节时必须直接省略.*具体字段组合/);
+    assert.match(text, /禁止用“可能”“为了兼容”等措辞包装成实现事实/);
     assert.match(text, /新 route.*旧身份\/租户事实不得串入/);
   }
 
