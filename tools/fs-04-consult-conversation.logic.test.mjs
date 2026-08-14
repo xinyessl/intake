@@ -877,10 +877,22 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     '催对接方按字符串传。',
     '推动第三方以指定格式发送。',
     '协调开发按数字类型传。',
+    '交给对接方改传参/序列化口径。',
+    '让第三方调整编码规则。',
+    '通知开发统一协议口径。',
   ]) {
     const actionAudit = bundle.audit(wording, '患者号对不上，下一步怎么查？', focusedPatientIdRoute);
     assert.ok(actionAudit.violations.includes('cross_actor_side_effect'), wording);
   }
+  const q128SideEffectDraft = 'patient_id 是 varchar(50)。\n这一段钉死后交给对接方改传参/序列化口径；先保留已有源值与出站请求的只读对照。';
+  const q128SideEffectAudit = bundle.audit(q128SideEffectDraft, '患者号字段第二步对不上，后面先停还是继续？', focusedPatientIdRoute);
+  assert.ok(q128SideEffectAudit.violations.includes('cross_actor_side_effect'));
+  const q128SideEffectFallback = bundle.fallback(q128SideEffectDraft, q128SideEffectAudit);
+  assert.match(q128SideEffectFallback, /patient_id 是 varchar\(50\)/);
+  assert.match(q128SideEffectFallback, /已有源值与出站请求的只读对照/);
+  assert.doesNotMatch(q128SideEffectFallback, /交给对接方改|传参\/序列化口径/);
+  assert.deepEqual(bundle.audit(q128SideEffectFallback, '患者号字段第二步对不上，后面先停还是继续？', focusedPatientIdRoute).violations, []);
+  assert.deepEqual(bundle.audit('只读核对已有序列化日志和协议字段，不修改配置。', '患者号怎么继续排查？', focusedPatientIdRoute).violations, [], '只读查看已有机制证据不得误判为修改动作');
   assert.deepEqual(bundle.audit('只读对照已有 patient_id 源值与出站报文。', q127R28Question, focusedPatientIdRoute).violations, [], '当前聚焦字段与只读动作应放行');
   assert.deepEqual(bundle.audit(
     '统计100份已核报文，其中80份确认数字转换后发生精度丢失。',
