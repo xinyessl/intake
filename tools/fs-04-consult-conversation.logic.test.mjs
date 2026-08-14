@@ -595,7 +595,7 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
   const failed = audit('页面等于接口但与浏览器不同，多半是服务端时区差。', '今天视图对不上，怎么排查？', route);
   assert.deepEqual(failed.violations, ['unsupported_likelihood']);
   assert.deepEqual(failed.likelihoodTerms, ['多半']);
-  for (const phrase of ['很常见', '较常见', '比较常见', '常见原因', '经常发生', '多发', '高发', '很多是规则内预期', '不少属于时区差', '多数是预期', '大多不是BUG', '绝大多数无需处理', '少数会异常', '极少出错', '大部分符合预期', '小部分对不上', '几乎全部正常', '频繁出现', '偶尔失败', '有时不同', '首要原因', '主要原因之一', '很像服务端缓存', '更像前端取错字段', '可能是异常兜底', '疑似配置问题', '倾向于时区问题', '最容易出现', '很容易丢精度', '尤其容易对不上', '易发生', '很可能就发生在序列化时', '超过精度就会直接丢位', '一定会导致字段少位', '必然会出现错误', '肯定会发生变化', '这就是对接方类型传错']) {
+  for (const phrase of ['很常见', '较常见', '比较常见', '常见原因', '经常发生', '多发', '高发', '很多是规则内预期', '不少属于时区差', '多数是预期', '大多不是BUG', '绝大多数无需处理', '少数会异常', '极少出错', '大部分符合预期', '小部分对不上', '几乎全部正常', '频繁出现', '偶尔失败', '有时不同', '首要原因', '主要原因之一', '很像服务端缓存', '更像前端取错字段', '可能是异常兜底', '疑似配置问题', '倾向于时区问题', '最容易出现', '很容易丢精度', '尤其容易对不上', '易发生', '很可能就发生在序列化时', '更可能在请求之后', '较可能从网关开始', '比较可能由服务端引起', '超过精度就会直接丢位', '一定会导致字段少位', '必然会出现错误', '肯定会发生变化', '这就是对接方类型传错']) {
     assert.ok(audit(`接口和浏览器不一致${phrase}。`, '今天视图为什么不一致？', route).violations.includes('unsupported_likelihood'), phrase);
   }
   assert.deepEqual(audit('待验证假设：服务端时区和现场约定不一致；可能分支：页面没有照接口响应展示。', '今天视图为什么不一致？', route).violations, [], '明确标为不排序待验证分支时应放行');
@@ -942,6 +942,19 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     '只能确认请求发出，后端具体走到哪不知道。',
     route,
   ).violations, [], '没有逐层值时保持局部未知，不应误伤');
+
+  const q129ComparativeDraft = '请求已发出，但后端具体路径未知。若请求值与原始值一致，丢位更可能在请求之后。';
+  const q129ComparativeAudit = bundle.audit(q129ComparativeDraft, '只能确认请求发出，后端具体走到哪不知道，先说能确定的部分。', route);
+  assert.ok(q129ComparativeAudit.violations.includes('unsupported_likelihood'), '更可能在/从/由某位置仍是无证据比较概率和位置排序');
+  const q129ComparativeFallback = bundle.fallback(q129ComparativeDraft, q129ComparativeAudit);
+  assert.match(q129ComparativeFallback, /请求已发出/);
+  assert.doesNotMatch(q129ComparativeFallback, /更可能在请求之后/);
+  assert.deepEqual(bundle.audit(q129ComparativeFallback, '只能确认请求发出，后端具体走到哪不知道，先说能确定的部分。', route).violations, []);
+  assert.deepEqual(bundle.audit(
+    '已核对 A 与 B 一致、C 与 B 不同，差异边界可收敛到 B 之后、C 之前。',
+    '已确认 A=B 且 C 不同，能确定什么？',
+    route,
+  ).violations, [], '已核有序观测点允许不带概率排序地陈述确定边界');
 
   const explicitLayerRuleRoute = {
     matched: true,
