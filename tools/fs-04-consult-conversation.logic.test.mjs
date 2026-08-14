@@ -1102,6 +1102,25 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   const orphanedContrastFallback = bundle.fallback(orphanedContrastDraft, orphanedContrastAudit);
   assert.doesNotMatch(orphanedContrastFallback, /但够继续/);
   assert.deepEqual(bundle.audit(orphanedContrastFallback, '只有截图够不够？', route).violations, []);
+
+  const orphanedQuoteDraft = [
+    '对外表述应限定在本批样本：',
+    '',
+    '」',
+    '',
+    '仍不能点名具体组件。',
+  ].join('\n');
+  const orphanedQuoteAudit = bundle.audit(orphanedQuoteDraft, '100个样本中80个在序列化前丢位，怎么表述？', route);
+  assert.ok(orphanedQuoteAudit.violations.includes('malformed_markdown'), '示例正文被删后单独残留右引号必须拦截');
+  assert.ok(orphanedQuoteAudit.malformedMarkdown.includes('unbalanced_cjk_corner_quote'));
+  assert.ok(orphanedQuoteAudit.malformedMarkdown.includes('orphaned_quote_line'));
+  assert.match(bundle.revision(orphanedQuoteDraft, orphanedQuoteAudit), /单独一行的孤立引号/);
+  const orphanedQuoteFallback = bundle.fallback(orphanedQuoteDraft, orphanedQuoteAudit);
+  assert.doesNotMatch(orphanedQuoteFallback, /^[\s>*_`#\-+]*[「」『』“”‘’]+[\s。！？；：,.!?;:]*$/mu);
+  assert.match(orphanedQuoteFallback, /仍不能点名具体组件/);
+  assert.deepEqual(bundle.audit(orphanedQuoteFallback, '100个样本中80个在序列化前丢位，怎么表述？', route).violations, []);
+  assert.deepEqual(bundle.audit('对外可写：「本批100个样本中80个在序列化前已丢位。」', '100个样本中80个在序列化前丢位，怎么表述？', route).violations, [], '同一自然句内闭合的合法引用不得误伤');
+  assert.deepEqual(bundle.audit('原文如下：\n「本批100个样本中80个在序列化前已丢位。」', '100个样本中80个在序列化前丢位，怎么表述？', route).violations, [], '跨行但成对闭合的合法引用不得误伤');
   assert.deepEqual(bundle.audit('单张截图不够结案。\n但够继续只读排查。', '只有截图够不够？', route).violations, [], '已有完整前句时转折不得误拦');
 
   const incompletePairedDraft = [
