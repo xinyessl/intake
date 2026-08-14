@@ -518,7 +518,7 @@ test('最终证据概率守卫禁止无依据成因排序，并让核心事实�
     const text = fn(q, route);
     assert.match(text, /最终证据与概率语言审计/);
     assert.match(text, /Spec 正文、源码、已核经验库或统计样本直接写明频率/);
-    assert.match(text, /“最高频”“最常见”“通常”“一般”“大概率”“多半”“往往”“典型原因”“常见于”/);
+    assert.match(text, /“最高频”“最常见”“常见\/很常见\/较常见\/比较常见”“经常”“通常”“一般”“大概率”“多半”“往往”“多发\/高发”“首要原因\/主要原因（之一）”“典型原因”“常见于”/);
     assert.match(text, /只能列不排序的“待验证假设\/可能分支”/);
     assert.match(text, /排查顺序只能依据本轮已有页面、请求、响应、原始报文、日志或审计/);
     assert.match(text, /核心事实题或已定位的共享键、字段类型、接口契约答清后立即停止/);
@@ -543,6 +543,9 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
   const failed = audit('页面等于接口但与浏览器不同，多半是服务端时区差。', '今天视图对不上，怎么排查？', route);
   assert.deepEqual(failed.violations, ['unsupported_likelihood']);
   assert.deepEqual(failed.likelihoodTerms, ['多半']);
+  for (const phrase of ['很常见', '较常见', '比较常见', '常见原因', '经常发生', '多发', '高发', '首要原因', '主要原因之一']) {
+    assert.deepEqual(audit(`接口和浏览器不一致${phrase}。`, '今天视图为什么不一致？', route).violations, ['unsupported_likelihood'], phrase);
+  }
 
   const userSample = audit('基于你给的样本，最常见的是服务端时区差。', '最近统计100次，其中80次确认是服务端时区差。', route);
   assert.deepEqual(userSample.violations, []);
@@ -553,6 +556,12 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
     answerFacts: ['统计样本明确写明：服务端时区差是最常见原因'],
   });
   assert.deepEqual(routedSample.violations, []);
+  const namedField = audit('说明书称它是常见字段名。', '这个字段叫什么？', {
+    matched: true,
+    route: { title: '字段命名' },
+    answerFacts: ['字段正文明确写明：patient_id 是常见字段名'],
+  });
+  assert.deepEqual(namedField.violations, [], '正文明确命名时允许照实引用“常见字段名”');
 });
 
 test('发布前确定性语义校验：跨主体副作用触发，否定句和完整受控条件不误拦', () => {
