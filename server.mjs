@@ -1697,6 +1697,7 @@ function consultFinalActionConsistencyGuard(question, route) {
     '最终稿中的每个有序/无序列表项若只剩粗体步骤标题，后面必须有正文或子项；若直接遇到分隔线、新节、下一同级列表项或答案结束，删除该空列表项，不得补造内容。每个自然句也必须完整收口：行尾逗号、分号或冒号后必须有同句后半段或紧邻正文；若直接进入分隔线、新节、统一安全尾注或答案结束，删除该悬空完整句。列表项内部的正常分号、下一行有真实正文/子项及以句号/问号/叹号完整结束的粗体单句不得误删。',
     '普通行、粗体行或 Markdown heading 形式的“N. 步骤标题”都必须有自己的正文、表格、列表或代码块；水平分隔线不算步骤内容。若到下一同级编号步骤、分隔线、新节或文末仍无内容，删除该空编号步骤；删除后只把剩余已有步骤连续重编号，不得补造缺失步骤。四空格缩进的嵌套步骤属于父步骤内容，不参与顶层编号。',
     '用户问“只有这份证据/没有另一份证据，够不够、是否足够、能不能判断”时，第一句话必须明确回答：现有证据够完成什么、不够完成什么；随后只从 current/inherited route 的直接事实和已核主接口给最小缺口，不得退成页面、终端、账号、版本等跨主题通用材料清单。用户明确索要完整提单/转开发材料清单时才可给通用清单。若本轮没有可核验附件，不得声称看见截图里的数字或内容。',
+    '若答案声明“最小证据/最小输入/只缺 N 项”，后续诊断结论或分支表使用的每个观测变量，都必须已在用户本轮明确具备的证据或此前“已有/需补/采集”清单中定义。不得在最小清单只列接口响应，却在判断表首次引入本机日期、浏览器时间、日志等第二个输入；发现时补回草稿/current route 已有的安全观测项，或删除依赖未定义变量的判断结构，不得补造业务事实。',
     '该审计只删除不安全或互相矛盾的动作，不新增业务事实，也不给纯事实回答强加诊断步骤。若用户只问事实且现有证据已经足够，直接回答后停止；若已明确动作只读，可保留相应只读观察；若受控条件全部齐全，可条件式说明单次受控验证。',
   ].join('\n');
 }
@@ -2614,6 +2615,78 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const minimumRoutePath = uniqueRoutePathFacts.length === 1 ? uniqueRoutePathFacts[0] : null;
   const missingEvidenceMinimumPath = evidenceSufficiencyQuestion && minimumRoutePath
     && !consultConcretePaths(text).includes(minimumRoutePath.path) ? minimumRoutePath : null;
+  // “最小证据/只缺一项”本身也是一份输入契约：后面的判断表不能首次
+  // 引入没有在用户已有证据或前序采集清单中定义的观测量。这里按观测
+  // 对象审计，而不是按某一道题或某个接口硬编码；route 只提供事实，不能
+  // 自动证明现场已经取得了对应观测值。
+  const observationRules = [
+    { id: 'page', label: '页面/截图现象', re: /(?:页面|界面|截图|图片|附图|图内|屏幕)/iu },
+    { id: 'response', label: '请求/接口响应', re: /(?:请求(?:原文|响应)?|接口响应|完整响应|响应(?:原文|内容)?|返回值|状态码|业务码|\byear\b|\bweek\b)/iu },
+    { id: 'local_clock', label: '同一时刻本机日期/星期/时间', re: /(?:(?:浏览器|本机|电脑|终端|客户端)[^。！？；|\n]{0,18}(?:日期|星期|时间|时区)|(?:日期|星期|时间|时区)[^。！？；|\n]{0,18}(?:浏览器|本机|电脑|终端|客户端))/iu },
+    { id: 'logs', label: '日志', re: /(?:服务端|服务器|应用|任务|调度)?日志/iu },
+    { id: 'database', label: '数据库观测', re: /(?:数据库|库内|落库|表内|表中|SQL查询)/iu },
+  ];
+  const observationIds = value => observationRules
+    .filter(rule => rule.re.test(String(value || ''))).map(rule => rule.id);
+  const userObservationClauses = questionText.split(/[，,。！？；;\n]/u).map(item => item.trim()).filter(Boolean);
+  const userExistingObservationVariables = new Set();
+  for (const clause of userObservationClauses) {
+    if (!/(?:只有|仅有|只(?:有|拿得到|拿到|能拿到)|已有|已经|拿到|取得|记录|记下|显示|具备|提供|有这|有一)/u.test(clause)) continue;
+    for (const id of observationIds(clause)) userExistingObservationVariables.add(id);
+  }
+  let observationInputContract = null;
+  const minimumInputContractRe = /(?:最小(?:证据|输入|缺口)|真正还缺|还缺的是|只(?:还)?缺|仅(?:还)?缺|需补(?:的)?(?:证据|输入)|采集清单|已有\/需补\/采集)/u;
+  for (let index = 0; index < documentLines.length - 1; index += 1) {
+    const headers = consultMarkdownTableCells(documentLines[index]);
+    if (!headers || !/^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*$/u.test(documentLines[index + 1] || '')) continue;
+    const headerText = headers.join(' ');
+    if (!/(?:判断|含义|结论|下一步|说明)/u.test(headerText)
+      || !/(?:对照|情况|结果|现象|条件|页面|响应|输入)/u.test(headerText)) continue;
+    let end = index + 2;
+    while (end < documentLines.length && consultMarkdownTableCells(documentLines[end])) end += 1;
+    const tableLines = documentLines.slice(index, end);
+    const tableText = tableLines.join('\n');
+    const prefixLines = documentLines.slice(0, index);
+    const prefixText = prefixLines.join('\n');
+    if (!evidenceSufficiencyQuestion && !minimumInputContractRe.test(prefixText)) continue;
+    const used = new Set(observationIds(tableText));
+    if (!used.size) continue;
+    const defined = new Set(userExistingObservationVariables);
+    let insideInputSection = false;
+    for (const line of prefixLines) {
+      const plain = line.replace(/^\s*(?:#{1,6}\s+|[-*+]\s+|[1-9]\d*[.、．]\s+)?/u, '').replace(/[*_`]/g, '').trim();
+      if (!plain) continue;
+      if (minimumInputContractRe.test(plain) || /(?:已有|需补|采集|输入|证据|缺口)(?:清单|项|如下|：|:)/u.test(plain)) insideInputSection = true;
+      const declaresInput = insideInputSection
+        || /(?:还缺|需补|补充|采集|记录|记下|保留|拿到|取得|获取|提供|输入|证据|原文|完整响应|同一时刻)/u.test(plain);
+      if (declaresInput) {
+        const explicitlyExcludedLogs = /(?:不是|无需|不需|不必|没有|拿不到|不依赖)[^。！？；\n]{0,12}(?:服务端|服务器|应用|任务|调度)?日志/u.test(plain);
+        for (const id of observationIds(plain)) {
+          if (id === 'logs' && explicitlyExcludedLogs) continue;
+          defined.add(id);
+        }
+      }
+    }
+    const unbound = [...used].filter(id => !defined.has(id));
+    const claimedOne = /(?:还缺的是(?:下面|以下)?这一项|(?:只|仅)(?:还)?缺[^。！？\n]{0,16}(?:一|1)\s*项)/u.test(prefixText);
+    const declaredMissing = new Set([...defined].filter(id => !userExistingObservationVariables.has(id)));
+    const actualMissing = new Set([...declaredMissing, ...unbound]);
+    observationInputContract = {
+      headerLine: documentLines[index].trim(),
+      usedVariables: [...used],
+      definedVariables: [...defined],
+      userExistingVariables: [...userExistingObservationVariables],
+      unboundVariables: unbound,
+      unboundLabels: unbound.map(id => observationRules.find(rule => rule.id === id)?.label || id),
+      claimedMissingCount: claimedOne ? 1 : null,
+      actualMissingCount: actualMissing.size,
+      countMismatch: claimedOne && actualMissing.size !== 1,
+    };
+    break;
+  }
+  const undefinedObservationVariables = observationInputContract && (
+    observationInputContract.unboundVariables.length || observationInputContract.countMismatch
+  ) ? observationInputContract : null;
   let safeDiagnosticFallback = '';
   if (diagnosticQuestion) {
     const confirmedFacts = route && route.matched
@@ -2674,6 +2747,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (emptyNumberedSections.length) violations.push('empty_numbered_section');
   if (!hasEvidenceSufficiencyVerdict) violations.push('missing_evidence_sufficiency_verdict');
   if (missingEvidenceMinimumPath) violations.push('missing_evidence_minimum_route_fact');
+  if (undefinedObservationVariables) violations.push('undefined_observation_variable');
   if (cardinalityMismatches.length) violations.push('inconsistent_structured_cardinality');
   if (incompleteResultBranchTables.length) violations.push('incomplete_result_branch_set');
   if (conflictingCountDeclarations.length) violations.push('conflicting_count_declaration');
@@ -2688,7 +2762,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (contradictoryNegativeSections.length) violations.push('contradictory_negative_section');
   if (singleStepOverreach) violations.push('single_step_diagnostic_overreach');
   if (malformedMarkdown.length) violations.push('malformed_markdown');
-  return { checked: true, diagnosticQuestion, evidenceSufficiencyQuestion, fullHandoffMaterialQuestion, hasEvidenceSufficiencyVerdict, minimumRoutePath, missingEvidenceMinimumPath, focusedFactQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, focusedRelationshipFacts, missingFocusedRelationshipFacts, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, emptyNumberedSections, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, emptyDiagnosticBranchHeadings, emptyListStepItems, danglingClosingPunctuationLines, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
+  return { checked: true, diagnosticQuestion, evidenceSufficiencyQuestion, fullHandoffMaterialQuestion, hasEvidenceSufficiencyVerdict, minimumRoutePath, missingEvidenceMinimumPath, observationInputContract, undefinedObservationVariables, focusedFactQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, focusedRelationshipFacts, missingFocusedRelationshipFacts, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, emptyNumberedSections, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, emptyDiagnosticBranchHeadings, emptyListStepItems, danglingClosingPunctuationLines, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -2742,6 +2816,9 @@ function consultAnswerRevisionPrompt(draft, audit) {
       : '',
     audit.violations.includes('missing_evidence_minimum_route_fact')
       ? `用户问的是当前主题证据是否足够，最小缺口必须优先引用 current/inherited route 的已核主接口 ${audit.missingEvidenceMinimumPath.display} 及直接响应事实；不得退成页面、终端、账号角色、版本等通用提单材料。只有用户明确索要完整提单/转开发材料清单时才给泛清单。`
+      : '',
+    audit.violations.includes('undefined_observation_variable')
+      ? `草稿的“最小证据/最小输入”与后续判断结构不自洽。判断表使用了此前未在用户已有证据或“需补/采集”清单中定义的观测量：${(audit.undefinedObservationVariables && audit.undefinedObservationVariables.unboundLabels || []).join('、') || '未定义观测量'}${audit.undefinedObservationVariables && audit.undefinedObservationVariables.countMismatch ? `；草稿声明只缺 ${audit.undefinedObservationVariables.claimedMissingCount} 项，但实际判断至少需要 ${audit.undefinedObservationVariables.actualMissingCount} 项输入` : ''}。只允许从用户本轮已明确具备的证据、草稿已有安全观测项或 current/inherited route 直接事实补全前序清单；否则删除依赖未定义变量的完整判断行/表格。不得补造业务事实，也不得重复要求用户已经明确具备的观测值。`
       : '',
     audit.violations.includes('inconsistent_structured_cardinality')
       ? `草稿声明的对照数量与实际结构不一致：${(audit.cardinalityMismatches || []).map(item => `${item.kind === 'list' ? '清单' : '表格'}声明${item.expected}项、实际${item.actual}项`).join('；')}。只有草稿中已经存在的内容才能保留；把声明改成实际数量，或删除数量声明/不完整表格或清单，禁止为了凑数新增字段、来源或观测点。`
@@ -2934,7 +3011,9 @@ function consultAnswerSafeFallback(draft, audit) {
     const exact = audit.missingPrimaryPath.display;
     safeKept = [safeKept, `当前请求应逐字核对已核主接口：\`${exact}\`。`].filter(Boolean).join('\n\n');
   }
-  if (audit.violations.includes('missing_evidence_sufficiency_verdict') || audit.violations.includes('missing_evidence_minimum_route_fact')) {
+  if (audit.violations.includes('missing_evidence_sufficiency_verdict')
+    || audit.violations.includes('missing_evidence_minimum_route_fact')
+    || audit.violations.includes('undefined_observation_variable')) {
     safeKept = String(audit.safeDiagnosticFallback || '').trim();
   }
   const notes = [];

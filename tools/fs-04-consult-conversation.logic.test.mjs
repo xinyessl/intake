@@ -565,6 +565,8 @@ test('发布前动作一致性审计覆盖整份答案，禁止同答先劝停�
     assert.match(text, /第一句话必须明确回答：现有证据够完成什么、不够完成什么/);
     assert.match(text, /不得退成页面、终端、账号、版本等跨主题通用材料清单/);
     assert.match(text, /若本轮没有可核验附件，不得声称看见截图里的数字或内容/);
+    assert.match(text, /诊断结论或分支表使用的每个观测变量/);
+    assert.match(text, /不得在最小清单只列接口响应，却在判断表首次引入本机日期/);
   });
 
   const readOnly = fn('这个列表刷新已确认纯只读，可以刷新后看现有数量吗？', { matched: true });
@@ -1012,6 +1014,66 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(q122Fallback, /不能声称看见图内数字或内容/);
   assert.doesNotMatch(q122Fallback, /账号角色|版本、发生时间|完整提单材料/);
   assert.deepEqual(bundle.audit(q122Fallback, q122Question, todayAtomicRoute).violations, [], '确定性证据充分性fallback自身必须通过终稿审计');
+
+  const q122R71ProductionDraft = [
+    '结论：这张截图只够固定当前页面现象，不够完成三边对照，也不足以闭环原因。',
+    '## 真正还缺的最小证据（不是服务端日志）',
+    '还缺的是下面这一项：',
+    '- `GET /pwrsapi/month/view/today` 的状态码和完整响应，至少保留 `year`、`week`。',
+    '| 对照结果 | 判断 |',
+    '| --- | --- |',
+    '| 页面与 `year/week` 一致，但与当时浏览器/本机日期星期不同 | 记录三边差异 |',
+    '| 页面与 `year/week` 不一致，但本机日期星期一致 | 记录页面差异 |',
+    '| 页面、响应和本机日期星期一致 | 本次证据未复现差异 |',
+  ].join('\n');
+  const q122R71Audit = bundle.audit(q122R71ProductionDraft, q122Question, todayAtomicRoute);
+  assert.ok(q122R71Audit.violations.includes('undefined_observation_variable'), '最小清单只列响应、判断表却首次使用本机日期时必须拦截');
+  assert.deepEqual(q122R71Audit.undefinedObservationVariables.unboundVariables, ['local_clock']);
+  assert.equal(q122R71Audit.undefinedObservationVariables.claimedMissingCount, 1);
+  assert.equal(q122R71Audit.undefinedObservationVariables.actualMissingCount, 2);
+  assert.equal(q122R71Audit.undefinedObservationVariables.countMismatch, true);
+  assert.match(bundle.revision(q122R71ProductionDraft, q122R71Audit), /同一时刻本机日期\/星期\/时间/);
+  const q122R72Fallback = bundle.fallback(q122R71ProductionDraft, q122R71Audit);
+  assert.match(q122R72Fallback, /GET \/pwrsapi\/month\/view\/today 完整响应/);
+  assert.match(q122R72Fallback, /同一时刻本机显示的日期和星期/);
+  assert.deepEqual(bundle.audit(q122R72Fallback, q122Question, todayAtomicRoute).violations, [], '观测输入不闭合时降级稿必须同时定义响应和本机日期星期');
+
+  const completeThreeWayDraft = [
+    '结论：截图只够固定页面现象，还需补两项才能完成三边对照。',
+    '最小输入：',
+    '- 已有截图中的页面现象。',
+    '- 需补同一次 `GET /pwrsapi/month/view/today` 完整响应。',
+    '- 需补同一时刻本机显示的日期和星期。',
+    '| 三边对照 | 判断 |',
+    '| --- | --- |',
+    '| 页面与响应一致、本机日期不同 | 只记录差异 |',
+    '| 页面与响应不一致、本机日期一致 | 只记录差异 |',
+  ].join('\n');
+  assert.ok(!bundle.audit(completeThreeWayDraft, q122Question, todayAtomicRoute).violations.includes('undefined_observation_variable'), '三边观测量均在清单定义时放行');
+
+  const completeTwoWayDraft = [
+    '结论：截图够固定页面现象，但还需响应才能完成两边对照。',
+    '最小输入：已有截图；需补 `GET /pwrsapi/month/view/today` 完整响应。',
+    '| 两边对照 | 判断 |',
+    '| --- | --- |',
+    '| 页面与响应一致 | 记录一致 |',
+    '| 页面与响应不一致 | 记录差异 |',
+  ].join('\n');
+  assert.ok(!bundle.audit(completeTwoWayDraft, q122Question, todayAtomicRoute).violations.includes('undefined_observation_variable'), '两边判断没有引入第三个观测量时放行');
+
+  const userHasClockQuestion = '我只有截图，但同一时刻本机日期和星期已经记下了，没有日志；现在只缺接口响应，够不够判断？';
+  const userHasClockDraft = [
+    '结论：截图和已记录的本机日期只够固定两边，还需一项响应才能完成三边对照。',
+    '还缺的是下面这一项：',
+    '- `GET /pwrsapi/month/view/today` 的完整响应。',
+    '| 三边对照 | 判断 |',
+    '| --- | --- |',
+    '| 页面、响应与本机日期星期一致 | 记录一致 |',
+    '| 页面或响应与本机日期星期不一致 | 记录差异 |',
+  ].join('\n');
+  const userHasClockAudit = bundle.audit(userHasClockDraft, userHasClockQuestion, todayAtomicRoute);
+  assert.ok(!userHasClockAudit.violations.includes('undefined_observation_variable'), '用户已明确记录的观测量不应在最小清单中重复索要');
+  assert.deepEqual(userHasClockAudit.observationInputContract.userExistingVariables.sort(), ['local_clock', 'page'].sort());
 
   const q122MissingRouteDraft = '结论：这张截图只够固定页面现象，不够闭环原因。\n再看已有请求即可。';
   const q122MissingRouteAudit = bundle.audit(q122MissingRouteDraft, q122Question, todayAtomicRoute);
