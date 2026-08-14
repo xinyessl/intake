@@ -637,6 +637,19 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
   assert.equal(atomicAudit.focusedFactOverreach.length, 4);
   assert.ok(audit('调用 GET /pwrsapi/month/view/today，返回 year/week；不得混淆已废止的 GET /month/view。', '工作台今天日期和星期调用哪个接口？', atomicRoute).violations.includes('focused_fact_overreach'));
   assert.deepEqual(audit('调用 GET /pwrsapi/month/view/today；不得混淆已废止的 GET /month/view。', '工作台今天日期和星期调用哪个接口？', atomicRoute).violations, []);
+  const statementQuestion = '工作台今天的日期和星期，调用的是 GET /pwrsapi/month/view/today（需要合法 JWT）。别跟已经按会议结论删除的 GET /month/view 月历网格接口搞混。';
+  const statementDraft = [
+    '结论：对。',
+    '工作台走 GET /pwrsapi/month/view/today。',
+    '无入参。',
+    '返回 year/week。',
+    '日期按服务端 JVM 当前时区算。',
+  ].join('\n');
+  const statementAudit = audit(statementDraft, statementQuestion, atomicRoute);
+  assert.ok(statementAudit.violations.includes('focused_fact_overreach'), '陈述式确认单一接口同样触发原子止答');
+  assert.ok(statementAudit.focusedFactOverreach.includes('无入参。'));
+  assert.equal(statementAudit.missingFocusedMustNotConfuse.length, 1, '用户逐字点名易混淆接口时须保留route必要反事实');
+  assert.deepEqual(audit('工作台走 GET /pwrsapi/month/view/today。\n不得答已废止的 GET /month/view。', statementQuestion, atomicRoute).violations, []);
   assert.ok(!audit('调用 GET /pwrsapi/month/view/today 后现场怎么核对？', '工作台接口为什么不一致，现场怎么验证？', atomicRoute).violations.includes('focused_fact_overreach'), '显式诊断题不触发原子止答审计');
   const failed = audit('页面等于接口但与浏览器不同，多半是服务端时区差。', '今天视图对不上，怎么排查？', route);
   assert.deepEqual(failed.violations, ['unsupported_likelihood']);
@@ -895,6 +908,22 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(todayAtomicFallback, /GET \/month\/view/);
   assert.doesNotMatch(todayAtomicFallback, /Map<String,String>|\byear\b|\bweek\b|JVM 当前时区/);
   assert.deepEqual(bundle.audit(todayAtomicFallback, '工作台今天日期和星期调用哪个接口？', todayAtomicRoute).violations, []);
+  const todayStatementQuestion = '工作台今天的日期和星期，调用的是 GET /pwrsapi/month/view/today（需要合法 JWT）。别跟已经按会议结论删除的 GET /month/view 月历网格接口搞混。';
+  const todayStatementDraft = [
+    '结论：对。',
+    '工作台「今天日期 + 星期」走 GET /pwrsapi/month/view/today。',
+    '需要合法 JWT。',
+    '无入参。',
+    '返回 Map：year、week。',
+    '日期按服务端 JVM 当前时区算。',
+  ].join('\n');
+  const todayStatementAudit = bundle.audit(todayStatementDraft, todayStatementQuestion, todayAtomicRoute);
+  assert.ok(todayStatementAudit.violations.includes('focused_fact_overreach'));
+  const todayStatementFallback = bundle.fallback(todayStatementDraft, todayStatementAudit);
+  assert.match(todayStatementFallback, /GET \/pwrsapi\/month\/view\/today/);
+  assert.match(todayStatementFallback, /GET \/month\/view/);
+  assert.doesNotMatch(todayStatementFallback, /无入参|Map|\byear\b|\bweek\b|JVM 当前时区/);
+  assert.deepEqual(bundle.audit(todayStatementFallback, todayStatementQuestion, todayAtomicRoute).violations, []);
   assert.deepEqual(bundle.audit(
     '工作台今天日期和星期调用 GET /pwrsapi/month/view/today；如果响应不一致，现场怎么排查？',
     '工作台今天日期和星期调用哪个接口，响应不一致时现场怎么排查？',

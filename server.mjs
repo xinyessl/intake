@@ -2413,7 +2413,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const requiredPrimaryPath = consultRequiredPrimaryPath(question, route, text);
   const missingPrimaryPath = requiredPrimaryPath && !consultConcretePaths(text).includes(requiredPrimaryPath.path) ? requiredPrimaryPath : null;
   let focusedFactPrimaryPath = null;
-  if (focusedFactQuestion && /(?:(?:调用|使用|走|用)(?:的|哪|哪个|什么)?接口|哪个接口|接口(?:是|为|叫|地址|路径)?什么|路径(?:是|为)?什么)/i.test(String(question || '')) && route && route.matched) {
+  if (focusedFactQuestion && /(?:(?:调用|使用|走|用)(?:的|哪|哪个|什么)?接口|哪个接口|接口(?:是|为|叫|地址|路径)?什么|路径(?:是|为)?什么|(?:调用|使用|走|接口|路径)[^。！？；\n]{0,28}\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/)/i.test(String(question || '')) && route && route.matched) {
     const forbiddenFocusedPaths = new Set(consultConcretePaths((route.mustNotConfuse || []).join('\n')));
     const focusedCandidates = [];
     for (const fact of route.answerFacts || []) {
@@ -2428,6 +2428,16 @@ function consultAnswerSemanticAudit(answer, question, route) {
     if (uniqueFocusedCandidates.length === 1) focusedFactPrimaryPath = uniqueFocusedCandidates[0];
   }
   const focusedFactOverreach = consultFocusedFactOverreach(text, question, route);
+  const focusedMustNotConfuse = focusedFactQuestion && route && route.matched
+    ? (route.mustNotConfuse || []).map(String).filter(fact => {
+        const factPaths = consultConcretePaths(fact);
+        return factPaths.length && factPaths.some(pathValue => String(question || '').includes(pathValue));
+      })
+    : [];
+  const focusedAnswerPaths = new Set(consultConcretePaths(text));
+  const missingFocusedMustNotConfuse = focusedMustNotConfuse.filter(fact =>
+    !consultConcretePaths(fact).some(pathValue => focusedAnswerPaths.has(pathValue))
+  );
   let safeDiagnosticFallback = '';
   if (diagnosticQuestion) {
     const confirmedFacts = route && route.matched
@@ -2454,7 +2464,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (unexpectedPaths.length) violations.push('unexpected_concrete_path');
   if (unexpectedScopeTerms.length) violations.push('out_of_scope_entity');
   if (missingPrimaryPath) violations.push('missing_primary_path');
-  if (focusedFactOverreach.length) violations.push('focused_fact_overreach');
+  if (focusedFactOverreach.length || missingFocusedMustNotConfuse.length) violations.push('focused_fact_overreach');
   if (undefinedOrdinalReferences.length) violations.push('undefined_ordinal_reference');
   if (nonSequentialTopLevelSteps.length) violations.push('nonsequential_top_level_steps');
   if (cardinalityMismatches.length) violations.push('inconsistent_structured_cardinality');
@@ -2467,7 +2477,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (contradictoryNegativeSections.length) violations.push('contradictory_negative_section');
   if (singleStepOverreach) violations.push('single_step_diagnostic_overreach');
   if (malformedMarkdown.length) violations.push('malformed_markdown');
-  return { checked: true, focusedFactQuestion, focusedFactPrimaryPath, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, cardinalityMismatches, conflictingCountDeclarations, incompleteLeadIns, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
+  return { checked: true, focusedFactQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, cardinalityMismatches, conflictingCountDeclarations, incompleteLeadIns, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -2626,6 +2636,9 @@ function consultAnswerSafeFallback(draft, audit) {
   if (audit.focusedFactPrimaryPath && !consultConcretePaths(safeKept).includes(audit.focusedFactPrimaryPath.path)) {
     safeKept = [`当前接口：\`${audit.focusedFactPrimaryPath.display}\`。`, safeKept].filter(Boolean).join('\n\n');
   }
+  for (const fact of audit.missingFocusedMustNotConfuse || []) {
+    safeKept = [safeKept, fact].filter(Boolean).join('\n\n');
+  }
   if (audit.violations.includes('missing_primary_path') && audit.missingPrimaryPath) {
     const exact = audit.missingPrimaryPath.display;
     safeKept = [safeKept, `当前请求应逐字核对已核主接口：\`${exact}\`。`].filter(Boolean).join('\n\n');
@@ -2732,13 +2745,13 @@ function consultCurrentRulingGuard(question, route) {
 function consultFocusedFactGuard(question) {
   const q = String(question || '').trim();
   if (!q || q.length > 180) return '';
-  const focused = /(?:字段|列(?!表)|column|类型|type|是不是|是否|能否|能不能|会不会|是.*吗|分别是什么|值是什么|长度(?:多少|是什么)|状态码(?:是|为|什么|多少)|(?:调用|使用|走|用|是)(?:的|哪|哪个|什么)?接口|哪个接口|接口(?:是|为|叫|地址|路径)?什么|路径(?:是|为)?什么|varchar|uuid|integer|bigint)/i.test(q);
+  const focused = /(?:字段|列(?!表)|column|类型|type|是不是|是否|能否|能不能|会不会|是.*吗|分别是什么|值是什么|长度(?:多少|是什么)|状态码(?:是|为|什么|多少)|(?:调用|使用|走|用|是)(?:的|哪|哪个|什么)?接口|哪个接口|接口(?:是|为|叫|地址|路径)?什么|路径(?:是|为)?什么|(?:调用|使用|走|接口|路径)[^。！？；\n]{0,28}\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/|varchar|uuid|integer|bigint)/i.test(q);
   const operational = /(?:为什么|怎么(?:排查|判断|验证|处理|解决|核对|看)|如何|排查|复现|留证|下一步|接下来|现场|转开发|抓包|请求和响应|请求.*抓到|响应.*抓到|业务流程|保存|提交|查询.*不到)/i.test(q);
   const multiQuestion = (q.match(/[？?；;]/g) || []).length > 1 || /(?:另外|同时|还要|以及).*(?:什么|哪个|是否|怎么|如何)/i.test(q);
   if (!focused || operational || multiQuestion) return '';
   return [
     '【单一事实题止答边界】',
-    '用户只问一个接口、路径、状态码、字段/列的类型/长度/取值或一个是非事实。先从 current route 的 answerFacts/primary section 给直接答案，只补回答该事实所必需的限定与 mustNotConfuse 边界；答到这里就停止。',
+    '用户只询问或用陈述句确认一个接口、路径、状态码、字段/列的类型/长度/取值或一个是非事实。先从 current route 的 answerFacts/primary section 给直接答案，只补回答该事实所必需的限定与 mustNotConfuse 边界；答到这里就停止。',
     '不得主动扩写同表其它列、本地身份元组、联合键、索引、唯一约束、数据库迁移、SQL 用法、相邻模块事实、实施步骤、现场排查、原因假设、动作建议或“把截图发来”等继续邀约。只有用户在本轮明确问到这些内容，且当前有效证据直接覆盖时，才逐项回答。',
     '即使相邻事实本身真实，只要不改变本问答案，也不要作为“顺便提醒”加入；显式切题后不得带入上一主题事实。',
   ].join('\n');
@@ -2747,7 +2760,7 @@ function consultFocusedFactGuard(question) {
 function consultFocusedFactOverreach(answer, question, route) {
   if (!consultFocusedFactGuard(question)) return [];
   const q = String(question || '').trim();
-  const interfaceOnly = /(?:(?:调用|使用|走|用)(?:的|哪|哪个|什么)?接口|哪个接口|接口(?:是|为|叫|地址|路径)?什么|路径(?:是|为)?什么)/i.test(q);
+  const interfaceOnly = /(?:(?:调用|使用|走|用)(?:的|哪|哪个|什么)?接口|哪个接口|接口(?:是|为|叫|地址|路径)?什么|路径(?:是|为)?什么|(?:调用|使用|走|接口|路径)[^。！？；\n]{0,28}\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/)/i.test(q);
   const statusOnly = /状态码(?:是|为|什么|多少)/i.test(q);
   const typeOrLengthOnly = /(?:字段|列|column|varchar|uuid|integer|bigint|patient_id|visit_id|hospitalId|districtCode)/i.test(q)
     && /(?:类型|type|长度(?:多少|是什么))/i.test(q);
@@ -2763,7 +2776,8 @@ function consultFocusedFactOverreach(answer, question, route) {
       // 原子接口题只保留“方法 + 精确路径”及带精确路径的必要防混淆。
       // 即使响应字段、参数、来源时区等事实本身存在于同一 route，也不是本问目标。
       const adjacentContract = /(?:响应|返回(?:值|体)?|字段|参数|请求体|数据来源|来自|时区|\bJVM\b|\byear\b|\bweek\b|Map\s*<)/i.test(statement);
-      return adjacentContract || (consultConcretePaths(statement).length > 0 && !hasAllowedPath);
+      const shortConfirmation = /^(?:结论[：:]\s*)?(?:对|是|没错|正确)[。！!]?$/u.test(statement.replace(/[*_`]/g, '').trim());
+      return !shortConfirmation && (adjacentContract || !hasAllowedPath);
     }
     if (statusOnly) {
       return !/(?:HTTP\s*)?\d{3}|状态码/i.test(statement);
