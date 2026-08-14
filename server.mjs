@@ -898,7 +898,11 @@ function consultContextFollowupIntent(question) {
   // 实施常用“关于/针对 + 上轮主题 + 已拿到的证据 + 重点核什么”继续追问。
   // 这不是新主题；这里只允许进入上下文裁决，后面的显式新实体判断仍会让真正的切题 route 覆盖旧 route。
   const topicAnchoredFollowup = /^(?:关于|针对)[^。！？；\n]{1,100}(?:重点核对|重点检查|怎么排查|如何排查|下一步|接下来|还缺什么|能排除什么|请求和响应|已有请求|已有响应)/i.test(q);
-  return anaphoric || progress || partialEvidence || topicAnchoredFollowup;
+  // 实施也常把同主题追问重新包装成“医院/现场反馈……先查什么、做哪个验证”，不会使用“这个/刚才”。
+  // 这里只让它进入上下文裁决；后续显式新实体和直达 route 仍优先，单独开启的新会话也没有历史可继承。
+  const reportedIssueFollowup = /^(?:医院|现场|实施|产品|开发|运维|对接方)[\s\S]{1,220}(?:先|下一步|怎么|如何|哪个验证|排查|检查|核对)/i.test(q);
+  const subjectAnchoredProgress = /^(?=[^。！？；\n]{1,100}(?:这(?:一段|一步|个问题)|按这个顺序))[^。！？；\n]{1,180}(?:后面|下一步|先停|继续|怎么|如何)/i.test(q);
+  return anaphoric || progress || partialEvidence || topicAnchoredFollowup || reportedIssueFollowup || subjectAnchoredProgress;
 }
 
 function contextualRouteQuestion(map, messages, currentQuestion, subKey = '', contextDepth = 0) {
@@ -957,10 +961,17 @@ function contextualRouteQuestion(map, messages, currentQuestion, subKey = '', co
   if (!prior.matched) return direct;
   const directId = String(direct.route && direct.route.id || '');
   const priorId = String(prior.route && prior.route.id || '');
+  const currentTechnicalFocus = consultScopeTechnicalTokens(current);
+  const inheritedTechnicalFocus = currentTechnicalFocus.length
+    ? currentTechnicalFocus
+    : ((Array.isArray(prior.focusTechnicalTokens) && prior.focusTechnicalTokens.length)
+      ? prior.focusTechnicalTokens
+      : consultScopeTechnicalTokens(previous));
   if (direct.matched && directId === priorId) return {
     ...direct,
     inherited: true,
     inheritedFromQuestion: previous.slice(0, 240),
+    focusTechnicalTokens: inheritedTechnicalFocus,
     factLedger: true,
   };
 
@@ -989,6 +1000,9 @@ function contextualRouteQuestion(map, messages, currentQuestion, subKey = '', co
     score: Math.round((Number(prior.score) || 0) * 0.82 * 1000) / 1000,
     inherited: true,
     inheritedFromQuestion: previous.slice(0, 240),
+    // 记录最近一轮用户明确点名的强技术标识，供后续同主题诊断做“当前对象”范围审计。
+    // 只继承用户问题里的 token，不从宽泛 answerFacts 反推，避免同表 sibling 字段借 route 事实进入答案。
+    focusTechnicalTokens: inheritedTechnicalFocus,
     factLedger: true,
     directCandidate: direct.matched ? { id: directId, title: direct.route && direct.route.title, score: direct.score } : null,
   };
@@ -1702,7 +1716,7 @@ const CONSULT_DETERMINISTIC_FAILURE_RE = /(?:(?<!不)(?<!未)(?:会|就会)(?:�
 // 表格行也按整行审计，避免“B 已不同 → 问题可能在 B 后”躲在分支单元格中。
 const CONSULT_OBSERVATION_ORDER_CONTRADICTION_RE = /(?:请求|报文|响应|收到值|接收值|落库值|页面|展示)[^。！？；\n]{0,36}(?:与|和|≠)[^。！？；\n]{0,18}(?:原始|源端|上一步|前一层)[^。！？；\n]{0,18}(?:不一致|不同|已变化|少位|变样)[^。！？；\n]{0,64}(?:问题|差异|变化|异常)[^。！？；\n]{0,16}(?:可能|说明|表明|意味着)?[^。！？；\n]{0,16}(?:在|于)?(?:发出|该?(?:请求|报文|响应|收到|接收|落库|页面|展示))(?:后|之后|下游)/gi;
 const CONSULT_CAUSAL_PRIORITY_RE = /(?:优先|首先|先)(?:去)?(?:查|看|排查|核对)(?:服务端|服务器|JVM|前端|缓存|错误兜底|网关|登录态|权限|调度|数据库|配置)[^。！？；\n]{0,18}/g;
-const CONSULT_DIRECT_RISKY_ACTION_RE = /(?:(?:只能|需要|应当|应该|建议|可以|可|先|再|然后|去|请|让|由|交给|通知|要求)[^。！？；\n]{0,20}(?:改|修改|调整|切换|对齐|校准|统一|转换)[^。！？；\n]{0,16}(?:参数|传参方式|传输方式|接口入参|报文(?:类型)?|映射|配置|部署时区|时区|系统时间|环境|产品口径|业务口径|日切要求|服务配置|字符串|数字(?:类型)?|字段格式|数据格式|值类型)|(?:参数|传参方式|传输方式|接口入参|报文(?:类型)?|映射|配置|部署时区|时区|系统时间|产品口径|业务口径|日切要求|服务配置|字符串|数字(?:类型)?|字段格式|数据格式|值类型)[^。！？；\n]{0,24}(?:交给|让|由)[^。！？；\n]{0,16}(?:改|修改|调整|切换|对齐|校准|统一|转换)|(?:改|修改|调整|转换)(?:成|为)?(?:字符串|数字(?:类型)?|字段格式|数据格式|值类型|传参方式|传输方式)[^。！？；\n]{0,12}(?:再传|重传|重新发送|复测))/ig;
+const CONSULT_DIRECT_RISKY_ACTION_RE = /(?:(?:只能|需要|应当|应该|建议|可以|可|先|再|然后|去|请|让|由|交给|通知|要求)[^。！？；\n]{0,20}(?:改|修改|调整|切换|对齐|校准|统一|转换)[^。！？；\n]{0,16}(?:参数|传参方式|传输方式|接口入参|报文(?:类型)?|映射|配置|部署时区|时区|系统时间|环境|产品口径|业务口径|日切要求|服务配置|字符串|数字(?:类型)?|字段格式|数据格式|值类型)|(?:参数|传参方式|传输方式|接口入参|报文(?:类型)?|映射|配置|部署时区|时区|系统时间|产品口径|业务口径|日切要求|服务配置|字符串|数字(?:类型)?|字段格式|数据格式|值类型)[^。！？；\n]{0,24}(?:交给|让|由)[^。！？；\n]{0,16}(?:改|修改|调整|切换|对齐|校准|统一|转换)|(?:改|修改|调整|转换)(?:成|为)?(?:字符串|数字(?:类型)?|字段格式|数据格式|值类型|传参方式|传输方式)[^。！？；\n]{0,12}(?:再传|重传|重新发送|复测)|(?:压|催|催促|推动|协调)[^。！？；\n]{0,8}(?:对接方|第三方|运维|开发)[^。！？；\n]{0,20}(?:按|以)(?:字符串|数字(?:类型)?|指定格式|字段格式|数据格式|值类型)[^。！？；\n]{0,8}(?:传|发送))/ig;
 const CONSULT_COMPONENT_FAULT_RE = /(?:服务端|服务器|JVM|前端|后端|缓存|网关|鉴权|权限|数据库|配置|调度|部署|环境)[^。！？；\n]{0,16}(?:异常|故障|问题|错误|不对|有误)/ig;
 
 function consultHasLikelihoodEvidence(question, route, claim = '') {
@@ -2040,7 +2054,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const causalPriorityAllowed = consultHasCausalPriorityEvidence(question, route);
   const causalPriorityTerms = causalPriorityAllowed ? [] : Array.from(new Set(text.match(CONSULT_CAUSAL_PRIORITY_RE) || []));
   const controlled = consultHasControlledActionBundle(question);
-  const actorAction = /(?:让|请|交给|通知|要求|转)?\s*(?:实施|用户|患者|对接方|第三方|运维|开发)[^。！？；\n]{0,64}(?:(?:改|修改|调整|切换|对齐|校准|统一|转换)[^。！？；\n]{0,16}(?:参数|传参方式|传输方式|接口入参|报文(?:类型)?|类型|映射|配置|时区|系统时间|环境|产品口径|业务口径|日切要求|服务配置|字符串|数字(?:类型)?|字段格式|数据格式|值类型)|对时|重试|复测|重跑|补跑|重新触发|再次触发|再点|点一次|提交|保存|发送|完成|签名|审批|星标|再传|重传|重新发送)/ig;
+  const actorAction = /(?:让|请|交给|通知|要求|转|压|催|催促|推动|协调)?\s*(?:实施|用户|患者|对接方|第三方|运维|开发)[^。！？；\n]{0,64}(?:(?:改|修改|调整|切换|对齐|校准|统一|转换)[^。！？；\n]{0,16}(?:参数|传参方式|传输方式|接口入参|报文(?:类型)?|类型|映射|配置|时区|系统时间|环境|产品口径|业务口径|日切要求|服务配置|字符串|数字(?:类型)?|字段格式|数据格式|值类型)|(?:按|以)[^。！？；\n]{0,12}(?:字符串|数字(?:类型)?|指定格式|字段格式|数据格式|值类型)[^。！？；\n]{0,8}(?:传|发送)|对时|重试|复测|重跑|补跑|重新触发|再次触发|再点|点一次|提交|保存|发送|完成|签名|审批|星标|再传|重传|重新发送)/ig;
   const negatedActorPrefix = /(?:不得|不能|不要|禁止|不可|不应|先别|停止|未确认)\s*$/i;
   const unsafeActorActions = controlled ? [] : text.split(/(?<=[。！？；\n])/u)
     .map(x => x.trim()).filter(statement => statement && Array.from(statement.matchAll(actorAction))
@@ -2061,7 +2075,19 @@ function consultAnswerSemanticAudit(answer, question, route) {
     ? consultDiagnosticMechanismTerms(text).filter(term => !consultDiagnosticMechanismTerms(scopeText).includes(term))
     : [];
   const scopeTechnicalTokens = new Set(consultScopeTechnicalTokens(scopeText).map(token => token.toLowerCase()));
-  const unexpectedTechnicalTokens = consultScopeTechnicalTokens(text).filter(token => !scopeTechnicalTokens.has(token.toLowerCase()));
+  const inheritedFocusTokens = Array.isArray(route && route.focusTechnicalTokens) ? route.focusTechnicalTokens : [];
+  const focusedTechnicalTokens = Array.from(new Set([...inheritedFocusTokens, ...consultScopeTechnicalTokens(question)]));
+  const focusedFieldScope = focusedTechnicalTokens.length > 0
+    && /(?:字段|列|column|类型|长度|编号|患者号|标识符)/i.test(`${question || ''} ${(route && route.route && route.route.title) || ''}`)
+    && /(?:字段|列|column|类型|长度)/i.test(String((route && route.route && route.route.title) || ''));
+  const focusedTechnicalSet = new Set(focusedTechnicalTokens.map(token => token.toLowerCase()));
+  const focusedTechnicalOverreach = focusedFieldScope
+    ? consultScopeTechnicalTokens(text).filter(token => !focusedTechnicalSet.has(token.toLowerCase()))
+    : [];
+  const unexpectedTechnicalTokens = Array.from(new Set([
+    ...consultScopeTechnicalTokens(text).filter(token => !scopeTechnicalTokens.has(token.toLowerCase())),
+    ...focusedTechnicalOverreach,
+  ]));
   const unexpectedScopeTerms = Array.from(new Set([...unexpectedEntityTerms, ...unexpectedMechanismTerms, ...unexpectedTechnicalTokens]));
   const malformedMarkdown = [...consultMalformedMarkdownTokens(text), ...consultMalformedProseTokens(text), ...consultMalformedTableTokens(text)];
   const requiredPrimaryPath = consultRequiredPrimaryPath(question, route, text);
@@ -2077,7 +2103,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (missingPrimaryPath) violations.push('missing_primary_path');
   if (focusedFactOverreach.length) violations.push('focused_fact_overreach');
   if (malformedMarkdown.length) violations.push('malformed_markdown');
-  return { checked: true, focusedFactQuestion, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, malformedMarkdown, violations };
+  return { checked: true, focusedFactQuestion, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -2126,7 +2152,7 @@ function consultReplaceUnexpectedPath(text, pathValue) {
 }
 
 function consultAnswerSafeFallback(draft, audit) {
-  const actorAction = /(?:让|请|交给|通知|要求|转)?\s*(?:实施|用户|患者|对接方|第三方|运维|开发)[^。！？；\n]{0,64}(?:(?:改|修改|调整|切换|对齐|校准|统一|转换)[^。！？；\n]{0,16}(?:参数|传参方式|传输方式|接口入参|报文(?:类型)?|类型|映射|配置|时区|系统时间|环境|产品口径|业务口径|日切要求|服务配置|字符串|数字(?:类型)?|字段格式|数据格式|值类型)|对时|重试|复测|重跑|补跑|重新触发|再次触发|再点|点一次|提交|保存|发送|完成|签名|审批|星标|再传|重传|重新发送)/ig;
+  const actorAction = /(?:让|请|交给|通知|要求|转|压|催|催促|推动|协调)?\s*(?:实施|用户|患者|对接方|第三方|运维|开发)[^。！？；\n]{0,64}(?:(?:改|修改|调整|切换|对齐|校准|统一|转换)[^。！？；\n]{0,16}(?:参数|传参方式|传输方式|接口入参|报文(?:类型)?|类型|映射|配置|时区|系统时间|环境|产品口径|业务口径|日切要求|服务配置|字符串|数字(?:类型)?|字段格式|数据格式|值类型)|(?:按|以)[^。！？；\n]{0,12}(?:字符串|数字(?:类型)?|指定格式|字段格式|数据格式|值类型)[^。！？；\n]{0,8}(?:传|发送)|对时|重试|复测|重跑|补跑|重新触发|再次触发|再点|点一次|提交|保存|发送|完成|签名|审批|星标|再传|重传|重新发送)/ig;
   const negatedActorPrefix = /(?:不得|不能|不要|禁止|不可|不应|先别|停止|未确认)\s*$/i;
   const keepPart = part => {
     if (audit.violations.includes('contradictory_observation_order') && CONSULT_OBSERVATION_ORDER_CONTRADICTION_RE.test(part)) {

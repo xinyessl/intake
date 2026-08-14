@@ -57,6 +57,7 @@ function buildRoutingSandbox(deps) {
     extractFn(SRC, 'routeScorer') + '\n' +
     extractFn(SRC, 'routeQuestion') + '\n' +
     extractFn(SRC, 'consultContextFollowupIntent') + '\n' +
+    extractFn(SRC, 'consultScopeTechnicalTokens') + '\n' +
     extractFn(SRC, 'contextualRouteQuestion') + '\n' +
     extractFn(SRC, 'extractSection') + '\n' +
     extractFn(SRC, 'loadModuleMap') + '\n' +
@@ -1330,7 +1331,26 @@ test('真实PWRS地图回归：今天视图、自定义表单和患者号链按�
     const hit = S.contextualRouteQuestion(map, patientMessages, question, '');
     assert.equal(hit.route.id, 'QR-PATIENT-ID-COLUMN-TYPE', question);
     assert.match(hit.answerFacts.join(' '), /character varying\(50\)/);
+    assert.ok(Array.isArray(hit.focusTechnicalTokens), `应保留技术焦点：${question}`);
+    assert.ok(hit.focusTechnicalTokens.includes('pwrs_patient'), question);
+    assert.ok(hit.focusTechnicalTokens.includes('patient_id'), question);
   }
+
+  const firstPatientFollowup = S.contextualRouteQuestion(
+    map,
+    patientMessages,
+    '医院电话里只说“对接方把患者号当数字传，长号码开始丢位”。我应该先让他们做哪个验证？',
+    '',
+  );
+  const chainedPatientFollowup = S.contextualRouteQuestion(map, patientMessages.concat(
+    { role: 'user', content: '医院电话里只说“对接方把患者号当数字传，长号码开始丢位”。我应该先让他们做哪个验证？' },
+    { role: 'assistant', content: '历史回答不作证据。' },
+  ), '患者号字段这一段，按这个顺序查到第二步就对不上了，后面先停还是继续？', '');
+  assert.equal(firstPatientFollowup.route.id, 'QR-PATIENT-ID-COLUMN-TYPE');
+  assert.deepEqual(firstPatientFollowup.focusTechnicalTokens, ['pwrs_patient', 'patient_id']);
+  assert.equal(chainedPatientFollowup.route.id, 'QR-PATIENT-ID-COLUMN-TYPE');
+  assert.ok(chainedPatientFollowup.focusTechnicalTokens.includes('pwrs_patient'), JSON.stringify(chainedPatientFollowup.focusTechnicalTokens));
+  assert.ok(chainedPatientFollowup.focusTechnicalTokens.includes('patient_id'), JSON.stringify(chainedPatientFollowup.focusTechnicalTokens));
 
   const switched = S.contextualRouteQuestion(map, patientMessages, '换个问题，PWRS 的 token 到底是谁签发的？', '');
   assert.equal(switched.route.id, 'QR-TOKEN-AUTH-CHAIN');

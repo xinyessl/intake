@@ -850,6 +850,38 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     q127R28Question,
     route,
   ).violations, [], '明确把电话归因降为待核线索且只读核已有证据应放行');
+
+  const focusedPatientIdRoute = {
+    matched: true,
+    inherited: true,
+    focusTechnicalTokens: ['pwrs_patient', 'patient_id'],
+    route: { title: '患者主表身份字段类型' },
+    answerFacts: ['pwrs_patient 的 p_id、patient_id、visit_id、district_code 均为 character varying(50)'],
+  };
+  const q127R31Draft = [
+    '`pwrs_patient.patient_id` 是 `character varying(50)`。',
+    '同表 `p_id`、`visit_id`、`district_code` 也都是 `character varying(50)`。',
+    '先只读对照已有源值与出站报文；之后决定是压对接方按字符串传。',
+  ].join('\n');
+  const q127R31Audit = bundle.audit(q127R31Draft, q127R28Question, focusedPatientIdRoute);
+  assert.ok(q127R31Audit.violations.includes('out_of_scope_entity'), '单一字段诊断不能因宽route包含同表字段而放行 sibling token');
+  assert.ok(q127R31Audit.violations.includes('cross_actor_side_effect'), '压/催/推动对接方按某类型传仍是跨主体副作用动作');
+  assert.deepEqual(q127R31Audit.focusedTechnicalOverreach.sort(), ['district_code', 'p_id', 'visit_id'].sort());
+  const q127R31Fallback = bundle.fallback(q127R31Draft, q127R31Audit);
+  assert.match(q127R31Fallback, /pwrs_patient\.patient_id/);
+  assert.match(q127R31Fallback, /只读对照已有源值与出站报文/);
+  assert.doesNotMatch(q127R31Fallback, /p_id|visit_id|district_code|压对接方|按字符串传/);
+  assert.deepEqual(bundle.audit(q127R31Fallback, q127R28Question, focusedPatientIdRoute).violations, []);
+
+  for (const wording of [
+    '催对接方按字符串传。',
+    '推动第三方以指定格式发送。',
+    '协调开发按数字类型传。',
+  ]) {
+    const actionAudit = bundle.audit(wording, '患者号对不上，下一步怎么查？', focusedPatientIdRoute);
+    assert.ok(actionAudit.violations.includes('cross_actor_side_effect'), wording);
+  }
+  assert.deepEqual(bundle.audit('只读对照已有 patient_id 源值与出站报文。', q127R28Question, focusedPatientIdRoute).violations, [], '当前聚焦字段与只读动作应放行');
   assert.deepEqual(bundle.audit(
     '统计100份已核报文，其中80份确认数字转换后发生精度丢失。',
     '统计100份已核报文，其中80份确认数字转换后发生精度丢失，怎么描述？',
