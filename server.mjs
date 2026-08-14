@@ -1693,7 +1693,8 @@ function consultFinalActionConsistencyGuard(question, route) {
     '编辑、删除、新建、保存、提交、发送、完成、签名、审批、星标、可能标记已读的打开、改参数、改报文类型、改映射、改配置、重试、复现、补跑或重跑，只要不能归入 B 或 C，就必须从最终答案所有位置删除，改成检查已有页面、请求、响应、报文、映射、截图、日志或审计。动作换成由第三方执行也不改变副作用：不得写成“让对接方改字符串/参数/映射/配置后用同一患者复测”“让运维重跑”或“让开发重试”来绕过守卫。不能因为同一答案别处写了“不要操作”“只读”“别重复”，就保留这里的正向点击或重做指令；否定提醒不能抵消冲突动作。',
     '若最终答案任何一处说“不要操作/不要重复/只读”，则其它任何一处都不得再建议点击编辑、删除、发送、完成等未知动作来观察是否发请求，也不得用“点了是否被拦住”“试一下看看”之类问句变相放行。用户只问“这个按钮是否发请求”时，只能查已有请求、日志、审计、代码或契约；没有既有证据就局部说明当前无法安全确认，不能让现场点击未知按钮补抓。',
     '发布前还要核对步骤和对照项的编号引用：后文引用①②③④等序号时，每个序号都必须在本答案前文有明确对应项；不得出现“共三项”却引用④、表格只定义①②③却在判断或小结写③/④等未定义引用。顶层阿拉伯数字步骤默认必须从1开始并按正文出现顺序连续递增，不得从3起步、从1、2、3直接跳到5或重复编号；只有用户本轮明确说到“第N步/做到第N步”时，才允许从N或N+1承接。已有完整步骤只能重编号，不能为补缺号新增步骤或事实。发现后必须删除含未定义序号的完整句/完整表格行，或在不新增事实的前提下改回已经定义的序号。',
-    '结构化答案还必须逐项核对“声明数量 → 实际内容”：声称二/三/四边、项、份、件、条、处或个对照时，紧随其后的对照表或 Markdown 清单必须确实给出相同数量的完整项；不得用一行表格冒充“三边对照”，也不得说“核两件事”却只列一项。同一小节里“确认/回复/补充/核对 N 件/项/点/条”等结构数量不得从 1 漂成 2；统一数量或删除不必要的数量承诺。“例如：/如下：/包括：/包含：/内容为：/由以下组成：/分别为：”后必须有实际内容，“里面有：”同样受此约束；无论跨块还是同一 paragraph，都不能在没有枚举、字段、代码或列表时直接跳到“别搞混/注意/结论/下一步”等新语义分句；任何以冒号结尾的标题/提示语都不得出现在正文末尾而没有子内容。清理并列项后不得留下孤立的“还是页面…/或者接口…”等后半分支，也不得留下以“还是/或者/或是/或”结尾却没有后一项的前半分支；不得在答案开头或“结论/判断”等纯标题后直接留下没有前述主张的“但/但是/不过/然而”转折残句。删除示例或引用正文时必须连同整句引号一起删除，不得留下单独一行的「/」/“/”/『/』等孤立引号。明确要求对照/比较/分支判断时，若使用“一致/不一致、是/否、有/无、成功/失败、存在/不存在、命中/未命中”等成对标签，必须给齐两边，或改写成不承诺另一边的单一直接结论；不得只列“一致”后直接跳到未标注的另一种判断。“不要做/禁止/避免/切勿”等否定标题下不得只剩“可以/建议/请/应该/优先/最好/即可/帮你”等正向建议；正向替代动作必须移到独立的“可以做/下一步”标题下。用户明确只问“先做哪个验证/第一步做什么”时，只给一个最小只读验证，不追加第二、第三步或可转发的修改指令。',
+    '结构化答案还必须逐项核对“声明数量 → 实际内容”：声称二/三/四边、项、份、件、条、处或个对照时，紧随其后的对照表或 Markdown 清单必须确实给出相同数量的完整项；不得用一行表格冒充“三边对照”，也不得说“核两件事”却只列一项。明确要求“请回/回复/提供/补充/核对 N 行、列、组、种、类”时，紧随列表或表格也必须有相同数量，后文不得继续引用已经被清理掉的“N行”；普通事实“数据表有4列/已有4行数据”不是回复格式契约。同一小节里“确认/回复/补充/核对 N 件/项/点/条/行/列/组/种/类”等结构数量不得漂移；终稿删句后必须重新计数，统一为实际内容或删除数量承诺及其后续引用，绝不为凑数补造。“例如：/如下：/包括：/包含：/内容为：/由以下组成：/分别为：”后必须有实际内容，“里面有：”同样受此约束；无论跨块还是同一 paragraph，都不能在没有枚举、字段、代码或列表时直接跳到“别搞混/注意/结论/下一步”等新语义分句；任何以冒号结尾的标题/提示语都不得出现在正文末尾而没有子内容。清理并列项后不得留下孤立的“还是页面…/或者接口…”等后半分支，也不得留下以“还是/或者/或是/或”结尾却没有后一项的前半分支；不得在答案开头或“结论/判断”等纯标题后直接留下没有前述主张的“但/但是/不过/然而”转折残句。删除示例或引用正文时必须连同整句引号一起删除，不得留下单独一行的「/」/“/”/『/』等孤立引号。明确要求对照/比较/分支判断时，若使用“一致/不一致、是/否、有/无、成功/失败、存在/不存在、命中/未命中”等成对标签，必须给齐两边，或改写成不承诺另一边的单一直接结论；不得只列“一致”后直接跳到未标注的另一种判断。“不要做/禁止/避免/切勿”等否定标题下不得只剩“可以/建议/请/应该/优先/最好/即可/帮你”等正向建议；正向替代动作必须移到独立的“可以做/下一步”标题下。用户明确只问“先做哪个验证/第一步做什么”时，只给一个最小只读验证，不追加第二、第三步或可转发的修改指令。',
+    '同一局部的结构数量不得从 1 漂成 2；这里也包括行、列、组、种、类等带明确回复动作的数量声明。',
     '最终稿中的每个有序/无序列表项若只剩粗体步骤标题，后面必须有正文或子项；若直接遇到分隔线、新节、下一同级列表项或答案结束，删除该空列表项，不得补造内容。每个自然句也必须完整收口：行尾逗号、分号或冒号后必须有同句后半段或紧邻正文；若直接进入分隔线、新节、统一安全尾注或答案结束，删除该悬空完整句。列表项内部的正常分号、下一行有真实正文/子项及以句号/问号/叹号完整结束的粗体单句不得误删。',
     '普通行、粗体行或 Markdown heading 形式的“N. 步骤标题”都必须有自己的正文、表格、列表或代码块；水平分隔线不算步骤内容。若到下一同级编号步骤、分隔线、新节或文末仍无内容，删除该空编号步骤；删除后只把剩余已有步骤连续重编号，不得补造缺失步骤。四空格缩进的嵌套步骤属于父步骤内容，不参与顶层编号。',
     '用户问“只有这份证据/没有另一份证据，够不够、是否足够、能不能判断”时，第一句话必须明确回答：现有证据够完成什么、不够完成什么；随后只从 current/inherited route 的直接事实和已核主接口给最小缺口，不得退成页面、终端、账号、版本等跨主题通用材料清单。用户明确索要完整提单/转开发材料清单时才可给通用清单。若本轮没有可核验附件，不得声称看见截图里的数字或内容。',
@@ -2115,6 +2116,10 @@ function consultAnswerSemanticAudit(answer, question, route) {
   // 避免把横向三列表误判为缺少三行。
   const chineseCount = { '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10 };
   const structuredCountRe = /(?:共|做|核对|对照|比较|检查|保留|拿|至少还要|还要|需要|缺)?\s*([一二两三四五六七八九十]|\d{1,2})\s*(边|项|份|样(?:东西|材料|信息)?|件(?:事|内容)?|条(?:记录|数据|内容)?|处(?:位置|断点)?|个(?:值|字段|位置|观测点|检查点|对照点)?)\s*(?:原文|值|字段|位置|观测点|检查点|数据)?\s*(?:对照|核对|比较|检查|分别)?/gu;
+  // “请回/提供/补充/核对 N 行（列/组/种/类）”是对紧随结构的显式
+  // 数量契约。行/列等又常出现在普通数据事实里，因此动作词必须存在：
+  // “表格有4列”“用户已有4行数据”不能触发，避免把业务数据误当回复格式。
+  const requestedStructureCountRe = /(?:请(?:你)?(?:只|直接)?\s*)?(?:回|回复|提供|补充|核对)\s*(?:下面|以下|下列|这|上述|以上)?\s*([一二两三四五六七八九十]|\d{1,2})\s*(行|列|组|种|类)/u;
   const cardinalityMismatches = [];
   for (let index = 0; index + 1 < documentLines.length; index++) {
     const headerCells = consultMarkdownTableCells(documentLines[index]);
@@ -2205,7 +2210,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   // 同一局部结构里的显式数量声明也不能漂移，例如标题说“确认1件事”，
   // 紧接着又要求“回复两点”。只识别带结构动作的声明，不把“两条历史记录”
   // 这类普通事实数量当成清单承诺。
-  const explicitCountRe = /(?:确认|回复|补充|核对|对照|比较|检查|保留|拿)\s*(?:下面|这)?\s*([一二两三四五六七八九十]|\d{1,2})\s*(?:件(?:事|内容)?|项|点|条(?:信息|内容)?|处(?:位置)?|个(?:值|字段|位置|观测点|检查点|对照点)?)/u;
+  const explicitCountRe = /(?:确认|回|回复|提供|补充|核对|对照|比较|检查|保留|拿)\s*(?:下面|以下|下列|这|上述|以上)?\s*([一二两三四五六七八九十]|\d{1,2})\s*(?:件(?:事|内容)?|项|点|条(?:信息|内容)?|处(?:位置)?|个(?:值|字段|位置|观测点|检查点|对照点)?|行|列|组|种|类)/u;
   const conflictingCountDeclarations = [];
   for (let index = 0; index < documentLines.length; index++) {
     const firstMatch = documentLines[index].match(explicitCountRe);
@@ -2263,6 +2268,64 @@ function consultAnswerSemanticAudit(answer, question, route) {
         kind: 'list',
       });
     }
+  }
+  // 对明确请求回复格式的“行/列/组/种/类”做独立计数。声明可写在粗体
+  // 标题里且不以冒号结尾；实际结构只取紧随其后的列表或表格。后面的
+  // “你回这4行后……”属于同一契约引用，失配时也要一起删除。
+  for (let index = 0; index < documentLines.length; index++) {
+    const normalizedLine = String(documentLines[index] || '').replace(/(?:\*\*|__|`)/g, '').trim();
+    const declarationMatch = normalizedLine.match(requestedStructureCountRe);
+    if (!declarationMatch) continue;
+    const expected = /^\d+$/u.test(declarationMatch[1]) ? Number(declarationMatch[1]) : chineseCount[declarationMatch[1]];
+    if (!Number.isInteger(expected) || expected < 1) continue;
+    const unit = declarationMatch[2];
+    let cursor = index + 1;
+    while (cursor < documentLines.length && !documentLines[cursor].trim()) cursor++;
+    const structureStart = cursor;
+    let structureEnd = cursor;
+    let actual = null;
+    let kind = '';
+    const headerCells = consultMarkdownTableCells(documentLines[cursor] || '');
+    if (headerCells && cursor + 1 < documentLines.length && /^\s*\|?\s*:?-{3,}/u.test(documentLines[cursor + 1])) {
+      structureEnd = cursor + 2;
+      let dataRows = 0;
+      while (structureEnd < documentLines.length && consultMarkdownTableCells(documentLines[structureEnd])) {
+        dataRows++; structureEnd++;
+      }
+      actual = unit === '列' ? headerCells.length : dataRows;
+      kind = 'requested-table';
+    } else if (topLevelListItemRe.test(documentLines[cursor] || '')) {
+      let listItems = 0;
+      let sawItem = false;
+      while (structureEnd < documentLines.length) {
+        const current = documentLines[structureEnd];
+        if (!current.trim()) { if (sawItem) { structureEnd++; continue; } break; }
+        if (topLevelListItemRe.test(current)) { listItems++; sawItem = true; structureEnd++; continue; }
+        if (sawItem && /^\s{2,}\S/u.test(current)) { structureEnd++; continue; }
+        break;
+      }
+      actual = listItems;
+      kind = 'requested-list';
+    }
+    if (actual === null || actual === expected) continue;
+    const dependentLines = [];
+    const dependentCountRe = new RegExp(`(?:回|回复|提供|补充|核对)\\s*(?:这|上述|以上)?\\s*${declarationMatch[1]}\\s*${unit}`, 'u');
+    for (let next = structureEnd; next < documentLines.length && next <= structureEnd + 5; next++) {
+      const normalizedNext = String(documentLines[next] || '').replace(/(?:\*\*|__|`)/g, '').trim();
+      if (dependentCountRe.test(normalizedNext)) dependentLines.push(documentLines[next].trim());
+    }
+    cardinalityMismatches.push({
+      line: documentLines[index].trim(),
+      lineIndex: index,
+      expected,
+      actual,
+      unit,
+      structureStart,
+      structureEnd,
+      structureBlock: documentLines.slice(structureStart, structureEnd).join('\n'),
+      dependentLines,
+      kind,
+    });
   }
   // 冒号式引导语必须真正引出内容；若同一段内直接转入“别搞混/注意/结论”
   // 等新语义分句，或下一非空行已经进入新步骤/标题或已结束，说明模型删掉
@@ -2993,7 +3056,7 @@ function consultAnswerRevisionPrompt(draft, audit) {
       ? `草稿的“最小证据/最小输入”与后续判断结构不自洽。判断表使用了此前未在用户已有证据或“需补/采集”清单中定义的观测量：${(audit.undefinedObservationVariables && audit.undefinedObservationVariables.unboundLabels || []).join('、') || '未定义观测量'}${audit.undefinedObservationVariables && audit.undefinedObservationVariables.countMismatch ? `；草稿声明只缺 ${audit.undefinedObservationVariables.claimedMissingCount} 项，但实际判断至少需要 ${audit.undefinedObservationVariables.actualMissingCount} 项输入` : ''}。只允许从用户本轮已明确具备的证据、草稿已有安全观测项或 current/inherited route 直接事实补全前序清单；否则删除依赖未定义变量的完整判断行/表格。不得补造业务事实，也不得重复要求用户已经明确具备的观测值。`
       : '',
     audit.violations.includes('inconsistent_structured_cardinality')
-      ? `草稿声明的对照数量与实际结构不一致：${(audit.cardinalityMismatches || []).map(item => `${item.kind === 'list' ? '清单' : '表格'}声明${item.expected}项、实际${item.actual}项`).join('；')}。只有草稿中已经存在的内容才能保留；把声明改成实际数量，或删除数量声明/不完整表格或清单，禁止为了凑数新增字段、来源或观测点。`
+      ? `草稿声明的对照/回复数量与实际结构不一致：${(audit.cardinalityMismatches || []).map(item => `${String(item.kind || '').includes('list') ? '清单' : '表格'}声明${item.expected}${item.unit || '项'}、实际${item.actual}${item.unit || '项'}`).join('；')}。只有草稿中已经存在的内容才能保留；把声明改成实际数量，或删除数量声明及其后续引用/不完整表格或清单，禁止为了凑数新增字段、来源或观测点。普通“数据表有 N 列”不是回复数量契约。`
       : '',
     audit.violations.includes('incomplete_result_branch_set')
       ? `草稿承诺“按结果/情况分支判断”，但紧随表格只剩${(audit.incompleteResultBranchTables || []).map(item => item.actual).join('/')}条分支数据行。“分支”至少需要两个互斥或可区分结果；只能用草稿中已有的分支恢复，否则删除该引导语与不完整表格整块，不得凭空补造其余结果。`
@@ -3145,7 +3208,8 @@ function consultAnswerSafeFallback(draft, audit) {
   for (const mismatch of audit.cardinalityMismatches || []) {
     if (mismatch.structureBlock) fallbackDraft = fallbackDraft.replace(mismatch.structureBlock, '');
     else if (mismatch.tableBlock) fallbackDraft = fallbackDraft.replace(mismatch.tableBlock, '');
-    if (mismatch.line) fallbackDraft = fallbackDraft.split('\n').filter(line => line.trim() !== mismatch.line).join('\n');
+    const mismatchLines = new Set([mismatch.line, ...(mismatch.dependentLines || [])].filter(Boolean));
+    if (mismatchLines.size) fallbackDraft = fallbackDraft.split('\n').filter(line => !mismatchLines.has(line.trim())).join('\n');
   }
   for (const branches of audit.incompleteResultBranchTables || []) {
     if (branches.block) fallbackDraft = fallbackDraft.replace(branches.block, '');
@@ -3201,6 +3265,12 @@ function consultAnswerSafeFallback(draft, audit) {
   // 其它违规句/表格行被删除后，原本完整的判断表也可能只剩一行。
   // 对最终降级稿再做一次结构审计；只移除已经残缺的整块，不尝试补造分支。
   const postCleanupAudit = safeKept ? consultAnswerSemanticAudit(safeKept, audit.diagnosticQuestion ? '怎么判断？' : '', { matched: false }) : null;
+  for (const mismatch of postCleanupAudit && postCleanupAudit.cardinalityMismatches || []) {
+    if (mismatch.structureBlock) safeKept = safeKept.replace(mismatch.structureBlock, '');
+    else if (mismatch.tableBlock) safeKept = safeKept.replace(mismatch.tableBlock, '');
+    const mismatchLines = new Set([mismatch.line, ...(mismatch.dependentLines || [])].filter(Boolean));
+    if (mismatchLines.size) safeKept = safeKept.split('\n').filter(line => !mismatchLines.has(line.trim())).join('\n');
+  }
   for (const branches of postCleanupAudit && postCleanupAudit.incompleteResultBranchTables || []) {
     if (branches.block) safeKept = safeKept.replace(branches.block, '');
   }

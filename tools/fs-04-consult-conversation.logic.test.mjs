@@ -1646,6 +1646,58 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.deepEqual(bundle.audit('只确认一件事：已有两条历史记录是否一致。', '先确认什么？', route).violations, [], '普通事实数量没有第二个结构动作声明时不得误伤');
   assert.deepEqual(bundle.audit('请回复两点：\n- 页面值\n- 响应值', '还缺什么？', route).violations, [], '单一数量声明不得误伤');
 
+  const q125R78ProductionDraft = [
+    '第二步已经对不上时，先停。',
+    '**请你只回这 4 行（有就抄，没有写「没有」）**',
+    '- 同一条结果是否还有 content：有/没有/没权限看',
+    '你回这4行后，我再帮你判断。',
+  ].join('\n');
+  const q125R79Audit = bundle.audit(q125R78ProductionDraft, '第二步对不上，后面先停还是继续？', route);
+  assert.ok(q125R79Audit.violations.includes('inconsistent_structured_cardinality'), '声明回复4行但紧随清单只剩1行必须命中');
+  assert.deepEqual(q125R79Audit.cardinalityMismatches.filter(item => item.kind === 'requested-list').map(item => [item.expected, item.actual, item.unit]), [[4, 1, '行']]);
+  const q125R79Fallback = bundle.fallback(q125R78ProductionDraft, q125R79Audit);
+  assert.match(q125R79Fallback, /第二步已经对不上时，先停/);
+  assert.doesNotMatch(q125R79Fallback, /4\s*行|content|你回这4行后/);
+  assert.deepEqual(bundle.audit(q125R79Fallback, '第二步对不上，后面先停还是继续？', route).violations, [], '数量失配降级稿不得残留声明、残项或后续数量引用');
+  assert.deepEqual(bundle.audit([
+    '请你只回这4行：',
+    '- 页面已有值',
+    '- 已有请求原文',
+    '- 已有响应原文',
+    '- 同刻本机值',
+  ].join('\n'), '还缺什么？', route).violations, [], '声明4行且紧随清单确有4行时放行');
+  assert.deepEqual(bundle.audit([
+    '这个数据表有4列：',
+    '| 页面值 | 请求值 | 响应值 | 本机值 |',
+    '| --- | --- | --- | --- |',
+    '| 1 | 1 | 1 | 1 |',
+  ].join('\n'), '现有表格是什么？', route).violations, [], '普通数据表4列不是回复格式请求，不得误触发数量门');
+  assert.deepEqual(bundle.audit('用户说已有4行数据，可以只读核对。', '现有证据是什么？', route).violations, [], '用户陈述已有4行数据不是结构请求');
+  const requestedColumnsAudit = bundle.audit([
+    '请提供4列：',
+    '| 页面值 | 请求值 | 响应值 |',
+    '| --- | --- | --- |',
+    '| 1 | 1 | 1 |',
+  ].join('\n'), '请按什么格式补充？', route);
+  assert.deepEqual(requestedColumnsAudit.cardinalityMismatches.filter(item => item.kind === 'requested-table').map(item => [item.expected, item.actual, item.unit]), [[4, 3, '列']], '明确请求4列但表格只有3列必须命中');
+
+  const postCleanupCountDraft = [
+    '先保留已有请求原文。',
+    '请只回这4行：',
+    '- 已有页面现象',
+    '- 让运维重跑任务',
+    '- 让对接方改参数后复测',
+    '- 让开发修改配置',
+    '你回这4行后再判断。',
+  ].join('\n');
+  const postCleanupCountAudit = bundle.audit(postCleanupCountDraft, '现有证据怎么核对？', route);
+  assert.ok(postCleanupCountAudit.violations.includes('cross_actor_side_effect'));
+  assert.equal(postCleanupCountAudit.cardinalityMismatches.filter(item => item.kind === 'requested-list').length, 0, '清理前4行完整时不得提前误报');
+  const postCleanupCountFallback = bundle.fallback(postCleanupCountDraft, postCleanupCountAudit);
+  assert.match(postCleanupCountFallback, /先保留已有请求原文/);
+  assert.doesNotMatch(postCleanupCountFallback, /请只回这4行|已有页面现象|运维重跑|对接方改参数|开发修改配置|你回这4行后/);
+  assert.deepEqual(bundle.audit(postCleanupCountFallback, '现有证据怎么核对？', route).violations, [], '危险项清理后须再次核数量并删除新形成的不自洽回复块');
+
   const orphanedAlternativeDraft = [
     '写清「第二步对不上」的原文现象',
     '',
