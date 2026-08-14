@@ -1236,3 +1236,39 @@ test('AC-7 retrieval.routing 挂进 consult + 回放（源码级断言）', () =
   const occ = (SRC.match(/retrieval\.routing = routingDiag\(hasMap, route\)/g) || []).length;
   assert.ok(occ >= 2, 'consult + retrieval-replay 均接入路由诊断');
 });
+
+test('真实PWRS地图回归：患者类诊断补全全局三元身份，Pad监护链路事实完整', { skip: !process.env.PWRS_REAL_MAP }, () => {
+  const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
+  const S = buildRoutingSandbox(makeDeps());
+  const cases = [
+    ['AI药历没生成，现场抓什么请求参数排查？', 'QR-AI-MEDICINE-STATUS'],
+    ['患者关注按患者和药师怎么判断？', 'QR-PATIENT-FOCUS-OWNER'],
+    ['实施照着走 Pad 监护列表到详情的完整链是什么？', 'QR-PAD-CARE-ROUTE'],
+    ['Pad 监护详情数据从哪个 GET 接口读取？', 'QR-PAD-CARE-ROUTE'],
+    ['care order 是详情读取接口还是下监护医嘱？', 'QR-PAD-CARE-ROUTE'],
+  ];
+  for (const [question, expected] of cases) {
+    const hit = S.routeQuestion(map, question, '');
+    assert.equal(hit.matched, true, question);
+    assert.equal(hit.route.id, expected, question);
+    if (/药历|关注|监护/.test(question)) {
+      assert.match(hit.answerFacts.join('\n'), /hospitalId \+ patientId \+ visitId/, question);
+    }
+  }
+  const care = S.routeQuestion(map, '点监护记录前是否先同步患者上下文，详情请求是什么？', '');
+  const facts = care.answerFacts.join('\n');
+  assert.match(facts, /tablet\/pages\/ucenter\/info\/custody\.vue/);
+  assert.match(facts, /先同步\/确认.*患者上下文/);
+  assert.match(facts, /tablet\/pages\/patient\/info\/custody\.vue\?careTypeId=<监护ID>/);
+  assert.match(facts, /GET \/pwrsapi\/applet\/follow\/care\?careTypeId=<监护ID>/);
+  assert.match(facts, /\/care\/order 是下监护医嘱.*不是.*详情读取接口/);
+});
+
+test('真实PWRS地图审计：凡同时出现 patientId 与 visitId 的 route 都不得漏全局 hospitalId', { skip: !process.env.PWRS_REAL_MAP }, () => {
+  const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
+  const offenders = (map.questionRoutes || []).filter((route) => {
+    const facts = [...(route.answerFacts || []), ...(route.mustNotConfuse || [])].join('\n');
+    return /patientId/i.test(facts) && /visitId/i.test(facts) && !/hospitalId/i.test(facts);
+  }).map((route) => route.id);
+  assert.deepEqual(offenders, []);
+});

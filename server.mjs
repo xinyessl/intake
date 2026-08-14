@@ -1627,10 +1627,10 @@ function consultNonDestructiveDiagnosticGuard(question, route) {
   return [
     '【最高优先：实施现场诊断默认只读、非破坏】',
     '禁止为了验证而要求实施新建、修改、删除、保存、提交、完成、审批、签名、切换星标、打开会导致已读的记录、补跑、重跑或重新触发任何业务动作。这些都会改变数据、状态或留痕；“只做一次”“测试数据”“之后能回滚”都不能自动把它们变成只读动作。不得把“观察一次请求”误写成“主动执行一次写操作再抓请求”。',
-    '“再点一次”“重做一遍”“复现一下”“验证一下”“试试看”“用创建人点”“正常点完成/提交”都不是安全措辞：只要触发动作是否只读、是否会改状态尚未确认，就不得建议执行。即使当前 route 已经确认按钮、角色、状态或业务结果，也只允许把它作为事实结论，不能顺手追加一次真实完成、提交、签名、审批等现场验证。',
+    '“再点一次”“重做一遍”“复现一下”“下一轮”“同条件再复现”“再复现”“重新操作一次”“重新走一遍”“验证一下”“试试看”“用创建人点”“正常点完成/提交”都不是安全措辞：即使句子没出现“提交/保存”等写入动词，只要被重复的原业务动作是否只读、是否会改状态尚未确认，就一律按潜在副作用处理，不得建议执行。即使当前 route 已经确认按钮、角色、状态或业务结果，也只允许把它作为事实结论，不能顺手追加一次真实完成、提交、签名、审批等现场验证。',
     '优先复用已经存在的证据：对比已有正常记录与异常记录、历史日志/审计、用户刚才已经发生的请求与响应、页面当前只读信息，或测试环境里已存在且明确授权的对照数据。刷新、切换已确认是纯前端或只读的页签、查看已确认不会触发已读或业务状态变化的详情，属于可用观察动作；若详情打开会标已读，则仍禁止用它验证。',
     '消息、通知、患教、咨询等场景中，“当面确认/看看患者端/点进去看状态”也不默认是只读：打开可能会标记已读、已接收或完成。未确认无副作用时，只读使用当前已显示的页面、已有截图、历史状态、已有请求/响应与审计；不得要求患者或实施新打开、新点进详情来验证。',
-    '如果缺少本次请求，默认接受“当前无法安全补抓”，先用已有请求、日志、审计或历史记录；只有已经确认该动作无副作用，才可让现场单次执行以观察请求。若动作会改状态，则必须同时明确：1. 隔离测试环境或专用测试数据；2. 明确执行授权；3. 回滚/清理方案；4. 幂等性与影响范围。任一项没有确认，就停止给现场写操作步骤，整理“已知事实、已有正常/异常证据、仍缺哪一层”后升级开发或产品确认。',
+    '如果缺少本次请求，默认接受“当前无法安全补抓”，先用已有请求、日志、审计或历史记录；只有已经明确被重复的动作本身是只读且不会改变任何业务状态，才可让现场单次执行以观察请求。若只读性未知或动作会改状态，则必须同时明确：1. 隔离测试环境或专用测试数据；2. 明确执行授权；3. 回滚/清理方案；4. 幂等性与影响范围。任一项没有确认，就停止给现场写操作步骤，整理“已知事实、已有正常/异常证据、仍缺哪一层”后升级开发或产品确认。',
     '当前 route/Spec 已确认的方法授权、owner、机构范围或状态规则仍须作为判断基线；本守卫只限制诊断动作，不得把已知事实重新降级为未知，也不得借安全名义改用猜测。',
   ].join('\n');
 }
@@ -1734,6 +1734,27 @@ function consultFocusedFactGuard(question) {
     '用户只问一个字段/列的类型、长度、取值或一个是非事实。先直接回答该属性，并只补一句回答这个属性所必需的限定；答到这里就停止。',
     '不得主动扩写同表其它列、本地身份元组、联合键、索引、唯一约束、数据库迁移、SQL 用法、相邻模块事实或实施步骤。只有用户在本轮明确问到这些内容，且当前有效证据直接覆盖时，才逐项回答。',
     '即使相邻事实本身真实，只要不改变本问答案，也不要作为“顺便提醒”加入；显式切题后不得带入上一主题事实。',
+  ].join('\n');
+}
+
+// 患者相关功能的请求身份边界是全局安全裁决，不能依赖某条业务 route 是否刚好重复列全。
+// 只在现场诊断/请求核对场景注入；单字段类型等原子事实题继续止答，避免无关扩写。
+function consultPatientIdentityGuard(question, route) {
+  const q = String(question || '').trim();
+  if (!q || consultFocusedFactGuard(q)) return '';
+  const routeText = route && route.matched
+    ? [route.route && route.route.title, ...(route.answerFacts || []), ...(route.mustNotConfuse || [])].filter(Boolean).join(' ')
+    : '';
+  const topic = `${q} ${routeText}`;
+  const patientTopic = /(?:患者|patient|患教|监护|关注|药历|随访|住院号|就诊号)/i.test(topic);
+  const requestIdentityCheck = /(?:请求|接口|参数|抓包|Network|响应|URL|身份|串院|串患者|错患者|详情|列表|数据对不上|怎么排查|如何排查|下一步|留证|复现)/i.test(q)
+    || (consultSafeDiagnosticIntent(q) && /(?:页面|详情|列表|接口|请求|响应|数据)/i.test(topic));
+  if (!patientTopic || !requestIdentityCheck) return '';
+  return [
+    '【患者相关请求的全局三元身份守卫】',
+    '本轮涉及患者相关页面、详情、列表或现场诊断。只要答案要求核对请求身份/参数，就必须逐项核对 `hospitalId + patientId + visitId`，三项共同构成当前患者身份边界；不能只写 `patientId + visitId`，也不能因为当前业务 route 没有重复列全就省略 `hospitalId`。',
+    '缺少 `hospitalId` 不能判定患者请求身份完整，应按当前契约回到可信入口重新选择医院/院区或患者上下文；不得从 token、默认院区或历史链接补齐。`districtCode` 只可作为可信上游内部路由条件，不能代替 `hospitalId`，也不是产品患者身份键的第四项。',
+    '该守卫只约束患者相关请求身份核对，不扩写无关实现。若用户只问单个字段/列的类型、长度、值或一个原子是非事实，仍只回答所问属性，不主动追加三元身份、索引、表或其它模块事实。',
   ].join('\n');
 }
 
@@ -3445,7 +3466,7 @@ const server = http.createServer((req, res) => {
       else {
         // PD-04：命中 mustNotConfuse → 作负向提示注入 system（易混淆项，勿臆造）。answerFacts 已在 specHits 顶段（consultSystem 走 specExcerpts）。
         const mncNote = routeMnc.length ? '\n【以下为该问题的易混淆项，请勿臆造、勿张冠李戴】' + routeMnc.map(x => '\n· ' + x).join('') : '';
-        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationMode) + '\n' + consultEvidenceLedgerGuard(qtext, route) + '\n' + consultCurrentRulingGuard(qtext, route) + '\n' + consultRuleApplicationGuard(qtext, route) + '\n' + consultCriticalContextGuard(qtext, route) + '\n' + consultFocusedFactGuard(qtext) + '\n' + consultExactPathBoundaryGuard(qtext, route) + '\n' + consultGenericControlledActionGuard(qtext) + '\n' + consultOperationalSafetyGuard(qtext, route) + '\n' + consultFileArtifactGuard(qtext, route) + '\n' + consultDiagnosticGuard(qtext, route) + '\n' + consultNonDestructiveDiagnosticGuard(qtext, route) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
+        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationMode) + '\n' + consultEvidenceLedgerGuard(qtext, route) + '\n' + consultCurrentRulingGuard(qtext, route) + '\n' + consultRuleApplicationGuard(qtext, route) + '\n' + consultPatientIdentityGuard(qtext, route) + '\n' + consultCriticalContextGuard(qtext, route) + '\n' + consultFocusedFactGuard(qtext) + '\n' + consultExactPathBoundaryGuard(qtext, route) + '\n' + consultGenericControlledActionGuard(qtext) + '\n' + consultOperationalSafetyGuard(qtext, route) + '\n' + consultFileArtifactGuard(qtext, route) + '\n' + consultDiagnosticGuard(qtext, route) + '\n' + consultNonDestructiveDiagnosticGuard(qtext, route) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
           piece = String(piece == null ? '' : piece); if (!piece) return;
           if (!kbInjected && kbRefs.length) { kbInjected = true; sse({ kb: kbRefs, kbInjected: true }); }
           reply += piece; sse({ v: piece });
