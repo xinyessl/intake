@@ -1695,6 +1695,11 @@ function consultHasControlledActionBundle(question) {
     && /(?:影响范围|数据范围|执行范围)/i.test(q);
 }
 
+function consultConcretePaths(text) {
+  return Array.from(new Set((String(text || '').match(/(?<![A-Za-z0-9_.{}<>:-])\/(?:[A-Za-z0-9_.{}<>:-]+\/)*[A-Za-z0-9_.{}<>:-]+\/?(?:\?[A-Za-z0-9_./?={}&<>:%+-]*)?/g) || [])
+    .map(x => x.replace(/[),.;，。；：]+$/g, '')).filter(Boolean)));
+}
+
 function consultAnswerSemanticAudit(answer, question, route) {
   const text = String(answer || '').trim();
   const likelihoodAllowed = consultHasLikelihoodEvidence(question, route);
@@ -1704,10 +1709,16 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const negativeOrConditional = /(?:不得|不能|不要|禁止|不可|不应|先别|停止|未确认|任一项没有|仅当|只有[^。！？；\n]{0,30}(?:才|之后|后))/i;
   const unsafeActorActions = controlled ? [] : text.split(/(?<=[。！？；\n])/u)
     .map(x => x.trim()).filter(x => x && actorAction.test(x) && !negativeOrConditional.test(x));
+  const routeText = route && route.matched
+    ? [route.route && route.route.title, ...(route.answerFacts || []), ...(route.mustNotConfuse || [])].filter(Boolean).join(' ')
+    : '';
+  const allowedPaths = new Set(consultConcretePaths(`${question || ''}\n${routeText}`));
+  const unexpectedPaths = consultConcretePaths(text).filter(p => !allowedPaths.has(p));
   const violations = [];
   if (likelihoodTerms.length) violations.push('unsupported_likelihood');
   if (unsafeActorActions.length) violations.push('cross_actor_side_effect');
-  return { checked: true, likelihoodAllowed, likelihoodTerms, unsafeActorActionCount: unsafeActorActions.length, violations };
+  if (unexpectedPaths.length) violations.push('unexpected_concrete_path');
+  return { checked: true, likelihoodAllowed, likelihoodTerms, unsafeActorActionCount: unsafeActorActions.length, unexpectedPaths, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -1719,6 +1730,9 @@ function consultAnswerRevisionPrompt(draft, audit) {
       : '',
     audit.violations.includes('cross_actor_side_effect')
       ? '草稿把副作用动作交给实施、患者、对接方、运维或开发执行。删除改参、改映射/配置、复测、重试、重跑、补跑、重新触发等指令；改成只读检查已有报文、映射、请求响应、日志或审计。'
+      : '',
+    audit.violations.includes('unexpected_concrete_path')
+      ? '草稿出现了用户原文和当前 route/Spec 事实都没有的具体路径，或把已核路径用省略号、缩写、去前缀/尾斜杠的方式改写。删除这些新路径；已核路径必须逐字保留每个路径段和斜杠。不能安全恢复原字面量时改写为“该已核接口”或“当前请求”，不要猜路径。'
       : '',
     '保留草稿中已经由 Spec/route/源码确认的事实和局部未知边界；不得把当前主题整体降级为“说明书未覆盖”。',
     '<draft>', String(draft || ''), '</draft>',
@@ -1734,10 +1748,16 @@ function consultAnswerSafeFallback(draft, audit) {
     if (audit.violations.includes('cross_actor_side_effect') && actorAction.test(part) && !negativeOrConditional.test(part)) return false;
     return true;
   }).join('').trim();
+  let safeKept = kept;
+  if (audit.violations.includes('unexpected_concrete_path')) {
+    for (const p of audit.unexpectedPaths || []) safeKept = safeKept.split(p).join('该已核接口');
+    safeKept = safeKept.replace(/…\s*该已核接口/g, '该已核接口');
+  }
   const notes = [];
   if (audit.violations.includes('unsupported_likelihood')) notes.push('当前证据不支持对原因作频率排序；未确认的原因只能作为不排序的待验证分支。');
   if (audit.violations.includes('cross_actor_side_effect')) notes.push('未满足完整受控条件时，不执行改参、复测、重试、重跑或重新触发；只核已有报文、映射、请求响应、日志和审计。');
-  return [kept || '当前草稿未通过发布前证据与动作安全校验，已停止发布其中未经证实的判断和操作指令。', ...notes].filter(Boolean).join('\n\n');
+  if (audit.violations.includes('unexpected_concrete_path')) notes.push('具体接口路径只按用户原文或当前 route/Spec 已核字面量逐字表述；未核新路径已改为“该已核接口/当前请求”。');
+  return [safeKept || '当前草稿未通过发布前证据与动作安全校验，已停止发布其中未经证实的判断和操作指令。', ...notes].filter(Boolean).join('\n\n');
 }
 
 // 只给出“隔离/授权/回滚/幂等/范围”而未点名实际业务动作时，不能由检索命中反向替用户选一个任务。

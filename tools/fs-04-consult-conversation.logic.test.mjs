@@ -533,6 +533,7 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
     likelihoodConst + '\n'
     + extractFn(SRC, 'consultHasLikelihoodEvidence') + '\n'
     + extractFn(SRC, 'consultHasControlledActionBundle') + '\n'
+    + extractFn(SRC, 'consultConcretePaths') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + 'return consultAnswerSemanticAudit;',
   )();
@@ -558,6 +559,7 @@ test('发布前确定性语义校验：跨主体副作用触发，否定句和�
     likelihoodConst + '\n'
     + extractFn(SRC, 'consultHasLikelihoodEvidence') + '\n'
     + extractFn(SRC, 'consultHasControlledActionBundle') + '\n'
+    + extractFn(SRC, 'consultConcretePaths') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + 'return consultAnswerSemanticAudit;',
   )();
@@ -580,6 +582,7 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     likelihoodConst + '\n'
     + extractFn(SRC, 'consultHasLikelihoodEvidence') + '\n'
     + extractFn(SRC, 'consultHasControlledActionBundle') + '\n'
+    + extractFn(SRC, 'consultConcretePaths') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + extractFn(SRC, 'consultAnswerRevisionPrompt') + '\n'
     + extractFn(SRC, 'consultAnswerSafeFallback') + '\n'
@@ -597,6 +600,46 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(fallback, /不支持对原因作频率排序/);
   assert.match(fallback, /未满足完整受控条件/);
   assert.deepEqual(bundle.audit(fallback, '患者号丢位怎么查？', route).violations, []);
+});
+
+test('发布前确定性语义校验：路径必须来自用户或route并逐字保留', () => {
+  const likelihoodConst = SRC.match(/const CONSULT_LIKELIHOOD_WORD_RE = [^;]+;/)?.[0] || '';
+  const bundle = new Function(
+    likelihoodConst + '\n'
+    + extractFn(SRC, 'consultHasLikelihoodEvidence') + '\n'
+    + extractFn(SRC, 'consultHasControlledActionBundle') + '\n'
+    + extractFn(SRC, 'consultConcretePaths') + '\n'
+    + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
+    + extractFn(SRC, 'consultAnswerRevisionPrompt') + '\n'
+    + extractFn(SRC, 'consultAnswerSafeFallback') + '\n'
+    + 'return { audit:consultAnswerSemanticAudit, revision:consultAnswerRevisionPrompt, fallback:consultAnswerSafeFallback };',
+  )();
+  const route = {
+    matched: true,
+    route: { title: '工作台今天视图' },
+    answerFacts: ['GET /pwrsapi/month/view/today 返回 year/week'],
+    mustNotConfuse: ['不得答已废止的 GET /month/view'],
+  };
+  assert.deepEqual(bundle.audit('调用 GET /pwrsapi/month/view/today；不要混淆 GET /month/view。', '今天视图接口是什么？', route).violations, []);
+  for (const bad of [
+    '调用 GET /month/view/today。',
+    '抓包筛选 …/month/view/today。',
+    '也可以看 /pwrsapi/month/view/today/。',
+  ]) {
+    const audit = bundle.audit(bad, '今天视图接口是什么？', route);
+    assert.deepEqual(audit.violations, ['unexpected_concrete_path'], bad);
+    assert.ok(audit.unexpectedPaths.length > 0, bad);
+    const revision = bundle.revision(bad, audit);
+    assert.match(revision, /省略号、缩写、去前缀\/尾斜杠/);
+    const fallback = bundle.fallback(bad, audit);
+    assert.doesNotMatch(fallback, /\/month\/view\/today|\/pwrsapi\/month\/view\/today\//);
+    assert.match(fallback, /该已核接口/);
+    assert.deepEqual(bundle.audit(fallback, '今天视图接口是什么？', route).violations, []);
+  }
+  const userPath = bundle.audit('按你提供的 /custom/probe 只读核当前请求。', '我抓到 /custom/probe，怎么判断？', { matched: true, answerFacts: ['只核当前请求'] });
+  assert.deepEqual(userPath.violations, [], '用户本轮原文路径可照实引用');
+  const inventedWithoutKnownPath = bundle.audit('建议再看 GET /guessed/path。', '还要看哪里？', { matched: true, answerFacts: ['继续核当前请求'] });
+  assert.deepEqual(inventedWithoutKnownPath.violations, ['unexpected_concrete_path'], '没有已核路径时也不能新增具体路径');
 });
 
 test('跨主体副作用动作不能通过对接方、运维或开发外包绕过', () => {
