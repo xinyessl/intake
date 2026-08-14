@@ -1,0 +1,254 @@
+{
+  "schemaVersion": "1.0",
+  "title": "PWRS tag35 current-ruling Browser Plugin visible UI regression",
+  "createdAt": "2026-08-14T10:00:00+08:00",
+  "environment": {
+    "surface": "intake 收件·实施端",
+    "browserControl": "official Chrome Browser Plugin visible UI",
+    "answerSource": "visible DOM only",
+    "site": "安吉县人民医院",
+    "modelVersion": "2.7.260814-35",
+    "imageUploads": 0
+  },
+  "release": {
+    "intakeCommit": "976109b",
+    "pwrsCommit": "040abac2d9c288e35601b775098d30f20050e17e",
+    "pwrsTag": "2.7.260814-35",
+    "productionBackup": "/opt/intake/backups/tag35-20260814T1020",
+    "health": {
+      "ok": true,
+      "projects": 3,
+      "intakes": 678,
+      "kb": 7
+    },
+    "externalPrompts": {
+      "normal": {
+        "safeDiagnostic": true,
+        "criticalContext": true,
+        "currentRuling": true,
+        "focusedFact": true,
+        "firstStep": true
+      },
+      "deep": {
+        "safeDiagnostic": true,
+        "criticalContext": true,
+        "currentRuling": true,
+        "focusedFact": true,
+        "firstStep": true
+      }
+    }
+  },
+  "verification": {
+    "total": 17,
+    "passed": 17,
+    "failed": 0,
+    "conversations": 5,
+    "newConversationIsolation": "Each semantic chain used the visible 新对话 control; #fChatBox .f-msg was 0 before first question.",
+    "summary": "Q0090-Q0100 original chain plus six natural positive/negative/topic-switch variants; all passed strict manual evaluation.",
+    "criteria": [
+      "current verified facts take precedence over retired history",
+      "global patient identity uses hospitalId + patientId + visitId",
+      "unknown details remain local",
+      "diagnosis remains read-only/non-destructive",
+      "focused fact answers stop at the asked scope",
+      "explicit topic switches do not inherit the prior route"
+    ]
+  },
+  "automatedTests": {
+    "targeted": "110/110 passed",
+    "intakeLogic": "403 passed, 0 failed, 6 skipped (local MySQL unavailable)",
+    "pwrsMapAudit": "PASS: 81 specs / 1321 headings / 45 generated routes / 126 menus",
+    "aiReadiness": "79/81; diagnostic 18 cards / 108 questions / 0 errors",
+    "syntaxAndData": "node --check, JSON parse, map audit and git diff --check passed",
+    "knownUnrelatedBaseline": "test-spec-menu-contract wording mismatch predates tag35 and is unrelated to current-ruling changes"
+  },
+  "cases": [
+    {
+      "id": "Q0090",
+      "conversation": "C016",
+      "question": "跨院区时一名患者靠哪几个字段才算唯一？",
+      "rawDom": "跨院区时一名患者靠哪几个字段才算唯一？\n  - generic: AI\n  - paragraph:\n    - strong:\n      - text: 结论：跨院区时，一名患者正式算唯一，靠这 3 个字段一起：\n      - code: hospitalId + patientId + visitId\n      - text: 。\n  - list:\n    - text: 两个院区就算\n    - code: patientId\n    - text: 、\n    - code: visitId\n    - text: 完全一样，也必须用\n    - code: hospitalId\n    - text: 区分开。\n    - listitem: 产品页面定位、列表去重、详情、客户端缓存都固定用这组键。\n    - code: districtCode\n    - text: 不是产品身份键的一部分，不能拿它替代\n    - code: hospitalId\n    - text: 。\n  - paragraph:\n    - text: 缺\n    - code: hospitalId\n    - text: 时系统会直接拒绝，并提示重新选院区或从患者列表重新进，不会自动补。\n  - generic: \n  - generic: 这条答疑对你有帮助吗？有价值可沉淀到经验库，帮下一个人少走弯路。\n  - button \" 已解决 · 沉淀经验库\":\n    - generic: \n    - text: 已解决 · 沉淀经验库\n  - generic: \n  - generic: 这个咨询需要升级为需求 / BUG 交运营端处理吗？可直接转成工单。\n  - button \" 🎫 转工单\":\n    - generic: \n    - text: 🎫 转工单\n  ",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "pass",
+      "reason": "准确给出 hospitalId + patientId + visitId 三元身份键、缺 hospitalId 拒绝、districtCode 非产品身份键。"
+    },
+    {
+      "id": "Q0091",
+      "conversation": "C016",
+      "question": "这个问题能稳定复现：切换院区后，同号患者的列表和详情像是串人了。第一步怎么把范围缩小？",
+      "rawDom": "这个问题能稳定复现：切换院区后，同号患者的列表和详情像是串人了。第一步怎么把范围缩小？\n  - generic: AI\n  - paragraph:\n    - strong:\n      - text: 结论：先只读核对「切换院区前后，列表行、详情、请求/页面上下文里的三元身份键是否都是\n      - code: hospitalId + patientId + visitId\n      - text: ，并且\n      - code: hospitalId\n      - text: 跟着当前院区变」。\n    - text: 同号串人优先怀疑：切换后页面/缓存仍只靠\n    - code: patientId + visitId\n    - text: 定位，或详情入口没带上新院区的\n    - code: hospitalId\n    - text: 。院区是显式搜索/上下文条件，不是账号位置授权；缺\n    - code: hospitalId\n    - text: 应拒绝并提示从患者列表重进，不能回退 token/默认院区/\n    - code: districtCode\n    - text: 。\n  - paragraph:\n    - text: 本轮现场：你这边已能稳定复现「切换院区后，同号患者列表和详情像串人」。\n    - text: 仍局部未知：具体是列表本身混了、详情打开串了、还是缓存/历史入口带入的旧上下文——用下面只读对比就能把范围缩到其中一类。\n  - paragraph:\n    - strong: 第一步（也是最快缩小范围的只读动作）：\n  - list:\n    - strong: 固定同一账号、同一终端，复现一次「切换院区 → 打开同号患者」\n  - list:\n    - listitem: 记下：当前是 Web 还是 Pad、页面是「全部患者/关注患者」还是别的入口、切换前院区 A、切换后院区 B。\n    - listitem: 只观察，不要新建/关注/保存等会改数据的操作。\n    - strong: 正常预期\n    - text: ：同号患者必须靠\n    - code: hospitalId\n    - text: 区分；A、B 两个院区即使\n    - code: patientId\n    - text: 、\n    - code: visitId\n    - text: 一样，也应是两条不同患者。\n  - list:\n    - strong: 只读对比「列表行」和「详情」各自的身份上下文\n  - list:\n    - listitem: 在院区 B 下找到那个同号患者，看列表行上能看到的院区/医院信息，以及打开详情后地址栏、侧栏或页面上展示的院区是否仍是 B。\n    - text: 若浏览器开发者工具方便：只看\n    - strong: 已经发出\n    - text: 的列表/详情请求参数和响应里是否同时带有\n    - code: hospitalId\n    - text: 、\n    - code: patientId\n    - text: 、\n    - code: visitId\n    - text: （不要为了抓包去点写操作）。\n    - strong: 怎么判断\n    - text: ：\n    - text: 列表是 B、详情却像 A（或三元键里\n    - code: hospitalId\n    - text: 对不上 / 缺\n    - code: hospitalId\n    - text: ）→ 范围缩到「详情入口或缓存身份键没带齐院区」。\n    - text: 列表里同号就混了，或请求里本身就没带/带错\n    - code: hospitalId\n    - text: → 范围缩到「列表查询/筛选上下文或列表去重键」。\n    - listitem: 请求三元键都对，响应身份也对，但页面显示串了 → 再缩到「前端展示/本地缓存未按三元键刷新」。\n  - list:\n    - strong: 对照「有 hospitalId 的正规入口」和「可能缺键的入口」\n  - list:\n    - listitem: 正规：从当前院区患者列表点进详情。\n    - text: 若现场还有收藏、历史记录、深链、收藏夹链接：只观察是否缺\n    - code: hospitalId\n    - text: （规格要求：缺则应拒绝并提示从列表重进，不得自动补）。\n    - strong: 判断\n    - text: ：深链/历史入口串人、列表入口正常 → 范围缩到「无\n    - code: hospitalId\n    - text: 的历史入口/缓存」；两入口都串 → 继续盯切换院区后的显式上下文和请求三元键。\n  - list:\n    - strong: 整理最小留证（方便下一步或转开发）\n  - list:\n    - listitem: 脱敏截图：切换前后的院区选择、列表同号行、详情页展示。\n    - text: 若有请求：记录实际 URL、请求里的\n    - code: hospitalId/patientId/visitId\n    - text: 、HTTP/业务码、响应里返回的患者身份是否与页面一致。\n    - listitem: 发生时间、账号角色（不必猜权限集合；换账号正常也只当线索，先比两边的显式院区选择和同一请求的三元键）。\n  - paragraph:\n    - strong: 拿到第 2 步结果后怎么走：\n  - list:\n    - text: 缺\n    - code: hospitalId\n    - text: 或详情仍用旧键 → 按规则应从患者列表重选院区再进，不要指望自动补齐。\n    - listitem: 请求三元键正确但页面串 → 把「列表行身份 vs 详情身份 vs 响应身份」对照表发给开发。\n    - listitem: 仅出院/历史入口异常时，注意出院列表可能回源 HIS、部分历史入口查本地快照，不是同一数据集，别混着比。\n  - paragraph: 先做完第 1～2 步把「列表混 / 详情串 / 缓存旧键」三选一缩出来，再把对照结果回我（或贴脱敏的请求三元键与页面院区），我帮你定下一步只读点。\n  - generic: \n  - generic: 这条答疑对你有帮助吗？有价值可沉淀到经验库，帮下一个人少走弯路。\n  - button \" 已解决 · 沉淀经验库\":\n    - generic: \n    - text: 已解决 · 沉淀经验库\n  ",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "pass",
+      "reason": "以已核三元身份键为基线，给出列表/详情/缓存的只读对比，不把串人归因于账号授权。"
+    },
+    {
+      "id": "Q0092",
+      "conversation": "C016",
+      "question": "这次复测患者院区身份时，换了另一个账号就正常了，这个线索说明先看哪边？",
+      "rawDom": "这次复测患者院区身份时，换了另一个账号就正常了，这个线索说明先看哪边？\n  - generic: AI\n  - paragraph:\n    - strong: 结论：换账号后正常，只是一条相关性线索，先别往「账号院区授权 / 授权院区集合不同」上靠。\n    - text: 当前裁决里：院区是页面\n    - strong: 显式搜索/上下文条件\n    - text: ，不是账号位置授权；患者结果不得按账号绑定集合缩小，未绑定目标院区也不得据此拒绝查询。所以这个线索\n    - strong: 不能直接推导成授权差异\n    - text: 。\n  - paragraph:\n    - text: 现场优先只做\n    - strong: 只读对比\n    - text: 两边：\n  - list:\n    - text: 两个账号各自页面上的\n    - strong: 显式院区/病区/科室选择上下文\n    - text: 是否一致\n    - text: 同一操作发出的请求里，\n    - code: hospitalId + patientId + visitId\n    - text: 三元键是否一致、是否完整\n    - listitem: 响应返回的患者身份，以及列表/详情/缓存上的表现是否一致\n  - paragraph:\n    - strong: 建议你现在就按这个顺序缩小范围（全程只读，不新建、不关注、不保存）：\n  - list:\n    - strong: 固定同一终端、同一入口、同一目标同号患者\n  - list:\n    - text: 异常账号：记下当前选的院区、列表行/详情上看到的院区，以及（如方便）已发出请求里的\n    - code: hospitalId、patientId、visitId\n    - text: 。\n    - listitem: 正常账号：用同样入口、同样目标患者，做同样的只读观察。\n    - strong: 怎么判断\n    - text: ：\n    - listitem: 两边显式选的院区就不一样 → 先对齐页面上下文再比，别先怪权限。\n    - text: 院区选一样，但请求里缺\n    - code: hospitalId\n    - text: 或\n    - code: hospitalId\n    - text: 对不上 → 范围缩到「身份键/入口上下文」而不是账号授权。\n    - listitem: 请求三元键一样、响应身份也一样，只有页面/缓存表现不同 → 再缩到前端缓存或展示是否按三元键区分。\n  - list:\n    - strong: 把两边的最小对照表记下来（脱敏即可）\n  - list:\n    - listitem: 账号 A（异常）/ 账号 B（正常）\n    - listitem: 页面显式院区选择\n    - listitem: 请求三元键\n    - listitem: 响应身份\n    - listitem: 列表行 vs 详情是否串人\n    - listitem: 发生时间、Web 还是 Pad、从哪个列表进的\n  - list:\n    - strong: 拿到对照结果后\n  - list:\n    - listitem: 若两边请求三元键或显式上下文就不同 → 优先按「上下文/身份键」继续修或留证，不要升级成「授权院区集合」问题。\n    - text: 若两边请求与响应完全一致、只有一边串人 → 把对照表 + 脱敏截图给开发，查页面/缓存是否没按\n    - code: hospitalId + patientId + visitId\n    - text: 区分。\n    - listitem: 仍不要用「换账号正常」去复活已废止的「账号授权院区 / 未授权拒绝 / 按绑定集合缩小结果」说法。\n  - paragraph: 先把第 1 步两边的「显式选择 + 三元键 + 页面表现」对照结果回我（有截图或请求参数更好），我帮你定是上下文问题还是要往缓存/实现缺口收。\n  - generic: \n  - generic: 这条答疑对你有帮助吗？有价值可沉淀到经验库，帮下一个人少走弯路。\n  - button \" 已解决 · 沉淀经验库\":\n    - generic: \n    - text: 已解决 · 沉淀经验库\n  ",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "pass",
+      "reason": "明确换账号正常仅是相关性线索，不得推导账号授权院区集合，并给显式上下文与三元键对照。"
+    },
+    {
+      "id": "Q0093",
+      "conversation": "C016",
+      "question": "现场还卡在患者院区身份这里，第一步看过了，没发现异常。接下来呢？",
+      "rawDom": "现场还卡在患者院区身份这里，第一步看过了，没发现异常。接下来呢？\n  - generic: AI\n  - paragraph:\n    - strong: 结论：第一步没看出异常，说明「两边显式院区 + 请求三元键」可能表面上一致了；下一步别再盯账号授权，改成只读拆「列表行身份 / 详情身份 / 响应身份 / 切换后是否还在用旧键」四层，把串人缩到其中一层。\n  - paragraph: 持续有效的规则（先守住）：\n  - list:\n    - text: 跨院区患者唯一身份是\n    - strong:\n      - code: hospitalId + patientId + visitId\n    - text: ，缺\n    - code: hospitalId\n    - text: 应拒绝并从患者列表重进，不能自动补。\n    - text: 院区是页面\n    - strong: 显式搜索/上下文\n    - text: ，不是账号位置授权；「换账号正常」不能直接当成授权集合问题。\n  - paragraph: 本轮现场：\n  - list:\n    - strong: 已确认进度\n    - text: ：你说第一步看过了、没发现异常（只继承进度，不默认某次请求一定全对）。\n    - strong: 仍局部未知\n    - text: ：串发生在列表本身、详情打开、还是切换后前端/本地缓存没按三元键刷新——要靠下面只读对比才能分。\n  - paragraph:\n    - strong: 接下来按这个顺序做（全程只读，不要关注/保存/新建）：\n  - list:\n    - strong: 把「没异常」说清楚成对照结果（避免空转）\n  - list:\n    - listitem: 异常账号 vs 正常账号，同一入口、同一同号患者，各记一版：\n    - listitem: 页面上选的院区\n    - listitem: 列表行能看到的院区/身份\n    - listitem: 详情页展示的院区/姓名/床号等是否对得上\n  - paragraph:\n    - text: \"-（有开发者工具再看）已发出请求里的\"\n    - code: hospitalId、patientId、visitId\n    - text: 和响应里回的患者身份\n  - list:\n    - strong: 怎么判断\n    - text: ：若你其实还没逐项写下来，先补这一步；「感觉没异常」不算收口。两边请求键一致但一边串人 → 往展示/缓存收；键本身就不一致 → 还是上下文问题，回到对齐显式院区再比。\n  - list:\n    - strong: 固定异常账号，只做「切换院区前后」的只读对照\n  - list:\n    - listitem: 院区 A 下列表点开同号患者，记列表行 + 详情身份。\n    - listitem: 切到院区 B（或切回），再找同号、再进详情，同样记一版。\n    - strong: 正常\n    - text: ：A、B 即使\n    - code: patientId/visitId\n    - text: 相同，也应靠\n    - code: hospitalId\n    - text: 分开，详情必须跟当前选中的院区一致。\n    - strong: 异常分支\n    - text: ：\n    - listitem: 列表已是 B，详情却像 A → 缩到「详情入口/缓存仍用旧三元键」。\n    - listitem: 列表同号就混了 → 缩到「列表查询上下文或列表去重键」。\n    - listitem: 请求三元键都对、响应也对，只有页面像串人 → 缩到「前端展示/本地缓存未按三元键区分」。\n  - list:\n    - strong: 只观察「从列表进」和「可能缺键的入口」差异（能碰到才看，碰不到就跳过）\n  - list:\n    - listitem: 正规：当前院区患者列表点进详情。\n    - text: 若现场有历史记录、收藏、深链：只看打开后页面/地址是否缺院区上下文；规格要求缺\n    - code: hospitalId\n    - text: 应拒绝并提示从列表重进。\n    - strong: 判断\n    - text: ：仅历史/深链串、列表进正常 → 范围缩到无\n    - code: hospitalId\n    - text: 的入口；两入口都串 → 继续盯切换后的列表/详情与缓存。\n  - list:\n    - strong: 整理最小留证，方便定下一步或交给开发\n  - list:\n    - listitem: 脱敏：切换前后院区、列表同号行、详情页、发生时间、Web/Pad、入口名称。\n    - listitem: 若有请求：实际参数里的三元键、HTTP/业务码、响应身份是否与页面一致（不要贴完整 token/密码）。\n    - listitem: 用一句话标明你落在第 2 步哪条分支。\n  - paragraph:\n    - strong: 先把第 2 步的分支结果回我\n    - text: （例如：「列表对、详情串」或「请求键对、页面串」），我按分支给你下一档只读点；若两边请求与响应完全一致仍只有异常账号串，就把对照表升级给开发查前端/缓存是否没按\n    - code: hospitalId + patientId + visitId\n    - text: 区分。\n  - generic: \n  - generic: 这条答疑对你有帮助吗？有价值可沉淀到经验库，帮下一个人少走弯路。\n  - button \" 已解决 · 沉淀经验库\":\n    - generic: \n    - text: 已解决 · 沉淀经验库\n  ",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "pass",
+      "reason": "持续保留当前裁决，仅继承用户确认的排查进度，不把 assistant 先前假设当事实。"
+    },
+    {
+      "id": "Q0094",
+      "conversation": "C016",
+      "question": "关于患者院区身份，接口是通的，返回也是 200，但页面还是没变化，下一步看哪？",
+      "rawDom": "关于患者院区身份，接口是通的，返回也是 200，但页面还是没变化，下一步看哪？\n  - generic: AI\n  - paragraph:\n    - strong: 结论：接口通、HTTP 200 只说明传输成功，不能当「院区身份已经对上、页面该变」的依据。\n    - text: 下一步只读看三件事：\n    - strong: 响应体业务 code\n    - text: 、\n    - strong: 响应里的患者三元身份是否跟当前院区一致\n    - text: 、\n    - strong:\n      - text: 页面/本地是否还在用旧的\n      - code: hospitalId + patientId + visitId\n    - text: 。\n    - text: 跨院区唯一身份仍是这三元组；院区是页面显式上下文，不是账号授权集合。「换账号正常」「第一步没异常」都不能推出授权问题，也挡不住「业务已成功但前端没按新键刷新」。\n  - paragraph:\n    - strong: 本轮现场\n  - list:\n    - listitem: 已确认：接口能通、返回 200，页面仍没变化（或仍像串人）。\n    - listitem: 仍局部未知：是业务 code 实际失败、响应身份就是错的，还是响应对了但列表/详情/缓存没按三元键更新——用下面只读对比就能收口。\n  - paragraph:\n    - strong: 接下来按这个顺序做（全程只读，不要关注/保存/新建/再点会改状态的操作）：\n  - list:\n    - strong: 打开这次已经返回 200 的那条请求，只读响应体（不要为了“再抓一次”去重提交易）\n  - list:\n    - text: 看业务\n    - code: code\n    - text: （或同等业务成功字段），不要停在 HTTP 200。\n    - text: 看响应里的\n    - code: hospitalId\n    - text: 、\n    - code: patientId\n    - text: 、\n    - code: visitId\n    - text: （以及姓名/床号等你用来判断“是不是同一个人”的展示字段）。\n    - strong: 怎么判断\n    - text: ：\n    - listitem: 业务 code 失败 → 问题在接口业务结果，不是“页面懒得刷”；把业务码和提示文案记下来。\n    - text: 业务成功，但三元键/\n    - code: hospitalId\n    - text: 与当前所选院区不一致 → 范围在「请求上下文或返回身份」仍错，页面“没变/串人”是跟着错身份走的。\n    - listitem: 业务成功且三元键与当前院区一致 → 进入第 2 步，查前端展示/缓存。\n  - list:\n    - strong: 只读对照「响应身份」vs「页面上看到的身份」\n  - list:\n    - listitem: 同一时刻记三列：响应三元键 + 列表行展示 + 详情页展示（院区、姓名、床号等）。\n    - strong: 怎么判断\n    - text: ：\n    - text: 响应对、列表/详情仍是旧院区那个人 → 缩到「页面或本地缓存未按\n    - code: hospitalId + patientId + visitId\n    - text: 区分/刷新」。\n    - listitem: 列表已对、详情仍旧 → 缩到「详情入口或详情侧缓存仍用旧键」。\n    - listitem: 列表、详情、响应三边一致但仍觉得“没变化” → 说明一下你期望变的是什么（例如切院区后列表应换一批人、详情应换人），避免和“同号不同院区本就是两条”的预期打架。\n  - list:\n    - strong: 固定异常账号，只对比「切院区前 / 切院区后」各一次已发生的请求与页面（有历史记录就够，不必再制造新写操作）\n  - list:\n    - text: 看切换后发出的请求是否带上了\n    - strong: 新\n    - text: 的\n    - code: hospitalId\n    - text: ，响应是否也是新院区身份。\n    - strong: 怎么判断\n    - text: ：\n    - listitem: 请求/响应已是新院区，页面仍旧 → 前端展示或本地缓存问题，优先把对照表给开发。\n    - text: 请求里\n    - code: hospitalId\n    - text: 仍是旧的或缺失 → 仍是显式院区上下文没带进查询/详情，回到对齐页面所选院区与入参，而不是账号权限。\n    - text: 缺\n    - code: hospitalId\n    - text: → 按规则应拒绝并从患者列表重进，不能指望自动补齐。\n  - list:\n    - strong: 整理最小留证（方便你收口或转开发）\n  - list:\n    - listitem: 脱敏：当前院区选择、列表行、详情、发生时间、Web/Pad、入口（患者列表 / 历史 / 其它）。\n    - listitem: 该条 200 请求：实际 URL（可打码域名）、入参三元键、HTTP 状态、业务 code、响应三元键是否与页面一致。\n    - listitem: 一句话标明落在哪支：业务失败 / 响应身份错 / 响应对但页面或缓存未更新。\n    - listitem: 不要贴密码或完整 token。\n  - paragraph:\n    - strong: 先回我第 1～2 步的结果即可\n    - text: （例如：「业务 code 成功，响应 hospitalId 已是 B，详情仍显示 A」）。\n  - list:\n    - listitem: 响应对、页面错 → 按「前端/缓存未按三元键刷新」升级开发，附上对照表。\n    - listitem: 响应身份就错或业务 code 失败 → 继续只读对请求入参与当前显式院区，不必先查授权。\n    - listitem: 若你手头只有截图、没有响应体：先根据现有页面把「列表 vs 详情 vs 所选院区」三列记全，再说明缺响应体哪一段，我帮你判断能不能收口。\n  - generic: \n  - generic: 已参考经验（2条）\n  - generic: \n  - generic: \n  - generic: 这条答疑对你有帮助吗？有价值可沉淀到经验库，帮下一个人少走弯路。\n  - button \" 已解决 · 沉淀经验库\":\n    - generic: \n    - text: 已解决 · 沉淀经验库\n  ",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "pass",
+      "reason": "正确区分 HTTP 200、业务码、响应身份和页面缓存，全部为非破坏只读动作。"
+    },
+    {
+      "id": "Q0095",
+      "conversation": "C016",
+      "question": "上午反馈的患者院区身份问题，数据库这边暂时没权限查。仅靠页面和接口响应能先排除什么？",
+      "rawDom": "上午反馈的患者院区身份问题，数据库这边暂时没权限查。仅靠页面和接口响应能先排除什么？\n  - generic: AI\n  - paragraph:\n    - strong: 结论：没库权限也没关系。只靠页面 + 接口响应，已经能把「患者院区身份」问题先收成 3 类里的一类，并先排除一批常见误判。\n    - text: 持续规则不变：跨院区唯一身份是\n    - strong:\n      - code: hospitalId + patientId + visitId\n    - text: ；缺\n    - code: hospitalId\n    - text: 应拒绝并从患者列表重进；院区是页面\n    - strong: 显式上下文\n    - text: ，不是账号位置授权；\n    - strong: HTTP 200 只说明传通了，还要看业务 code 和响应身份\n    - text: 。\n  - separator\n  - generic: 仅靠页面 + 接口响应，可以先排除什么\n  - region \"Markdown 表格\":\n    - table:\n      - rowgroup:\n        - row \"能先排除 / 先收口的 怎么靠页面和响应判断\":\n          - columnheader \"能先排除 / 先收口的\"\n          - columnheader \"怎么靠页面和响应判断\"\n      - rowgroup:\n        - row \"纯网络/传输失败 已是 200 且业务 code 成功 → 不是“接口根本没通”\":\n          - cell \"纯网络/传输失败\"\n          - cell \"已是 200 且业务 code 成功 → 不是“接口根本没通”\"\n        - row \"入参缺三元键或 hospitalId 没带上 看已发出请求参数是否完整；缺键应拒绝，不是静默串人\":\n          - cell \"入参缺三元键或 hospitalId 没带上\":\n            - text: 入参缺三元键或\n            - code: hospitalId\n            - text: 没带上\n          - cell \"看已发出请求参数是否完整；缺键应拒绝，不是静默串人\":\n            - text: 看\n            - strong: 已发出请求\n            - text: 参数是否完整；缺键应拒绝，不是静默串人\n        - row \"“换账号正常 = 授权院区集合问题” 两边请求三元键、显式院区一致时，不能据此排除成账号授权\":\n          - cell \"“换账号正常 = 授权院区集合问题”\"\n          - cell \"两边请求三元键、显式院区一致时，不能据此排除成账号授权\"\n        - row \"列表混 vs 详情串 vs 缓存旧键 对比：所选院区 / 列表行 / 详情 / 响应三元键 是否一致\":\n          - cell \"列表混 vs 详情串 vs 缓存旧键\"\n          - cell \"对比：所选院区 / 列表行 / 详情 / 响应三元键 是否一致\"\n        - row \"业务其实失败但页面当成功 HTTP 200 但业务 code 失败 → 问题在业务结果，不是“页面懒刷”\":\n          - cell \"业务其实失败但页面当成功\"\n          - cell \"HTTP 200 但业务 code 失败 → 问题在业务结果，不是“页面懒刷”\"\n        - row \"响应对了、页面仍旧 响应三元键已是当前院区，页面仍像旧人 → 先收成前端展示/本地缓存未按三元键刷新\":\n          - cell \"响应对了、页面仍旧\"\n          - cell \"响应三元键已是当前院区，页面仍像旧人 → 先收成前端展示/本地缓存未按三元键刷新\"\n  - generic: 没库权限时，先别指望排除什么\n  - list:\n    - listitem: 库里真实主数据对不对、HIS 与本地快照是否不一致\n    - text: 后端查错表/映射错（若\n    - strong: 响应身份本身就错\n    - text: ，只能证明“返回错了”，不能单靠页面证明根因在哪张表）\n    - listitem: 账号菜单/动态授权全集（规格也要求线上动态查，不能靠猜）\n  - paragraph:\n    - text: 这些标成\n    - strong: 局部未知\n    - text: 即可，不挡你继续用页面和响应收口。\n  - separator\n  - generic: 建议你现在就做的只读对照（2～4 步，不查库、不写业务）\n  - list:\n    - strong: 固定异常账号 + 当前入口，打开“已经发生”的那条列表/详情请求\n  - list:\n    - text: 记：页面所选院区；请求里的\n    - code: hospitalId、patientId、visitId\n    - text: ；HTTP 状态；\n    - strong: 业务 code\n    - text: ；响应里的三元键和姓名/床号等。\n    - strong: 正常\n    - text: ：业务成功，且\n    - code: hospitalId\n    - text: 与当前所选院区一致。\n    - strong: 不正常\n    - text: ：缺\n    - code: hospitalId\n    - text: / 键与院区不一致 / 业务 code 失败 → 先落在「上下文或业务结果」，不必查库。\n  - list:\n    - strong: 同一时刻只读三列对照（列表行 / 详情 / 响应）\n  - list:\n    - listitem: 三列身份是否同一套三元键、是否都跟当前院区一致。\n    - strong: 分支\n    - text: ：\n    - listitem: 响应错 → 范围在接口返回身份（可升级开发带响应体，仍可不查库先报）。\n    - listitem: 响应对、列表或详情错 → 范围在页面展示/本地缓存未按三元键区分。\n    - listitem: 列表对、详情错 → 详情入口或详情侧仍用旧键。\n  - list:\n    - strong: 用已有记录做「切院区前 / 后」对照（有历史请求就够，不要为了验证再提交）\n  - list:\n    - text: 看切换后请求是否带上\n    - strong: 新\n    - code: hospitalId\n    - text: ，响应是否也是新院区身份，页面是否跟着变。\n    - listitem: 请求/响应对、页面不变 → 优先前端/缓存；请求仍旧键 → 仍是显式上下文没进查询。\n  - list:\n    - strong: 整理最小留证（方便你收口或转开发，仍不需要库）\n  - list:\n    - listitem: 脱敏：院区选择、列表行、详情、Web/Pad、入口、时间。\n    - listitem: 该次请求：入参三元键、HTTP、业务 code、响应三元键是否与页面一致。\n    - listitem: 一句话标明分支：业务失败 / 响应身份错 / 响应对但页面未更新。\n    - listitem: 不要贴密码或完整 token。\n  - separator\n  - generic: 你回我什么，就能定下一步\n  - paragraph:\n    - text: 只需一句话落到哪支，例如：\n    - text: \"-「业务成功，响应\"\n    - code: hospitalId\n    - text: 已是 B，详情仍是 A」→ 基本可排除传输和入参缺键，按\n    - strong: 前端/缓存\n    - text: 升级。\n    - text: \"-「请求里\"\n    - code: hospitalId\n    - text: 仍是旧的/缺失」→ 排除“库数据本身”，先回到\n    - strong: 页面显式院区与入参\n    - text: 。\n    - text: \"-「业务 code 失败」→ 排除“页面单独坏了”，带着业务码和提示文案给开发。\"\n  - paragraph:\n    - strong: 数据库权限恢复前，上面这些排除已经够用\n    - text: ；库权限回来后再补的，只适合验证“响应错时库里到底是什么”，不是现在卡点的第一步。\n  - generic: \n  - generic: 已参考经验（1条）\n  - generic: \n  - generic: \n  - generic: 这条答疑对你有帮助吗？有价值可沉淀到经验库，帮下一个人少走弯路。\n  - button \" 已解决 · 沉淀经验库\":\n    - generic: \n    - text: 已解决 · 沉淀经验库\n  ",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "pass",
+      "reason": "数据库无权限时仍保留当前事实，只局部标注库内根因未知，并给页面/响应可排除分支。"
+    },
+    {
+      "id": "Q0096",
+      "conversation": "C017",
+      "question": "推荐应该命中越多越靠前，所以当前也是降序，对吧？",
+      "rawDom": "推荐应该命中越多越靠前，所以当前也是降序，对吧？\n  - generic: AI\n  - paragraph:\n    - strong: 不对，当前不是降序，而是升序。\n  - paragraph:\n    - text: 直接结论：系统当前实现是按\n    - strong: 每个模板的命中项数升序排序\n    - text: ——命中少的排前面，命中多的排后面。\n    - text: 所以只命中 1 项的模板会排在命中 3 项的模板\n    - strong: 前面\n    - text: ，这和“命中越多越靠前”的直觉正好相反。\n  - paragraph: 现场核对时别按“推荐应该命中多优先”去猜，按实际返回的列表顺序看就行：少命中在前 = 符合当前实现。患者无医嘱也无诊断时，推荐列表直接返回空数组。\n  - generic: \n  - generic: 这条答疑对你有帮助吗？有价值可沉淀到经验库，帮下一个人少走弯路。\n  - button \" 已解决 · 沉淀经验库\":\n    - generic: \n    - text: 已解决 · 沉淀经验库\n  - generic: \n  - generic: 这个咨询需要升级为需求 / BUG 交运营端处理吗？可直接转成工单。\n  - button \" 🎫 转工单\":\n    - generic: \n    - text: 🎫 转工单\n  ",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "pass",
+      "reason": "明确当前按命中项数升序，命中少的在前；无医嘱且无诊断为空。"
+    },
+    {
+      "id": "Q0097",
+      "conversation": "C017",
+      "question": "医院现在的现象是“患教推荐的先后顺序和现场理解正好相反”。我在现场先查哪一步？",
+      "rawDom": "医院现在的现象是“患教推荐的先后顺序和现场理解正好相反”。我在现场先查哪一步？\n  - generic: AI\n  - paragraph:\n    - strong: 结论：这大概率是当前系统的预期行为，不是故障。\n    - text: 说明书明确：患教推荐列表按\n    - strong: 每个模板的命中项数升序\n    - text: 排——命中越少越靠前。现场如果按“命中越多越靠前”理解，就会觉得顺序“正好相反”。\n  - generic: 现场先查这一步（只读、最快核对）\n  - list:\n    - text: 选一个\n    - strong: 有执行中医嘱或诊断\n    - text: 的患者，打开患者教育里的\n    - strong: 推荐模板列表\n    - text: （不要改任何数据）。\n  - list:\n    - listitem: 对照每个模板实际命中了几项（药品/诊断匹配上的数量）。\n    - text: 看列表顺序是不是：\n    - strong: 命中 1 项的在前，命中 2/3 项的在后\n    - text: 。\n    - listitem: 正常：命中少的排前面 → 符合当前实现，和“推荐直觉”相反是预期。\n    - listitem: 异常：命中多的反而排前面，或顺序乱、和命中数对不上 → 再往下留证。\n  - paragraph:\n    - strong: 这一步对上了就停\n    - text: ，不用再查接口/日志当故障排查。\n    - text: 患者无医嘱也无诊断时列表本来就是空的，不算顺序问题。\n  - paragraph: 如果医院坚持“必须命中多的优先”，这是产品规则确认点（说明书里也标了需产品确认排序方向），整理“当前是升序、现场期望降序”直接提需求/工单改排序即可，别当 bug 硬查。\n  - generic: \n  - generic: 已参考经验（2条）\n  - generic: \n  - generic: \n  - generic: 这条答疑对你有帮助吗？有价值可沉淀到经验库，帮下一个人少走弯路。\n  - button \" 已解决 · 沉淀经验库\":\n    - generic: \n    - text: 已解决 · 沉淀经验库\n  ",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "pass",
+      "reason": "以当前升序规则为现场判断基线，给只读核对与产品期望差异边界。"
+    },
+    {
+      "id": "Q0098",
+      "conversation": "C017",
+      "question": "回到患教推荐排序这里，我只拿得到这张截图，没有日志，够不够？",
+      "rawDom": "回到患教推荐排序这里，我只拿得到这张截图，没有日志，够不够？\n  - generic: AI\n  - paragraph:\n    - strong: 够。\n    - text: 核对患教推荐排序，\n    - strong: 只要截图能看清推荐列表的先后顺序，以及每个模板大概命中了几项\n    - text: （或者能对照患者当前医嘱/诊断数出来），就足够判断是不是当前系统的预期行为，\n    - strong: 不需要日志\n    - text: 。\n  - generic: 直接对照截图做这一步（只读）\n  - list:\n    - listitem: 看截图里推荐模板的从上到下顺序。\n  - list:\n    - listitem: 数一下（或估一下）每个模板命中的药品/诊断条件数量。\n    - strong: 正常（符合当前实现）\n    - text: ：命中 1 项的排在命中 2/3 项的\n    - strong: 前面\n    - text: （升序，命中越少越靠前）。\n    - listitem: 这就是“和现场理解正好相反”——因为当前就是这样排的，不是故障。\n    - strong: 才需要再往下留证\n    - text: ：顺序完全乱、或者明显是命中多的反而更靠前。\n  - paragraph: 患者无医嘱也无诊断时列表本来就是空的，截图如果是空列表，也正常。\n  - generic: 截图要尽量包含这些（方便一眼定论）\n  - list:\n    - listitem: 推荐模板列表的完整顺序（从上到下）\n    - listitem: 能看出或能推断每个模板命中项数（有标签最好；没有的话截一下患者医嘱/诊断，方便对照）\n    - listitem: 患者侧信息（有就诊、有医嘱/诊断即可）\n  - paragraph:\n    - text: 把截图对照上面规则看完就行。\n    - text: 如果顺序就是“命中少的在前”，直接告诉医院：\n    - strong: 这是当前系统实现，不是 bug\n    - text: ；他们要“命中多优先”就按产品需求提改排序。\n    - text: 如果截图看完仍对不上（乱序/多的在前），把脱敏后的截图 + 你数的命中数发我，或补一句“截图里第1个命中几项、第2个命中几项”，我帮你定下一步最少留证。\n  - generic: \n  - generic: 这条答疑对你有帮助吗？有价值可沉淀到经验库，帮下一个人少走弯路。\n  - button \" 已解决 · 沉淀经验库\":\n    - generic: \n    - text: 已解决 · 沉淀经验库\n  ",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "pass",
+      "reason": "说明截图需能展示顺序与命中项才足够，不要求日志或副作用操作。"
+    },
+    {
+      "id": "Q0099",
+      "conversation": "C017",
+      "question": "患教推荐排序这一段，请求和响应都抓到了，重点核对哪几个地方？",
+      "rawDom": "患教推荐排序这一段，请求和响应都抓到了，重点核对哪几个地方？\n  - generic: AI\n  - paragraph:\n    - strong: 结论：够。\n    - text: 请求+响应抓全了，重点只核对下面 4 处，就能定是不是当前实现的预期排序（升序：命中越少越靠前），不用日志。\n  - generic: 重点核对这几处（只读对照）\n  - list:\n    - strong: 请求身份上下文\n    - text: （必填三项都在不在）\n  - list:\n    - text: 看请求参数里是否同时带了\n    - code: hospitalId\n    - text: +\n    - code: patientId\n    - text: +\n    - code: visitId\n    - text: 。\n    - listitem: 正常：三项都有且值正确。\n    - text: 异常：缺\n    - code: hospitalId\n    - text: （或任意一项）→ 先回到可信患者入口重选再测，别直接当排序问题。\n  - list:\n    - strong: 响应是不是空数组\n  - list:\n    - text: 患者当前无执行中医嘱、也无诊断时 → 响应体应是空列表\n    - code: \"[]\"\n    - text: 。\n    - listitem: 有医嘱/诊断却返回空 → 再看匹配和过滤；没有医嘱/诊断却有数据 → 异常。\n  - list:\n    - strong: 响应列表顺序 vs 每个模板命中项数\n    - text: （排序核心）\n  - list:\n    - listitem: 响应里模板从上到下的顺序。\n    - listitem: 对照每个模板实际命中的药品/诊断 code 数量（命中项数）。\n    - strong: 符合当前实现\n    - text: ：命中 1 项的排在命中 2/3 项的\n    - strong: 前面\n    - text: （按命中项数\n    - strong: 升序\n    - text: ）。\n    - listitem: 现场觉得“和理解正好相反”通常就是这个：系统就是命中少的在前，不是 bug。\n    - listitem: 只有命中多的反而在前、或顺序和命中数完全对不上，才算异常。\n  - list:\n    - strong: 结果过滤是否符合规则\n    - text: （避免把不该出现的模板当排序乱）\n  - list:\n    - listitem: 列表里应只保留：共享模板（shared = '1'）+ 当前用户自己创建的私有模板。\n    - text: 非共享且\n    - code: userId\n    - text: 不是当前用户的模板 → 应从结果里剔除，不应出现。\n  - generic: 怎么一眼定论\n  - list:\n    - text: 请求三项身份齐 + 有医嘱/诊断 + 列表按命中数升序（少的在前）→\n    - strong: 正常，当前就是这样排的\n    - text: 。\n    - listitem: 医院要“命中越多越靠前” → 这是产品规则确认点，整理“当前升序、期望降序”提需求/工单改排序即可。\n  - paragraph: 把响应里前几个模板的顺序 + 你数的各自命中项数（或脱敏 JSON 片段）发我，我可以帮你快速看是否完全符合。\n  - generic: \n  - generic: 已参考经验（1条）\n  - generic: \n  - generic: \n  - generic: 这条答疑对你有帮助吗？有价值可沉淀到经验库，帮下一个人少走弯路。\n  - button \" 已解决 · 沉淀经验库\":\n    - generic: \n    - text: 已解决 · 沉淀经验库\n  ",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "pass",
+      "reason": "请求身份核对包含 hospitalId + patientId + visitId，并正确核对空结果、升序和过滤。"
+    },
+    {
+      "id": "Q0100",
+      "conversation": "C017",
+      "question": "pwrs_patient.p_id 是 PostgreSQL 原生 uuid 吗？",
+      "rawDom": "pwrs_patient.p_id 是 PostgreSQL 原生 uuid 吗？\n  - generic: AI\n  - paragraph:\n    - strong: 不是。\n  - paragraph:\n    - code: pwrs_patient.p_id\n    - text: 的列类型是\n    - code: character varying(50)\n    - text: （varchar(50)）。业务侧写入的是 UUID 字符串，但数据库列本身\n    - strong: 不是\n    - text: PostgreSQL 原生\n    - code: uuid\n    - text: 类型。\n  - generic: \n  - generic: 这条答疑对你有帮助吗？有价值可沉淀到经验库，帮下一个人少走弯路。\n  - button \" 已解决 · 沉淀经验库\":\n    - generic: \n    - text: 已解决 · 沉淀经验库\n  ",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "pass",
+      "reason": "聚焦回答 p_id 为 varchar(50) 且存 UUID 字符串，不追加相邻字段、tuple、索引或约束。"
+    },
+    {
+      "id": "V01",
+      "conversation": "VC01",
+      "question": "账号没有绑定目标院区，患者查询是不是就应该拒绝？",
+      "rawDom": "账号没有绑定目标院区，患者查询是不是就应该拒绝？\n  - generic: AI\n  - paragraph:\n    - strong: 结论：不应该拒绝。\n  - paragraph:\n    - text: 账号没绑定目标院区，\n    - strong: 患者查询照样可以查\n    - text: ，服务端不能因为“账号未绑定该院区”就拦请求或返回权限错误。\n  - generic: 现场怎么理解、怎么核对\n  - list:\n    - strong: 院区是页面上的搜索/筛选条件，不是账号数据权限\n  - list:\n    - listitem: 药师先选院区（可单选、多选、甚至不选），再按该条件过滤病区/科室/患者。\n    - listitem: 接口只认请求里带来的搜索条件，不看账号有没有绑定这个院区。\n    - text: 未绑定目标院区时，\n    - strong: 不应出现\n    - code: AUTHORITY_WITHOUT\n    - text: 这类权限拒绝。\n  - list:\n    - strong: 若现场出现了“未绑定就查不了”\n  - list:\n    - text: 先固定同一患者：对比两个账号各自页面上\n    - strong: 显式选中的院区/病区/科室\n    - text: 是否一致。\n    - text: 再看同一请求里是否带了完整身份：\n    - code: hospitalId + patientId + visitId\n    - text: （缺\n    - code: hospitalId\n    - text: 会拒绝，但那是缺上下文，不是“账号没绑定”）。\n    - listitem: 只读对比：请求参数、响应里的患者身份、列表/缓存表现是否一致。\n    - strong: 换账号后正常\n    - text: ，只能当相关性线索，不能直接归因成“位置授权差异”。\n  - list:\n    - strong: 仍要注意的边界（和“不绑定不拒绝”不矛盾）\n  - list:\n    - text: 患者请求\n    - strong: 缺少 hospitalId\n    - text: 时必须拒绝，并提示重新选择医院/院区或从患者列表重新进入；历史深链、旧链接、收藏链接也不自动补齐。\n    - listitem: 写操作仍要校验 token、创建人/owner、记录状态、患者与记录一致性等；“位置不限制”≠ 可以匿名或跨记录越权。\n    - text: 真正去调 HIS/Proxy/ETL 时，用的是\n    - strong: 患者/记录真实院区\n    - text: 做上游路由，不能拿 token 当前院区或账号绑定去覆盖。\n  - generic: 验收口径（实施可直接对照）\n  - list:\n    - text: 任意已登录账号，查未绑定的院区患者/列表 → 应按搜索条件出结果，\n    - strong: 不得\n    - text: 因未绑定拒绝。\n    - listitem: 空筛选、单院区、多院区、跨院区同患者号、转院/转病区历史都应能按条件查到。\n  - paragraph:\n    - text: 当前资料已明确覆盖本题；若现场仍被拒绝，把\n    - strong: 实际请求参数（含 hospitalId/patientId/visitId）、HTTP/业务错误码、页面选中的院区条件\n    - text: 截图或脱敏留证，再给开发对照是否还在走已废止的“授权院区集合”逻辑。\n  - generic: \n  - generic: 这条答疑对你有帮助吗？有价值可沉淀到经验库，帮下一个人少走弯路。\n  - button \" 已解决 · 沉淀经验库\":\n    - generic: \n    - text: 已解决 · 沉淀经验库\n  - generic: \n  - generic: 这个咨询需要升级为需求 / BUG 交运营端处理吗？可直接转成工单。\n  - button \" 🎫 转工单\":\n    - generic: \n    - text: 🎫 转工单\n  ",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "pass",
+      "reason": "明确未绑定目标院区不是拒绝患者查询的理由，并区分缺 hospitalId 的上下文拒绝。"
+    },
+    {
+      "id": "V02",
+      "conversation": "VC01",
+      "question": "换账号后正常，能直接说明是账号授权院区集合不同吗？",
+      "rawDom": "换账号后正常，能直接说明是账号授权院区集合不同吗？\n  - generic: AI\n  - paragraph:\n    - strong: 结论：不能。\n  - paragraph:\n    - text: 换账号后正常，\n    - strong: 只能当一条相关性线索\n    - text: ，\n    - strong: 不能直接说明\n    - text: 是“账号授权院区集合不同”，更不能据此认定是位置权限差异。\n  - generic: 当前规则（必须先按这个判）\n  - list:\n    - text: 院区 / 病区 / 科室是\n    - strong: 页面上的显式搜索条件\n    - text: ，不是账号位置授权。\n    - text: 接口\n    - strong: 不得\n    - text: 按账号绑定的“授权院区集合”缩小患者结果，也\n    - strong: 不得\n    - text: 因为未绑定目标院区就拒绝查询。\n    - text: 旧方案里的“授权院区集合 / 未授权拒绝 / ScopeGuard 按账号院区拦查询”已被覆盖，\n    - strong: 不能再拿来解释现场现象\n    - text: 。\n  - paragraph:\n    - text: 所以：\n    - strong: “换账号就好了” ≠ “两个账号授权院区集合不一样”。\n  - generic: 现场优先怎么做（只读对比）\n  - list:\n    - strong: 固定同一患者、同一入口\n  - list:\n    - listitem: 两个账号分别进入同一患者（或同一查询条件）。\n    - text: 记录各自页面上\n    - strong: 显式选中的院区 / 病区 / 科室\n    - text: 是否一致。\n  - list:\n    - strong: 对比同一请求的身份键\n  - list:\n    - text: 看实际请求里的\n    - code: hospitalId + patientId + visitId\n    - text: 是否完整、是否一致。\n    - text: 缺\n    - code: hospitalId\n    - text: 会拒绝，这是上下文缺失，不是“账号没绑定”。\n  - list:\n    - strong: 对比响应与页面表现\n  - list:\n    - text: 响应里的患者身份是否带真实\n    - code: hospitalId\n    - text: 。\n    - listitem: 列表、详情、缓存、页签是否串患者或被错误过滤。\n    - text: 是否有业务码 / 权限类错误（若出现\n    - code: AUTHORITY_WITHOUT\n    - text: 一类，按当前裁决属于不该再因“未绑定院区”出现的结果，需留证）。\n  - list:\n    - strong: 再判断差异点\n  - list:\n    - text: 差异更可能在：页面显式选择上下文不一致、请求缺\n    - code: hospitalId\n    - text: 、缓存/深链/旧入口、本地快照 vs 回源 HIS 等。\n    - strong: 不要\n    - text: 先归因成“授权院区集合不同”。\n  - generic: 小结\n  - region \"Markdown 表格\":\n    - table:\n      - rowgroup:\n        - row \"现象 能否直接归因\":\n          - columnheader \"现象\"\n          - columnheader \"能否直接归因\"\n      - rowgroup:\n        - row \"换账号后正常 ❌ 不能直接说是授权院区集合不同\":\n          - cell \"换账号后正常\"\n          - cell \"❌ 不能直接说是授权院区集合不同\"\n        - row \"账号未绑定目标院区 ❌ 当前规则下不应因此拒绝患者查询\":\n          - cell \"账号未绑定目标院区\"\n          - cell \"❌ 当前规则下不应因此拒绝患者查询\"\n        - row \"正确做法 只读对比：显式选择上下文 + 同一请求 hospitalId+patientId+visitId + 响应身份与页面/缓存\":\n          - cell \"正确做法\"\n          - cell \"只读对比：显式选择上下文 + 同一请求 hospitalId+patientId+visitId + 响应身份与页面/缓存\":\n            - text: 只读对比：显式选择上下文 + 同一请求\n            - code: hospitalId+patientId+visitId\n            - text: + 响应身份与页面/缓存\n  - paragraph:\n    - text: 若对比后两边请求参数、选择上下文都一致，只有账号不同仍一正一负，把两边\n    - strong: 脱敏请求参数、HTTP/业务码、响应身份、页面截图\n    - text: 整理好再升级开发，对照是否还有已废止的位置授权逻辑残留。\n  - generic: \n  - generic: 这条答疑对你有帮助吗？有价值可沉淀到经验库，帮下一个人少走弯路。\n  - button \" 已解决 · 沉淀经验库\":\n    - generic: \n    - text: 已解决 · 沉淀经验库\n  ",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "pass",
+      "reason": "明确不得复活已废止的账号授权院区集合解释，给只读差异对照。"
+    },
+    {
+      "id": "V03",
+      "conversation": "VC02",
+      "question": "推荐模板接口抓包时，患者身份参数最少核哪几个？",
+      "rawDom": "推荐模板接口抓包时，患者身份参数最少核哪几个？\n  - generic: AI\n  - paragraph:\n    - strong:\n      - text: 结论：推荐模板接口抓包时，患者身份最少核\n      - code: hospitalId + patientId + visitId\n      - text: 这三个。\n  - paragraph:\n    - text: 缺\n    - code: hospitalId\n    - text: 必须按当前裁决拒绝（提示重新选医院/院区或从患者列表重新进），不能自动补齐、不能从 token/默认院区/districtCode 回退。接口文档摘要里只列了\n    - code: patientId\n    - text: 、\n    - code: visitId\n    - text: 是遗留实现缺口，\n    - strong: 不构成 hospitalId 豁免\n    - text: 。\n  - generic: 现场抓包只读核对（照着做）\n  - list:\n    - listitem: 打开实际触发“推荐模板”的页面入口，确认当前选中的医院/院区、患者列表上下文。\n  - list:\n    - listitem: 正常：页面/详情已带齐三个身份键。\n    - listitem: 不正常：上下文里没有 hospitalId，或只剩 patientId+visitId。\n  - list:\n    - listitem: 抓本次请求，看实际发出的 query/body/header 里是否同时有：\n  - list:\n    - code: hospitalId\n    - code: patientId\n    - code: visitId\n    - listitem: 正常：三者都在且与当前选中患者一致。\n    - listitem: 不正常：缺 hospitalId，或三者与页面展示的患者不一致。\n  - list:\n    - listitem: 对照响应：\n  - list:\n    - listitem: 缺 hospitalId 时应拒绝并提示回可信入口重选。\n    - listitem: 有三个键时再看推荐结果是否按规则返回（共享模板 + 当前用户自己的私有模板；无医嘱且无诊断则空列表）。\n  - list:\n    - text: 若换账号后正常，只读对比同一请求的\n    - code: hospitalId + patientId + visitId\n    - text: 与响应身份，不要归因为“账号授权院区”。\n  - paragraph:\n    - text: 技术依据（研发参考，实施可跳过）：\n    - text: 接口字面量\n    - code: GET /pwrsapi/edu/templates/recommend\n    - text: 入参摘要仅写 patientId、visitId；AC 与模块地图当前裁决统一要求患者相关请求按\n    - code: hospitalId + patientId + visitId\n    - text: 核对，districtCode 仅限内部上游路由，不能替代 hospitalId。\n  - generic: \n  - generic: 这条答疑对你有帮助吗？有价值可沉淀到经验库，帮下一个人少走弯路。\n  - button \" 已解决 · 沉淀经验库\":\n    - generic: \n    - text: 已解决 · 沉淀经验库\n  - generic: \n  - generic: 这个咨询需要升级为需求 / BUG 交运营端处理吗？可直接转成工单。\n  - button \" 🎫 转工单\":\n    - generic: \n    - text: 🎫 转工单\n  ",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "pass",
+      "reason": "推荐模板患者身份最少核 hospitalId + patientId + visitId，旧接口摘要不构成豁免。"
+    },
+    {
+      "id": "V06",
+      "conversation": "VC02",
+      "question": "旧患教接口只传 patientId 和 visitId，是不是说明患教可以不传 hospitalId？",
+      "rawDom": "旧患教接口只传 patientId 和 visitId，是不是说明患教可以不传 hospitalId？\n  - generic: AI\n  - paragraph:\n    - strong:\n      - text: 结论：不是。旧患教接口只传\n      - code: patientId\n      - text: 、\n      - code: visitId\n      - text: ，不能说明患教可以不传\n      - code: hospitalId\n      - text: 。\n  - paragraph:\n    - text: 当前有效身份契约是：\n    - code: hospitalId*\n    - text: +\n    - code: patientId*\n    - text: +\n    - code: visitId*\n    - text: 三个都必填。\n    - text: Controller 里只收\n    - code: patientId\n    - text: 、\n    - code: visitId\n    - text: 是\n    - strong: 遗留签名 / 待实施缺口\n    - text: ，答疑、验收、新链路都\n    - strong: 不得据此省略\n    - code: hospitalId\n    - text: ，也不得说“历史兼容”“系统会自动补齐”或从 token/默认院区回退。\n  - generic: 现场怎么卡\n  - list:\n    - text: 抓推荐模板（或其它患教相关）请求时，必须同时看到\n    - code: hospitalId\n    - text: 、\n    - code: patientId\n    - text: 、\n    - code: visitId\n    - text: 三个键，且与当前选中患者一致。\n  - list:\n    - text: 缺\n    - code: hospitalId\n    - text: → 按契约应拒绝，提示回到患者列表/可信入口重新进入，不能当成功。\n  - list:\n    - listitem: 验收/复测新链路时，一律按“三键必传”准备；只传两个键的旧写法不能当作合规方案。\n    - listitem: 若页面/前端封装只拼了两个参数，属于实现缺口，要记成问题转开发补齐，不能当成业务允许不传。\n  - paragraph:\n    - strong: 一句话记：\n    - text: 遗留只收两个参数 ≠ 产品允许不传\n    - code: hospitalId\n    - text: ；当前裁决就是三个都要。\n  - generic: \n  - generic: 这条答疑对你有帮助吗？有价值可沉淀到经验库，帮下一个人少走弯路。\n  - button \" 已解决 · 沉淀经验库\":\n    - generic: \n    - text: 已解决 · 沉淀经验库\n  ",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "pass",
+      "reason": "明确旧患教接口只传两字段是遗留缺口，不得作为 hospitalId 豁免或回退依据。"
+    },
+    {
+      "id": "V04",
+      "conversation": "VC03",
+      "question": "p_id 列类型是什么？",
+      "rawDom": "p_id 列类型是什么？\n  - generic: AI\n  - paragraph:\n    - strong:\n      - text: p_id 列类型是\n      - code: character varying(50)\n      - text: （varchar(50)）。\n  - paragraph:\n    - text: 业务代码写入的是 UUID 字符串，但数据库列本身\n    - strong: 不是\n    - text: PostgreSQL 原生\n    - code: uuid\n    - text: 类型。\n  - generic: \n  - generic: 这条答疑对你有帮助吗？有价值可沉淀到经验库，帮下一个人少走弯路。\n  - button \" 已解决 · 沉淀经验库\":\n    - generic: \n    - text: 已解决 · 沉淀经验库\n  - generic: \n  - generic: 这个咨询需要升级为需求 / BUG 交运营端处理吗？可直接转成工单。\n  - button \" 🎫 转工单\":\n    - generic: \n    - text: 🎫 转工单\n  ",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "pass",
+      "reason": "单一字段类型问答止于 varchar(50)/UUID 字符串，未扩散到相邻实现。"
+    },
+    {
+      "id": "V05",
+      "conversation": "VC03",
+      "question": "这个系统的登录 token 是谁签发的？",
+      "rawDom": "这个系统的登录 token 是谁签发的？\n  - generic: AI\n  - paragraph:\n    - strong: 登录 token 是由统一用户中心（usercenter）签发的，不是 PWRS 自己签发的。\n  - paragraph:\n    - text: PWRS 这边不负责业务登录，也不做 token 的签发/刷新。它只通过 usercenter 的 Dubbo 接口\n    - code: verifyToken(token)\n    - text: 去校验 token 是否有效，校验通过后再装配菜单和角色。\n  - generic: \n  - generic: 这条答疑对你有帮助吗？有价值可沉淀到经验库，帮下一个人少走弯路。\n  - button \" 已解决 · 沉淀经验库\":\n    - generic: \n    - text: 已解决 · 沉淀经验库\n  ",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "pass",
+      "reason": "同会话显式切换到 token 新实体，正确回答 usercenter 签发且无患者身份串话。"
+    }
+  ]
+}
