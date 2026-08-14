@@ -2676,6 +2676,22 @@ function consultAnswerSafeFallback(draft, audit) {
   return [safeKept || audit.safeDiagnosticFallback || '当前草稿未通过发布前证据与动作安全校验，已停止发布其中未经证实的判断和操作指令。', ...notes].filter(Boolean).join('\n\n');
 }
 
+// 模型草稿和一次修订都可能同时含多类违规；两轮整句清理后若仍有残留，
+// 不能直接退化为机械拒答。诊断题已在 audit 内基于 current route 构造了
+// 确定性“已核事实 + 只读留证”终稿；这里单独重审它，安全时优先发布。
+function consultRecoverSafeDiagnostic(initialAudit, question, route) {
+  let reply = String(initialAudit && initialAudit.safeDiagnosticFallback || '').trim();
+  if (!reply) return null;
+  let audit = consultAnswerSemanticAudit(reply, question, route);
+  let passes = 0;
+  while (audit.violations.length && passes < 2) {
+    reply = consultAnswerSafeFallback(reply, audit);
+    audit = consultAnswerSemanticAudit(reply, question, route);
+    passes += 1;
+  }
+  return audit.violations.length ? null : { reply, audit, passes };
+}
+
 // 只给出“隔离/授权/回滚/幂等/范围”而未点名实际业务动作时，不能由检索命中反向替用户选一个任务。
 // 这些条件只够回答通用准入原则，不够生成任何实体专属执行步骤。
 function consultGenericControlledActionGuard(question) {
@@ -4612,6 +4628,13 @@ const server = http.createServer((req, res) => {
                 finalAudit = consultAnswerSemanticAudit(reply, qtext, route);
               }
               if (finalAudit.violations.length) {
+                const recovered = consultRecoverSafeDiagnostic(initialAudit, qtext, route);
+                if (recovered) {
+                  reply = recovered.reply; finalAudit = recovered.audit;
+                  fallbackPasses = 3 + recovered.passes;
+                }
+              }
+              if (finalAudit.violations.length) {
                 reply = '当前回答未通过发布前事实与动作安全校验，已停止发布未经证实的判断；请先按当前已核事实和已有只读证据继续核对。';
                 finalAudit = consultAnswerSemanticAudit(reply, qtext, route);
               }
@@ -4622,6 +4645,13 @@ const server = http.createServer((req, res) => {
             if (finalAudit.violations.length) {
               reply = consultAnswerSafeFallback(reply, finalAudit); fallbackPasses = 2;
               finalAudit = consultAnswerSemanticAudit(reply, qtext, route);
+            }
+            if (finalAudit.violations.length) {
+              const recovered = consultRecoverSafeDiagnostic(initialAudit, qtext, route);
+              if (recovered) {
+                reply = recovered.reply; finalAudit = recovered.audit;
+                fallbackPasses = 3 + recovered.passes;
+              }
             }
             if (finalAudit.violations.length) {
               reply = '当前回答未通过发布前事实与动作安全校验，已停止发布未经证实的判断；请先按当前已核事实和已有只读证据继续核对。';

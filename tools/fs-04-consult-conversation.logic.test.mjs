@@ -1546,6 +1546,36 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   }).violations, []);
 });
 
+test('两轮草稿清理仍失败时，优先发布重审通过的确定性安全诊断终稿', () => {
+  const directRecover = new Function(
+    'consultAnswerSemanticAudit',
+    'consultAnswerSafeFallback',
+    extractFn(SRC, 'consultRecoverSafeDiagnostic') + '\nreturn consultRecoverSafeDiagnostic;',
+  )(
+    answer => ({ violations: answer.includes('危险') ? ['cross_actor_side_effect'] : [] }),
+    () => '已核事实。\n1. 只读核对已有请求与响应。',
+  );
+  assert.deepEqual(directRecover({ safeDiagnosticFallback: '已核事实。\n1. 只读核对已有请求与响应。' }, '怎么排查？', { matched: true }), {
+    reply: '已核事实。\n1. 只读核对已有请求与响应。',
+    audit: { violations: [] },
+    passes: 0,
+  });
+  const cleanedRecover = new Function(
+    'consultAnswerSemanticAudit',
+    'consultAnswerSafeFallback',
+    extractFn(SRC, 'consultRecoverSafeDiagnostic') + '\nreturn consultRecoverSafeDiagnostic;',
+  )(
+    answer => ({ violations: answer.includes('危险') ? ['cross_actor_side_effect'] : [] }),
+    () => '已核事实。\n1. 只读核对已有证据。',
+  );
+  const recovered = cleanedRecover({ safeDiagnosticFallback: '危险动作。' }, '怎么排查？', { matched: true });
+  assert.equal(recovered.reply, '已核事实。\n1. 只读核对已有证据。');
+  assert.equal(recovered.passes, 1);
+  assert.deepEqual(recovered.audit.violations, []);
+  assert.equal(directRecover({ safeDiagnosticFallback: '' }, '怎么排查？', { matched: true }), null, '非诊断题没有确定性模板时保持原机械拒答边界');
+  assert.equal((SRC.match(/consultRecoverSafeDiagnostic\(initialAudit, qtext, route\)/g) || []).length, 2, '正常生成异常与中止分支都应接入最后安全恢复');
+});
+
 test('发布前确定性语义校验：路径必须来自用户或route并逐字保留', () => {
   const likelihoodConst = SRC.match(/const CONSULT_LIKELIHOOD_WORD_RE = [^;]+;/)?.[0] || '';
   const causalLocalizationConst = SRC.match(/const CONSULT_CAUSAL_LOCALIZATION_RE = [^;]+;/)?.[0] || '';
