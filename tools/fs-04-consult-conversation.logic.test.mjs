@@ -1093,7 +1093,7 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   const q129OrderFallback = bundle.fallback(q129OrderDraft, q129OrderAudit);
   assert.match(q129OrderFallback, /patient_id 是 varchar\(50\) 字符串/);
   assert.doesNotMatch(q129OrderFallback, /报文已是字符串.*发出后的链路/);
-  assert.match(q129OrderFallback, /原始全号与报文一致，但收到值不同/);
+  assert.doesNotMatch(q129OrderFallback, /原始全号与报文一致，但收到值不同/, '删掉违规行后只剩单分支时应移除整张残表');
   assert.deepEqual(bundle.audit(q129OrderFallback, '只能确认请求发出，后端具体走到哪不知道，先说能确定的部分。', route).violations, []);
 
   assert.deepEqual(bundle.audit(
@@ -1534,15 +1534,15 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     '让运维修改服务端时区。',
   ].join('\n');
   const tableAudit = bundle.audit(tableDraft, '今天视图和浏览器不一致，怎么排查？', atomicRoute);
-  assert.deepEqual(tableAudit.violations, ['cross_actor_side_effect']);
+  assert.deepEqual(tableAudit.violations, ['cross_actor_side_effect', 'incomplete_result_branch_set']);
   const tableFallback = bundle.fallback(tableDraft, tableAudit);
-  assert.match(tableFallback, /\| 接口与页面相同；浏览器不同 \| 日期来自服务端 JVM 时区 \| 保留状态码与响应；交联调 \|/);
+  assert.doesNotMatch(tableFallback, /接口与页面相同；浏览器不同/, '单行诊断分类表应整体删除，不留下唯一分支误导实施');
   assert.doesNotMatch(tableFallback, /让运维修改/);
   assert.deepEqual(bundle.audit(tableFallback, '今天视图和浏览器不一致，怎么排查？', atomicRoute).violations, [], '表格行内分号不得被降级拆成孤立单元格');
 
   const sparseTable = '| 对照结果 | 已核边界 | 只读下一步 |\n| --- | --- | --- |\n| 把状态码与响应留给联调 | | |';
   const sparseAudit = bundle.audit(sparseTable, '今天视图怎么排查？', atomicRoute);
-  assert.deepEqual(sparseAudit.violations, ['malformed_markdown']);
+  assert.deepEqual(sparseAudit.violations, ['incomplete_result_branch_set', 'malformed_markdown']);
   const sparseFallback = bundle.fallback(sparseTable, sparseAudit);
   assert.doesNotMatch(sparseFallback, /\|/);
   assert.deepEqual(bundle.audit(sparseFallback, '今天视图怎么排查？', atomicRoute).violations, []);
@@ -1570,6 +1570,27 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     '| 页面≠响应 | 保留已有差异原文 |',
   ].join('\n');
   assert.deepEqual(bundle.audit(completeBranchTable, '已经对照请求和页面，怎么判断？', atomicRoute).violations, [], '至少两条完整分支表格放行');
+
+  const oneDecisionRowWithoutBranchLead = [
+    '怎么判断：',
+    '| 对照 | 含义 | 还要不要日志 |',
+    '| --- | --- | --- |',
+    '| 页面=接口但不等于本机 | 只确认服务端与本机观察不同 | 暂不需要 |',
+    '继续保留已有截图。',
+  ].join('\n');
+  const oneDecisionRowAudit = bundle.audit(oneDecisionRowWithoutBranchLead, '只有截图没有日志，够不够，怎么判断？', atomicRoute);
+  assert.ok(oneDecisionRowAudit.violations.includes('incomplete_result_branch_set'), '“怎么判断”或分类表头也不能放行仅一行的残缺诊断分支');
+  assert.equal(oneDecisionRowAudit.incompleteResultBranchTables[0].actual, 1);
+  const oneDecisionRowFallback = bundle.fallback(oneDecisionRowWithoutBranchLead, oneDecisionRowAudit);
+  assert.doesNotMatch(oneDecisionRowFallback, /怎么判断|页面=接口但不等于本机/);
+  assert.match(oneDecisionRowFallback, /继续保留已有截图/);
+  assert.deepEqual(bundle.audit(oneDecisionRowFallback, '只有截图没有日志，够不够，怎么判断？', atomicRoute).violations, []);
+  const oneRowFactTable = [
+    '| 字段 | 类型 |',
+    '| --- | --- |',
+    '| patient_id | character varying(50) |',
+  ].join('\n');
+  assert.ok(!bundle.audit(oneRowFactTable, 'patient_id 是什么类型和长度？', atomicRoute).violations.includes('incomplete_result_branch_set'), '普通单事实表不是诊断分支表');
 
   const brokenProse = '核对请求方法。是否不该有多余业务参数（这条接口不依赖患者入参；';
   const brokenAudit = bundle.audit(brokenProse, '今天视图请求和响应抓到了，重点核什么？', {

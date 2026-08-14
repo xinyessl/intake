@@ -2112,10 +2112,20 @@ function consultAnswerSemanticAudit(answer, question, route) {
   // “按结果分支判断”是至少两个分支的结构承诺。模型修订/删句后若表格只剩
   // 一条数据行，即使表格列数正确也不能称为“分支”；实施会不知道其余结果怎么走。
   const incompleteResultBranchTables = [];
-  const resultBranchLeadRe = /(?:按|根据|依照)[^。！？\n]{0,18}(?:结果|情况|观测)[^。！？\n]{0,18}(?:分支|分类|分别|判断|走)/u;
+  const branchDiagnosticQuestion = /(?:排查|不一致|对不上|异常|故障|现场|验证|复测|下一步|怎么判断|如何判断|怎么确认|检查|留证|只能确认|能确定|不知道|未知|走到哪|还缺什么|够不够)/i.test(String(question || ''));
+  const resultBranchLeadRe = /(?:(?:按|根据|依照)[^。！？\n]{0,18}(?:结果|情况|观测)[^。！？\n]{0,18}(?:分支|分类|分别|判断|走)|(?:怎么|如何)判断|判断如下)/u;
   for (let index = 0; index < documentLines.length; index++) {
-    if (!resultBranchLeadRe.test(documentLines[index])) continue;
-    let header = index + 1;
+    const leadMatched = resultBranchLeadRe.test(documentLines[index]);
+    const currentHeaderCells = consultMarkdownTableCells(documentLines[index]);
+    const normalizedHeaders = (currentHeaderCells || []).map(cell => String(cell || '').replace(/[*_`]/g, '').trim());
+    // 诊断表头本身也可能承诺“按观测结果分类”，即使模型清理掉了前置
+    // “按结果分支”句。要求首列描述结果/对照，且另有含义/判断/下一步列，
+    // 避免把普通的一行字段说明表误判成残缺分支表。
+    const semanticBranchHeader = branchDiagnosticQuestion
+      && normalizedHeaders.some(header => /(?:对照|观测|检查)?结果|情况|现象/u.test(header))
+      && normalizedHeaders.some(header => /含义|说明|判断|下一步|怎么处理|是否需要|还要不要/u.test(header));
+    if (!leadMatched && !semanticBranchHeader) continue;
+    let header = semanticBranchHeader ? index : index + 1;
     while (header < documentLines.length && header <= index + 3 && !documentLines[header].trim()) header++;
     if (header + 1 >= documentLines.length || !consultMarkdownTableCells(documentLines[header]) || !/^\s*\|?\s*:?-{3,}/.test(documentLines[header + 1])) continue;
     let end = header + 2;
@@ -2123,12 +2133,12 @@ function consultAnswerSemanticAudit(answer, question, route) {
     while (end < documentLines.length && consultMarkdownTableCells(documentLines[end])) { rows.push(documentLines[end]); end++; }
     if (rows.length >= 2) continue;
     incompleteResultBranchTables.push({
-      line: documentLines[index].trim(),
+      line: leadMatched ? documentLines[index].trim() : '',
       lineIndex: index,
       actual: rows.length,
       tableStart: header,
       tableEnd: end,
-      block: documentLines.slice(index, end).join('\n'),
+      block: documentLines.slice(leadMatched ? index : header, end).join('\n'),
     });
   }
   // 同一局部结构里的显式数量声明也不能漂移，例如标题说“确认1件事”，
@@ -2524,7 +2534,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (contradictoryNegativeSections.length) violations.push('contradictory_negative_section');
   if (singleStepOverreach) violations.push('single_step_diagnostic_overreach');
   if (malformedMarkdown.length) violations.push('malformed_markdown');
-  return { checked: true, focusedFactQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
+  return { checked: true, diagnosticQuestion, focusedFactQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -2694,6 +2704,13 @@ function consultAnswerSafeFallback(draft, audit) {
   }).filter(line => line.trim());
   const proseSafeKept = keptLines.filter(line => !consultMalformedProseTokens(line).length).join('\n');
   let safeKept = consultNormalizeSafeMarkdown(consultNormalizeSafeTables(proseSafeKept));
+  // 其它违规句/表格行被删除后，原本完整的判断表也可能只剩一行。
+  // 对最终降级稿再做一次结构审计；只移除已经残缺的整块，不尝试补造分支。
+  const postCleanupAudit = safeKept ? consultAnswerSemanticAudit(safeKept, audit.diagnosticQuestion ? '怎么判断？' : '', { matched: false }) : null;
+  for (const branches of postCleanupAudit && postCleanupAudit.incompleteResultBranchTables || []) {
+    if (branches.block) safeKept = safeKept.replace(branches.block, '');
+  }
+  safeKept = consultNormalizeSafeMarkdown(consultNormalizeSafeTables(safeKept));
   if (audit.focusedFactPrimaryPath && !consultConcretePaths(safeKept).includes(audit.focusedFactPrimaryPath.path)) {
     safeKept = [`当前接口：\`${audit.focusedFactPrimaryPath.display}\`。`, safeKept].filter(Boolean).join('\n\n');
   }
