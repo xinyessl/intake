@@ -1669,6 +1669,7 @@ function consultEvidenceLikelihoodGuard(question, route) {
     '【最终证据与概率语言审计：必须在输出最终答案前完成】',
     '逐句扫描最终答案里的原因、归因、优先级与概率措辞。只有当前有效的 Spec 正文、源码、已核经验库或统计样本直接写明频率、默认值、排序或典型性时，才能照实使用“最高频”“最常见”“常见/很常见/较常见/比较常见”“经常”“通常”“一般”“大概率”“多半”“往往”“多发/高发”“首要原因/主要原因（之一）”“典型原因”“常见于”等词，并保留证据限定。route 标题相似、行业经验、模型常识或本轮单一现象都不构成频率证据。',
     '没有直接频率证据时，删除上述概率定性和任何隐含排序；只能列不排序的“待验证假设/可能分支”。排查顺序只能依据本轮已有页面、请求、响应、原始报文、日志或审计里已经观察到的差异来决定，并明确写出该证据差异，不能把待验证假设包装成“先看这一边”。',
+    '诊断内容逐句只归为四类：①route/Spec 已核事实；②用户本轮已经提供的观察；③明确标成“待验证假设/可能分支”的未核原因；④通过动作一致性门的只读或受控动作。前端、后端、服务端、缓存、网关、鉴权、权限、数据库、配置、调度、部署或环境等组件故障，若用户或 route 没有直接确认，只能写成待验证假设，不能在条件分支、表格或小结中写成定论。',
     '核心事实题或已定位的共享键、字段类型、接口契约答清后立即停止；不得追加“改过模板、复制/重存、历史兼容、行业里经常如此”等经验成因。若用户明确问原因但证据只支持链路边界，就只说能定位到哪一层以及仍待验证的分支。',
     '本轮问题与已核 route 主题仅供证据边界判断，不自动生成事实：' + (routeText || '当前无 route 直接事实') + '。审计过程不要展示给用户，只输出删除无证据概率判断后的最终答案。',
   ].join('\n');
@@ -1676,6 +1677,8 @@ function consultEvidenceLikelihoodGuard(question, route) {
 
 const CONSULT_LIKELIHOOD_WORD_RE = /(?:最高频|最常见|(?:很|较|比较)?常见(?:原因|问题|场景)?|经常|通常|一般|大概率|多半|往往|多发|高发|首要原因|主要原因(?:之一)?|典型原因|常见于|可能是|(?:很|更|比较)?像(?=[“"'A-Za-z\u4e00-\u9fff])|看起来(?:很|更)?像|疑似|倾向于|(?:最|更|较|比较|尤其)?容易(?:出现|发生|对不上|出错|导致|造成)|易(?:发|出现|发生|错))/g;
 const CONSULT_CAUSAL_PRIORITY_RE = /(?:优先|首先|先)(?:去)?(?:查|看|排查|核对)(?:服务端|服务器|JVM|前端|缓存|错误兜底|网关|登录态|权限|调度|数据库|配置)[^。！？；\n]{0,18}/g;
+const CONSULT_DIRECT_RISKY_ACTION_RE = /(?:只能|需要|应当|应该|建议|可以|可|先|再|然后|去|请|让|由)[^。！？；\n]{0,10}(?:改|修改|调整|切换)[^。！？；\n]{0,12}(?:参数|报文(?:类型)?|映射|配置|部署时区|时区|系统时间|环境|产品口径|服务配置)/ig;
+const CONSULT_COMPONENT_FAULT_RE = /(?:服务端|服务器|JVM|前端|后端|缓存|网关|鉴权|权限|数据库|配置|调度|部署|环境)[^。！？；\n]{0,16}(?:异常|故障|问题|错误|不对|有误)/ig;
 
 function consultHasLikelihoodEvidence(question, route) {
   const q = String(question || '').trim();
@@ -1693,6 +1696,24 @@ function consultHasCausalPriorityEvidence(question, route) {
   const observedDifference = /(?:页面|接口|响应|请求|本机|服务器|JVM)[^。；\n]{0,24}(?:=|≠|一致|不一致|不同|只差|缺失|没有|未发出|失败|4\d\d|5\d\d|业务码)[^。；\n]{0,24}/i.test(q);
   const routedOrder = /(?:明确|规定|已核|说明书)[^。；\n]{0,32}(?:排查顺序|优先(?:查|看|排查|核对)|先[^。；\n]{0,16}再)/i.test(routeText);
   return observedDifference || routedOrder;
+}
+
+function consultUnsupportedComponentClaims(answer, question, route) {
+  const q = String(question || '').trim();
+  if (!/(?:排查|不一致|对不上|异常|故障|现场|验证|复测|下一步|怎么判断|如何判断|怎么确认|检查|留证)/i.test(q)) return [];
+  const evidence = `${q}\n${consultRouteScopeText(route)}`;
+  const hypothesisLabel = /(?:待验证|可能分支|待核|需(?:要)?确认|尚未确认|不能确认|无法确认|核对是否|确认是否|(?:若|如果)?(?:已经|已)?确认[^。！？；\n]{0,24}(?:后|时))/i;
+  return String(answer || '').split(/(?<=[。！？；\n])/u).map(x => x.trim()).filter(statement => {
+    if (!statement || hypothesisLabel.test(statement)) return false;
+    const matches = Array.from(statement.matchAll(CONSULT_COMPONENT_FAULT_RE));
+    if (!matches.length) return false;
+    return matches.some(match => {
+      const component = String(match[0] || '').match(/服务端|服务器|JVM|前端|后端|缓存|网关|鉴权|权限|数据库|配置|调度|部署|环境/i)?.[0];
+      if (!component) return false;
+      const escaped = component.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return !new RegExp(`(?:${escaped}[^。！？；\\n]{0,16}(?:异常|故障|问题|错误|不对|有误)|(?:已核|已确认|确认|明确|发现|显示|证明|复现)[^。！？；\\n]{0,20}${escaped})`, 'i').test(evidence);
+    });
+  });
 }
 
 function consultHasControlledActionBundle(question) {
@@ -1764,6 +1785,11 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const unsafeActorActions = controlled ? [] : text.split(/(?<=[。！？；\n])/u)
     .map(x => x.trim()).filter(statement => statement && Array.from(statement.matchAll(actorAction))
       .some(match => !negatedActorPrefix.test(statement.slice(0, match.index))));
+  const diagnosticQuestion = /(?:排查|不一致|对不上|异常|故障|现场|验证|复测|下一步|怎么判断|如何判断|怎么确认|检查|留证)/i.test(String(question || ''));
+  const unsafeDirectActions = controlled || !diagnosticQuestion ? [] : text.split(/(?<=[。！？；\n])/u)
+    .map(x => x.trim()).filter(statement => statement && Array.from(statement.matchAll(CONSULT_DIRECT_RISKY_ACTION_RE))
+      .some(match => !negatedActorPrefix.test(statement.slice(0, match.index))));
+  const unsupportedComponentClaims = consultUnsupportedComponentClaims(text, question, route);
   const routeText = consultRouteScopeText(route);
   const scopeText = `${question || ''}\n${routeText}`;
   const allowedPaths = new Set(consultConcretePaths(`${question || ''}\n${routeText}`));
@@ -1777,11 +1803,12 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const malformedMarkdown = consultMalformedMarkdownTokens(text);
   const violations = [];
   if (likelihoodTerms.length || causalPriorityTerms.length) violations.push('unsupported_likelihood');
-  if (unsafeActorActions.length) violations.push('cross_actor_side_effect');
+  if (unsupportedComponentClaims.length) violations.push('unsupported_component_fault');
+  if (unsafeActorActions.length || unsafeDirectActions.length) violations.push('cross_actor_side_effect');
   if (unexpectedPaths.length) violations.push('unexpected_concrete_path');
   if (unexpectedScopeTerms.length) violations.push('out_of_scope_entity');
   if (malformedMarkdown.length) violations.push('malformed_markdown');
-  return { checked: true, likelihoodAllowed, likelihoodTerms, causalPriorityAllowed, causalPriorityTerms, unsafeActorActionCount: unsafeActorActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, malformedMarkdown, violations };
+  return { checked: true, likelihoodAllowed, likelihoodTerms, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -1790,6 +1817,9 @@ function consultAnswerRevisionPrompt(draft, audit) {
     '下面是尚未发送给用户的草稿。请只输出修订后的完整答案，不要解释修订过程，不要增加任何新业务事实、接口、字段、按钮、原因或示例。',
     audit.violations.includes('unsupported_likelihood')
       ? '草稿含无直接证据的概率/频率或成因定性。删除整句中的“最高频/最常见/常见/经常/通常/一般/大概率/多半/往往/多发/高发/首要原因/主要原因/典型原因/常见于/可能是/很像/更像/疑似/倾向于/最容易出现”等定性；若本轮没有已观察到的页面、请求或响应差异，也删除“优先查服务端/前端/缓存/配置”等成因排序。原因只能改成不排序的“待验证假设/可能分支”，证据收集步骤仍可按只读顺序说明。'
+      : '',
+    audit.violations.includes('unsupported_component_fault')
+      ? '草稿把用户或 route 尚未确认的组件故障写成了定论。逐句按“已核事实 / 本轮观察 / 待验证假设 / 安全动作”四类重写；前端、后端、服务端、缓存、网关、鉴权、权限、数据库、配置、调度、部署或环境等未核原因只能明确标成“待验证假设/可能分支”，条件分支、表格和小结也不能绕过。'
       : '',
     audit.violations.includes('cross_actor_side_effect')
       ? '草稿把副作用动作交给实施、患者、对接方、运维或开发执行。删除改参、改映射/配置、复测、重试、重跑、补跑、重新触发等指令；改成只读检查已有报文、映射、请求响应、日志或审计。'
@@ -1828,6 +1858,9 @@ function consultAnswerSafeFallback(draft, audit) {
     CONSULT_CAUSAL_PRIORITY_RE.lastIndex = 0;
     if (audit.violations.includes('cross_actor_side_effect') && Array.from(part.matchAll(actorAction))
       .some(match => !negatedActorPrefix.test(part.slice(0, match.index)))) return false;
+    if (audit.violations.includes('cross_actor_side_effect') && Array.from(part.matchAll(CONSULT_DIRECT_RISKY_ACTION_RE))
+      .some(match => !negatedActorPrefix.test(part.slice(0, match.index)))) return false;
+    if (audit.violations.includes('unsupported_component_fault') && (audit.unsupportedComponentClaims || []).includes(part.trim())) return false;
     if (audit.violations.includes('out_of_scope_entity') && (audit.unexpectedEntityTerms || []).some(term => part.toLowerCase().includes(String(term).toLowerCase()))) return false;
     if (audit.violations.includes('unexpected_concrete_path')) {
       const partPaths = new Set(consultConcretePaths(part));
@@ -1838,6 +1871,7 @@ function consultAnswerSafeFallback(draft, audit) {
   const safeKept = consultNormalizeSafeMarkdown(kept);
   const notes = [];
   if (audit.violations.includes('unsupported_likelihood')) notes.push('当前证据不支持对原因作频率排序；未确认的原因只能作为不排序的待验证分支。');
+  if (audit.violations.includes('unsupported_component_fault')) notes.push('未由当前事实确认的组件原因仅作为待验证分支，不作故障定论。');
   if (audit.violations.includes('cross_actor_side_effect')) notes.push('未满足完整受控条件时，不执行这些改动或重复操作；只核已有报文、映射、请求响应、日志和审计。');
   return [safeKept || '当前草稿未通过发布前证据与动作安全校验，已停止发布其中未经证实的判断和操作指令。', ...notes].filter(Boolean).join('\n\n');
 }

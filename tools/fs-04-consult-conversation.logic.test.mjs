@@ -529,12 +529,15 @@ test('最终证据概率守卫禁止无依据成因排序，并让核心事实�
 test('发布前确定性语义校验：无证据概率词触发一次修订，有直接样本时不误拦', () => {
   const likelihoodConst = SRC.match(/const CONSULT_LIKELIHOOD_WORD_RE = [^;]+;/)?.[0] || '';
   const priorityConst = SRC.match(/const CONSULT_CAUSAL_PRIORITY_RE = [^;]+;/)?.[0] || '';
+  const directActionConst = SRC.match(/const CONSULT_DIRECT_RISKY_ACTION_RE = [^;]+;/)?.[0] || '';
+  const componentFaultConst = SRC.match(/const CONSULT_COMPONENT_FAULT_RE = [^;]+;/)?.[0] || '';
   assert.ok(likelihoodConst, '应找到概率词检测常量');
   const audit = new Function(
-    likelihoodConst + '\n' + priorityConst + '\n'
+    likelihoodConst + '\n' + priorityConst + '\n' + directActionConst + '\n' + componentFaultConst + '\n'
     + extractFn(SRC, 'consultHasLikelihoodEvidence') + '\n'
     + extractFn(SRC, 'consultRouteScopeText') + '\n'
     + extractFn(SRC, 'consultHasCausalPriorityEvidence') + '\n'
+    + extractFn(SRC, 'consultUnsupportedComponentClaims') + '\n'
     + extractFn(SRC, 'consultHasControlledActionBundle') + '\n'
     + extractFn(SRC, 'consultConcretePaths') + '\n'
     + extractFn(SRC, 'consultScopeEntityTerms') + '\n'
@@ -548,12 +551,17 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
   assert.deepEqual(failed.violations, ['unsupported_likelihood']);
   assert.deepEqual(failed.likelihoodTerms, ['多半']);
   for (const phrase of ['很常见', '较常见', '比较常见', '常见原因', '经常发生', '多发', '高发', '首要原因', '主要原因之一', '很像服务端缓存', '更像前端取错字段', '可能是异常兜底', '疑似配置问题', '倾向于时区问题', '最容易出现', '尤其容易对不上', '易发生']) {
-    assert.deepEqual(audit(`接口和浏览器不一致${phrase}。`, '今天视图为什么不一致？', route).violations, ['unsupported_likelihood'], phrase);
+    assert.ok(audit(`接口和浏览器不一致${phrase}。`, '今天视图为什么不一致？', route).violations.includes('unsupported_likelihood'), phrase);
   }
   assert.deepEqual(audit('待验证假设：服务端时区和现场约定不一致；可能分支：页面没有照接口响应展示。', '今天视图为什么不一致？', route).violations, [], '明确标为不排序待验证分支时应放行');
   assert.deepEqual(audit('优先查服务端时区。', '今天视图为什么不一致？', route).violations, ['unsupported_likelihood'], '没有当前差异证据不得排序成因');
   assert.deepEqual(audit('页面=接口但与本机不一致，优先查服务端时区。', '现场已确认页面=接口，但与本机不一致。', route).violations, [], '用户已给出直接差异时可据此排查对应层');
   assert.deepEqual(audit('按已核顺序优先查前端展示。', '页面为什么不一致？', { matched: true, route: { title: '展示排查' }, answerFacts: ['说明书明确排查顺序：页面与接口不一致时优先查前端展示'] }).violations, [], 'route明确顺序时放行');
+  assert.deepEqual(audit('响应与页面不一致，所以前端展示/缓存异常。', '今天视图不一致，怎么排查？', route).violations, ['unsupported_component_fault'], '答案自己补的条件不能把未核组件故障写成定论');
+  assert.deepEqual(audit('| 层级 | 结论 |\n| --- | --- |\n| 缓存 | 缓存异常 |\n最后就是前端问题。', '今天视图异常，怎么排查？', route).violations, ['unsupported_component_fault'], '表格和结尾同样进入四类事实审计');
+  assert.deepEqual(audit('可能分支：缓存异常，仍待验证。', '今天视图不一致，怎么排查？', route).violations, [], '明确标成待验证假设可保留');
+  assert.deepEqual(audit('已确认是缓存异常。', '现场日志已经确认缓存异常，下一步怎么留证？', route).violations, [], '用户已给直接故障证据可照实承接');
+  assert.deepEqual(audit('前端展示异常已由审计确认。', '今天视图不一致，怎么排查？', { matched: true, route: { title: '展示排查' }, answerFacts: ['已确认前端展示异常'] }).violations, [], 'route已核故障事实可照实承接');
 
   const userSample = audit('基于你给的样本，最常见的是服务端时区差。', '最近统计100次，其中80次确认是服务端时区差。', route);
   assert.deepEqual(userSample.violations, []);
@@ -575,11 +583,14 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
 test('发布前确定性语义校验：跨主体副作用触发，否定句和完整受控条件不误拦', () => {
   const likelihoodConst = SRC.match(/const CONSULT_LIKELIHOOD_WORD_RE = [^;]+;/)?.[0] || '';
   const priorityConst = SRC.match(/const CONSULT_CAUSAL_PRIORITY_RE = [^;]+;/)?.[0] || '';
+  const directActionConst = SRC.match(/const CONSULT_DIRECT_RISKY_ACTION_RE = [^;]+;/)?.[0] || '';
+  const componentFaultConst = SRC.match(/const CONSULT_COMPONENT_FAULT_RE = [^;]+;/)?.[0] || '';
   const audit = new Function(
-    likelihoodConst + '\n' + priorityConst + '\n'
+    likelihoodConst + '\n' + priorityConst + '\n' + directActionConst + '\n' + componentFaultConst + '\n'
     + extractFn(SRC, 'consultHasLikelihoodEvidence') + '\n'
     + extractFn(SRC, 'consultRouteScopeText') + '\n'
     + extractFn(SRC, 'consultHasCausalPriorityEvidence') + '\n'
+    + extractFn(SRC, 'consultUnsupportedComponentClaims') + '\n'
     + extractFn(SRC, 'consultHasControlledActionBundle') + '\n'
     + extractFn(SRC, 'consultConcretePaths') + '\n'
     + extractFn(SRC, 'consultScopeEntityTerms') + '\n'
@@ -594,22 +605,34 @@ test('发布前确定性语义校验：跨主体副作用触发，否定句和�
   assert.equal(failed.unsafeActorActionCount, 1);
   assert.deepEqual(audit('确认服务器时区不对后，转运维/开发按部署规范改时区。', '今天视图和浏览器不一致，怎么处理？', route).violations, ['cross_actor_side_effect']);
   assert.deepEqual(audit('JVM 时区错了，或服务器时间漂移，由运维按规范改服务端时区/对时（不在实施侧乱改前端）。改完后再看接口。', '今天视图和浏览器不一致，怎么处理？', route).violations, ['cross_actor_side_effect'], '句尾否定别的动作不能抵消前面的运维修改');
+  const directUnsafe = audit('要统一体验只能改部署时区或产品口径。', '今天视图和浏览器不一致，怎么排查？', route);
+  assert.deepEqual(directUnsafe.violations, ['cross_actor_side_effect'], '不写执行主体也不能把配置/时区/口径修改包装成诊断结论');
+  assert.equal(directUnsafe.unsafeDirectActionCount, 1);
   assert.deepEqual(audit('不得让运维重跑，也不能让开发重试。', '同步中断，能不能让运维重跑或开发重试？', route).violations, []);
+  assert.deepEqual(audit('规范正文说明该设置可以修改。', '这个设置是否支持修改？', { matched: true, route: { title: '设置能力' }, answerFacts: ['该设置支持修改'] }).violations, [], '核心能力事实题不强塞诊断动作门');
   assert.deepEqual(audit(
     '在已确认条件下，可让对接方受控改参数后单次复测。',
     '隔离测试环境、专用测试数据、明确授权、回滚清理、幂等性和影响范围都已确认。',
     route,
   ).violations, []);
+  assert.deepEqual(audit(
+    '在已确认条件下，可以受控修改配置一次并按清理方案恢复。',
+    '隔离测试环境、专用测试数据、明确授权、回滚清理、幂等性和影响范围都已确认，怎么受控验证？',
+    route,
+  ).violations, [], '完整受控条件放行不带执行主体的条件式动作');
 });
 
 test('二次修订失败时安全降级：删违规句、保留已核事实并追加边界', () => {
   const likelihoodConst = SRC.match(/const CONSULT_LIKELIHOOD_WORD_RE = [^;]+;/)?.[0] || '';
   const priorityConst = SRC.match(/const CONSULT_CAUSAL_PRIORITY_RE = [^;]+;/)?.[0] || '';
+  const directActionConst = SRC.match(/const CONSULT_DIRECT_RISKY_ACTION_RE = [^;]+;/)?.[0] || '';
+  const componentFaultConst = SRC.match(/const CONSULT_COMPONENT_FAULT_RE = [^;]+;/)?.[0] || '';
   const bundle = new Function(
-    likelihoodConst + '\n' + priorityConst + '\n'
+    likelihoodConst + '\n' + priorityConst + '\n' + directActionConst + '\n' + componentFaultConst + '\n'
     + extractFn(SRC, 'consultHasLikelihoodEvidence') + '\n'
     + extractFn(SRC, 'consultRouteScopeText') + '\n'
     + extractFn(SRC, 'consultHasCausalPriorityEvidence') + '\n'
+    + extractFn(SRC, 'consultUnsupportedComponentClaims') + '\n'
     + extractFn(SRC, 'consultHasControlledActionBundle') + '\n'
     + extractFn(SRC, 'consultConcretePaths') + '\n'
     + extractFn(SRC, 'consultScopeEntityTerms') + '\n'
@@ -637,7 +660,7 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
 
   const todayDraft = '今天视图由已核接口返回。页面日期可能是旧缓存或异常兜底。页面与接口不同，更像前端展示/取错字段。JVM 时区错了，由运维按规范改服务端时区（不在实施侧乱改前端）。';
   const todayAudit = bundle.audit(todayDraft, '今天视图和浏览器不一致，怎么处理？', { matched: true, route: { title: '工作台今天视图' }, answerFacts: ['日期来自服务端 JVM 当前时区'] });
-  assert.deepEqual(todayAudit.violations, ['unsupported_likelihood', 'cross_actor_side_effect']);
+  assert.deepEqual(todayAudit.violations, ['unsupported_likelihood', 'unsupported_component_fault', 'cross_actor_side_effect']);
   const todayFallback = bundle.fallback(todayDraft, todayAudit);
   assert.match(todayFallback, /今天视图由已核接口返回/);
   assert.doesNotMatch(todayFallback, /可能是|更像|由运维.*改/);
@@ -654,11 +677,14 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
 test('发布前确定性语义校验：路径必须来自用户或route并逐字保留', () => {
   const likelihoodConst = SRC.match(/const CONSULT_LIKELIHOOD_WORD_RE = [^;]+;/)?.[0] || '';
   const priorityConst = SRC.match(/const CONSULT_CAUSAL_PRIORITY_RE = [^;]+;/)?.[0] || '';
+  const directActionConst = SRC.match(/const CONSULT_DIRECT_RISKY_ACTION_RE = [^;]+;/)?.[0] || '';
+  const componentFaultConst = SRC.match(/const CONSULT_COMPONENT_FAULT_RE = [^;]+;/)?.[0] || '';
   const bundle = new Function(
-    likelihoodConst + '\n' + priorityConst + '\n'
+    likelihoodConst + '\n' + priorityConst + '\n' + directActionConst + '\n' + componentFaultConst + '\n'
     + extractFn(SRC, 'consultHasLikelihoodEvidence') + '\n'
     + extractFn(SRC, 'consultRouteScopeText') + '\n'
     + extractFn(SRC, 'consultHasCausalPriorityEvidence') + '\n'
+    + extractFn(SRC, 'consultUnsupportedComponentClaims') + '\n'
     + extractFn(SRC, 'consultHasControlledActionBundle') + '\n'
     + extractFn(SRC, 'consultConcretePaths') + '\n'
     + extractFn(SRC, 'consultScopeEntityTerms') + '\n'
@@ -712,11 +738,14 @@ test('发布前确定性语义校验：路径必须来自用户或route并逐字
 test('发布前事实作用域审计：相邻模块、通配路径不串入，显式切题放行', () => {
   const likelihoodConst = SRC.match(/const CONSULT_LIKELIHOOD_WORD_RE = [^;]+;/)?.[0] || '';
   const priorityConst = SRC.match(/const CONSULT_CAUSAL_PRIORITY_RE = [^;]+;/)?.[0] || '';
+  const directActionConst = SRC.match(/const CONSULT_DIRECT_RISKY_ACTION_RE = [^;]+;/)?.[0] || '';
+  const componentFaultConst = SRC.match(/const CONSULT_COMPONENT_FAULT_RE = [^;]+;/)?.[0] || '';
   const bundle = new Function(
-    likelihoodConst + '\n' + priorityConst + '\n'
+    likelihoodConst + '\n' + priorityConst + '\n' + directActionConst + '\n' + componentFaultConst + '\n'
     + extractFn(SRC, 'consultHasLikelihoodEvidence') + '\n'
     + extractFn(SRC, 'consultRouteScopeText') + '\n'
     + extractFn(SRC, 'consultHasCausalPriorityEvidence') + '\n'
+    + extractFn(SRC, 'consultUnsupportedComponentClaims') + '\n'
     + extractFn(SRC, 'consultHasControlledActionBundle') + '\n'
     + extractFn(SRC, 'consultConcretePaths') + '\n'
     + extractFn(SRC, 'consultScopeEntityTerms') + '\n'
