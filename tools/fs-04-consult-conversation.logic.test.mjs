@@ -860,6 +860,10 @@ test('发布前确定性语义校验：路径必须来自用户或route并逐字
   assert.deepEqual(bundle.audit(requiredFallback, '今天请求响应抓到了，重点核什么？', route).violations, []);
   const multipleRoute = { matched: true, route: { title: '多接口只读核对' }, answerFacts: ['GET /api/a 读取列表', 'GET /api/b 读取详情'] };
   assert.deepEqual(bundle.audit('核对当前请求的状态和响应。', '这个请求响应重点核什么？', multipleRoute).violations, [], '多个合法接口时不得强塞任意一个');
+  const wildcardRoute = { matched: true, route: { title: '外部调度入口组' }, answerFacts: ['外部调度调用 /comm/* 入口组'] };
+  const wildcardAudit = bundle.audit('核对当前请求的状态和响应。', '关于这次请求和响应，重点核对什么？', wildcardRoute);
+  assert.deepEqual(wildcardAudit.violations, [], '路径族/通配前缀不是一次请求的唯一精确主接口，不得强塞');
+  assert.doesNotMatch(bundle.fallback('核对当前请求的状态和响应。', wildcardAudit), /\/comm\/\*/);
   for (const bad of [
     '调用 GET /month/view/today。',
     '过滤关键字 month/view/today。',

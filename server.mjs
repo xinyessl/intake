@@ -895,28 +895,43 @@ function consultContextFollowupIntent(question) {
   const anaphoric = /^(?:那|那么|这个|那个|它|刚才|上面|前面|所以|然后|还有|其中|该功能|该接口|该页面|回到|上午反馈(?:的)?|之前反馈(?:的)?|前次反馈(?:的)?|关于(?:刚才|上面|前面|这个|该)|针对(?:刚才|上面|前面|这个|该)|这(?:里|块|一段|一步)|刚才这(?:里|块|一段)|填完(?:以后|后)?|提交(?:完|后)|保存(?:完|后)|发送(?:完|后)|完成(?:后)?|药师想复核这次|医生想复核这次|现场想复核这次|复核这次|这次复测|复测(?:时|到|这里|这个))/i.test(q);
   const progress = /^(?:(?:第[一二三四五六七八九十\d]+步|前(?:一|两|几)步)(?:已经|也|都|先)?[^，。；]{0,36}(?:正常|完成|看过|查过|没发现异常|对上|没对上)|(?:接口|请求|响应)(?:已经|也|都|是)?[^，。；]{0,36}(?:正常|成功|通了|返回(?:也是|为)?\s*(?:HTTP\s*)?200)|(?:接下来|下一步|后面)(?:呢|怎么|查|看|做|先))/i.test(q);
   const partialEvidence = /(?:目前|现在|这次|现场|我|这边)?(?:只能|只)(?:确认|看到|拿(?:得)?到|靠|看)|只有(?:这|一)?张?(?:截图|图片|图|页面)|(?:数据库|日志|源码|后台)(?:这边)?(?:暂时)?(?:没|没有|拿不到|无)(?:权限|法)?(?:查|看|拿)?|仅靠(?:页面|截图|接口|响应)|只靠(?:页面|截图|接口|响应)|还缺(?:什么|哪些)|缺(?:什么|哪些)(?:信息|证据)|先说(?:说)?能确定的部分|能先排除什么/i.test(q);
-  return anaphoric || progress || partialEvidence;
+  // 实施常用“关于/针对 + 上轮主题 + 已拿到的证据 + 重点核什么”继续追问。
+  // 这不是新主题；这里只允许进入上下文裁决，后面的显式新实体判断仍会让真正的切题 route 覆盖旧 route。
+  const topicAnchoredFollowup = /^(?:关于|针对)[^。！？；\n]{1,100}(?:重点核对|重点检查|怎么排查|如何排查|下一步|接下来|还缺什么|能排除什么|请求和响应|已有请求|已有响应)/i.test(q);
+  return anaphoric || progress || partialEvidence || topicAnchoredFollowup;
 }
 
-function contextualRouteQuestion(map, messages, currentQuestion, subKey = '') {
+function contextualRouteQuestion(map, messages, currentQuestion, subKey = '', contextDepth = 0) {
   const current = String(currentQuestion || '').trim();
   const direct = routeQuestion(map, current, subKey);
   if (!consultContextFollowupIntent(current)) return direct;
-  const users = (Array.isArray(messages) ? messages : []).filter(m => m && m.role === 'user' && String(m.content || '').trim());
+  const history = Array.isArray(messages) ? messages : [];
+  const users = history.map((m, messageIndex) => ({ m, messageIndex }))
+    .filter(({ m }) => m && m.role === 'user' && String(m.content || '').trim());
   let previous = '';
   let previousIndex = -1;
+  let previousMessageIndex = -1;
   for (let i = users.length - 1; i >= 0; i--) {
-    const value = String(users[i].content || '').trim();
-    if (value && value !== current) { previous = value; previousIndex = i; break; }
+    const value = String(users[i].m.content || '').trim();
+    if (value && value !== current) {
+      previous = value;
+      previousIndex = i;
+      previousMessageIndex = users[i].messageIndex;
+      break;
+    }
   }
   if (!previous) return direct;
-  let prior = routeQuestion(map, previous, subKey);
+  // 上一轮本身也可能是“只剩截图/请求已抓到/还缺什么”之类承接问法。
+  // 用它之前的历史递归还原当时已经裁决的 route，避免连续第二个弱追问被宽泛 DQ 抢走事实账本。
+  let prior = consultContextFollowupIntent(previous) && contextDepth < 24
+    ? contextualRouteQuestion(map, history.slice(0, previousMessageIndex), previous, subKey, contextDepth + 1)
+    : routeQuestion(map, previous, subKey);
   // 连续多轮都只汇报排查进度/证据限制时，中间句本身可能没有足够词命中 route。
   // 向前找“最近一个仍属于同主题的已核 route”：中间轮即使重复“配置/权限/反馈”等原主题实体也可跨越；
   // 但只要中间轮已明确命中另一 route，或出现候选 route 完全不含的新实体，就形成主题屏障。
   if (!prior.matched && consultContextFollowupIntent(previous)) {
     for (let i = previousIndex - 1; i >= 0; i--) {
-      const candidateQuestion = String(users[i].content || '').trim();
+      const candidateQuestion = String(users[i].m.content || '').trim();
       if (!candidateQuestion) continue;
       const candidate = routeQuestion(map, candidateQuestion, subKey);
       if (!candidate.matched) {
@@ -928,7 +943,7 @@ function contextualRouteQuestion(map, messages, currentQuestion, subKey = '') {
       const candidateText = String(candidateCard && candidateCard.searchText || [candidateCard && candidateCard.title, ...((candidateCard && candidateCard.aliases) || []), ...((candidateCard && candidateCard.keywords) || [])].filter(Boolean).join(' ')).toLowerCase();
       let blocked = false;
       for (let j = i + 1; j <= previousIndex; j++) {
-        const bridgeQuestion = String(users[j].content || '').trim(); if (!bridgeQuestion) continue;
+        const bridgeQuestion = String(users[j].m.content || '').trim(); if (!bridgeQuestion) continue;
         const bridgeRoute = routeQuestion(map, bridgeQuestion, subKey);
         const bridgeId = String(bridgeRoute.route && bridgeRoute.route.id || '');
         if (bridgeRoute.matched && bridgeId && bridgeId !== candidateId) { blocked = true; break; }
@@ -1869,7 +1884,9 @@ function consultRequiredPrimaryPath(question, route, answer = '') {
   for (const fact of route.answerFacts || []) {
     const factText = String(fact || '');
     for (const pathValue of consultConcretePaths(factText)) {
-      if (!pathValue.startsWith('/') || forbidden.has(pathValue)) continue;
+      // “唯一主接口”必须是可逐字核对的具体端点；`/x/*` 只是路径族/前缀，
+      // 不能因为它恰好是 route 内唯一的 path 就强塞成某一次请求的精确接口。
+      if (!pathValue.startsWith('/') || pathValue.includes('*') || forbidden.has(pathValue)) continue;
       const escaped = pathValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const method = factText.match(new RegExp(`\\b(GET|POST|PUT|PATCH|DELETE)\\s+${escaped}`, 'i'))?.[1]?.toUpperCase() || '';
       candidates.push({ path: pathValue, method, display: `${method ? `${method} ` : ''}${pathValue}` });

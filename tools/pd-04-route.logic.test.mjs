@@ -1296,6 +1296,20 @@ test('真实PWRS地图回归：今天视图、自定义表单和患者号链按�
   assert.equal(screenshotOnly.inherited, true);
   assert.equal(screenshotOnly.directCandidate?.id, 'DQ-013');
   assert.doesNotMatch(screenshotOnly.answerFacts.join(' '), /外部调度|\/comm\/\*/);
+  const capturedRequest = S.contextualRouteQuestion(map, todayMessages.concat(
+    { role: 'user', content: '现在卡在“今天视图显示的年份或星期和浏览器理解不一致”。给我一个能直接照着走的排查顺序。' },
+    { role: 'assistant', content: '历史回答不作证据。' },
+    { role: 'user', content: '现场还卡在今天视图时间这里，我只拿得到这张截图，没有日志，够不够？' },
+    { role: 'assistant', content: '历史回答不作证据。' },
+  ), '关于今天视图时间，请求和响应都抓到了，重点核对哪几个地方？', '');
+  assert.equal(capturedRequest.route.id, 'QR-WORKBENCH-TODAY');
+  assert.equal(capturedRequest.inherited, true);
+  assert.equal(capturedRequest.directCandidate?.id, 'DQ-013');
+  assert.match(capturedRequest.answerFacts.join(' '), /GET \/pwrsapi\/month\/view\/today/);
+  assert.doesNotMatch(capturedRequest.answerFacts.join(' '), /外部调度|\/comm\/\*/);
+  const explicitAboutSwitch = S.contextualRouteQuestion(map, todayMessages, '关于自定义表单的 form_id、element_id 和结果 content，重点核对怎么关联？', '');
+  assert.equal(explicitAboutSwitch.route.id, 'QR-CUSTOM-FORM-RELATION');
+  assert.notEqual(explicitAboutSwitch.inherited, true, '“关于”只打开上下文裁决，显式新实体仍须切到当前 route');
 
   const form = S.contextualRouteQuestion(map, todayMessages.concat(
     { role: 'user', content: '自定义表单的 form_id、element_id 和结果 content 分别怎么关联？' },
