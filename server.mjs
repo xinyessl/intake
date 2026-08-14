@@ -1817,6 +1817,47 @@ function consultMalformedProseTokens(text) {
   return issues;
 }
 
+function consultMarkdownTableCells(line) {
+  const source = String(line || '').trim();
+  if ((source.match(/(?<!\\)\|/g) || []).length < 2) return null;
+  return source.replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map(cell => cell.trim());
+}
+
+function consultMalformedTableTokens(text) {
+  const lines = String(text || '').split('\n');
+  const issues = [];
+  for (let i = 0; i < lines.length;) {
+    if (!consultMarkdownTableCells(lines[i])) { i += 1; continue; }
+    const block = [];
+    while (i < lines.length && consultMarkdownTableCells(lines[i])) block.push(lines[i++]);
+    const rows = block.map(consultMarkdownTableCells);
+    const columns = rows[0]?.length || 0;
+    const separator = rows[1] && rows[1].length === columns && rows[1].every(cell => /^:?-{3,}:?$/.test(cell));
+    if (block.length < 3 || columns < 2 || !separator || rows.some(row => row.length !== columns)) {
+      issues.push('malformed_table_structure');
+      continue;
+    }
+    if (rows.slice(2).some(row => row.filter(Boolean).length < 2)) issues.push('sparse_table_row');
+  }
+  return Array.from(new Set(issues));
+}
+
+function consultNormalizeSafeTables(text) {
+  const lines = String(text || '').split('\n');
+  const output = [];
+  for (let i = 0; i < lines.length;) {
+    if (!consultMarkdownTableCells(lines[i])) { output.push(lines[i++]); continue; }
+    const block = [];
+    while (i < lines.length && consultMarkdownTableCells(lines[i])) block.push(lines[i++]);
+    const rows = block.map(consultMarkdownTableCells);
+    const columns = rows[0]?.length || 0;
+    const separator = rows[1] && rows[1].length === columns && rows[1].every(cell => /^:?-{3,}:?$/.test(cell));
+    const dataRows = rows.slice(2).filter(row => row.length === columns && row.filter(Boolean).length >= 2);
+    if (columns >= 2 && separator && dataRows.length) output.push(block[0], block[1], ...dataRows.map(row => `| ${row.join(' | ')} |`));
+  }
+  return output.join('\n');
+}
+
 function consultRequiredPrimaryPath(question, route, answer = '') {
   if (!route || !route.matched) return null;
   const answerText = String(answer || '');
@@ -1886,7 +1927,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const scopeTechnicalTokens = new Set(consultScopeTechnicalTokens(scopeText).map(token => token.toLowerCase()));
   const unexpectedTechnicalTokens = consultScopeTechnicalTokens(text).filter(token => !scopeTechnicalTokens.has(token.toLowerCase()));
   const unexpectedScopeTerms = Array.from(new Set([...unexpectedEntityTerms, ...unexpectedMechanismTerms, ...unexpectedTechnicalTokens]));
-  const malformedMarkdown = [...consultMalformedMarkdownTokens(text), ...consultMalformedProseTokens(text)];
+  const malformedMarkdown = [...consultMalformedMarkdownTokens(text), ...consultMalformedProseTokens(text), ...consultMalformedTableTokens(text)];
   const requiredPrimaryPath = consultRequiredPrimaryPath(question, route, text);
   const missingPrimaryPath = requiredPrimaryPath && !consultConcretePaths(text).includes(requiredPrimaryPath.path) ? requiredPrimaryPath : null;
   const focusedFactOverreach = consultFocusedFactOverreach(text, question);
@@ -1928,7 +1969,7 @@ function consultAnswerRevisionPrompt(draft, audit) {
       ? '用户本轮只是问单个接口、路径、状态码、字段属性或一个是非事实。保留 current route answerFacts/primary section 的直接答案和回答它所必需的 mustNotConfuse 限定；删除现场排查、无当前观察的失败原因、诊断优先级、操作建议、截图/日志邀约及其它未问扩写。用户明确问“为什么/排查/现场/怎么验证/接下来”或提出多个子问题时才可给对应步骤。'
       : '',
     audit.violations.includes('malformed_markdown')
-      ? '草稿含未闭合的 Markdown 粗体、行内代码、代码围栏、中文/英文括号或书名式括号。修订时必须输出语法完整的自然句并闭合成对标记；无法自然恢复就删除整句，禁止保留半截列表项、孤立标点或残缺括号。'
+      ? '草稿含未闭合的 Markdown 粗体、行内代码、代码围栏、中文/英文括号，或列数不齐/只有单个残留单元格的 Markdown 表格。修订时必须输出语法完整的自然句并闭合成对标记；表格必须保留完整表头、分隔行与列数一致的数据行，删掉一个违规单元格时删除其完整数据行，无法保住有效数据行就删除整张表。禁止保留半截列表项、孤立标点、残缺括号或空列表格。'
       : '',
     '保留草稿中已经由 Spec/route/源码确认的事实和局部未知边界；不得把当前主题整体降级为“说明书未覆盖”。',
     '<draft>', String(draft || ''), '</draft>',
@@ -1947,7 +1988,7 @@ function consultReplaceUnexpectedPath(text, pathValue) {
 function consultAnswerSafeFallback(draft, audit) {
   const actorAction = /(?:让|请|交给|通知|要求|转)?\s*(?:实施|用户|患者|对接方|第三方|运维|开发)[^。！？；\n]{0,42}(?:(?:改|修改|调整|切换|对齐|校准|统一)[^。！？；\n]{0,16}(?:参数|报文(?:类型)?|类型|映射|配置|时区|系统时间|环境|产品口径|业务口径|日切要求|服务配置)|对时|重试|复测|重跑|补跑|重新触发|再次触发|再点|点一次|提交|保存|发送|完成|签名|审批|星标)/ig;
   const negatedActorPrefix = /(?:不得|不能|不要|禁止|不可|不应|先别|停止|未确认)\s*$/i;
-  const kept = String(draft || '').split(/(?<=[。！？；\n])/u).filter(part => {
+  const keepPart = part => {
     if (audit.violations.includes('unsupported_likelihood') && (CONSULT_LIKELIHOOD_WORD_RE.test(part) || CONSULT_CAUSAL_PRIORITY_RE.test(part))) {
       CONSULT_LIKELIHOOD_WORD_RE.lastIndex = 0; CONSULT_CAUSAL_PRIORITY_RE.lastIndex = 0; return false;
     }
@@ -1965,9 +2006,13 @@ function consultAnswerSafeFallback(draft, audit) {
       if ((audit.unexpectedPaths || []).some(pathValue => partPaths.has(String(pathValue)))) return false;
     }
     return true;
-  }).join('').trim();
-  const proseSafeKept = kept.split('\n').filter(line => !consultMalformedProseTokens(line).length).join('\n');
-  let safeKept = consultNormalizeSafeMarkdown(proseSafeKept);
+  };
+  const keptLines = String(draft || '').split('\n').map(line => {
+    if (consultMarkdownTableCells(line)) return keepPart(line) ? line : '';
+    return line.split(/(?<=[。！？；])/u).filter(keepPart).join('');
+  }).filter(line => line.trim());
+  const proseSafeKept = keptLines.filter(line => !consultMalformedProseTokens(line).length).join('\n');
+  let safeKept = consultNormalizeSafeMarkdown(consultNormalizeSafeTables(proseSafeKept));
   if (audit.violations.includes('missing_primary_path') && audit.missingPrimaryPath) {
     const exact = audit.missingPrimaryPath.display;
     safeKept = [safeKept, `当前请求应逐字核对已核主接口：\`${exact}\`。`].filter(Boolean).join('\n\n');

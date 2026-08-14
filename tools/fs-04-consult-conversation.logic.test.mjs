@@ -561,6 +561,9 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
     + extractFn(SRC, 'consultScopeTechnicalTokens') + '\n'
     + extractFn(SRC, 'consultMalformedMarkdownTokens') + '\n'
     + extractFn(SRC, 'consultMalformedProseTokens') + '\n'
+    + extractFn(SRC, 'consultMarkdownTableCells') + '\n'
+    + extractFn(SRC, 'consultMalformedTableTokens') + '\n'
+    + extractFn(SRC, 'consultNormalizeSafeTables') + '\n'
     + extractFn(SRC, 'consultRequiredPrimaryPath') + '\n'
     + extractFn(SRC, 'consultFocusedFactGuard') + '\n'
     + extractFn(SRC, 'consultFocusedFactOverreach') + '\n'
@@ -656,6 +659,9 @@ test('发布前确定性语义校验：跨主体副作用触发，否定句和�
     + extractFn(SRC, 'consultScopeTechnicalTokens') + '\n'
     + extractFn(SRC, 'consultMalformedMarkdownTokens') + '\n'
     + extractFn(SRC, 'consultMalformedProseTokens') + '\n'
+    + extractFn(SRC, 'consultMarkdownTableCells') + '\n'
+    + extractFn(SRC, 'consultMalformedTableTokens') + '\n'
+    + extractFn(SRC, 'consultNormalizeSafeTables') + '\n'
     + extractFn(SRC, 'consultRequiredPrimaryPath') + '\n'
     + extractFn(SRC, 'consultFocusedFactGuard') + '\n'
     + extractFn(SRC, 'consultFocusedFactOverreach') + '\n'
@@ -706,6 +712,9 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     + extractFn(SRC, 'consultScopeTechnicalTokens') + '\n'
     + extractFn(SRC, 'consultMalformedMarkdownTokens') + '\n'
     + extractFn(SRC, 'consultMalformedProseTokens') + '\n'
+    + extractFn(SRC, 'consultMarkdownTableCells') + '\n'
+    + extractFn(SRC, 'consultMalformedTableTokens') + '\n'
+    + extractFn(SRC, 'consultNormalizeSafeTables') + '\n'
     + extractFn(SRC, 'consultRequiredPrimaryPath') + '\n'
     + extractFn(SRC, 'consultFocusedFactGuard') + '\n'
     + extractFn(SRC, 'consultFocusedFactOverreach') + '\n'
@@ -766,6 +775,26 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.doesNotMatch(atomicFallback, /现场怎么|打开工作台|优先查|截图发来|再一起看/);
   assert.deepEqual(bundle.audit(atomicFallback, '工作台今天日期和星期调用哪个接口？', atomicRoute).violations, []);
 
+  const tableDraft = [
+    '| 对照结果 | 已核边界 | 只读下一步 |',
+    '| --- | --- | --- |',
+    '| 接口与页面相同；浏览器不同 | 日期来自服务端 JVM 时区 | 保留状态码与响应；交联调 |',
+    '让运维修改服务端时区。',
+  ].join('\n');
+  const tableAudit = bundle.audit(tableDraft, '今天视图和浏览器不一致，怎么排查？', atomicRoute);
+  assert.deepEqual(tableAudit.violations, ['cross_actor_side_effect']);
+  const tableFallback = bundle.fallback(tableDraft, tableAudit);
+  assert.match(tableFallback, /\| 接口与页面相同；浏览器不同 \| 日期来自服务端 JVM 时区 \| 保留状态码与响应；交联调 \|/);
+  assert.doesNotMatch(tableFallback, /让运维修改/);
+  assert.deepEqual(bundle.audit(tableFallback, '今天视图和浏览器不一致，怎么排查？', atomicRoute).violations, [], '表格行内分号不得被降级拆成孤立单元格');
+
+  const sparseTable = '| 对照结果 | 已核边界 | 只读下一步 |\n| --- | --- | --- |\n| 把状态码与响应留给联调 | | |';
+  const sparseAudit = bundle.audit(sparseTable, '今天视图怎么排查？', atomicRoute);
+  assert.deepEqual(sparseAudit.violations, ['malformed_markdown']);
+  const sparseFallback = bundle.fallback(sparseTable, sparseAudit);
+  assert.doesNotMatch(sparseFallback, /\|/);
+  assert.deepEqual(bundle.audit(sparseFallback, '今天视图怎么排查？', atomicRoute).violations, []);
+
   const brokenProse = '核对请求方法。是否不该有多余业务参数（这条接口不依赖患者入参；';
   const brokenAudit = bundle.audit(brokenProse, '今天视图请求和响应抓到了，重点核什么？', {
     matched: true,
@@ -803,6 +832,9 @@ test('发布前确定性语义校验：路径必须来自用户或route并逐字
     + extractFn(SRC, 'consultScopeTechnicalTokens') + '\n'
     + extractFn(SRC, 'consultMalformedMarkdownTokens') + '\n'
     + extractFn(SRC, 'consultMalformedProseTokens') + '\n'
+    + extractFn(SRC, 'consultMarkdownTableCells') + '\n'
+    + extractFn(SRC, 'consultMalformedTableTokens') + '\n'
+    + extractFn(SRC, 'consultNormalizeSafeTables') + '\n'
     + extractFn(SRC, 'consultRequiredPrimaryPath') + '\n'
     + extractFn(SRC, 'consultFocusedFactGuard') + '\n'
     + extractFn(SRC, 'consultFocusedFactOverreach') + '\n'
@@ -884,6 +916,9 @@ test('发布前事实作用域审计：相邻模块、通配路径不串入，�
     + extractFn(SRC, 'consultScopeTechnicalTokens') + '\n'
     + extractFn(SRC, 'consultMalformedMarkdownTokens') + '\n'
     + extractFn(SRC, 'consultMalformedProseTokens') + '\n'
+    + extractFn(SRC, 'consultMarkdownTableCells') + '\n'
+    + extractFn(SRC, 'consultMalformedTableTokens') + '\n'
+    + extractFn(SRC, 'consultNormalizeSafeTables') + '\n'
     + extractFn(SRC, 'consultRequiredPrimaryPath') + '\n'
     + extractFn(SRC, 'consultFocusedFactGuard') + '\n'
     + extractFn(SRC, 'consultFocusedFactOverreach') + '\n'

@@ -428,6 +428,7 @@
           "title": "咨询答疑 Spec 完整目录路由→候选正文 Top5 两阶段召回，并隔离当前问题与历史其它模块事实",
           "status": "doing",
           "specRef": "FS-04",
+          "noteTag38R22": "待验收增量：安全fallback按普通段落与Markdown结构块分流，表格行内分号不再拆行；违规单元格删完整数据行，最终审计表头/分隔行/列数/稀疏残行，无有效数据行删整表。",
           "noteTag38R21": "待验收增量：接口/路径/状态码/字段属性/是非等原子事实题仅保留current route直接事实和必要mustNotConfuse，最终稿删除未问的现场排查、原因、动作与继续邀约；显式为什么/排查/现场/怎么验证/接下来及多子问题不触发止答。",
           "noteTag38R20": "待验收增量：最终修订/降级稿增加Markdown与中英文括号、完整自然句复审；患者/医生/药师/订单等业务实体必须来自本轮或current/inherited route；请求核对且answerFacts仅一个已核主接口时逐字保留HTTP方法与完整路径，多接口不强塞。",
           "noteTag38R19": "待验收增量：概率/频率/比例从route全局布尔改为自然句claim级证据绑定，无关统计和多facts混合不能放行另造原因；东八区、UTC/GMT偏移、Asia/Shanghai等具体环境值按current scope事实token审计，用户/route逐字给出放行。",
