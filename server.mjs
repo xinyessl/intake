@@ -1699,6 +1699,7 @@ function consultFinalActionConsistencyGuard(question, route) {
     '用户问“只有这份证据/没有另一份证据，够不够、是否足够、能不能判断”时，第一句话必须明确回答：现有证据够完成什么、不够完成什么；随后只从 current/inherited route 的直接事实和已核主接口给最小缺口，不得退成页面、终端、账号、版本等跨主题通用材料清单。用户明确索要完整提单/转开发材料清单时才可给通用清单。若本轮没有可核验附件，不得声称看见截图里的数字或内容。',
     '若答案声明“最小证据/最小输入/只缺 N 项”，后续诊断结论或分支表使用的每个观测变量，都必须已在用户本轮明确具备的证据或此前“已有/需补/采集”清单中定义。不得在最小清单只列接口响应，却在判断表首次引入本机日期、浏览器时间、日志等第二个输入；发现时补回草稿/current route 已有的安全观测项，或删除依赖未定义变量的判断结构，不得补造业务事实。',
     '若答案用 A/B/C 等单字母、编号或短符号做“=、≠、>、<、vs”组合判断，必须在第一次比较之前逐一明确绑定每个符号的含义（如 A=页面、B=接口、C=本机，或用符号—含义表）。只在前文自然语列出三项、事后再写自然语结论，都不能反向补定义；表头直接使用页面/接口/本机等具体名称时无需引入符号。未定义时改写成已知具体观测名；映射没有证据时删除该分支块，不得猜。合法数学常量、HTTP 状态码和 JSON key 不按诊断符号处理。',
+    '所有“进入/回到/按第 N 步”的引用都必须在此前已有顶层 N. 步骤或“第N步：”定义；后文定义不能反向补足，只有用户本轮明确说已到第N步时可承接。“N选一/以下N类”必须紧随实际 N 个选项；字母选项从 A 连续，数字/圈号同样连续。后文用 A/B/C、A、B、C、A-C 归类时，每个字母必须已在此前选项、符号正文或符号表定义。缺项时删除不完整声明/引用；仅已有选项从起点连续时可把数量改为实际值，不得补造缺失分支。普通 A/B 测试、API 缩写与路径不按选项引用处理。',
     '该审计只删除不安全或互相矛盾的动作，不新增业务事实，也不给纯事实回答强加诊断步骤。若用户只问事实且现有证据已经足够，直接回答后停止；若已明确动作只读，可保留相应只读观察；若受控条件全部齐全，可条件式说明单次受控验证。',
   ].join('\n');
 }
@@ -2520,15 +2521,17 @@ function consultAnswerSemanticAudit(answer, question, route) {
     const sameStep = new RegExp(`(?:按|根据|依照|参考|完成|继续|回到|返回|执行|做完|做好|做)\\s*第\\s*${step.number}\\s*步(?:\\s*(?:的)?(?:结果|结论|内容|操作|要求|后|再|往下|往后))?`, 'u');
     return sameStep.test(body);
   });
-  const definedArabicSteps = new Set(topLevelSteps.map(step => step.number));
-  for (const line of documentLines) {
-    const heading = line.match(/^\s*(?:\*\*|__)?\s*第\s*([1-9]\d*)\s*步(?:\s*[：:、.]|\s+)/u);
-    if (heading) definedArabicSteps.add(Number(heading[1]));
-  }
   const userArabicSteps = new Set(Array.from(String(question || '').matchAll(/第\s*([1-9]\d*)\s*步/gu), match => Number(match[1])));
+  const definedArabicSteps = new Set(userArabicSteps);
   const undefinedArabicStepReferences = [];
   for (let lineIndex = 0; lineIndex < documentLines.length; lineIndex++) {
     const line = documentLines[lineIndex];
+    // 定义按文档顺序生效；后文才出现的“第N步：”不能反向补足前面的
+    // “进入第N步”。顶层 `N.` 与明确“第N步：标题”在本行先登记。
+    const topLevelDefinition = topLevelSteps.find(step => step.lineIndex === lineIndex);
+    if (topLevelDefinition) definedArabicSteps.add(topLevelDefinition.number);
+    const heading = line.match(/^\s*(?:[-*+]\s+)?(?:\*\*|__)?\s*第\s*([1-9]\d*)\s*步(?:\s*[：:、.]|\s+)/u);
+    if (heading) definedArabicSteps.add(Number(heading[1]));
     const referenced = new Set();
     for (const match of line.matchAll(/第\s*([1-9]\d*)(?:\s*[\/、和及]\s*([1-9]\d*))?\s*步/gu)) {
       referenced.add(Number(match[1]));
@@ -2536,6 +2539,72 @@ function consultAnswerSemanticAudit(answer, question, route) {
     }
     const undefinedNumbers = Array.from(referenced).filter(number => !definedArabicSteps.has(number) && !userArabicSteps.has(number));
     if (undefinedNumbers.length) undefinedArabicStepReferences.push({ line: line.trim(), lineIndex, numbers: undefinedNumbers });
+  }
+  // “三选一/以下三类”是选项结构契约。紧随选项可用 A./1./① 等标签，
+  // 但实际数量必须匹配声明；字母选项必须从 A 连续，不能只剩 B/C。
+  const optionCountDeclarationRe = /(?:(?:用|从|按)?\s*(?:下面|以下|下列|这)\s*([一二两三四五六七八九十]|\d{1,2})\s*(?:选一|类|种(?:情况|结果|分支|选项)?)|([一二两三四五六七八九十]|\d{1,2})\s*选一)/u;
+  const optionLineRe = /^\s*(?:[-*+]\s+)?(?:\*\*|__)?\s*(?:([A-Z]|[1-9]\d*)\s*[.、:：）)]\s*|([①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳])\s*)/u;
+  const optionCardinalityMismatches = [];
+  const nonSequentialOptionSets = [];
+  for (let lineIndex = 0; lineIndex < documentLines.length; lineIndex++) {
+    const declaration = documentLines[lineIndex].match(optionCountDeclarationRe);
+    if (!declaration) continue;
+    const countToken = declaration[1] || declaration[2];
+    const expected = /^\d+$/u.test(countToken) ? Number(countToken) : chineseCount[countToken];
+    let cursor = lineIndex + 1;
+    const options = [];
+    while (cursor < documentLines.length) {
+      if (!documentLines[cursor].trim()) { cursor++; continue; }
+      const optionMatch = documentLines[cursor].match(optionLineRe);
+      if (!optionMatch) break;
+      options.push({ label: optionMatch[1] || optionMatch[2], line: documentLines[cursor].trim(), lineIndex: cursor });
+      cursor++;
+    }
+    if (!options.length) continue;
+    if (options.length !== expected) optionCardinalityMismatches.push({
+      line: documentLines[lineIndex].trim(), lineIndex, expected, actual: options.length, options,
+      block: documentLines.slice(lineIndex, cursor).join('\n'),
+    });
+    const letterOptions = options.filter(item => /^[A-Z]$/u.test(item.label));
+    if (letterOptions.length === options.length) {
+      const expectedLabels = letterOptions.map((_, index) => String.fromCharCode(65 + index));
+      const actualLabels = letterOptions.map(item => item.label);
+      if (actualLabels.some((label, index) => label !== expectedLabels[index])) nonSequentialOptionSets.push({
+        line: documentLines[lineIndex].trim(), lineIndex, expectedLabels, actualLabels, options,
+        block: documentLines.slice(lineIndex, cursor).join('\n'),
+      });
+    }
+  }
+  // A/B/C、A、B、C、A-C 等分组引用只在“分类/分支/选项”语境下解释为
+  // 文档变量，避免误伤 API、A/B 测试等普通缩写。每个字母必须在引用前由
+  // A. 选项、A=含义正文或符号表定义；后文定义不回填。
+  const definedGroupSymbols = new Set();
+  const undefinedGroupReferences = [];
+  for (let lineIndex = 0; lineIndex < documentLines.length; lineIndex++) {
+    const line = String(documentLines[lineIndex] || '');
+    const optionMatch = line.match(optionLineRe);
+    const optionLabel = optionMatch && (optionMatch[1] || optionMatch[2]);
+    if (optionLabel && /^[A-Z]$/u.test(optionLabel)) definedGroupSymbols.add(optionLabel);
+    const cells = consultMarkdownTableCells(line);
+    if (cells && /^[A-Z]$/u.test(String(cells[0] || '').trim()) && String(cells[1] || '').trim()) definedGroupSymbols.add(String(cells[0]).trim());
+    for (const match of line.matchAll(/(?:^|[|,，；;:：\s（(])([A-Z])\s*(?:=|：|:|表示|代表|指代|为)\s*([^|,，；;。\n]{1,32})/gu)) {
+      const meaning = String(match[2] || '').trim();
+      if (meaning && !/^[A-Z](?:\s|$)/u.test(meaning)) definedGroupSymbols.add(match[1]);
+    }
+    const groupContext = /(?:哪一类|归类|归到|分类|分组|选项|分支|类别|落在|属于|选择|三选一|二选一)/u.test(line)
+      || optionCardinalityMismatches.some(item => item.lineIndex < lineIndex)
+      || nonSequentialOptionSets.some(item => item.lineIndex < lineIndex);
+    if (!groupContext) continue;
+    const references = [];
+    for (const match of line.matchAll(/(?<![A-Za-z0-9_])([A-Z])\s*(?:\/|、|,|，)\s*([A-Z])(?:\s*(?:\/|、|,|，)\s*([A-Z]))*(?![A-Za-z0-9_])/gu)) {
+      references.push(...match[0].match(/[A-Z]/gu) || []);
+    }
+    for (const match of line.matchAll(/(?<![A-Za-z0-9_])([A-Z])\s*[-–—]\s*([A-Z])(?![A-Za-z0-9_])/gu)) {
+      const start = match[1].charCodeAt(0), end = match[2].charCodeAt(0);
+      if (end >= start && end - start <= 12) for (let code = start; code <= end; code++) references.push(String.fromCharCode(code));
+    }
+    const undefinedSymbols = Array.from(new Set(references.filter(symbol => !definedGroupSymbols.has(symbol))));
+    if (undefinedSymbols.length) undefinedGroupReferences.push({ line: line.trim(), lineIndex, symbols: Array.from(new Set(references)), undefinedSymbols });
   }
   const singleStepOverreach = singleStepQuestion && topLevelSteps.length > 1
     ? { steps: topLevelSteps, truncateFromLine: topLevelSteps[1].lineIndex }
@@ -2830,6 +2899,9 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (undefinedOrdinalReferences.length) violations.push('undefined_ordinal_reference');
   if (undefinedSymbolicComparisons.length) violations.push('undefined_symbolic_comparison');
   if (undefinedArabicStepReferences.length) violations.push('undefined_arabic_step_reference');
+  if (optionCardinalityMismatches.length) violations.push('incomplete_option_set');
+  if (nonSequentialOptionSets.length) violations.push('nonsequential_option_labels');
+  if (undefinedGroupReferences.length) violations.push('undefined_symbol_group_reference');
   if (selfReferentialStepReferences.length) violations.push('self_referential_step_reference');
   if (nonSequentialTopLevelSteps.length) violations.push('nonsequential_top_level_steps');
   if (emptyNumberedSections.length) violations.push('empty_numbered_section');
@@ -2850,7 +2922,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (contradictoryNegativeSections.length) violations.push('contradictory_negative_section');
   if (singleStepOverreach) violations.push('single_step_diagnostic_overreach');
   if (malformedMarkdown.length) violations.push('malformed_markdown');
-  return { checked: true, diagnosticQuestion, evidenceSufficiencyQuestion, fullHandoffMaterialQuestion, hasEvidenceSufficiencyVerdict, minimumRoutePath, missingEvidenceMinimumPath, observationInputContract, undefinedObservationVariables, symbolicDefinitions: Object.fromEntries(symbolicDefinitions), undefinedSymbolicComparisons, focusedFactQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, focusedRelationshipFacts, missingFocusedRelationshipFacts, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, emptyNumberedSections, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, emptyDiagnosticBranchHeadings, emptyListStepItems, danglingClosingPunctuationLines, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
+  return { checked: true, diagnosticQuestion, evidenceSufficiencyQuestion, fullHandoffMaterialQuestion, hasEvidenceSufficiencyVerdict, minimumRoutePath, missingEvidenceMinimumPath, observationInputContract, undefinedObservationVariables, symbolicDefinitions: Object.fromEntries(symbolicDefinitions), undefinedSymbolicComparisons, focusedFactQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, focusedRelationshipFacts, missingFocusedRelationshipFacts, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, optionCardinalityMismatches, nonSequentialOptionSets, undefinedGroupReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, emptyNumberedSections, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, emptyDiagnosticBranchHeadings, emptyListStepItems, danglingClosingPunctuationLines, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -2891,7 +2963,16 @@ function consultAnswerRevisionPrompt(draft, audit) {
       ? `草稿使用了未在此前逐一绑定含义的符号比较：${(audit.undefinedSymbolicComparisons || []).map(item => `${item.expression}（未定义 ${item.undefinedSymbols.join('/')}）`).join('；')}。A/B/C 等单字母或短符号必须在第一次“=、≠、>、<、vs”比较前通过“A=页面”正文或符号—含义表逐一定义；前文只自然语列三项、结尾再写自然语结论都不能反向补定义。若草稿/route 已明确映射，就把全部分支改成页面、接口响应、本机日期等具体观测名；没有明确映射时删除含符号的完整分支行/块，不得猜。表头直接用具体名称时无需符号。`
       : '',
     audit.violations.includes('undefined_arabic_step_reference')
-      ? `草稿引用了本答案未定义、用户本轮也未明确给出的阿拉伯数字步骤：${(audit.undefinedArabicStepReferences || []).map(item => `${item.numbers.map(number => `第${number}步`).join('/')}（${item.line}）`).join('；')}。若确有现成步骤正文，只按现有顺序补上连续标题；否则删除含引用的完整句，不得凭空补造缺失步骤。`
+      ? `草稿引用了此前尚未定义、用户本轮也未明确给出的阿拉伯数字步骤：${(audit.undefinedArabicStepReferences || []).map(item => `${item.numbers.map(number => `第${number}步`).join('/')}（${item.line}）`).join('；')}。定义必须在引用之前；后文才出现的步骤不能反向补足。若确有现成步骤正文，只按现有顺序补上连续标题；否则删除含引用的完整句，不得凭空补造缺失步骤。`
+      : '',
+    audit.violations.includes('incomplete_option_set')
+      ? `草稿的“N选一/以下N类”声明与实际选项数量不一致：${(audit.optionCardinalityMismatches || []).map(item => `声明${item.expected}项、实际${item.actual}项`).join('；')}。若已有选项标签从起点连续，只把数量收敛为实际已有项数；否则删除不完整声明。不得为了凑数补造缺失业务分支。`
+      : '',
+    audit.violations.includes('nonsequential_option_labels')
+      ? `草稿的字母选项没有从A连续：${(audit.nonSequentialOptionSets || []).map(item => `${item.actualLabels.join('/')}（应从${item.expectedLabels.join('/')}起）`).join('；')}。只能用已有选项重新连续标号，或删除整组残缺选项；不得猜测缺失A项的内容。`
+      : '',
+    audit.violations.includes('undefined_symbol_group_reference')
+      ? `草稿用 A/B/C、A、B、C 或 A-C 引用分类，但其中符号此前未定义：${(audit.undefinedGroupReferences || []).map(item => `${item.undefinedSymbols.join('/')}（${item.line}）`).join('；')}。删除含未定义符号的完整引用句，或仅使用此前已经定义的具体选项名；不得从列举顺序猜映射、不得补造缺失分类。`
       : '',
     audit.violations.includes('self_referential_step_reference')
       ? `草稿的顶层步骤定义行引用了自己：${(audit.selfReferentialStepReferences || []).map(item => item.line).join('；')}。“3. 按第3步结果”之类自引用没有可执行含义；删除该完整标题行，让其下已有分支归属前一步，再将后续现有顶层步骤连续重编号。不得新增步骤或事实。`
@@ -3034,6 +3115,7 @@ function consultAnswerSafeFallback(draft, audit) {
     if (audit.violations.includes('undefined_ordinal_reference') && (audit.undefinedOrdinalReferences || []).some(term => part.includes(String(term)))) return false;
     if (audit.violations.includes('undefined_symbolic_comparison') && (audit.undefinedSymbolicComparisons || []).some(item => item.line === part.trim() || item.line.includes(part.trim()))) return false;
     if (audit.violations.includes('undefined_arabic_step_reference') && (audit.undefinedArabicStepReferences || []).some(item => item.line === part.trim() || item.line.includes(part.trim()))) return false;
+    if (audit.violations.includes('undefined_symbol_group_reference') && (audit.undefinedGroupReferences || []).some(item => item.line === part.trim() || item.line.includes(part.trim()))) return false;
     if (audit.violations.includes('self_referential_step_reference') && (audit.selfReferentialStepReferences || []).some(item => item.line === part.trim() || item.line.includes(part.trim()))) return false;
     if (audit.violations.includes('unexpected_concrete_path')) {
       const partPaths = new Set(consultConcretePaths(part));
@@ -3070,6 +3152,21 @@ function consultAnswerSafeFallback(draft, audit) {
   }
   const conflictingCountLines = new Set((audit.conflictingCountDeclarations || []).flatMap(item => [item.first, item.second]));
   if (conflictingCountLines.size) fallbackDraft = fallbackDraft.split('\n').filter(line => !conflictingCountLines.has(line.trim())).join('\n');
+  const nonSequentialOptionBlocks = new Set((audit.nonSequentialOptionSets || []).map(item => item.block).filter(Boolean));
+  for (const block of nonSequentialOptionBlocks) fallbackDraft = fallbackDraft.replace(block, '');
+  const optionCountChinese = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+  for (const mismatch of audit.optionCardinalityMismatches || []) {
+    if (nonSequentialOptionBlocks.has(mismatch.block)) continue;
+    if (!mismatch.actual) {
+      fallbackDraft = fallbackDraft.split('\n').filter(line => line.trim() !== mismatch.line).join('\n');
+      continue;
+    }
+    fallbackDraft = fallbackDraft.split('\n').map(line => {
+      if (line.trim() !== mismatch.line) return line;
+      return line.replace(/((?:(?:用|从|按)?\s*(?:下面|以下|下列|这)\s*)?)([一二两三四五六七八九十]|\d{1,2})(\s*选一|\s*(?:类|种(?:情况|结果|分支|选项)?))/u,
+        (_, prefix, original, suffix) => `${prefix}${/^\d+$/u.test(original) ? mismatch.actual : (optionCountChinese[mismatch.actual] || mismatch.actual)}${suffix}`);
+    }).join('\n');
+  }
   for (const lead of audit.incompleteLeadIns || []) {
     if (lead.inlineClause) fallbackDraft = fallbackDraft.replace(lead.inlineClause, '');
   }

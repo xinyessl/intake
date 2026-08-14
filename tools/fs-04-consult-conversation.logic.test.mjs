@@ -572,6 +572,9 @@ test('发布前动作一致性审计覆盖整份答案，禁止同答先劝停�
     assert.match(text, /不得在最小清单只列接口响应，却在判断表首次引入本机日期/);
     assert.match(text, /A\/B\/C 等单字母、编号或短符号/);
     assert.match(text, /第一次比较之前逐一明确绑定每个符号的含义/);
+    assert.match(text, /所有“进入\/回到\/按第 N 步”的引用/);
+    assert.match(text, /“N选一\/以下N类”必须紧随实际 N 个选项/);
+    assert.match(text, /普通 A\/B 测试、API 缩写与路径不按选项引用处理/);
   });
 
   const readOnly = fn('这个列表刷新已确认纯只读，可以刷新后看现有数量吗？', { matched: true });
@@ -1084,6 +1087,50 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     '已有请求 HTTP 200，只记录状态码。',
     'JSON key 是 year/week，按原文保留。',
   ]) assert.ok(!bundle.audit(harmless, q121Question, todayAtomicRoute).violations.includes('undefined_symbolic_comparison'), harmless);
+
+  const q121R76ProductionDraft = [
+    '**先核三边**',
+    '只读比较页面、已有接口响应和本机日期。',
+    '请求成功 → 进入第 3 步。',
+    '用下面三选一即可：',
+    '- **B. 接口正确但页面不同。**',
+    '- **C. 接口本身与本机不同。**',
+    '把差异落在 A/B/C 哪一类。',
+  ].join('\n');
+  const q121R76Audit = bundle.audit(q121R76ProductionDraft, q121Question, todayAtomicRoute);
+  assert.ok(q121R76Audit.violations.includes('undefined_arabic_step_reference'), '无1/2/3顶层定义时“进入第3步”必须拦截');
+  assert.ok(q121R76Audit.violations.includes('incomplete_option_set'), '三选一实际仅B/C两项必须拦截');
+  assert.ok(q121R76Audit.violations.includes('nonsequential_option_labels'), '字母选项B/C未从A起必须拦截');
+  assert.ok(q121R76Audit.violations.includes('undefined_symbol_group_reference'), 'A/B/C归类中A未在此前定义必须拦截');
+  assert.deepEqual(q121R76Audit.undefinedGroupReferences[0].undefinedSymbols, ['A']);
+  const q121R77Fallback = bundle.fallback(q121R76ProductionDraft, q121R76Audit);
+  assert.doesNotMatch(q121R77Fallback, /第\s*3\s*步|三选一|A\/B\/C|\bB\.|\bC\./);
+  assert.deepEqual(bundle.audit(q121R77Fallback, q121Question, todayAtomicRoute).violations, [], '缺A的选项块与未定义步骤引用降级后不得残留');
+
+  const validThreeOptions = [
+    '用下面三选一即可：',
+    'A. 页面与接口一致。',
+    'B. 接口与本机一致。',
+    'C. 三边均不同。',
+    '把差异归到 A/B/C 中已定义的一类。',
+  ].join('\n');
+  assert.ok(!bundle.audit(validThreeOptions, q121Question, todayAtomicRoute).violations.some(item => ['incomplete_option_set', 'nonsequential_option_labels', 'undefined_symbol_group_reference'].includes(item)), '合法A/B/C三选一及后续归类放行');
+  const sequentialButShort = '用下面三选一即可：\nA. 页面现象。\nB. 接口响应。';
+  const sequentialButShortAudit = bundle.audit(sequentialButShort, q121Question, todayAtomicRoute);
+  assert.ok(sequentialButShortAudit.violations.includes('incomplete_option_set'));
+  const sequentialButShortFallback = bundle.fallback(sequentialButShort, sequentialButShortAudit);
+  assert.match(sequentialButShortFallback, /下面二选一/);
+  assert.match(sequentialButShortFallback, /A\. 页面现象|B\. 接口响应/);
+  assert.ok(!bundle.audit(sequentialButShortFallback, q121Question, todayAtomicRoute).violations.includes('incomplete_option_set'), '选项从A连续时fallback只收敛声明数量，不补第三项');
+  const validNumericOptions = '以下三类：\n1. 页面现象。\n2. 接口响应。\n3. 本机日期。';
+  assert.ok(!bundle.audit(validNumericOptions, q121Question, todayAtomicRoute).violations.includes('incomplete_option_set'), '连续数字三类放行');
+  const validCircledOptions = '以下三类：\n① 页面现象。\n② 接口响应。\n③ 本机日期。';
+  assert.ok(!bundle.audit(validCircledOptions, q121Question, todayAtomicRoute).violations.includes('incomplete_option_set'), '连续圈号三类放行');
+  assert.ok(!bundle.audit('请求成功后进入第 3 步。', '我已经做到第3步，现有请求成功后继续。', todayAtomicRoute).violations.includes('undefined_arabic_step_reference'), '用户本轮明确第3步时允许承接');
+  assert.ok(bundle.audit('把差异归到 A/B。\nA. 页面。\nB. 接口。', q121Question, todayAtomicRoute).violations.includes('undefined_symbol_group_reference'), '后文选项定义不能反向补足前文A/B引用');
+  for (const harmlessGroup of ['这是 A/B 测试结果。', 'API 文档里的 A/B 缩写保持原文。', '请求路径 /api/v1/a-b 已记录。']) {
+    assert.ok(!bundle.audit(harmlessGroup, q121Question, todayAtomicRoute).violations.includes('undefined_symbol_group_reference'), harmlessGroup);
+  }
 
   const fullyUnsafeDiagnosticDraft = [
     '多半是缓存或前端数据源故障。',
