@@ -39,6 +39,7 @@
 - [ ] **【答疑 Spec 召回必须真两阶段】**：完整目录/frontmatter/标题层级/精确标识符只路由有限候选文件，目录与机器索引不当事实证据；再仅在候选正文内分段排 Top5。普通事实问答不向模型塞全量目录，只有明确问“有哪些模块/规格目录”才给完整目录。改这条链时必测第 61 份以后可达、文件后部表格/API、`word`≠Word、SQL≠WebSocket、相邻模块不串、本轮事实边界。
 - [ ] **【实施端对话窄屏/调试工具停靠回归】**：`field.html` 工作区与右侧 AI 面板必须逐层 `min-width:0`，右栏还需受控宽度和 `overflow:hidden`；消息/气泡/输入行同样不能依赖 flex 默认最小内容宽度。普通文字、URL、行内代码允许换行，`pre` 与 `.md-table-wrap` 只在自身横滚。改对话 CSS 后用 `tools/fixtures/fs-04-narrow-layout.html` 在 980px、760px 检查 `documentElement.scrollWidth <= clientWidth`，同时分别核对气泡、inline code、宽表和输入按钮没有越过右栏。
 - [ ] **【2026-08-10 AI 回复新增/修改 Markdown 块级能力时，必须同步核对三处渲染器】**：本项目不是单一 Markdown 入口——实施工作台用 `public/field.html` 内联 `md()`，后台/详情等页面用 `public/assets/ui.js` 的共享 `window.mdToHtml()`，免登录提交页用 `public/submit.html` 内联 `mdToHtml()`。GFM 管道表格等能力必须三处一起支持；测试要直接抽取并执行三处真实函数，至少覆盖标准表格、无首尾管道、单元格行内 Markdown、XSS 和普通段落。表格必须有 `max-width:100%` 横向滚动包装、清晰表头/单元格，并给 `role="region"` + `aria-label` 可访问名称；不得只做源码字符串存在性断言。
+- [ ] **【有序 Markdown 的 marker 是 HTML 语义，不是 CSS 外观】**：实施端若因子列表/空行把 `2.`、`3.` 拆成新的 `<ol>`，新块必须用原生 `start` 保留起点，或维持同一个 `<ol>`；缩进列表要挂到所属 `<li>`。不得用 CSS counter/伪元素只修视觉，因为 DOM/读屏仍会把每块报成第 1 项。回归须直接执行真实渲染器并覆盖子列表切块、显式非 1 起始、嵌套列表、普通数字和 XSS（见 L-097）。
 - [ ] **【咨询“已参考经验”以模型首片段为证，不以检索命中为证】**：`/api/consult` 的 hits 会进入普通/深入两类 `consultSystem.kbBlock`，但检索完成不等于模型已使用。`kb` SSE 必须在 `callModelStream` 首个有效片段回调内发，并带 `kbInjected:true`；未配模型、首片段前失败、检索失败/无命中均不发且 `done.kbHits=0`。引用随对应 assistant 的 `kbRefs` 存 chat/草稿/系统快照，历史恢复逐条重放；续聊 payload 只传 role/content，不能信客户端引用声明。旧 L-013 的“流式前先发、未配模型也发”已被本条取代。
 - [ ] **【field.html 刷新恢复顺序】**：必须先拉实时引用数据，再校验 mode/医院/子项目/系统，加载对应视图后最后恢复对话；不能在 `restoreDraft` 前调 `onHospitalChange`/`syncConversationToSystem`/`newConversation`。版本要等真实版本列表返回后二次校验。「新对话」保导航，「退出」才清整份 session 草稿。
 - [ ] **【field.html 系统视图刷新恢复】**：`/api/field/systems` 返回的实时列表就是可选系统事实源，草稿 `curSys` 只按稳定 `name` 命中并规范化保存；不得再用 `me.projects` 对返回项的 `project` 二次过滤。线上必测「选中中文系统名→打开会话→F5」后标签、稳定值和消息数/全文都一致；列表不存在值才回退「全部系统」。
@@ -968,3 +969,11 @@
 - 解法：维护步骤定义、选项块和分组符号三份有序账本；引用前必须已有定义，字母选项从 A 连续，声明数量与实际选项一致。后文定义不回填，缺失分支不靠常识补造。
 - 防复发：锁无编号“第3步”与 B/C 三选一生产残稿；正例覆盖完整 A/B/C、连续数字/圈号、用户明确已到第3步和 A/B/API 普通缩写；fallback 仅对连续已有选项收敛数量。
 - 通用性提示：适用于 SOP、决策树、诊断分流和所有带交叉引用的生成式文档；本环境 `$STEWARD_LESSONS` 未配置，故先记入项目经验库，待全局库可用时再分流。
+
+### L-097 Markdown 源序号正确，不代表渲染后的列表编号仍正确
+- 范围/模块：intake · 实施端 `field.html` Markdown 渲染 · FS-04 AC-128。
+- 现象：模型终稿明明包含 1/2/3/4，浏览器却把被子列表隔开的每一步都渲染为独立 `<ol>`，且都没有 `start`；用户视觉上看到四个“1.”，读屏语义同样错误。
+- 根因：旧渲染器只保存列表类型和正文，解析 `N.` 时丢掉了显式 marker；遇无序子项还立即 flush 当前有序列表。CSS 样式无法恢复已经丢失的 HTML 序号语义。
+- 解法：解析阶段同时保留 marker 与缩进；连续同级项聚成一个 `<ol>`，嵌套列表挂到所属 `<li>`，确需新开且起点非 1 的 `<ol>` 输出数值来源受限的原生 `start`。
+- 防复发：直接抽取并执行生产 `field.md`，覆盖有序标题+无序子项、同级列表/空行切块、显式 3 起始、嵌套有序列表、普通数字和 XSS；浏览器验收读取真实 `.f-msg` outerHTML，不只看源码 Markdown。
+- 通用性提示：HTML 列表语义属于通用前端渲染教训；本环境 `$STEWARD_LESSONS` 未配置，故先记入项目经验库，待全局库可用时再分流。

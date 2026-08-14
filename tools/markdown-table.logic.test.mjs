@@ -85,3 +85,54 @@ test('field 对话正文可读字号：桌面至少 15px，移动端 16px', () =
   assert.match(FIELD, /\.f-msg \.bub \{[^}]*font-size:\s*15px/, '桌面对话正文为 15px');
   assert.match(FIELD, /@media \(max-width:\s*720px\)\s*\{\s*\.f-msg \.bub \{\s*font-size:\s*16px/, '移动端对话正文为 16px');
 });
+
+test('field.md：无序子列表切开的显式有序步骤保留 2/3/4 的 HTML start 语义', () => {
+  const html = fieldMd([
+    '1. 记录页面现象',
+    '   - 保存已有截图',
+    '2. 核对已有请求',
+    '   - 对照响应内容',
+    '3. 比较三边结果',
+    '4. 整理只读证据',
+  ].join('\n'));
+
+  assert.match(html, /^<ol class="md-ol"><li class="md-li">记录页面现象<ul class="md-ul">/, '第 1 步与缩进无序子项保持嵌套');
+  assert.match(html, /<li class="md-li">核对已有请求<ul class="md-ul">/, '第 2 步与自己的无序子项保持嵌套');
+  assert.equal((html.match(/<ol class="md-ol"/g) || []).length, 1, '缩进子列表不拆断顶层有序列表');
+  assert.doesNotMatch(html, /<ol class="md-ol" start="[234]">/, '保持同一有序列表时无需额外拆块');
+  assert.match(html, /<li class="md-li">比较三边结果<\/li><li class="md-li">整理只读证据<\/li><\/ol>$/, '第 3/4 步连续且处于同一 ol');
+});
+
+test('field.md：被同级列表或空行切成新块时，显式非 1 marker 输出 start 属性', () => {
+  const switched = fieldMd('1. 第一步\n- 同级说明\n2. 第二步\n- 另一说明\n3. 第三步\n\n4. 第四步');
+  assert.match(switched, /<ol class="md-ol"><li class="md-li">第一步<\/li><\/ol>/, '首个 ol 使用默认起点 1');
+  assert.match(switched, /<ol class="md-ol" start="2"><li class="md-li">第二步<\/li><\/ol>/, '同级 ul 后的新 ol 从 2 开始');
+  assert.match(switched, /<ol class="md-ol" start="3"><li class="md-li">第三步<\/li><\/ol>/, '第二个同级 ul 后的新 ol 从 3 开始');
+  assert.match(switched, /<ol class="md-ol" start="4"><li class="md-li">第四步<\/li><\/ol>$/, '空行后的新 ol 从 4 开始');
+
+  const explicit = fieldMd('3. 第三项\n4. 第四项');
+  assert.equal(explicit, '<ol class="md-ol" start="3"><li class="md-li">第三项</li><li class="md-li">第四项</li></ol>', '显式 3 起始的连续列表只生成一个语义正确的 ol');
+});
+
+test('field.md：普通连续 ol 与嵌套 ol 都保持显式序号', () => {
+  assert.equal(
+    fieldMd('1. 第一项\n2. 第二项'),
+    '<ol class="md-ol"><li class="md-li">第一项</li><li class="md-li">第二项</li></ol>',
+    '普通 1/2 连续列表不产生多余 start 或拆块',
+  );
+
+  const nested = fieldMd('1. 外层一\n   3. 内层三\n   4. 内层四\n2. 外层二');
+  assert.equal(
+    nested,
+    '<ol class="md-ol"><li class="md-li">外层一<ol class="md-ol" start="3"><li class="md-li">内层三</li><li class="md-li">内层四</li></ol></li><li class="md-li">外层二</li></ol>',
+    '嵌套 ol 挂在所属 li 下，并独立保留起始 marker',
+  );
+});
+
+test('field.md：非列表数字不误判，列表内容仍先转义避免 XSS', () => {
+  const html = fieldMd('版本 3.2 不属于列表\n2026.08.15 也不是列表\n\n2. <img src=x onerror="boom()">');
+  assert.match(html, /^<p class="md-p">版本 3\.2 不属于列表<br>2026\.08\.15 也不是列表<\/p>/, '句中数字与无 marker 后空格的日期保持普通段落');
+  assert.match(html, /<ol class="md-ol" start="2">/, '真实显式 marker 仍被识别');
+  assert.doesNotMatch(html, /<img\b|onerror="boom\(\)"/, '列表内容不能注入 HTML/事件属性');
+  assert.match(html, /&lt;img src=x onerror=&quot;boom\(\)&quot;&gt;/, '攻击内容按文本转义');
+});

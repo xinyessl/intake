@@ -4517,18 +4517,50 @@ button.f-ov-card { width: 100%; appearance: none; }
     var lines = esc(src).split('\n');
     var out = [];       // 已闭合的块 HTML 片段
     var para = [];      // 当前累积的普通段落行（用 <br> 连内部换行）
-    var listType = '';  // 当前开着的列表：'ul' | 'ol' | ''
-    var listItems = []; // 当前列表的 <li> 内容
+    var listLines = []; // 连续列表行；保留显式序号与缩进，供 HTML start / 嵌套语义使用
     var flushPara = function () {
       if (para.length) { out.push('<p class="md-p">' + para.join('<br>') + '</p>'); para = []; }
     };
     var flushList = function () {
-      if (listType) {
-        out.push('<' + listType + ' class="md-' + listType + '">' +
-          listItems.map(function (it) { return '<li class="md-li">' + it + '</li>'; }).join('') +
-          '</' + listType + '>');
-        listType = ''; listItems = [];
-      }
+      if (!listLines.length) return;
+      // 将连续列表行解析成同级列表组；缩进列表挂到前一个 li 下。
+      // 有序列表按 Markdown 显式 marker 输出 start，避免被无序子列表切块后视觉都重置为 1。
+      var minIndent = listLines.reduce(function (min, it) { return Math.min(min, it.indent); }, listLines[0].indent);
+      listLines.forEach(function (it) { it.indent -= minIndent; });
+      var parseLevel = function (from, indent) {
+        var groups = [], current = null, idx = from;
+        while (idx < listLines.length) {
+          var row = listLines[idx];
+          if (row.indent < indent) break;
+          if (row.indent > indent) {
+            if (!current || !current.items.length) break;
+            var child = parseLevel(idx, row.indent);
+            current.items[current.items.length - 1].children =
+              (current.items[current.items.length - 1].children || []).concat(child.groups);
+            idx = child.next;
+            continue;
+          }
+          var expected = current && current.type === 'ol' ? current.start + current.items.length : null;
+          if (!current || current.type !== row.type || (row.type === 'ol' && row.order !== expected)) {
+            current = { type: row.type, start: row.order || 1, items: [] };
+            groups.push(current);
+          }
+          current.items.push({ content: row.content, children: [] });
+          idx++;
+        }
+        return { groups: groups, next: idx };
+      };
+      var renderGroups = function (groups) {
+        return groups.map(function (group) {
+          var start = group.type === 'ol' && group.start !== 1 ? ' start="' + group.start + '"' : '';
+          return '<' + group.type + ' class="md-' + group.type + '"' + start + '>' +
+            group.items.map(function (it) {
+              return '<li class="md-li">' + it.content + renderGroups(it.children) + '</li>';
+            }).join('') + '</' + group.type + '>';
+        }).join('');
+      };
+      out.push(renderGroups(parseLevel(0, 0).groups));
+      listLines = [];
     };
     var splitTableRow = function (row) {
       var s = String(row == null ? '' : row).trim();
@@ -4560,8 +4592,8 @@ button.f-ov-card { width: 100%; appearance: none; }
       var ln = lines[i];
       var tbl = tableAt(i);
       var mH = ln.match(/^(#{1,6})\s+(.*)$/);       // 标题 # ~ ######
-      var mUl = ln.match(/^\s*[-*+]\s+(.*)$/);        // 无序列表 - * +
-      var mOl = ln.match(/^\s*\d+\.\s+(.*)$/);        // 有序列表 1. 2. ...
+      var mUl = ln.match(/^(\s*)[-*+]\s+(.*)$/);        // 无序列表 - * +
+      var mOl = ln.match(/^(\s*)(\d+)\.\s+(.*)$/);     // 有序列表 1. 2. ...（保留显式序号）
       var mHr = /^\s*(?:-{3,}|\*{3,})\s*$/.test(ln); // 独占一行的 --- / ***；表格分隔行已由上面的 tableAt 优先识别
       if (tbl) {
         flushPara(); flushList();
@@ -4585,12 +4617,10 @@ button.f-ov-card { width: 100%; appearance: none; }
         out.push('<div class="md-h md-h' + lvl + '">' + inline(mH[2]) + '</div>');
       } else if (mUl) {
         flushPara();
-        if (listType !== 'ul') { flushList(); listType = 'ul'; }
-        listItems.push(inline(mUl[1]));
+        listLines.push({ type: 'ul', order: 0, indent: mUl[1].replace(/\t/g, '    ').length, content: inline(mUl[2]) });
       } else if (mOl) {
         flushPara();
-        if (listType !== 'ol') { flushList(); listType = 'ol'; }
-        listItems.push(inline(mOl[1]));
+        listLines.push({ type: 'ol', order: Number(mOl[2]), indent: mOl[1].replace(/\t/g, '    ').length, content: inline(mOl[3]) });
       } else if (ln.trim() === '') {
         // 空行 = 段落/块分隔：闭合当前段落与列表（间距交给块元素 margin，不堆叠空 <br>）
         flushPara(); flushList();
