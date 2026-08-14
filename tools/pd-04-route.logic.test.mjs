@@ -1288,6 +1288,14 @@ test('真实PWRS地图回归：今天视图、自定义表单和患者号链按�
   const today = S.contextualRouteQuestion(map, todayMessages, '现在卡在“今天视图显示的年份或星期和浏览器理解不一致”。给我一个能直接照着走的排查顺序。', '');
   assert.equal(today.route.id, 'QR-WORKBENCH-TODAY');
   assert.match(today.answerFacts.join(' '), /服务端 JVM 当前时区/);
+  const screenshotOnly = S.contextualRouteQuestion(map, todayMessages.concat(
+    { role: 'user', content: '现在卡在“今天视图显示的年份或星期和浏览器理解不一致”。给我一个能直接照着走的排查顺序。' },
+    { role: 'assistant', content: '历史回答不作证据。' },
+  ), '现场还卡在今天视图时间这里，我只拿得到这张截图，没有日志，够不够？', '');
+  assert.equal(screenshotOnly.route.id, 'QR-WORKBENCH-TODAY');
+  assert.equal(screenshotOnly.inherited, true);
+  assert.equal(screenshotOnly.directCandidate?.id, 'DQ-013');
+  assert.doesNotMatch(screenshotOnly.answerFacts.join(' '), /外部调度|\/comm\/\*/);
 
   const form = S.contextualRouteQuestion(map, todayMessages.concat(
     { role: 'user', content: '自定义表单的 form_id、element_id 和结果 content 分别怎么关联？' },

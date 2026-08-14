@@ -894,7 +894,7 @@ function consultContextFollowupIntent(question) {
   // 这里只判断是否值得尝试继承；contextualRouteQuestion 后续仍会用当前直达 route、显式新实体和高风险 UI 门阻止串话。
   const anaphoric = /^(?:那|那么|这个|那个|它|刚才|上面|前面|所以|然后|还有|其中|该功能|该接口|该页面|回到|上午反馈(?:的)?|之前反馈(?:的)?|前次反馈(?:的)?|关于(?:刚才|上面|前面|这个|该)|针对(?:刚才|上面|前面|这个|该)|这(?:里|块|一段|一步)|刚才这(?:里|块|一段)|填完(?:以后|后)?|提交(?:完|后)|保存(?:完|后)|发送(?:完|后)|完成(?:后)?|药师想复核这次|医生想复核这次|现场想复核这次|复核这次|这次复测|复测(?:时|到|这里|这个))/i.test(q);
   const progress = /^(?:(?:第[一二三四五六七八九十\d]+步|前(?:一|两|几)步)(?:已经|也|都|先)?[^，。；]{0,36}(?:正常|完成|看过|查过|没发现异常|对上|没对上)|(?:接口|请求|响应)(?:已经|也|都|是)?[^，。；]{0,36}(?:正常|成功|通了|返回(?:也是|为)?\s*(?:HTTP\s*)?200)|(?:接下来|下一步|后面)(?:呢|怎么|查|看|做|先))/i.test(q);
-  const partialEvidence = /(?:目前|现在|这次|现场)?(?:只能|只)(?:确认|看到|拿到|靠|看)|(?:数据库|日志|源码|后台)(?:这边)?(?:暂时)?(?:没|没有|拿不到|无)(?:权限|法)?(?:查|看|拿)|仅靠(?:页面|截图|接口|响应)|只靠(?:页面|截图|接口|响应)|还缺(?:什么|哪些)|缺(?:什么|哪些)(?:信息|证据)|先说(?:说)?能确定的部分|能先排除什么/i.test(q);
+  const partialEvidence = /(?:目前|现在|这次|现场|我|这边)?(?:只能|只)(?:确认|看到|拿(?:得)?到|靠|看)|只有(?:这|一)?张?(?:截图|图片|图|页面)|(?:数据库|日志|源码|后台)(?:这边)?(?:暂时)?(?:没|没有|拿不到|无)(?:权限|法)?(?:查|看|拿)?|仅靠(?:页面|截图|接口|响应)|只靠(?:页面|截图|接口|响应)|还缺(?:什么|哪些)|缺(?:什么|哪些)(?:信息|证据)|先说(?:说)?能确定的部分|能先排除什么/i.test(q);
   return anaphoric || progress || partialEvidence;
 }
 
@@ -1722,6 +1722,27 @@ function consultScopeTechnicalTokens(text) {
   return Array.from(new Set(tokens.filter(token => token.length > 2 && !shared.has(token.toLowerCase()))));
 }
 
+function consultMalformedMarkdownTokens(text) {
+  const source = String(text || '');
+  const issues = [];
+  if (((source.match(/\*\*/g) || []).length % 2) !== 0) issues.push('unbalanced_bold');
+  if (((source.match(/```/g) || []).length % 2) !== 0) issues.push('unbalanced_fence');
+  const withoutFences = source.replace(/```/g, '');
+  if (((withoutFences.match(/`/g) || []).length % 2) !== 0) issues.push('unbalanced_code');
+  return issues;
+}
+
+function consultNormalizeSafeMarkdown(text) {
+  return String(text || '').split('\n').map(line => {
+    let out = line;
+    if (((out.match(/\*\*/g) || []).length % 2) !== 0) out = out.replace(/\*\*/g, '');
+    if (((out.match(/```/g) || []).length % 2) !== 0) out = out.replace(/```/g, '');
+    const withoutFences = out.replace(/```/g, '');
+    if (((withoutFences.match(/`/g) || []).length % 2) !== 0) out = out.replace(/`/g, '');
+    return out;
+  }).filter(line => !/^\s*(?:\*\*|__|`{1,3})\s*$/.test(line)).join('\n').trim();
+}
+
 function consultAnswerSemanticAudit(answer, question, route) {
   const text = String(answer || '').trim();
   const likelihoodAllowed = consultHasLikelihoodEvidence(question, route);
@@ -1742,12 +1763,14 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const scopeTechnicalTokens = new Set(consultScopeTechnicalTokens(scopeText).map(token => token.toLowerCase()));
   const unexpectedTechnicalTokens = consultScopeTechnicalTokens(text).filter(token => !scopeTechnicalTokens.has(token.toLowerCase()));
   const unexpectedScopeTerms = Array.from(new Set([...unexpectedEntityTerms, ...unexpectedTechnicalTokens]));
+  const malformedMarkdown = consultMalformedMarkdownTokens(text);
   const violations = [];
   if (likelihoodTerms.length) violations.push('unsupported_likelihood');
   if (unsafeActorActions.length) violations.push('cross_actor_side_effect');
   if (unexpectedPaths.length) violations.push('unexpected_concrete_path');
   if (unexpectedScopeTerms.length) violations.push('out_of_scope_entity');
-  return { checked: true, likelihoodAllowed, likelihoodTerms, unsafeActorActionCount: unsafeActorActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, violations };
+  if (malformedMarkdown.length) violations.push('malformed_markdown');
+  return { checked: true, likelihoodAllowed, likelihoodTerms, unsafeActorActionCount: unsafeActorActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -1765,6 +1788,9 @@ function consultAnswerRevisionPrompt(draft, audit) {
       : '',
     audit.violations.includes('out_of_scope_entity')
       ? `草稿引入了当前问题与当前/继承 route 事实未点名的相邻模块或任务：${(audit.unexpectedEntityTerms || []).join('、')}。删除这些模块、接口和动作所在的整句，只围绕当前已核主题作答；用户显式切到新实体时才允许进入新 route。`
+      : '',
+    audit.violations.includes('malformed_markdown')
+      ? '草稿含未闭合的 Markdown 粗体、行内代码或代码围栏。修订时必须闭合成对标记；无法自然闭合就删除该行的格式标记，正文句意必须完整。'
       : '',
     '保留草稿中已经由 Spec/route/源码确认的事实和局部未知边界；不得把当前主题整体降级为“说明书未覆盖”。',
     '<draft>', String(draft || ''), '</draft>',
@@ -1789,13 +1815,13 @@ function consultAnswerSafeFallback(draft, audit) {
     if (audit.violations.includes('cross_actor_side_effect') && Array.from(part.matchAll(actorAction))
       .some(match => !negatedActorPrefix.test(part.slice(0, match.index)))) return false;
     if (audit.violations.includes('out_of_scope_entity') && (audit.unexpectedEntityTerms || []).some(term => part.toLowerCase().includes(String(term).toLowerCase()))) return false;
+    if (audit.violations.includes('unexpected_concrete_path')) {
+      const partPaths = new Set(consultConcretePaths(part));
+      if ((audit.unexpectedPaths || []).some(pathValue => partPaths.has(String(pathValue)))) return false;
+    }
     return true;
   }).join('').trim();
-  let safeKept = kept;
-  if (audit.violations.includes('unexpected_concrete_path')) {
-    for (const p of audit.unexpectedPaths || []) safeKept = consultReplaceUnexpectedPath(safeKept, p);
-    safeKept = safeKept.replace(/(?:…|\.{2,})\s*该已核接口/g, '该已核接口');
-  }
+  const safeKept = consultNormalizeSafeMarkdown(kept);
   const notes = [];
   if (audit.violations.includes('unsupported_likelihood')) notes.push('当前证据不支持对原因作频率排序；未确认的原因只能作为不排序的待验证分支。');
   if (audit.violations.includes('cross_actor_side_effect')) notes.push('未满足完整受控条件时，不执行这些改动或重复操作；只核已有报文、映射、请求响应、日志和审计。');
@@ -3648,7 +3674,8 @@ const server = http.createServer((req, res) => {
         if (draft.trim()) {
           const initialAudit = consultAnswerSemanticAudit(draft, qtext, route);
           let finalAudit = initialAudit;
-          let revisionAttempted = false, revisionAccepted = false, fallbackUsed = false;
+          let revisionAudit = null;
+          let revisionAttempted = false, revisionAccepted = false, fallbackUsed = false, fallbackPasses = 0;
           reply = draft;
           if (initialAudit.violations.length && !stopped) {
             revisionAttempted = true;
@@ -3663,22 +3690,45 @@ const server = http.createServer((req, res) => {
             } catch {}
             if (revised.trim()) {
               const revisedAudit = consultAnswerSemanticAudit(revised, qtext, route);
+              revisionAudit = revisedAudit;
               finalAudit = revisedAudit;
               if (!revisedAudit.violations.length) { reply = revised; revisionAccepted = true; }
             }
-            if (!revisionAccepted) { reply = consultAnswerSafeFallback(draft, initialAudit); finalAudit = consultAnswerSemanticAudit(reply, qtext, route); fallbackUsed = true; }
+            if (!revisionAccepted) {
+              reply = consultAnswerSafeFallback(draft, initialAudit); fallbackPasses = 1;
+              finalAudit = consultAnswerSemanticAudit(reply, qtext, route); fallbackUsed = true;
+              if (finalAudit.violations.length) {
+                reply = consultAnswerSafeFallback(reply, finalAudit); fallbackPasses = 2;
+                finalAudit = consultAnswerSemanticAudit(reply, qtext, route);
+              }
+              if (finalAudit.violations.length) {
+                reply = '当前回答未通过发布前事实与动作安全校验，已停止发布未经证实的判断；请先按当前已核事实和已有只读证据继续核对。';
+                finalAudit = consultAnswerSemanticAudit(reply, qtext, route);
+              }
+            }
           } else if (initialAudit.violations.length) {
-            reply = consultAnswerSafeFallback(draft, initialAudit); finalAudit = consultAnswerSemanticAudit(reply, qtext, route); fallbackUsed = true;
+            reply = consultAnswerSafeFallback(draft, initialAudit); fallbackPasses = 1;
+            finalAudit = consultAnswerSemanticAudit(reply, qtext, route); fallbackUsed = true;
+            if (finalAudit.violations.length) {
+              reply = consultAnswerSafeFallback(reply, finalAudit); fallbackPasses = 2;
+              finalAudit = consultAnswerSemanticAudit(reply, qtext, route);
+            }
+            if (finalAudit.violations.length) {
+              reply = '当前回答未通过发布前事实与动作安全校验，已停止发布未经证实的判断；请先按当前已核事实和已有只读证据继续核对。';
+              finalAudit = consultAnswerSemanticAudit(reply, qtext, route);
+            }
           }
           const answerAudit = {
-            version: 1,
+            version: 2,
             checked: true,
             initialViolations: initialAudit.violations,
             initialUnexpectedPaths: initialAudit.unexpectedPaths || [],
             initialUnexpectedEntities: initialAudit.unexpectedEntityTerms || [],
             revisionAttempted,
             revisionAccepted,
+            revisionViolations: revisionAudit ? revisionAudit.violations : [],
             fallbackUsed,
+            fallbackPasses,
             finalViolations: finalAudit.violations,
             finalUnexpectedPaths: finalAudit.unexpectedPaths || [],
             finalUnexpectedEntities: finalAudit.unexpectedEntityTerms || [],

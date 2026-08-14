@@ -537,6 +537,7 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
     + extractFn(SRC, 'consultRouteScopeText') + '\n'
     + extractFn(SRC, 'consultScopeEntityTerms') + '\n'
     + extractFn(SRC, 'consultScopeTechnicalTokens') + '\n'
+    + extractFn(SRC, 'consultMalformedMarkdownTokens') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + 'return consultAnswerSemanticAudit;',
   )();
@@ -576,6 +577,7 @@ test('发布前确定性语义校验：跨主体副作用触发，否定句和�
     + extractFn(SRC, 'consultRouteScopeText') + '\n'
     + extractFn(SRC, 'consultScopeEntityTerms') + '\n'
     + extractFn(SRC, 'consultScopeTechnicalTokens') + '\n'
+    + extractFn(SRC, 'consultMalformedMarkdownTokens') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + 'return consultAnswerSemanticAudit;',
   )();
@@ -603,9 +605,11 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     + extractFn(SRC, 'consultRouteScopeText') + '\n'
     + extractFn(SRC, 'consultScopeEntityTerms') + '\n'
     + extractFn(SRC, 'consultScopeTechnicalTokens') + '\n'
+    + extractFn(SRC, 'consultMalformedMarkdownTokens') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + extractFn(SRC, 'consultAnswerRevisionPrompt') + '\n'
     + extractFn(SRC, 'consultReplaceUnexpectedPath') + '\n'
+    + extractFn(SRC, 'consultNormalizeSafeMarkdown') + '\n'
     + extractFn(SRC, 'consultAnswerSafeFallback') + '\n'
     + 'return { audit:consultAnswerSemanticAudit, revision:consultAnswerRevisionPrompt, fallback:consultAnswerSafeFallback };',
   )();
@@ -629,6 +633,13 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(todayFallback, /今天视图由已核接口返回/);
   assert.doesNotMatch(todayFallback, /可能是|更像|由运维.*改/);
   assert.deepEqual(bundle.audit(todayFallback, '今天视图和浏览器不一致，怎么处理？', { matched: true, route: { title: '工作台今天视图' }, answerFacts: ['日期来自服务端 JVM 当前时区'] }).violations, []);
+
+  const malformed = '只有截图不够。**\n请只读核已有响应。';
+  const malformedAudit = bundle.audit(malformed, '只有截图够不够？', route);
+  assert.deepEqual(malformedAudit.violations, ['malformed_markdown']);
+  const normalized = bundle.fallback(malformed, malformedAudit);
+  assert.equal(normalized, '只有截图不够。\n请只读核已有响应。');
+  assert.deepEqual(bundle.audit(normalized, '只有截图够不够？', route).violations, []);
 });
 
 test('发布前确定性语义校验：路径必须来自用户或route并逐字保留', () => {
@@ -641,9 +652,11 @@ test('发布前确定性语义校验：路径必须来自用户或route并逐字
     + extractFn(SRC, 'consultRouteScopeText') + '\n'
     + extractFn(SRC, 'consultScopeEntityTerms') + '\n'
     + extractFn(SRC, 'consultScopeTechnicalTokens') + '\n'
+    + extractFn(SRC, 'consultMalformedMarkdownTokens') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + extractFn(SRC, 'consultAnswerRevisionPrompt') + '\n'
     + extractFn(SRC, 'consultReplaceUnexpectedPath') + '\n'
+    + extractFn(SRC, 'consultNormalizeSafeMarkdown') + '\n'
     + extractFn(SRC, 'consultAnswerSafeFallback') + '\n'
     + 'return { audit:consultAnswerSemanticAudit, revision:consultAnswerRevisionPrompt, fallback:consultAnswerSafeFallback };',
   )();
@@ -668,15 +681,14 @@ test('发布前确定性语义校验：路径必须来自用户或route并逐字
     assert.match(revision, /省略号、缩写、去前缀\/尾斜杠/);
     const fallback = bundle.fallback(bad, audit);
     assert.doesNotMatch(fallback, /\/month\/view\/today|\/pwrsapi\/month\/view\/today\//);
-    assert.match(fallback, /该已核接口/);
-    assert.doesNotMatch(fallback, /GET\s+该已核接口|具体接口路径只按/);
+    assert.doesNotMatch(fallback, /该已核接口|GET\s+该已核接口|具体接口路径只按/);
     assert.deepEqual(bundle.audit(fallback, '今天视图接口是什么？', route).violations, []);
   }
   const methodFallback = bundle.fallback('请找 GET /month/view/today，再核当前响应。', bundle.audit('请找 GET /month/view/today，再核当前响应。', '今天视图接口是什么？', route));
-  assert.equal(methodFallback, '请找 该已核接口，再核当前响应。', '降级替换整个方法+路径，不留下“GET 该已核接口”残句或审计元话术');
+  assert.equal(methodFallback, '当前草稿未通过发布前证据与动作安全校验，已停止发布其中未经证实的判断和操作指令。', '未知路径所在整句应删除，不保留“GET 该已核接口”残句');
   const mixedDraft = '完整接口 GET /pwrsapi/month/view/today；不要简称 /pwrsapi。';
   const mixedFallback = bundle.fallback(mixedDraft, bundle.audit(mixedDraft, '今天视图接口是什么？', route));
-  assert.equal(mixedFallback, '完整接口 GET /pwrsapi/month/view/today；不要简称 该已核接口。', '未核短前缀只替换独立 token，不得污染已核完整长路径');
+  assert.equal(mixedFallback, '完整接口 GET /pwrsapi/month/view/today；', '未核短前缀所在分句整体删除，合法完整路径不受污染');
   assert.deepEqual(bundle.audit(mixedFallback, '今天视图接口是什么？', route).violations, []);
   const userPath = bundle.audit('按你提供的 /custom/probe 只读核当前请求。', '我抓到 /custom/probe，怎么判断？', { matched: true, answerFacts: ['只核当前请求'] });
   assert.deepEqual(userPath.violations, [], '用户本轮原文路径可照实引用');
@@ -696,9 +708,11 @@ test('发布前事实作用域审计：相邻模块、通配路径不串入，�
     + extractFn(SRC, 'consultRouteScopeText') + '\n'
     + extractFn(SRC, 'consultScopeEntityTerms') + '\n'
     + extractFn(SRC, 'consultScopeTechnicalTokens') + '\n'
+    + extractFn(SRC, 'consultMalformedMarkdownTokens') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + extractFn(SRC, 'consultAnswerRevisionPrompt') + '\n'
     + extractFn(SRC, 'consultReplaceUnexpectedPath') + '\n'
+    + extractFn(SRC, 'consultNormalizeSafeMarkdown') + '\n'
     + extractFn(SRC, 'consultAnswerSafeFallback') + '\n'
     + 'return { audit:consultAnswerSemanticAudit, revision:consultAnswerRevisionPrompt, fallback:consultAnswerSafeFallback };',
   )();
