@@ -515,6 +515,7 @@ test('发布前动作一致性审计覆盖整份答案，禁止同答先劝停�
     assert.match(text, /不得说“核两件事”却只列一项/);
     assert.match(text, /“例如：\/如下：\/包括：\/分别为：”后必须有实际内容/);
     assert.match(text, /不得留下孤立的“还是页面…\/或者接口…”等后半分支/);
+    assert.match(text, /没有前述主张的“但\/但是\/不过\/然而”转折残句/);
     assert.match(text, /一致\/不一致、是\/否、有\/无、成功\/失败/);
     assert.match(text, /“不要做\/禁止\/避免\/切勿”等否定标题下不得只剩/);
     assert.match(text, /只问“先做哪个验证\/第一步先做什么”时，只给一个最小只读验证/);
@@ -1076,6 +1077,15 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.deepEqual(bundle.audit('是接口返回不同，还是页面显示不同？', '这两种情况怎么分？', route).violations, [], '完整二选一问句不得误伤');
   assert.deepEqual(bundle.audit('先停还是继续\n还是先停，不要继续。', '第二步断了怎么处理？', route).violations, [], '还是先停式直接结论不得误伤');
   assert.deepEqual(bundle.audit('两种分支：\n或者接口没有返回，先只读留证。', '还有什么分支？', route).violations, [], '明确冒号引出的或者分支不得误伤');
+  const orphanedContrastDraft = '**结论：**\n但够继续只读排查，也不必先等日志。';
+  const orphanedContrastAudit = bundle.audit(orphanedContrastDraft, '只有截图够不够？', route);
+  assert.ok(orphanedContrastAudit.violations.includes('orphaned_contrast_fragment'), '纯标题后直接出现但字残句必须命中');
+  assert.deepEqual(orphanedContrastAudit.orphanedContrastLines.map(item => item.line), ['但够继续只读排查，也不必先等日志。']);
+  assert.match(bundle.revision(orphanedContrastDraft, orphanedContrastAudit), /不得猜造被删前提/);
+  const orphanedContrastFallback = bundle.fallback(orphanedContrastDraft, orphanedContrastAudit);
+  assert.doesNotMatch(orphanedContrastFallback, /但够继续/);
+  assert.deepEqual(bundle.audit(orphanedContrastFallback, '只有截图够不够？', route).violations, []);
+  assert.deepEqual(bundle.audit('单张截图不够结案。\n但够继续只读排查。', '只有截图够不够？', route).violations, [], '已有完整前句时转折不得误拦');
 
   const incompletePairedDraft = [
     '**再对照：接口返回和浏览器本机是否一致**',
