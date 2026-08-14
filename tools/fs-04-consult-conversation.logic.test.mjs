@@ -932,6 +932,27 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.doesNotMatch(atomicFallback, /现场怎么|打开工作台|优先查|截图发来|再一起看/);
   assert.deepEqual(bundle.audit(atomicFallback, '工作台今天日期和星期调用哪个接口？', atomicRoute).violations, []);
 
+  const patientFieldRoute = {
+    matched: true,
+    route: { title: '患者号字段类型' },
+    answerFacts: ['pwrs_patient.patient_id 在 PostgreSQL 中为 character varying(50)'],
+  };
+  const patientFieldDraft = [
+    '`pwrs_patient.patient_id` 是 `character varying(50)`。',
+    '数值传输很容易丢精度。',
+  ].join('\n');
+  const patientFieldAudit = bundle.audit(patientFieldDraft, 'pwrs_patient.patient_id 在 PostgreSQL 里是什么类型和长度？', patientFieldRoute);
+  assert.deepEqual(patientFieldAudit.violations, ['unsupported_likelihood']);
+  assert.equal(patientFieldAudit.focusedFactQuestion, true);
+  const patientFieldFallback = bundle.fallback(patientFieldDraft, patientFieldAudit);
+  assert.equal(patientFieldFallback, '`pwrs_patient.patient_id` 是 `character varying(50)`。', '原子事实题降级后不得附加概率/动作审计尾注');
+  assert.doesNotMatch(patientFieldFallback, /当前证据不支持|待验证分支|完整受控条件|只核已有/);
+  assert.deepEqual(bundle.audit(patientFieldFallback, 'pwrs_patient.patient_id 在 PostgreSQL 里是什么类型和长度？', patientFieldRoute).violations, []);
+
+  const diagnosticAudit = bundle.audit(patientFieldDraft, '患者号传输对不上，现场怎么排查？', patientFieldRoute);
+  const diagnosticFallback = bundle.fallback(patientFieldDraft, diagnosticAudit);
+  assert.match(diagnosticFallback, /当前证据不支持对原因作频率排序/, '诊断题仍保留面向用户的必要安全边界');
+
   const tableDraft = [
     '| 对照结果 | 已核边界 | 只读下一步 |',
     '| --- | --- | --- |',

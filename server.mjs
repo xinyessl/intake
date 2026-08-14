@@ -2001,6 +2001,7 @@ async function consultStreamFinalAnswer(answer, writeChunk, options = {}) {
 
 function consultAnswerSemanticAudit(answer, question, route) {
   const text = String(answer || '').trim();
+  const focusedFactQuestion = !!consultFocusedFactGuard(question);
   const likelihoodClaims = text.split(/(?<=[。！？；\n])/u).map(x => x.trim()).filter(statement => {
     const matched = CONSULT_LIKELIHOOD_WORD_RE.test(statement);
     CONSULT_LIKELIHOOD_WORD_RE.lastIndex = 0;
@@ -2076,7 +2077,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (missingPrimaryPath) violations.push('missing_primary_path');
   if (focusedFactOverreach.length) violations.push('focused_fact_overreach');
   if (malformedMarkdown.length) violations.push('malformed_markdown');
-  return { checked: true, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, malformedMarkdown, violations };
+  return { checked: true, focusedFactQuestion, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -2163,9 +2164,13 @@ function consultAnswerSafeFallback(draft, audit) {
     safeKept = [safeKept, `当前请求应逐字核对已核主接口：\`${exact}\`。`].filter(Boolean).join('\n\n');
   }
   const notes = [];
-  if (audit.violations.includes('unsupported_likelihood')) notes.push('当前证据不支持对原因作频率排序；未确认的原因只能作为不排序的待验证分支。');
-  if (audit.violations.includes('unsupported_component_fault')) notes.push('未由当前事实确认的组件原因仅作为待验证分支，不作故障定论。');
-  if (audit.violations.includes('cross_actor_side_effect')) notes.push('未满足完整受控条件时，不执行这些改动或重复操作；只核已有报文、映射、请求响应、日志和审计。');
+  // 原子事实题的审计只负责删掉越界内容；内部违规原因留在 retrieval.answerAudit，
+  // 不能再以“安全尾注”形式污染用户正文，否则字段类型/接口题仍然没有真正止答。
+  if (!audit.focusedFactQuestion) {
+    if (audit.violations.includes('unsupported_likelihood')) notes.push('当前证据不支持对原因作频率排序；未确认的原因只能作为不排序的待验证分支。');
+    if (audit.violations.includes('unsupported_component_fault')) notes.push('未由当前事实确认的组件原因仅作为待验证分支，不作故障定论。');
+    if (audit.violations.includes('cross_actor_side_effect')) notes.push('未满足完整受控条件时，不执行这些改动或重复操作；只核已有报文、映射、请求响应、日志和审计。');
+  }
   return [safeKept || '当前草稿未通过发布前证据与动作安全校验，已停止发布其中未经证实的判断和操作指令。', ...notes].filter(Boolean).join('\n\n');
 }
 
