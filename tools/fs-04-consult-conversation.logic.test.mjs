@@ -552,7 +552,7 @@ test('发布前动作一致性审计覆盖整份答案，禁止同答先劝停�
     assert.match(text, /不得用一行表格冒充“三边对照”/);
     assert.match(text, /不得说“核两件事”却只列一项/);
     assert.match(text, /结构数量不得从 1 漂成 2/);
-    assert.match(text, /“例如：\/如下：\/包括：\/分别为：”后必须有实际内容/);
+    assert.match(text, /“例如：\/如下：\/包括：\/包含：\/内容为：\/由以下组成：\/分别为：”后必须有实际内容/);
     assert.match(text, /不得留下孤立的“还是页面…\/或者接口…”等后半分支/);
     assert.match(text, /没有前述主张的“但\/但是\/不过\/然而”转折残句/);
     assert.match(text, /一致\/不一致、是\/否、有\/无、成功\/失败/);
@@ -1303,6 +1303,28 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(emptyTrailingHeadingFallback, /patient_id 是 character varying\(50\)/);
   assert.deepEqual(bundle.audit(emptyTrailingHeadingFallback, 'patient_id是什么类型和长度？', route).violations, []);
   assert.deepEqual(bundle.audit('特别注意：\n不要把 patient_id 当成 bigint。', 'patient_id是什么类型？', route).violations, [], '冒号标题后有真实内容时不得误伤');
+  const emptyInlineContractLead = [
+    '工作台今天日期和星期调用 GET /pwrsapi/month/view/today（需合法 JWT）。',
+    '响应是 Map<String,String>，包含：',
+    '**别搞混**：这不是已删除的 GET /month/view。',
+  ].join('\n');
+  const emptyInlineContractAudit = bundle.audit(emptyInlineContractLead, '工作台今天日期和星期调用哪个接口？', {
+    matched: true,
+    route: { title: '工作台今天视图' },
+    answerFacts: ['GET /pwrsapi/month/view/today 返回 year/week'],
+    mustNotConfuse: ['不得答已废止的 GET /month/view'],
+  });
+  assert.ok(emptyInlineContractAudit.violations.includes('incomplete_structured_lead_in'), '“包含：”后直接进入别搞混小节属于空引导句');
+  const emptyInlineContractFallback = bundle.fallback(emptyInlineContractLead, emptyInlineContractAudit);
+  assert.doesNotMatch(emptyInlineContractFallback, /Map<String,String>|包含：/);
+  assert.match(emptyInlineContractFallback, /GET \/pwrsapi\/month\/view\/today/);
+  assert.match(emptyInlineContractFallback, /GET \/month\/view/);
+  assert.deepEqual(bundle.audit(emptyInlineContractFallback, '工作台今天日期和星期调用哪个接口？', {
+    matched: true,
+    route: { title: '工作台今天视图' },
+    answerFacts: ['GET /pwrsapi/month/view/today 返回 year/week'],
+    mustNotConfuse: ['不得答已废止的 GET /month/view'],
+  }).violations, []);
   assert.deepEqual(bundle.audit('**1. 只读核对**\n比较已有请求与已有响应原文。', '第一步先做什么？', route).violations, [], '单步问题只给一个顶层步骤时应放行');
 
   const twoSourcesOneRowDraft = [
