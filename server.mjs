@@ -157,7 +157,17 @@ async function callModelStream(cfg, opts, onDelta, signal) {
   let lastErr;
   for (let i = 0; i < cands.length; i++) {
     let got = false;
-    try { return await callModelStreamOnce(cands[i], opts, p => { got = true; if (onDelta) onDelta(p); }, signal); }
+    try {
+      const result = await callModelStreamOnce(cands[i], opts, p => {
+        if (String(p == null ? '' : p).trim()) got = true;
+        if (onDelta) onDelta(p);
+      }, signal);
+      // 某些 OpenAI 兼容端点会以 HTTP/SSE 正常结束，但 choices.delta.content
+      // 始终为空。它不是一次成功回答；在尚无可见正文时应像首 token 前失败一样
+      // 切备用模型，所有候选都空时抛错交上层输出明确降级文案，绝不能发布空气泡。
+      if (!got && !String(result == null ? '' : result).trim()) throw new Error('模型返回空内容');
+      return result;
+    }
     catch (e) { lastErr = e; if ((signal && signal.aborted) || got) throw e; if (i < cands.length - 1) console.warn('[model-stream] 第' + (i + 1) + '个模型失败，切下一个：', String((e && e.message) || e)); }
   }
   throw lastErr;

@@ -30,6 +30,39 @@ const mode = new Function(extractFn(SRC, 'consultConversationMode') + '\nreturn 
 const classify = new Function('consultConversationMode', extractFn(SRC, 'consultConversationTurn') + '\nreturn consultConversationTurn;')(mode);
 const guard = new Function(extractFn(SRC, 'consultConversationGuard') + '\nreturn consultConversationGuard;')();
 
+test('模型流式正常结束但无正文时切备用，全部为空时返回明确错误而非空气泡', async () => {
+  const attempts = [];
+  const stream = new Function(
+    'modelCandidates',
+    'callModelStreamOnce',
+    'async ' + extractFn(SRC, 'callModelStream') + '\nreturn callModelStream;',
+  )(
+    cfg => cfg.candidates,
+    async (candidate, _opts, onDelta) => {
+      attempts.push(candidate.id);
+      if (candidate.id === 'empty') return '';
+      if (candidate.id === 'space') { onDelta('   '); return '   '; }
+      onDelta('备用回答'); return '备用回答';
+    },
+  );
+  const chunks = [];
+  const answer = await stream({ candidates: [{ id: 'empty' }, { id: 'ok' }] }, {}, piece => chunks.push(piece));
+  assert.equal(answer, '备用回答');
+  assert.deepEqual(attempts, ['empty', 'ok']);
+  assert.deepEqual(chunks, ['备用回答']);
+
+  attempts.length = 0; chunks.length = 0;
+  const whitespaceAnswer = await stream({ candidates: [{ id: 'space' }, { id: 'ok' }] }, {}, piece => { if (String(piece).trim()) chunks.push(piece); });
+  assert.equal(whitespaceAnswer, '备用回答', '只有空白 chunk 仍应视为首个可见正文前失败');
+  assert.deepEqual(attempts, ['space', 'ok']);
+
+  await assert.rejects(
+    stream({ candidates: [{ id: 'empty' }] }, {}, () => {}),
+    /模型返回空内容/,
+    '全部候选都空时必须交给上层输出明确错误文案',
+  );
+});
+
 test('纯寒暄、情绪反馈、表达偏好和换种说法属于对话性表达', () => {
   for (const q of [
     '你好',
