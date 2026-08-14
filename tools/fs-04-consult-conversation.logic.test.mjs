@@ -568,6 +568,8 @@ test('发布前动作一致性审计覆盖整份答案，禁止同答先劝停�
     assert.match(text, /若本轮没有可核验附件，不得声称看见截图里的数字或内容/);
     assert.match(text, /诊断结论或分支表使用的每个观测变量/);
     assert.match(text, /不得在最小清单只列接口响应，却在判断表首次引入本机日期/);
+    assert.match(text, /A\/B\/C 等单字母、编号或短符号/);
+    assert.match(text, /第一次比较之前逐一明确绑定每个符号的含义/);
   });
 
   const readOnly = fn('这个列表刷新已确认纯只读，可以刷新后看现有数量吗？', { matched: true });
@@ -1015,6 +1017,70 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     '工作台今天日期和星期调用哪个接口，响应不一致时现场怎么排查？',
     todayAtomicRoute,
   ).violations, [], '显式多问且含现场诊断意图时不触发原子止答');
+
+  const q121Question = '今天视图页面、接口返回和本机日期对不上，现场怎么判断差异在哪一边？';
+  const q121R74ProductionDraft = [
+    '先只读核三件事：页面显示的日期星期、GET /pwrsapi/month/view/today 的响应、本机日期星期。',
+    '按结果判断：',
+    '- A = B，但 B ≠ C：记录这条差异。',
+    '- B = C，但 A ≠ B：记录这条差异。',
+    '- A ≠ B，且 B ≠ C：三边均保留原文。',
+    '收口时再按接口=本机≠页面记录。',
+  ].join('\n');
+  const q121R74Audit = bundle.audit(q121R74ProductionDraft, q121Question, todayAtomicRoute);
+  assert.ok(q121R74Audit.violations.includes('undefined_symbolic_comparison'), '前文自然语列三项不能自动定义A/B/C');
+  assert.deepEqual(Array.from(new Set(q121R74Audit.undefinedSymbolicComparisons.flatMap(item => item.undefinedSymbols))).sort(), ['A', 'B', 'C']);
+  assert.match(bundle.revision(q121R74ProductionDraft, q121R74Audit), /第一次“=、≠、>、<、vs”比较前/);
+  const q121R75Fallback = bundle.fallback(q121R74ProductionDraft, q121R74Audit);
+  assert.doesNotMatch(q121R75Fallback, /\b[ABC]\s*(?:=|≠|>|<|vs)\s*[ABC]\b/);
+  assert.match(q121R75Fallback, /GET \/pwrsapi\/month\/view\/today/);
+  assert.deepEqual(bundle.audit(q121R75Fallback, q121Question, todayAtomicRoute).violations, [], '未定义符号降级后只能发布具体观测名的安全终稿');
+
+  const definedThreeWay = [
+    '符号定义：A=页面，B=接口响应，C=本机日期星期。',
+    '- A = B，但 B ≠ C：记录页面与响应一致、本机不同。',
+    '- B = C，但 A ≠ B：记录响应与本机一致、页面不同。',
+  ].join('\n');
+  assert.ok(!bundle.audit(definedThreeWay, q121Question, todayAtomicRoute).violations.includes('undefined_symbolic_comparison'), '三边符号在比较前逐一定义时放行');
+
+  const definedTwoWay = [
+    'A 表示页面，B 表示接口响应。',
+    'A vs B：只读对照两边原文。',
+  ].join('\n');
+  assert.ok(!bundle.audit(definedTwoWay, q121Question, todayAtomicRoute).violations.includes('undefined_symbolic_comparison'), '两边符号显式定义后允许vs');
+
+  const numberedAndShortSymbols = [
+    '①=页面，②=接口响应，甲=本机日期，乙=页面日期。',
+    '① < ② 时只记录已有差异；甲 > 乙 时也只记录原文。',
+  ].join('\n');
+  assert.ok(!bundle.audit(numberedAndShortSymbols, q121Question, todayAtomicRoute).violations.includes('undefined_symbolic_comparison'), '圈号编号和短中文符号在比较前定义后放行');
+  assert.ok(bundle.audit('① = ②，但甲 ≠ 乙。', q121Question, todayAtomicRoute).violations.includes('undefined_symbolic_comparison'), '未定义的圈号编号和短中文符号比较必须拦截');
+
+  const symbolTable = [
+    '| 符号 | 含义 |',
+    '| --- | --- |',
+    '| A | 页面 |',
+    '| B | 接口响应 |',
+    '| C | 本机日期星期 |',
+    '',
+    'A = B，B ≠ C。',
+  ].join('\n');
+  assert.ok(!bundle.audit(symbolTable, q121Question, todayAtomicRoute).violations.includes('undefined_symbolic_comparison'), '符号—含义表在前时放行');
+
+  const namedComparisonTable = [
+    '| 页面 | 接口响应 | 本机日期 |',
+    '| --- | --- | --- |',
+    '| 一致 | 一致 | 不一致 |',
+  ].join('\n');
+  assert.ok(!bundle.audit(namedComparisonTable, q121Question, todayAtomicRoute).violations.includes('undefined_symbolic_comparison'), '表头直接使用具体观测名不要求符号定义');
+
+  const lateDefinition = 'A = B，但 B ≠ C。\n补充定义：A=页面，B=接口响应，C=本机日期。';
+  assert.ok(bundle.audit(lateDefinition, q121Question, todayAtomicRoute).violations.includes('undefined_symbolic_comparison'), '比较后的事后定义不能反向补足前文');
+  for (const harmless of [
+    '数学常量写作 E=mc²。',
+    '已有请求 HTTP 200，只记录状态码。',
+    'JSON key 是 year/week，按原文保留。',
+  ]) assert.ok(!bundle.audit(harmless, q121Question, todayAtomicRoute).violations.includes('undefined_symbolic_comparison'), harmless);
 
   const fullyUnsafeDiagnosticDraft = [
     '多半是缓存或前端数据源故障。',

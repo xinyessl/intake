@@ -1698,6 +1698,7 @@ function consultFinalActionConsistencyGuard(question, route) {
     '普通行、粗体行或 Markdown heading 形式的“N. 步骤标题”都必须有自己的正文、表格、列表或代码块；水平分隔线不算步骤内容。若到下一同级编号步骤、分隔线、新节或文末仍无内容，删除该空编号步骤；删除后只把剩余已有步骤连续重编号，不得补造缺失步骤。四空格缩进的嵌套步骤属于父步骤内容，不参与顶层编号。',
     '用户问“只有这份证据/没有另一份证据，够不够、是否足够、能不能判断”时，第一句话必须明确回答：现有证据够完成什么、不够完成什么；随后只从 current/inherited route 的直接事实和已核主接口给最小缺口，不得退成页面、终端、账号、版本等跨主题通用材料清单。用户明确索要完整提单/转开发材料清单时才可给通用清单。若本轮没有可核验附件，不得声称看见截图里的数字或内容。',
     '若答案声明“最小证据/最小输入/只缺 N 项”，后续诊断结论或分支表使用的每个观测变量，都必须已在用户本轮明确具备的证据或此前“已有/需补/采集”清单中定义。不得在最小清单只列接口响应，却在判断表首次引入本机日期、浏览器时间、日志等第二个输入；发现时补回草稿/current route 已有的安全观测项，或删除依赖未定义变量的判断结构，不得补造业务事实。',
+    '若答案用 A/B/C 等单字母、编号或短符号做“=、≠、>、<、vs”组合判断，必须在第一次比较之前逐一明确绑定每个符号的含义（如 A=页面、B=接口、C=本机，或用符号—含义表）。只在前文自然语列出三项、事后再写自然语结论，都不能反向补定义；表头直接使用页面/接口/本机等具体名称时无需引入符号。未定义时改写成已知具体观测名；映射没有证据时删除该分支块，不得猜。合法数学常量、HTTP 状态码和 JSON key 不按诊断符号处理。',
     '该审计只删除不安全或互相矛盾的动作，不新增业务事实，也不给纯事实回答强加诊断步骤。若用户只问事实且现有证据已经足够，直接回答后停止；若已明确动作只读，可保留相应只读观察；若受控条件全部齐全，可条件式说明单次受控验证。',
   ].join('\n');
 }
@@ -2068,6 +2069,46 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const undefinedOrdinalReferences = Array.from(new Set(ordinalUses
     .filter(item => !ordinalDefinitions.has(item.ordinal))
     .map(item => item.ordinal)));
+  // 诊断分支里的 A/B/C 是文档级变量，不是装饰。比较表达出现前必须已经
+  // 逐一绑定含义；只在前文自然语列了三项，或在结尾改用自然名，不能反向
+  // 证明 A/B/C 的映射。定义与使用按文档顺序扫描，避免“事后定义”漏过。
+  const symbolicDefinitions = new Map();
+  const symbolicComparisons = [];
+  const symbolicContext = /(?:对照|比较|判断|分支|页面|界面|接口|响应|本机|浏览器|终端|观测|现场)/iu.test(`${question || ''}\n${text}`);
+  let insideSymbolFence = false;
+  if (symbolicContext) {
+    for (let lineIndex = 0; lineIndex < documentLines.length; lineIndex++) {
+      const rawLine = String(documentLines[lineIndex] || '');
+      if (/^\s*```/u.test(rawLine)) { insideSymbolFence = !insideSymbolFence; continue; }
+      if (insideSymbolFence) continue;
+      const events = [];
+      const cells = consultMarkdownTableCells(rawLine);
+      if (cells && /^[A-Z①-⑳甲乙丙丁]$/u.test(String(cells[0] || '').trim())) {
+        const meaning = String(cells[1] || '').replace(/[*_`]/g, '').trim();
+        if (meaning && !/^[A-Z①-⑳甲乙丙丁]$/u.test(meaning)) events.push({ type: 'definition', index: 0, symbol: String(cells[0]).trim(), meaning });
+      }
+      const definitionRe = /(?:^|[|,，；;:：\s（(])([A-Z①-⑳甲乙丙丁])\s*(?:=|：|:|表示|代表|指代|为)\s*([^|,，；;。\n]{1,32})/gu;
+      for (const match of rawLine.matchAll(definitionRe)) {
+        const meaning = String(match[2] || '').replace(/[*_`]/g, '').trim();
+        if (!meaning || /^[A-Z①-⑳甲乙丙丁](?:\s|$)/u.test(meaning) || /^(?:=|≠|>|<|vs\b)/iu.test(meaning)) continue;
+        events.push({ type: 'definition', index: match.index || 0, symbol: match[1], meaning });
+      }
+      const comparisonRe = /(?<![A-Za-z0-9_])([A-Z①-⑳甲乙丙丁])\s*(==|=|≠|>|<|vs\.?)\s*([A-Z①-⑳甲乙丙丁])(?![A-Za-z0-9_])/giu;
+      for (const match of rawLine.matchAll(comparisonRe)) {
+        events.push({ type: 'comparison', index: match.index || 0, symbols: [match[1].toUpperCase(), match[3].toUpperCase()], expression: match[0] });
+      }
+      events.sort((a, b) => a.index - b.index || (a.type === 'definition' ? -1 : 1));
+      for (const event of events) {
+        if (event.type === 'definition') {
+          symbolicDefinitions.set(event.symbol, { meaning: event.meaning, lineIndex, line: rawLine.trim() });
+          continue;
+        }
+        const undefinedSymbols = Array.from(new Set(event.symbols.filter(symbol => !symbolicDefinitions.has(symbol))));
+        if (undefinedSymbols.length) symbolicComparisons.push({ line: rawLine.trim(), lineIndex, expression: event.expression, symbols: event.symbols, undefinedSymbols });
+      }
+    }
+  }
+  const undefinedSymbolicComparisons = symbolicComparisons;
   // “三边/三项对照”与实际表格行数是文档级契约，Markdown 列数正确并不代表
   // 内容完整。只在表头明确以“对照项/观测点/来源”等按行列项时比较数据行，
   // 避免把横向三列表误判为缺少三行。
@@ -2771,6 +2812,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (focusedFactOverreach.length || missingFocusedMustNotConfuse.length) violations.push('focused_fact_overreach');
   if (missingFocusedRelationshipFacts.length) violations.push('focused_fact_incomplete');
   if (undefinedOrdinalReferences.length) violations.push('undefined_ordinal_reference');
+  if (undefinedSymbolicComparisons.length) violations.push('undefined_symbolic_comparison');
   if (undefinedArabicStepReferences.length) violations.push('undefined_arabic_step_reference');
   if (selfReferentialStepReferences.length) violations.push('self_referential_step_reference');
   if (nonSequentialTopLevelSteps.length) violations.push('nonsequential_top_level_steps');
@@ -2792,7 +2834,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (contradictoryNegativeSections.length) violations.push('contradictory_negative_section');
   if (singleStepOverreach) violations.push('single_step_diagnostic_overreach');
   if (malformedMarkdown.length) violations.push('malformed_markdown');
-  return { checked: true, diagnosticQuestion, evidenceSufficiencyQuestion, fullHandoffMaterialQuestion, hasEvidenceSufficiencyVerdict, minimumRoutePath, missingEvidenceMinimumPath, observationInputContract, undefinedObservationVariables, focusedFactQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, focusedRelationshipFacts, missingFocusedRelationshipFacts, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, emptyNumberedSections, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, emptyDiagnosticBranchHeadings, emptyListStepItems, danglingClosingPunctuationLines, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
+  return { checked: true, diagnosticQuestion, evidenceSufficiencyQuestion, fullHandoffMaterialQuestion, hasEvidenceSufficiencyVerdict, minimumRoutePath, missingEvidenceMinimumPath, observationInputContract, undefinedObservationVariables, symbolicDefinitions: Object.fromEntries(symbolicDefinitions), undefinedSymbolicComparisons, focusedFactQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, focusedRelationshipFacts, missingFocusedRelationshipFacts, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, emptyNumberedSections, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, emptyDiagnosticBranchHeadings, emptyListStepItems, danglingClosingPunctuationLines, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -2828,6 +2870,9 @@ function consultAnswerRevisionPrompt(draft, audit) {
       : '',
     audit.violations.includes('undefined_ordinal_reference')
       ? `草稿存在未定义的圈号步骤/对照项引用：${(audit.undefinedOrdinalReferences || []).join('、')}。逐项核对前文表格、列表和正文，只能引用已经明确给出含义的序号；“共三项”不得再写④，表格只定义①②③时不得在判断或小结引用③/④或“含④”。删除含未定义序号的完整句/完整表格行，或在不新增事实的前提下改回已定义序号；不得凭空补造第四项。`
+      : '',
+    audit.violations.includes('undefined_symbolic_comparison')
+      ? `草稿使用了未在此前逐一绑定含义的符号比较：${(audit.undefinedSymbolicComparisons || []).map(item => `${item.expression}（未定义 ${item.undefinedSymbols.join('/')}）`).join('；')}。A/B/C 等单字母或短符号必须在第一次“=、≠、>、<、vs”比较前通过“A=页面”正文或符号—含义表逐一定义；前文只自然语列三项、结尾再写自然语结论都不能反向补定义。若草稿/route 已明确映射，就把全部分支改成页面、接口响应、本机日期等具体观测名；没有明确映射时删除含符号的完整分支行/块，不得猜。表头直接用具体名称时无需符号。`
       : '',
     audit.violations.includes('undefined_arabic_step_reference')
       ? `草稿引用了本答案未定义、用户本轮也未明确给出的阿拉伯数字步骤：${(audit.undefinedArabicStepReferences || []).map(item => `${item.numbers.map(number => `第${number}步`).join('/')}（${item.line}）`).join('；')}。若确有现成步骤正文，只按现有顺序补上连续标题；否则删除含引用的完整句，不得凭空补造缺失步骤。`
@@ -2929,6 +2974,7 @@ function consultAnswerSafeFallback(draft, audit) {
     if (audit.violations.includes('focused_fact_overreach') && (audit.focusedFactOverreach || []).includes(part.trim())) return false;
     if (audit.violations.includes('out_of_scope_entity') && (audit.unexpectedEntityTerms || []).some(term => part.toLowerCase().includes(String(term).toLowerCase()))) return false;
     if (audit.violations.includes('undefined_ordinal_reference') && (audit.undefinedOrdinalReferences || []).some(term => part.includes(String(term)))) return false;
+    if (audit.violations.includes('undefined_symbolic_comparison') && (audit.undefinedSymbolicComparisons || []).some(item => item.line === part.trim() || item.line.includes(part.trim()))) return false;
     if (audit.violations.includes('undefined_arabic_step_reference') && (audit.undefinedArabicStepReferences || []).some(item => item.line === part.trim() || item.line.includes(part.trim()))) return false;
     if (audit.violations.includes('self_referential_step_reference') && (audit.selfReferentialStepReferences || []).some(item => item.line === part.trim() || item.line.includes(part.trim()))) return false;
     if (audit.violations.includes('unexpected_concrete_path')) {
