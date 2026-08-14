@@ -821,6 +821,38 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   }).violations, [], '同一claim有权威确定规则时允许“会导致”');
   assert.deepEqual(bundle.audit('按当前契约传字符串不会出现少位。', '患者号字段怎么传？', route).violations, [], '否定故障句不误拦');
 
+  const q127R28Draft = [
+    'patient_id 在库里是 character varying(50)，不是数字类型。',
+    '对接方把患者号当数字传/处理，长号就可能丢位或丢精度。',
+    '裸数字和库侧字符串契约不一致，长号就可能在途中丢精度。',
+    '报文已是字符串但值已经少位，丢位发生在对接更上游（生成号、Excel、中间系统）。',
+    '报文类型核对清楚后再改对接传参方式。',
+    '先只读核一次已有原始报文与医院完整患者号。',
+  ].join('\n');
+  const q127R28Question = '医院电话里只说“对接方把患者号当数字传，长号码开始丢位”。我应该先让他们做哪个验证？';
+  const q127R28Audit = bundle.audit(q127R28Draft, q127R28Question, route);
+  assert.ok(q127R28Audit.violations.includes('unsupported_likelihood'), '电话转述不构成“可能丢位/丢精度”的直接因果证据');
+  assert.ok(q127R28Audit.violations.includes('cross_actor_side_effect'), '无受控条件时不得建议核对后修改传参方式');
+  assert.ok(q127R28Audit.violations.includes('out_of_scope_entity'), '不得自行枚举 Excel/中间系统等未点名机制');
+  assert.ok(q127R28Audit.unsupportedLikelihoodClaims.some(x => /可能丢位|可能在途中丢精度/.test(x)));
+  assert.ok(q127R28Audit.unsupportedCausalLocalizationClaims.some(x => /更上游/.test(x)));
+  const q127R28Fallback = bundle.fallback(q127R28Draft, q127R28Audit);
+  assert.match(q127R28Fallback, /patient_id 在库里是 character varying\(50\)/);
+  assert.match(q127R28Fallback, /先只读核一次已有原始报文与医院完整患者号/);
+  assert.doesNotMatch(q127R28Fallback, /可能丢位|可能在途中丢精度|更上游|生成号|Excel|中间系统|改对接传参方式/);
+  assert.deepEqual(bundle.audit(q127R28Fallback, q127R28Question, route).violations, []);
+
+  assert.deepEqual(bundle.audit(
+    '电话里说“对接方把患者号当数字传并开始丢位”只能作为待核线索；先只读核已有原始报文中的类型和值。',
+    q127R28Question,
+    route,
+  ).violations, [], '明确把电话归因降为待核线索且只读核已有证据应放行');
+  assert.deepEqual(bundle.audit(
+    '统计100份已核报文，其中80份确认数字转换后发生精度丢失。',
+    '统计100份已核报文，其中80份确认数字转换后发生精度丢失，怎么描述？',
+    { matched: true, route: { title: '已核报文统计' }, answerFacts: ['统计样本明确写明：100份中80份确认数字转换后发生精度丢失'] },
+  ).violations, [], '直接统计与route同一claim证据仍应放行');
+
   const explicitLayerRuleRoute = {
     matched: true,
     route: { title: '字段转换契约' },
