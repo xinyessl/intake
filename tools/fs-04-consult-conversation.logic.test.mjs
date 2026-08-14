@@ -1406,6 +1406,17 @@ test('发布前事实作用域审计：相邻模块、通配路径不串入，�
   assert.deepEqual(bundle.audit('页面与响应不一致 → 页面呈现链路待验证。', '今天视图时间对不上，怎么排查？', todayRoute).violations, [], '没有scope证据时退回不点名具体机制的呈现层假设');
   assert.deepEqual(bundle.audit('待验证假设：缓存异常。', '已确认当前页面使用缓存，今天视图时间对不上。', todayRoute).violations, [], '用户显式给缓存线索时放行');
   assert.deepEqual(bundle.audit('待验证假设：数据源选择异常。', '今天视图时间对不上，怎么排查？', { ...todayRoute, answerFacts: [...todayRoute.answerFacts, '页面数据源由工作台当前上下文选择'] }).violations, [], 'route facts显式给数据源时放行');
+  const patientColumnRoute = {
+    matched: true,
+    route: { id: 'QR-PATIENT-ID-COLUMN-TYPE', title: '患者主表身份字段类型' },
+    answerFacts: ['pwrs_patient.patient_id 是 character varying(50)'],
+  };
+  const jsMechanismLeak = bundle.audit('长号不应被 JS/中间层收成 Number。', '请求已发出，后端具体走到哪还不知道。', patientColumnRoute);
+  assert.deepEqual(jsMechanismLeak.violations, ['out_of_scope_entity'], '列类型事实不能扩写未核JS/中间层实现');
+  assert.deepEqual(jsMechanismLeak.unexpectedEntityTerms, ['JavaScript', '中间层', 'Number']);
+  assert.doesNotMatch(bundle.fallback('已核列类型是 varchar(50)。长号不应被 JS/中间层收成 Number。', bundle.audit('已核列类型是 varchar(50)。长号不应被 JS/中间层收成 Number。', '请求已发出，后端具体走到哪还不知道。', patientColumnRoute)), /JS|中间层|Number/);
+  assert.deepEqual(bundle.audit('前端 JS 不自行拼接日期。', '今天视图由前端 JavaScript 自己拼日期吗？', todayRoute).violations, [], '用户显式JavaScript时应归一放行JS简称');
+  assert.deepEqual(bundle.audit('已有报文显示字段进入 Number。', '已有报文显示字段进入 Number，能确认什么？', patientColumnRoute).violations, [], '用户逐字提供Number观察时放行');
   const timezoneValueLeak = bundle.audit('服务器可能不是东八区，也可能是 UTC+0 或 GMT+8。', '今天视图时间对不上，怎么排查？', todayRoute);
   assert.ok(timezoneValueLeak.violations.includes('out_of_scope_entity'));
   assert.ok(timezoneValueLeak.unexpectedEntityTerms.includes('东八区'));

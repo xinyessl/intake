@@ -1767,7 +1767,7 @@ function consultHasCausalPriorityEvidence(question, route) {
 
 function consultUnsupportedComponentClaims(answer, question, route) {
   const q = String(question || '').trim();
-  if (!/(?:排查|不一致|对不上|异常|故障|现场|验证|复测|下一步|怎么判断|如何判断|怎么确认|检查|留证)/i.test(q)) return [];
+  if (!/(?:排查|不一致|对不上|异常|故障|现场|验证|复测|下一步|怎么判断|如何判断|怎么确认|检查|留证|只能确认|能确定|不知道|未知|走到哪|还缺什么)/i.test(q)) return [];
   const evidence = `${q}\n${consultRouteScopeText(route)}`;
   const hypothesisLabel = /(?:待验证|可能分支|待核|需(?:要)?确认|尚未确认|不能确认|无法确认|核对是否|确认是否|(?:若|如果)?(?:已经|已)?确认[^。！？；\n]{0,24}(?:后|时))/i;
   return String(answer || '').split(/(?<=[。！？；\n])/u).map(x => x.trim()).filter(statement => {
@@ -1817,7 +1817,8 @@ function consultScopeEntityTerms() {
 }
 
 function consultDiagnosticMechanismTerms(text) {
-  return Array.from(new Set(String(text || '').match(/(?:缓存|数据源|错误兜底|本地存储|消息队列|中间件|中间系统|Excel|代理层|网关|东八区|(?:UTC|GMT)\s*[+-]?\d{1,2}(?::\d{2})?|Asia\/Shanghai)/gi) || []));
+  const matches = String(text || '').match(/(?:缓存|数据源|错误兜底|本地存储|消息队列|中间件|中间层|中间系统|Excel|代理层|网关|东八区|\b(?:JavaScript|JS|Number)\b|(?:UTC|GMT)\s*[+-]?\d{1,2}(?::\d{2})?|Asia\/Shanghai)/gi) || [];
+  return Array.from(new Set(matches.map(term => /^(?:javascript|js)$/i.test(term) ? 'JavaScript' : term)));
 }
 
 function consultScopeTechnicalTokens(text) {
@@ -2297,7 +2298,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const unsafeActorActions = controlled ? [] : text.split(/(?<=[。！？；\n])/u)
     .map(x => x.trim()).filter(statement => statement && Array.from(statement.matchAll(actorAction))
       .some(match => !negatedActorPrefix.test(statement.slice(0, match.index))));
-  const diagnosticQuestion = /(?:排查|不一致|对不上|异常|故障|现场|验证|复测|下一步|怎么判断|如何判断|怎么确认|检查|留证)/i.test(String(question || ''));
+  const diagnosticQuestion = /(?:排查|不一致|对不上|异常|故障|现场|验证|复测|下一步|怎么判断|如何判断|怎么确认|检查|留证|只能确认|能确定|不知道|未知|走到哪|还缺什么)/i.test(String(question || ''));
   const unsafeDirectActions = controlled || !diagnosticQuestion ? [] : text.split(/(?<=[。！？；\n])/u)
     .map(x => x.trim()).filter(statement => statement && Array.from(statement.matchAll(CONSULT_DIRECT_RISKY_ACTION_RE))
       .some(match => !negatedActorPrefix.test(statement.slice(0, match.index))));
