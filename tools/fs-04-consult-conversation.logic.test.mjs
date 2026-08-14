@@ -541,6 +541,7 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
     + extractFn(SRC, 'consultHasControlledActionBundle') + '\n'
     + extractFn(SRC, 'consultConcretePaths') + '\n'
     + extractFn(SRC, 'consultScopeEntityTerms') + '\n'
+    + extractFn(SRC, 'consultDiagnosticMechanismTerms') + '\n'
     + extractFn(SRC, 'consultScopeTechnicalTokens') + '\n'
     + extractFn(SRC, 'consultMalformedMarkdownTokens') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
@@ -557,9 +558,9 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
   assert.deepEqual(audit('优先查服务端时区。', '今天视图为什么不一致？', route).violations, ['unsupported_likelihood'], '没有当前差异证据不得排序成因');
   assert.deepEqual(audit('页面=接口但与本机不一致，优先查服务端时区。', '现场已确认页面=接口，但与本机不一致。', route).violations, [], '用户已给出直接差异时可据此排查对应层');
   assert.deepEqual(audit('按已核顺序优先查前端展示。', '页面为什么不一致？', { matched: true, route: { title: '展示排查' }, answerFacts: ['说明书明确排查顺序：页面与接口不一致时优先查前端展示'] }).violations, [], 'route明确顺序时放行');
-  assert.deepEqual(audit('响应与页面不一致，所以前端展示/缓存异常。', '今天视图不一致，怎么排查？', route).violations, ['unsupported_component_fault'], '答案自己补的条件不能把未核组件故障写成定论');
-  assert.deepEqual(audit('| 层级 | 结论 |\n| --- | --- |\n| 缓存 | 缓存异常 |\n最后就是前端问题。', '今天视图异常，怎么排查？', route).violations, ['unsupported_component_fault'], '表格和结尾同样进入四类事实审计');
-  assert.deepEqual(audit('可能分支：缓存异常，仍待验证。', '今天视图不一致，怎么排查？', route).violations, [], '明确标成待验证假设可保留');
+  assert.deepEqual(audit('响应与页面不一致，所以前端展示/缓存异常。', '今天视图不一致，怎么排查？', route).violations, ['unsupported_component_fault', 'out_of_scope_entity'], '答案自己补的条件不能把未核组件故障写成定论或引入未点名机制');
+  assert.deepEqual(audit('| 层级 | 结论 |\n| --- | --- |\n| 缓存 | 缓存异常 |\n最后就是前端问题。', '今天视图异常，怎么排查？', route).violations, ['unsupported_component_fault', 'out_of_scope_entity'], '表格和结尾同样进入四类事实与scope审计');
+  assert.deepEqual(audit('可能分支：缓存异常，仍待验证。', '今天视图不一致，怎么排查？', route).violations, ['out_of_scope_entity'], '待验证标签也不能引入当前scope未点名的具体技术机制');
   assert.deepEqual(audit('已确认是缓存异常。', '现场日志已经确认缓存异常，下一步怎么留证？', route).violations, [], '用户已给直接故障证据可照实承接');
   assert.deepEqual(audit('前端展示异常已由审计确认。', '今天视图不一致，怎么排查？', { matched: true, route: { title: '展示排查' }, answerFacts: ['已确认前端展示异常'] }).violations, [], 'route已核故障事实可照实承接');
 
@@ -594,6 +595,7 @@ test('发布前确定性语义校验：跨主体副作用触发，否定句和�
     + extractFn(SRC, 'consultHasControlledActionBundle') + '\n'
     + extractFn(SRC, 'consultConcretePaths') + '\n'
     + extractFn(SRC, 'consultScopeEntityTerms') + '\n'
+    + extractFn(SRC, 'consultDiagnosticMechanismTerms') + '\n'
     + extractFn(SRC, 'consultScopeTechnicalTokens') + '\n'
     + extractFn(SRC, 'consultMalformedMarkdownTokens') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
@@ -636,6 +638,7 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     + extractFn(SRC, 'consultHasControlledActionBundle') + '\n'
     + extractFn(SRC, 'consultConcretePaths') + '\n'
     + extractFn(SRC, 'consultScopeEntityTerms') + '\n'
+    + extractFn(SRC, 'consultDiagnosticMechanismTerms') + '\n'
     + extractFn(SRC, 'consultScopeTechnicalTokens') + '\n'
     + extractFn(SRC, 'consultMalformedMarkdownTokens') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
@@ -660,7 +663,7 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
 
   const todayDraft = '今天视图由已核接口返回。页面日期可能是旧缓存或异常兜底。页面与接口不同，更像前端展示/取错字段。JVM 时区错了，由运维按规范改服务端时区（不在实施侧乱改前端）。';
   const todayAudit = bundle.audit(todayDraft, '今天视图和浏览器不一致，怎么处理？', { matched: true, route: { title: '工作台今天视图' }, answerFacts: ['日期来自服务端 JVM 当前时区'] });
-  assert.deepEqual(todayAudit.violations, ['unsupported_likelihood', 'unsupported_component_fault', 'cross_actor_side_effect']);
+  assert.deepEqual(todayAudit.violations, ['unsupported_likelihood', 'unsupported_component_fault', 'cross_actor_side_effect', 'out_of_scope_entity']);
   const todayFallback = bundle.fallback(todayDraft, todayAudit);
   assert.match(todayFallback, /今天视图由已核接口返回/);
   assert.doesNotMatch(todayFallback, /可能是|更像|由运维.*改/);
@@ -688,6 +691,7 @@ test('发布前确定性语义校验：路径必须来自用户或route并逐字
     + extractFn(SRC, 'consultHasControlledActionBundle') + '\n'
     + extractFn(SRC, 'consultConcretePaths') + '\n'
     + extractFn(SRC, 'consultScopeEntityTerms') + '\n'
+    + extractFn(SRC, 'consultDiagnosticMechanismTerms') + '\n'
     + extractFn(SRC, 'consultScopeTechnicalTokens') + '\n'
     + extractFn(SRC, 'consultMalformedMarkdownTokens') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
@@ -749,6 +753,7 @@ test('发布前事实作用域审计：相邻模块、通配路径不串入，�
     + extractFn(SRC, 'consultHasControlledActionBundle') + '\n'
     + extractFn(SRC, 'consultConcretePaths') + '\n'
     + extractFn(SRC, 'consultScopeEntityTerms') + '\n'
+    + extractFn(SRC, 'consultDiagnosticMechanismTerms') + '\n'
     + extractFn(SRC, 'consultScopeTechnicalTokens') + '\n'
     + extractFn(SRC, 'consultMalformedMarkdownTokens') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
@@ -774,6 +779,14 @@ test('发布前事实作用域审计：相邻模块、通配路径不串入，�
   const leakedFallback = bundle.fallback(leaked, leakedAudit);
   assert.equal(leakedFallback, '今天视图仍调用 GET /pwrsapi/month/view/today。');
   assert.deepEqual(bundle.audit(leakedFallback, '今天请求响应都抓到了，重点核什么？', todayRoute).violations, []);
+
+  const hiddenMechanism = bundle.audit('页面与响应不一致 → 页面用了别的数据源/缓存。', '今天视图时间对不上，怎么排查？', todayRoute);
+  assert.deepEqual(hiddenMechanism.violations, ['out_of_scope_entity']);
+  assert.ok(hiddenMechanism.unexpectedEntityTerms.includes('数据源'));
+  assert.ok(hiddenMechanism.unexpectedEntityTerms.includes('缓存'));
+  assert.deepEqual(bundle.audit('页面与响应不一致 → 页面呈现链路待验证。', '今天视图时间对不上，怎么排查？', todayRoute).violations, [], '没有scope证据时退回不点名具体机制的呈现层假设');
+  assert.deepEqual(bundle.audit('待验证假设：缓存异常。', '已确认当前页面使用缓存，今天视图时间对不上。', todayRoute).violations, [], '用户显式给缓存线索时放行');
+  assert.deepEqual(bundle.audit('待验证假设：数据源选择异常。', '今天视图时间对不上，怎么排查？', { ...todayRoute, answerFacts: [...todayRoute.answerFacts, '页面数据源由工作台当前上下文选择'] }).violations, [], 'route facts显式给数据源时放行');
 
   const patientIdentityLeak = '这个接口不依赖患者 hospitalId/patientId/visitId；今天视图时间不是患者三元身份链路。';
   const patientIdentityAudit = bundle.audit(patientIdentityLeak, '今天请求响应都抓到了，重点核什么？', todayRoute);
