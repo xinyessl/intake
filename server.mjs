@@ -2109,6 +2109,28 @@ function consultAnswerSemanticAudit(answer, question, route) {
     }
     index = end - 1;
   }
+  // “按结果分支判断”是至少两个分支的结构承诺。模型修订/删句后若表格只剩
+  // 一条数据行，即使表格列数正确也不能称为“分支”；实施会不知道其余结果怎么走。
+  const incompleteResultBranchTables = [];
+  const resultBranchLeadRe = /(?:按|根据|依照)[^。！？\n]{0,18}(?:结果|情况|观测)[^。！？\n]{0,18}(?:分支|分类|分别|判断|走)/u;
+  for (let index = 0; index < documentLines.length; index++) {
+    if (!resultBranchLeadRe.test(documentLines[index])) continue;
+    let header = index + 1;
+    while (header < documentLines.length && header <= index + 3 && !documentLines[header].trim()) header++;
+    if (header + 1 >= documentLines.length || !consultMarkdownTableCells(documentLines[header]) || !/^\s*\|?\s*:?-{3,}/.test(documentLines[header + 1])) continue;
+    let end = header + 2;
+    const rows = [];
+    while (end < documentLines.length && consultMarkdownTableCells(documentLines[end])) { rows.push(documentLines[end]); end++; }
+    if (rows.length >= 2) continue;
+    incompleteResultBranchTables.push({
+      line: documentLines[index].trim(),
+      lineIndex: index,
+      actual: rows.length,
+      tableStart: header,
+      tableEnd: end,
+      block: documentLines.slice(index, end).join('\n'),
+    });
+  }
   // 同一局部结构里的显式数量声明也不能漂移，例如标题说“确认1件事”，
   // 紧接着又要求“回复两点”。只识别带结构动作的声明，不把“两条历史记录”
   // 这类普通事实数量当成清单承诺。
@@ -2492,6 +2514,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (selfReferentialStepReferences.length) violations.push('self_referential_step_reference');
   if (nonSequentialTopLevelSteps.length) violations.push('nonsequential_top_level_steps');
   if (cardinalityMismatches.length) violations.push('inconsistent_structured_cardinality');
+  if (incompleteResultBranchTables.length) violations.push('incomplete_result_branch_set');
   if (conflictingCountDeclarations.length) violations.push('conflicting_count_declaration');
   if (incompleteLeadIns.length) violations.push('incomplete_structured_lead_in');
   if (orphanedAlternativeLines.length) violations.push('orphaned_alternative_fragment');
@@ -2501,7 +2524,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (contradictoryNegativeSections.length) violations.push('contradictory_negative_section');
   if (singleStepOverreach) violations.push('single_step_diagnostic_overreach');
   if (malformedMarkdown.length) violations.push('malformed_markdown');
-  return { checked: true, focusedFactQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, cardinalityMismatches, conflictingCountDeclarations, incompleteLeadIns, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
+  return { checked: true, focusedFactQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -2546,6 +2569,9 @@ function consultAnswerRevisionPrompt(draft, audit) {
       : '',
     audit.violations.includes('inconsistent_structured_cardinality')
       ? `草稿声明的对照数量与实际结构不一致：${(audit.cardinalityMismatches || []).map(item => `${item.kind === 'list' ? '清单' : '表格'}声明${item.expected}项、实际${item.actual}项`).join('；')}。只有草稿中已经存在的内容才能保留；把声明改成实际数量，或删除数量声明/不完整表格或清单，禁止为了凑数新增字段、来源或观测点。`
+      : '',
+    audit.violations.includes('incomplete_result_branch_set')
+      ? `草稿承诺“按结果/情况分支判断”，但紧随表格只剩${(audit.incompleteResultBranchTables || []).map(item => item.actual).join('/')}条分支数据行。“分支”至少需要两个互斥或可区分结果；只能用草稿中已有的分支恢复，否则删除该引导语与不完整表格整块，不得凭空补造其余结果。`
       : '',
     audit.violations.includes('conflicting_count_declaration')
       ? `草稿同一局部结构的数量声明互相冲突：${(audit.conflictingCountDeclarations || []).map(item => `“${item.first}”=${item.firstCount}，但“${item.second}”=${item.secondCount}`).join('；')}。统一为实际已有清单项数，或删除不必要的数量承诺；不得为了凑数新增问题、字段或动作。`
@@ -2642,6 +2668,9 @@ function consultAnswerSafeFallback(draft, audit) {
     if (mismatch.structureBlock) fallbackDraft = fallbackDraft.replace(mismatch.structureBlock, '');
     else if (mismatch.tableBlock) fallbackDraft = fallbackDraft.replace(mismatch.tableBlock, '');
     if (mismatch.line) fallbackDraft = fallbackDraft.split('\n').filter(line => line.trim() !== mismatch.line).join('\n');
+  }
+  for (const branches of audit.incompleteResultBranchTables || []) {
+    if (branches.block) fallbackDraft = fallbackDraft.replace(branches.block, '');
   }
   const conflictingCountLines = new Set((audit.conflictingCountDeclarations || []).flatMap(item => [item.first, item.second]));
   if (conflictingCountLines.size) fallbackDraft = fallbackDraft.split('\n').filter(line => !conflictingCountLines.has(line.trim())).join('\n');

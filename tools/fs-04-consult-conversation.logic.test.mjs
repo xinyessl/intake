@@ -1547,6 +1547,30 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.doesNotMatch(sparseFallback, /\|/);
   assert.deepEqual(bundle.audit(sparseFallback, '今天视图怎么排查？', atomicRoute).violations, []);
 
+  const oneBranchDraft = [
+    '只读三方对照，按结果分支判断（不改配置）',
+    '| 对照结果 | 怎么理解 | 下一步 |',
+    '| --- | --- | --- |',
+    '| 接口失败或缺字段 | 只能确认当前响应异常 | 保留已有原文 |',
+    '后续整理脱敏证据。',
+  ].join('\n');
+  const oneBranchAudit = bundle.audit(oneBranchDraft, '今天视图和浏览器不一致，怎么排查？', atomicRoute);
+  assert.ok(oneBranchAudit.violations.includes('incomplete_result_branch_set'), '声称按结果分支时不得只剩一条表格分支');
+  assert.equal(oneBranchAudit.incompleteResultBranchTables[0].actual, 1);
+  assert.match(bundle.revision(oneBranchDraft, oneBranchAudit), /分支”至少需要两个/);
+  const oneBranchFallback = bundle.fallback(oneBranchDraft, oneBranchAudit);
+  assert.doesNotMatch(oneBranchFallback, /按结果分支判断|接口失败或缺字段/);
+  assert.match(oneBranchFallback, /后续整理脱敏证据/);
+  assert.deepEqual(bundle.audit(oneBranchFallback, '今天视图和浏览器不一致，怎么排查？', atomicRoute).violations, []);
+  const completeBranchTable = [
+    '按已核结果分支判断：',
+    '| 对照结果 | 只读下一步 |',
+    '| --- | --- |',
+    '| 页面=响应 | 保留已有页面与响应 |',
+    '| 页面≠响应 | 保留已有差异原文 |',
+  ].join('\n');
+  assert.deepEqual(bundle.audit(completeBranchTable, '已经对照请求和页面，怎么判断？', atomicRoute).violations, [], '至少两条完整分支表格放行');
+
   const brokenProse = '核对请求方法。是否不该有多余业务参数（这条接口不依赖患者入参；';
   const brokenAudit = bundle.audit(brokenProse, '今天视图请求和响应抓到了，重点核什么？', {
     matched: true,
