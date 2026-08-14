@@ -662,6 +662,9 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
   for (const phrase of ['很常见', '较常见', '比较常见', '常见原因', '经常发生', '多发', '高发', '很多是规则内预期', '不少属于时区差', '多数是预期', '大多不是BUG', '绝大多数无需处理', '少数会异常', '极少出错', '大部分符合预期', '小部分对不上', '几乎全部正常', '频繁出现', '偶尔失败', '有时不同', '首要原因', '主要原因之一', '很像服务端缓存', '更像前端取错字段', '可能是异常兜底', '疑似配置问题', '倾向于时区问题', '高度符合服务端时区差', '强烈符合配置问题', '明显符合前端问题', '更符合缓存问题', '较符合网关问题', '比较符合后端问题', '最容易出现', '很容易丢精度', '尤其容易对不上', '午夜附近更容易和浏览器理解对不上', '较容易在跨区环境出现偏差', '比较容易与本机日期不同', '尤其是午夜前后可能与本机不一致', '可能和浏览器本机不一致', '易发生', '很可能就发生在序列化时', '更可能在请求之后', '较可能从网关开始', '比较可能由服务端引起', '超过精度就会直接丢位', '一定会导致字段少位', '必然会出现错误', '肯定会发生变化', '这就是对接方类型传错']) {
     assert.ok(audit(`接口和浏览器不一致${phrase}。`, '今天视图为什么不一致？', route).violations.includes('unsupported_likelihood'), phrase);
   }
+  for (const phrase of ['典型现象边界', '典型表现', '典型场景', '典型特征']) {
+    assert.ok(audit(`这是服务端时区问题的${phrase}。`, '今天视图为什么不一致？', route).violations.includes('unsupported_likelihood'), phrase);
+  }
   assert.deepEqual(audit('待验证假设：服务端时区和现场约定不一致；可能分支：页面没有照接口响应展示。', '今天视图为什么不一致？', route).violations, [], '明确标为不排序待验证分支时应放行');
   assert.deepEqual(audit('优先查服务端时区。', '今天视图为什么不一致？', route).violations, ['unsupported_likelihood'], '没有当前差异证据不得排序成因');
   assert.deepEqual(audit('优先怀疑服务端时区。', '今天视图为什么不一致？', route).violations, ['unsupported_likelihood'], '用怀疑/判断包装的成因优先级同样须有当前差异证据');
@@ -706,6 +709,11 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
     route: { title: '时区结论' },
     answerFacts: ['说明书明确写明：这个现象高度符合服务端时区差'],
   }).violations, [], 'route 对同一 claim 明确给出倾向结论时可照实引用');
+  assert.deepEqual(audit('这是服务端时区问题的典型表现。', '按权威结论怎么说？', {
+    matched: true,
+    route: { title: '时区结论' },
+    answerFacts: ['统计样本明确写明：这是服务端时区问题的典型表现'],
+  }).violations, [], 'route 对同一 claim 明确给出典型性时可照实引用');
   const namedField = audit('说明书称它是常见字段名。', '这个字段叫什么？', {
     matched: true,
     route: { title: '字段命名' },
@@ -1611,6 +1619,26 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     '| 已有文案 | 已有响应 |',
   ].join('\n');
   assert.ok(!bundle.audit(ordinaryTwoSideTable, '页面和接口怎么对照？', atomicRoute).violations.includes('inconsistent_structured_cardinality'), '普通横向两边表仍按两列满足声明');
+  const emptyBranchHeading = [
+    '### A = B，但 B ≠ C',
+    '保留已有三边原文。',
+    '### 接口失败 / 无字段',
+    '### 仍卡住时的最小留证包',
+    '保留时间与脱敏截图。',
+  ].join('\n');
+  const emptyBranchAudit = bundle.audit(emptyBranchHeading, '今天视图三边怎么判断？', atomicRoute);
+  assert.ok(emptyBranchAudit.violations.includes('empty_diagnostic_branch'), '分支标题后直接进入下一节属于空诊断分支');
+  const emptyBranchFallback = bundle.fallback(emptyBranchHeading, emptyBranchAudit);
+  assert.doesNotMatch(emptyBranchFallback, /接口失败 \/ 无字段/);
+  assert.match(emptyBranchFallback, /仍卡住时的最小留证包/);
+  assert.ok(!bundle.audit(emptyBranchFallback, '今天视图三边怎么判断？', atomicRoute).violations.includes('empty_diagnostic_branch'));
+  const completeBranchHeading = [
+    '### 接口失败 / 无字段',
+    '只读保留已有状态码和响应原文后升级开发。',
+    '### 仍卡住时的最小留证包',
+    '保留时间与脱敏截图。',
+  ].join('\n');
+  assert.ok(!bundle.audit(completeBranchHeading, '今天视图三边怎么判断？', atomicRoute).violations.includes('empty_diagnostic_branch'), '分支标题有正文时放行');
 
   const oneDecisionRowWithoutBranchLead = [
     '怎么判断：',

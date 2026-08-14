@@ -2236,6 +2236,25 @@ function consultAnswerSemanticAudit(answer, question, route) {
     if (previous >= 0 && topLevelStepRe.test(documentLines[previous])) affectedLines.push(documentLines[previous]);
     incompleteLeadIns.push({ line: documentLines[index].trim(), lineIndex: index, affectedLines });
   }
+  // 修订/删句后不能留下只有标题、没有判断或动作的诊断分支，例如
+  // “请求失败 / 无字段”后直接跳到下一节。只审短分支标题和 Markdown 标题。
+  const emptyDiagnosticBranchHeadings = [];
+  if (branchDiagnosticQuestion) {
+    for (let index = 0; index < documentLines.length; index++) {
+      const raw = documentLines[index];
+      const clean = String(raw || '').replace(/^\s*#{1,6}\s+/u, '').replace(/^\s*(?:[-*+]\s+)?(?:\*\*|__)?/u, '').replace(/(?:\*\*|__)?\s*$/u, '').trim();
+      const markdownHeading = /^\s*#{1,6}\s+/u.test(raw) || /^\s*(?:\*\*|__)[^\n]+(?:\*\*|__)\s*$/u.test(raw);
+      const branchLike = clean.length <= 42
+        && /(?:\/|／|或|、)/u.test(clean)
+        && /(?:失败|无(?:请求|响应|字段|数据|权限)|缺(?:字段|数据|响应)|不一致|异常|未命中|不存在)/u.test(clean);
+      if (!markdownHeading || !branchLike) continue;
+      let next = index + 1;
+      while (next < documentLines.length && !documentLines[next].trim()) next++;
+      const nextRaw = documentLines[next] || '';
+      const nextIsHeading = /^\s*#{1,6}\s+/u.test(nextRaw) || /^\s*(?:\*\*|__)[^\n]+(?:\*\*|__)\s*$/u.test(nextRaw);
+      if (next >= documentLines.length || nextIsHeading) emptyDiagnosticBranchHeadings.push({ line: raw.trim(), lineIndex: index });
+    }
+  }
   // 全文修订/删句后可能只剩并列结构的后半句，例如上一项已被删除，却留下
   // “还是页面上有字段标题但无选项”。这类句子标记、括号都完整，但缺少可选择
   // 的前项。直接回答“还是先停”或完整的“是 A 还是 B？”不属于孤立残句。
@@ -2403,7 +2422,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
     : null;
   const focusedFactQuestion = !!consultFocusedFactGuard(question);
   const likelihoodClaims = text.split(/(?<=[。！？；\n])/u).map(x => x.trim()).filter(statement => {
-    const matched = CONSULT_LIKELIHOOD_WORD_RE.test(statement);
+    const matched = CONSULT_LIKELIHOOD_WORD_RE.test(statement) || /典型(?:现象|表现|场景|特征|模式|症状)(?:边界)?/u.test(statement);
     CONSULT_LIKELIHOOD_WORD_RE.lastIndex = 0;
     return matched;
   });
@@ -2430,6 +2449,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
     : consultHasLikelihoodEvidence(question, route);
   const likelihoodTerms = Array.from(new Set([
     ...unsupportedLikelihoodClaims.flatMap(statement => statement.match(CONSULT_LIKELIHOOD_WORD_RE) || []),
+    ...unsupportedLikelihoodClaims.flatMap(statement => statement.match(/典型(?:现象|表现|场景|特征|模式|症状)(?:边界)?/gu) || []),
     ...unsupportedCausalLocalizationClaims.flatMap(statement => statement.match(CONSULT_CAUSAL_LOCALIZATION_RE) || []),
     ...unsupportedDeterministicFailureClaims.flatMap(statement => statement.match(CONSULT_DETERMINISTIC_FAILURE_RE) || []),
   ]));
@@ -2539,6 +2559,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (incompleteResultBranchTables.length) violations.push('incomplete_result_branch_set');
   if (conflictingCountDeclarations.length) violations.push('conflicting_count_declaration');
   if (incompleteLeadIns.length) violations.push('incomplete_structured_lead_in');
+  if (emptyDiagnosticBranchHeadings.length) violations.push('empty_diagnostic_branch');
   if (orphanedAlternativeLines.length) violations.push('orphaned_alternative_fragment');
   if (danglingAlternativeLines.length) violations.push('dangling_alternative_fragment');
   if (orphanedContrastLines.length) violations.push('orphaned_contrast_fragment');
@@ -2546,7 +2567,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (contradictoryNegativeSections.length) violations.push('contradictory_negative_section');
   if (singleStepOverreach) violations.push('single_step_diagnostic_overreach');
   if (malformedMarkdown.length) violations.push('malformed_markdown');
-  return { checked: true, diagnosticQuestion, focusedFactQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
+  return { checked: true, diagnosticQuestion, focusedFactQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, emptyDiagnosticBranchHeadings, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -2601,6 +2622,9 @@ function consultAnswerRevisionPrompt(draft, audit) {
     audit.violations.includes('incomplete_structured_lead_in')
       ? '草稿含“例如：/如下：/包括：/分别为：”后直接跳到下一步骤/结束的空引导句，或文末以冒号结尾却没有任何子内容的空标题/提示语。删除该完整引导句及其孤立步骤标题，或只用草稿中已经存在的内容补成完整自然句；禁止补造示例或注意事项。'
       : '',
+    audit.violations.includes('empty_diagnostic_branch')
+      ? '草稿存在只有分支标题、没有任何判断或安全动作的空诊断分支。只能用草稿已有正文补回；若没有现成内容，删除该完整分支标题，不得凭常识补造步骤。'
+      : '',
     audit.violations.includes('orphaned_alternative_fragment')
       ? `草稿在前一并列项被删除后留下孤立后半分支：${(audit.orphanedAlternativeLines || []).map(item => item.line).join('；')}。删除这些以“还是/或者”开头、却没有可对应前项的完整行；不得猜测或补造被删掉的前项。完整“是 A 还是 B？”问句和“还是先停”式直接结论应保持。`
       : '',
@@ -2644,7 +2668,7 @@ function consultAnswerSafeFallback(draft, audit) {
       CONSULT_OBSERVATION_ORDER_CONTRADICTION_RE.lastIndex = 0; return false;
     }
     CONSULT_OBSERVATION_ORDER_CONTRADICTION_RE.lastIndex = 0;
-    if (audit.violations.includes('unsupported_likelihood') && (CONSULT_LIKELIHOOD_WORD_RE.test(part) || CONSULT_CAUSAL_PRIORITY_RE.test(part) || CONSULT_CAUSAL_LOCALIZATION_RE.test(part) || CONSULT_DETERMINISTIC_FAILURE_RE.test(part))) {
+    if (audit.violations.includes('unsupported_likelihood') && (CONSULT_LIKELIHOOD_WORD_RE.test(part) || /典型(?:现象|表现|场景|特征|模式|症状)(?:边界)?/u.test(part) || CONSULT_CAUSAL_PRIORITY_RE.test(part) || CONSULT_CAUSAL_LOCALIZATION_RE.test(part) || CONSULT_DETERMINISTIC_FAILURE_RE.test(part))) {
       CONSULT_LIKELIHOOD_WORD_RE.lastIndex = 0; CONSULT_CAUSAL_PRIORITY_RE.lastIndex = 0; CONSULT_CAUSAL_LOCALIZATION_RE.lastIndex = 0; CONSULT_DETERMINISTIC_FAILURE_RE.lastIndex = 0; return false;
     }
     CONSULT_LIKELIHOOD_WORD_RE.lastIndex = 0;
@@ -2698,6 +2722,8 @@ function consultAnswerSafeFallback(draft, audit) {
   if (conflictingCountLines.size) fallbackDraft = fallbackDraft.split('\n').filter(line => !conflictingCountLines.has(line.trim())).join('\n');
   const incompleteLines = new Set((audit.incompleteLeadIns || []).flatMap(item => item.affectedLines || []));
   if (incompleteLines.size) fallbackDraft = fallbackDraft.split('\n').filter(line => !incompleteLines.has(line)).join('\n');
+  const emptyBranchLines = new Set((audit.emptyDiagnosticBranchHeadings || []).map(item => item.line));
+  if (emptyBranchLines.size) fallbackDraft = fallbackDraft.split('\n').filter(line => !emptyBranchLines.has(line.trim())).join('\n');
   const orphanedLines = new Set((audit.orphanedAlternativeLines || []).map(item => item.line));
   if (orphanedLines.size) fallbackDraft = fallbackDraft.split('\n').filter(line => !orphanedLines.has(line.trim())).join('\n');
   const danglingAlternative = new Set((audit.danglingAlternativeLines || []).map(item => item.line));
