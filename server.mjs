@@ -1683,7 +1683,7 @@ function consultFinalActionConsistencyGuard(question, route) {
     '编辑、删除、新建、保存、提交、发送、完成、签名、审批、星标、可能标记已读的打开、改参数、改报文类型、改映射、改配置、重试、复现、补跑或重跑，只要不能归入 B 或 C，就必须从最终答案所有位置删除，改成检查已有页面、请求、响应、报文、映射、截图、日志或审计。动作换成由第三方执行也不改变副作用：不得写成“让对接方改字符串/参数/映射/配置后用同一患者复测”“让运维重跑”或“让开发重试”来绕过守卫。不能因为同一答案别处写了“不要操作”“只读”“别重复”，就保留这里的正向点击或重做指令；否定提醒不能抵消冲突动作。',
     '若最终答案任何一处说“不要操作/不要重复/只读”，则其它任何一处都不得再建议点击编辑、删除、发送、完成等未知动作来观察是否发请求，也不得用“点了是否被拦住”“试一下看看”之类问句变相放行。用户只问“这个按钮是否发请求”时，只能查已有请求、日志、审计、代码或契约；没有既有证据就局部说明当前无法安全确认，不能让现场点击未知按钮补抓。',
     '发布前还要核对步骤和对照项的编号引用：后文引用①②③④等序号时，每个序号都必须在本答案前文有明确对应项；不得出现“共三项”却引用④、表格只定义①②③却在判断或小结写③/④等未定义引用。发现后必须删除含未定义序号的完整句/完整表格行，或在不新增事实的前提下改回已经定义的序号。',
-    '结构化答案还必须逐项核对“声明数量 → 实际内容”：声称二/三/四边、项、份、件、条、处或个对照时，紧随其后的对照表或 Markdown 清单必须确实给出相同数量的完整项；不得用一行表格冒充“三边对照”，也不得说“核两件事”却只列一项。同一小节里“确认/回复/补充/核对 N 件/项/点/条”等结构数量不得从 1 漂成 2；统一数量或删除不必要的数量承诺。“例如：/如下：/包括：/分别为：”后必须有实际内容，不能直接跳到下一步骤；清理并列项后不得留下孤立的“还是页面…/或者接口…”等后半分支，也不得在答案开头或“结论/判断”等纯标题后直接留下没有前述主张的“但/但是/不过/然而”转折残句。删除示例或引用正文时必须连同整句引号一起删除，不得留下单独一行的「/」/“/”/『/』等孤立引号。明确要求对照/比较/分支判断时，若使用“一致/不一致、是/否、有/无、成功/失败、存在/不存在、命中/未命中”等成对标签，必须给齐两边，或改写成不承诺另一边的单一直接结论；不得只列“一致”后直接跳到未标注的另一种判断。“不要做/禁止/避免/切勿”等否定标题下不得只剩“可以/建议/请/应该/优先/最好/即可/帮你”等正向建议；正向替代动作必须移到独立的“可以做/下一步”标题下。用户明确只问“先做哪个验证/第一步先做什么”时，只给一个最小只读验证，不追加第二、第三步或可转发的修改指令。',
+    '结构化答案还必须逐项核对“声明数量 → 实际内容”：声称二/三/四边、项、份、件、条、处或个对照时，紧随其后的对照表或 Markdown 清单必须确实给出相同数量的完整项；不得用一行表格冒充“三边对照”，也不得说“核两件事”却只列一项。同一小节里“确认/回复/补充/核对 N 件/项/点/条”等结构数量不得从 1 漂成 2；统一数量或删除不必要的数量承诺。“例如：/如下：/包括：/分别为：”后必须有实际内容，不能直接跳到下一步骤；清理并列项后不得留下孤立的“还是页面…/或者接口…”等后半分支，也不得留下以“还是/或者/或是/或”结尾却没有后一项的前半分支；不得在答案开头或“结论/判断”等纯标题后直接留下没有前述主张的“但/但是/不过/然而”转折残句。删除示例或引用正文时必须连同整句引号一起删除，不得留下单独一行的「/」/“/”/『/』等孤立引号。明确要求对照/比较/分支判断时，若使用“一致/不一致、是/否、有/无、成功/失败、存在/不存在、命中/未命中”等成对标签，必须给齐两边，或改写成不承诺另一边的单一直接结论；不得只列“一致”后直接跳到未标注的另一种判断。“不要做/禁止/避免/切勿”等否定标题下不得只剩“可以/建议/请/应该/优先/最好/即可/帮你”等正向建议；正向替代动作必须移到独立的“可以做/下一步”标题下。用户明确只问“先做哪个验证/第一步先做什么”时，只给一个最小只读验证，不追加第二、第三步或可转发的修改指令。',
     '该审计只删除不安全或互相矛盾的动作，不新增业务事实，也不给纯事实回答强加诊断步骤。若用户只问事实且现有证据已经足够，直接回答后停止；若已明确动作只读，可保留相应只读观察；若受控条件全部齐全，可条件式说明单次受控验证。',
   ].join('\n');
 }
@@ -2188,6 +2188,16 @@ function consultAnswerSemanticAudit(answer, question, route) {
     if (/[。！？；?！]$/u.test(previousLine)) continue;
     orphanedAlternativeLines.push({ line: current, lineIndex: index, previousLine });
   }
+  // 反方向也要审：后一项被删后，前一项可能停在“还是/或者/或是/或”。
+  // 这种行即使括号、引号和 Markdown 都闭合，二选一语义仍然悬空。
+  const danglingAlternativeLines = [];
+  for (let index = 0; index < documentLines.length; index++) {
+    const current = String(documentLines[index] || '')
+      .replace(/(?:\*\*|__|`)+\s*$/u, '')
+      .trim();
+    if (!/(?:还是|或者|或是|或)\s*[，,：:]?\s*$/u.test(current)) continue;
+    danglingAlternativeLines.push({ line: documentLines[index].trim(), lineIndex: index });
+  }
   // “但/但是/不过/然而”必须承接上一条完整主张。答案开头或纯标题之后直接
   // 出现转折，通常是前半句被修订/降级删掉后的残句。
   const orphanedContrastLines = [];
@@ -2378,12 +2388,13 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (conflictingCountDeclarations.length) violations.push('conflicting_count_declaration');
   if (incompleteLeadIns.length) violations.push('incomplete_structured_lead_in');
   if (orphanedAlternativeLines.length) violations.push('orphaned_alternative_fragment');
+  if (danglingAlternativeLines.length) violations.push('dangling_alternative_fragment');
   if (orphanedContrastLines.length) violations.push('orphaned_contrast_fragment');
   if (incompletePairedBranches.length) violations.push('incomplete_paired_branch');
   if (contradictoryNegativeSections.length) violations.push('contradictory_negative_section');
   if (singleStepOverreach) violations.push('single_step_diagnostic_overreach');
   if (malformedMarkdown.length) violations.push('malformed_markdown');
-  return { checked: true, focusedFactQuestion, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, cardinalityMismatches, conflictingCountDeclarations, incompleteLeadIns, orphanedAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
+  return { checked: true, focusedFactQuestion, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, cardinalityMismatches, conflictingCountDeclarations, incompleteLeadIns, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -2428,6 +2439,9 @@ function consultAnswerRevisionPrompt(draft, audit) {
       : '',
     audit.violations.includes('orphaned_alternative_fragment')
       ? `草稿在前一并列项被删除后留下孤立后半分支：${(audit.orphanedAlternativeLines || []).map(item => item.line).join('；')}。删除这些以“还是/或者”开头、却没有可对应前项的完整行；不得猜测或补造被删掉的前项。完整“是 A 还是 B？”问句和“还是先停”式直接结论应保持。`
+      : '',
+    audit.violations.includes('dangling_alternative_fragment')
+      ? `草稿在后一并列项被删除后留下悬空前半分支：${(audit.danglingAlternativeLines || []).map(item => item.line).join('；')}。删除这些以“还是/或者/或是/或”结尾却没有后一项的完整行，或仅用草稿中已经存在的后一项恢复完整二选一；不得猜测或补造被删内容。`
       : '',
     audit.violations.includes('orphaned_contrast_fragment')
       ? `草稿留下了没有前述完整主张的转折残句：${(audit.orphanedContrastLines || []).map(item => item.line).join('；')}。答案开头或“结论/判断”等纯标题后不得直接以“但/但是/不过/然而”起句；仅用草稿已有内容补回完整前句，或去掉转折词改成独立结论，无法保证时删除整句，不得猜造被删前提。`
@@ -2502,6 +2516,8 @@ function consultAnswerSafeFallback(draft, audit) {
   if (incompleteLines.size) fallbackDraft = fallbackDraft.split('\n').filter(line => !incompleteLines.has(line)).join('\n');
   const orphanedLines = new Set((audit.orphanedAlternativeLines || []).map(item => item.line));
   if (orphanedLines.size) fallbackDraft = fallbackDraft.split('\n').filter(line => !orphanedLines.has(line.trim())).join('\n');
+  const danglingAlternative = new Set((audit.danglingAlternativeLines || []).map(item => item.line));
+  if (danglingAlternative.size) fallbackDraft = fallbackDraft.split('\n').filter(line => !danglingAlternative.has(line.trim())).join('\n');
   const orphanedContrast = new Set((audit.orphanedContrastLines || []).map(item => item.line));
   if (orphanedContrast.size) fallbackDraft = fallbackDraft.split('\n').filter(line => !orphanedContrast.has(line.trim())).join('\n');
   for (const group of audit.incompletePairedBranches || []) {

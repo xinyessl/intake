@@ -1091,6 +1091,22 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.doesNotMatch(orphanedAlternativeFallback, /还是页面上有字段标题/);
   assert.match(orphanedAlternativeFallback, /记下模板和已有字段标识/);
   assert.deepEqual(bundle.audit(orphanedAlternativeFallback, '第二步对不上，先停还是继续？', route).violations, []);
+
+  const danglingAlternativeDraft = [
+    '对照既有报文，患者号在入参里是：',
+    '带引号的字符串（例如 "1234567890123456789"），还是',
+    '只抄字段名和完整原文，不要重发。',
+  ].join('\n');
+  const danglingAlternativeAudit = bundle.audit(danglingAlternativeDraft, '患者号先做哪个验证？', route);
+  assert.ok(danglingAlternativeAudit.violations.includes('dangling_alternative_fragment'), '后一项被删后句尾悬空“还是”必须命中');
+  assert.deepEqual(danglingAlternativeAudit.danglingAlternativeLines.map(item => item.line), ['带引号的字符串（例如 "1234567890123456789"），还是']);
+  assert.match(bundle.revision(danglingAlternativeDraft, danglingAlternativeAudit), /悬空前半分支/);
+  const danglingAlternativeFallback = bundle.fallback(danglingAlternativeDraft, danglingAlternativeAudit);
+  assert.doesNotMatch(danglingAlternativeFallback, /，还是\s*$/mu);
+  assert.match(danglingAlternativeFallback, /只抄字段名和完整原文/);
+  assert.deepEqual(bundle.audit(danglingAlternativeFallback, '患者号先做哪个验证？', route).violations, []);
+  assert.ok(!bundle.audit('报文里的患者号是带引号字符串，还是裸数字？', '患者号先做哪个验证？', route).violations.includes('dangling_alternative_fragment'), '完整二选一问句不得误伤');
+  assert.ok(!bundle.audit('结果是字符串或裸数字。', '报文里的形态是什么？', route).violations.includes('dangling_alternative_fragment'), '句中合法“或”不得误伤');
   assert.deepEqual(bundle.audit('是接口返回不同，还是页面显示不同？', '这两种情况怎么分？', route).violations, [], '完整二选一问句不得误伤');
   assert.deepEqual(bundle.audit('先停还是继续\n还是先停，不要继续。', '第二步断了怎么处理？', route).violations, [], '还是先停式直接结论不得误伤');
   assert.deepEqual(bundle.audit('两种分支：\n或者接口没有返回，先只读留证。', '还有什么分支？', route).violations, [], '明确冒号引出的或者分支不得误伤');
