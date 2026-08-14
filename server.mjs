@@ -1695,6 +1695,7 @@ function consultFinalActionConsistencyGuard(question, route) {
     '发布前还要核对步骤和对照项的编号引用：后文引用①②③④等序号时，每个序号都必须在本答案前文有明确对应项；不得出现“共三项”却引用④、表格只定义①②③却在判断或小结写③/④等未定义引用。顶层阿拉伯数字步骤默认必须从1开始并按正文出现顺序连续递增，不得从3起步、从1、2、3直接跳到5或重复编号；只有用户本轮明确说到“第N步/做到第N步”时，才允许从N或N+1承接。已有完整步骤只能重编号，不能为补缺号新增步骤或事实。发现后必须删除含未定义序号的完整句/完整表格行，或在不新增事实的前提下改回已经定义的序号。',
     '结构化答案还必须逐项核对“声明数量 → 实际内容”：声称二/三/四边、项、份、件、条、处或个对照时，紧随其后的对照表或 Markdown 清单必须确实给出相同数量的完整项；不得用一行表格冒充“三边对照”，也不得说“核两件事”却只列一项。同一小节里“确认/回复/补充/核对 N 件/项/点/条”等结构数量不得从 1 漂成 2；统一数量或删除不必要的数量承诺。“例如：/如下：/包括：/包含：/内容为：/由以下组成：/分别为：”后必须有实际内容，不能直接跳到下一步骤或“别搞混/注意/结论/下一步”等新小节；任何以冒号结尾的标题/提示语都不得出现在正文末尾而没有子内容。清理并列项后不得留下孤立的“还是页面…/或者接口…”等后半分支，也不得留下以“还是/或者/或是/或”结尾却没有后一项的前半分支；不得在答案开头或“结论/判断”等纯标题后直接留下没有前述主张的“但/但是/不过/然而”转折残句。删除示例或引用正文时必须连同整句引号一起删除，不得留下单独一行的「/」/“/”/『/』等孤立引号。明确要求对照/比较/分支判断时，若使用“一致/不一致、是/否、有/无、成功/失败、存在/不存在、命中/未命中”等成对标签，必须给齐两边，或改写成不承诺另一边的单一直接结论；不得只列“一致”后直接跳到未标注的另一种判断。“不要做/禁止/避免/切勿”等否定标题下不得只剩“可以/建议/请/应该/优先/最好/即可/帮你”等正向建议；正向替代动作必须移到独立的“可以做/下一步”标题下。用户明确只问“先做哪个验证/第一步做什么”时，只给一个最小只读验证，不追加第二、第三步或可转发的修改指令。',
     '最终稿中的每个有序/无序列表项若只剩粗体步骤标题，后面必须有正文或子项；若直接遇到分隔线、新节、下一同级列表项或答案结束，删除该空列表项，不得补造内容。每个自然句也必须完整收口：行尾逗号、分号或冒号后必须有同句后半段或紧邻正文；若直接进入分隔线、新节、统一安全尾注或答案结束，删除该悬空完整句。列表项内部的正常分号、下一行有真实正文/子项及以句号/问号/叹号完整结束的粗体单句不得误删。',
+    '普通行、粗体行或 Markdown heading 形式的“N. 步骤标题”都必须有自己的正文、表格、列表或代码块；水平分隔线不算步骤内容。若到下一同级编号步骤、分隔线、新节或文末仍无内容，删除该空编号步骤；删除后只把剩余已有步骤连续重编号，不得补造缺失步骤。四空格缩进的嵌套步骤属于父步骤内容，不参与顶层编号。',
     '该审计只删除不安全或互相矛盾的动作，不新增业务事实，也不给纯事实回答强加诊断步骤。若用户只问事实且现有证据已经足够，直接回答后停止；若已明确动作只读，可保留相应只读观察；若受控条件全部齐全，可条件式说明单次受控验证。',
   ].join('\n');
 }
@@ -2222,7 +2223,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   // 冒号式引导语必须真正引出内容；若下一非空行已经进入新步骤/标题或已结束，
   // 说明模型删掉示例后留下了空壳。
   const incompleteLeadIns = [];
-  const topLevelStepRe = /^(?![ \t]{4})[ \t]{0,3}(?:\*\*|__)?[ \t]*([1-9]\d*)[.、．][ \t]+/u;
+  const topLevelStepRe = /^(?![ \t]{4})[ \t]{0,3}(?:#{1,6}[ \t]+)?(?:\*\*|__)?[ \t]*([1-9]\d*)[.、．][ \t]+/u;
   for (let index = 0; index < documentLines.length; index++) {
     const explicitLead = /(?:例如|如下|包括|包含|内容为|由以下(?:内容|项目|字段|部分)?组成|组成如下|分别为|具体为|可见|重点看)\s*[：:]\s*(?:\*\*|__)?\s*$/u.test(documentLines[index]);
     const genericColonLead = /[：:]\s*(?:\*\*|__)?\s*$/u.test(documentLines[index]);
@@ -2421,6 +2422,26 @@ function consultAnswerSemanticAudit(answer, question, route) {
     const match = line.match(topLevelStepRe);
     if (match) topLevelSteps.push({ number: Number(match[1]), lineIndex, line: line.trim() });
   }
+  // 编号步骤可能写成普通行、粗体行或 Markdown heading。编号行只作为步骤标题，
+  // 到下一个同级步骤/分隔线/新节/文末前必须出现真实正文、表格、列表或代码块；
+  // 水平分隔线本身不能冒充内容。四空格缩进的嵌套步骤属于父步骤正文。
+  const emptyNumberedSections = [];
+  const topLevelSectionBoundaryRe = /^(?![ \t]{4})[ \t]{0,3}(?:#{1,6}[ \t]+|(?:\*\*|__)[^\n]+(?:\*\*|__)\s*$)/u;
+  for (const step of topLevelSteps) {
+    const inlineTitle = step.line.replace(topLevelStepRe, '').replace(/(?:\*\*|__)\s*$/u, '').trim();
+    // “1. 只读记录当前值。”本身已经是完整可执行句，不要求额外正文；没有
+    // 句末标点的标题仍须检查其下内容。
+    let hasBody = /[。！？?!]$/u.test(inlineTitle);
+    for (let cursor = step.lineIndex + 1; cursor < documentLines.length; cursor++) {
+      if (hasBody) break;
+      const candidate = documentLines[cursor];
+      if (!candidate.trim()) continue;
+      if (horizontalSeparatorRe.test(candidate) || topLevelStepRe.test(candidate) || topLevelSectionBoundaryRe.test(candidate)) break;
+      hasBody = true;
+      break;
+    }
+    if (!hasBody) emptyNumberedSections.push(step);
+  }
   const nonSequentialTopLevelSteps = [];
   let topLevelExpectedStart = topLevelSteps.length ? 1 : null;
   if (topLevelSteps.length) {
@@ -2607,6 +2628,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (undefinedArabicStepReferences.length) violations.push('undefined_arabic_step_reference');
   if (selfReferentialStepReferences.length) violations.push('self_referential_step_reference');
   if (nonSequentialTopLevelSteps.length) violations.push('nonsequential_top_level_steps');
+  if (emptyNumberedSections.length) violations.push('empty_numbered_section');
   if (cardinalityMismatches.length) violations.push('inconsistent_structured_cardinality');
   if (incompleteResultBranchTables.length) violations.push('incomplete_result_branch_set');
   if (conflictingCountDeclarations.length) violations.push('conflicting_count_declaration');
@@ -2621,7 +2643,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (contradictoryNegativeSections.length) violations.push('contradictory_negative_section');
   if (singleStepOverreach) violations.push('single_step_diagnostic_overreach');
   if (malformedMarkdown.length) violations.push('malformed_markdown');
-  return { checked: true, diagnosticQuestion, focusedFactQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, focusedRelationshipFacts, missingFocusedRelationshipFacts, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, emptyDiagnosticBranchHeadings, emptyListStepItems, danglingClosingPunctuationLines, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
+  return { checked: true, diagnosticQuestion, focusedFactQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, focusedRelationshipFacts, missingFocusedRelationshipFacts, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, emptyNumberedSections, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, emptyDiagnosticBranchHeadings, emptyListStepItems, danglingClosingPunctuationLines, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -2666,6 +2688,9 @@ function consultAnswerRevisionPrompt(draft, audit) {
       : '',
     audit.violations.includes('nonsequential_top_level_steps')
       ? `草稿的顶层步骤没有从本轮合法起点开始或编号不连续：${(audit.nonSequentialTopLevelSteps || []).map(item => `“${item.line}”应为${item.expected}、实际为${item.number}`).join('；')}。默认从1开始；只有用户本轮明确提到“第N步/做到第N步”时才允许从N或N+1承接。只按现有完整步骤的正文顺序连续重编号；不得为补缺号新增步骤、动作、字段或事实。嵌套清单和代码块不参与顶层编号。`
+      : '',
+    audit.violations.includes('empty_numbered_section')
+      ? `草稿存在只有编号步骤标题、没有任何正文/表格/列表/代码块的空步骤：${(audit.emptyNumberedSections || []).map(item => item.line).join('；')}。编号标题可能是普通行、粗体或 Markdown heading；水平分隔线不算内容。只能接回草稿里已经存在的内容，没有时删除该完整标题，再按剩余已有步骤顺序连续重编号；不得补造缺失步骤。`
       : '',
     audit.violations.includes('inconsistent_structured_cardinality')
       ? `草稿声明的对照数量与实际结构不一致：${(audit.cardinalityMismatches || []).map(item => `${item.kind === 'list' ? '清单' : '表格'}声明${item.expected}项、实际${item.actual}项`).join('；')}。只有草稿中已经存在的内容才能保留；把声明改成实际数量，或删除数量声明/不完整表格或清单，禁止为了凑数新增字段、来源或观测点。`
@@ -2756,7 +2781,7 @@ function consultAnswerSafeFallback(draft, audit) {
   };
   let fallbackDraft = String(draft || '');
   if (audit.violations.includes('nonsequential_top_level_steps')) {
-    const stepLineRe = /^((?![ \t]{4})[ \t]{0,3}(?:\*\*|__)?[ \t]*)([1-9]\d*)([.、．][ \t]+)/u;
+    const stepLineRe = /^((?![ \t]{4})[ \t]{0,3}(?:#{1,6}[ \t]+)?(?:\*\*|__)?[ \t]*)([1-9]\d*)([.、．][ \t]+)/u;
     let insideFence = false;
     let nextNumber = null;
     fallbackDraft = fallbackDraft.split('\n').map(line => {
@@ -2789,6 +2814,8 @@ function consultAnswerSafeFallback(draft, audit) {
   if (emptyBranchLines.size) fallbackDraft = fallbackDraft.split('\n').filter(line => !emptyBranchLines.has(line.trim())).join('\n');
   const emptyStepLines = new Set((audit.emptyListStepItems || []).map(item => item.line));
   if (emptyStepLines.size) fallbackDraft = fallbackDraft.split('\n').filter(line => !emptyStepLines.has(line.trim())).join('\n');
+  const emptyNumberedLines = new Set((audit.emptyNumberedSections || []).map(item => item.line));
+  if (emptyNumberedLines.size) fallbackDraft = fallbackDraft.split('\n').filter(line => !emptyNumberedLines.has(line.trim())).join('\n');
   const danglingClosingLines = new Set((audit.danglingClosingPunctuationLines || []).map(item => item.line));
   if (danglingClosingLines.size) fallbackDraft = fallbackDraft.split('\n').filter(line => !danglingClosingLines.has(line.trim())).join('\n');
   const orphanedLines = new Set((audit.orphanedAlternativeLines || []).map(item => item.line));
@@ -2819,6 +2846,7 @@ function consultAnswerSafeFallback(draft, audit) {
   // “只读核对已有报文；”。最终降级稿必须基于清理后的文本重审并删除完整项/行，
   // 不能把残缺句直接发布，也不能为了补全语义临时添加事实。
   const postCleanupStructuralLines = new Set([
+    ...(postCleanupAudit && postCleanupAudit.emptyNumberedSections || []).map(item => item.line),
     ...(postCleanupAudit && postCleanupAudit.emptyListStepItems || []).map(item => item.line),
     ...(postCleanupAudit && postCleanupAudit.danglingClosingPunctuationLines || []).map(item => item.line),
   ]);
@@ -2826,6 +2854,22 @@ function consultAnswerSafeFallback(draft, audit) {
     safeKept = safeKept.split('\n').filter(line => !postCleanupStructuralLines.has(line.trim())).join('\n');
   }
   safeKept = consultNormalizeSafeMarkdown(consultNormalizeSafeTables(safeKept));
+  // 删除空步骤后可能只剩 2/4 等跳号。按原问题确定的合法起点重排剩余已有
+  // 顶层步骤；只改编号，不创建标题或正文。
+  if (safeKept) {
+    const remainingStepRe = /^((?![ \t]{4})[ \t]{0,3}(?:#{1,6}[ \t]+)?(?:\*\*|__)?[ \t]*)([1-9]\d*)([.、．][ \t]+)/u;
+    let expectedStep = Number.isInteger(audit.topLevelExpectedStart) ? audit.topLevelExpectedStart : 1;
+    let insideFence = false;
+    safeKept = safeKept.split('\n').map(line => {
+      if (/^\s*```/u.test(line)) { insideFence = !insideFence; return line; }
+      if (insideFence) return line;
+      const match = line.match(remainingStepRe);
+      if (!match) return line;
+      const normalized = `${match[1]}${expectedStep}${match[3]}${line.slice(match[0].length)}`;
+      expectedStep += 1;
+      return normalized;
+    }).join('\n');
+  }
   if (audit.focusedFactPrimaryPath && !consultConcretePaths(safeKept).includes(audit.focusedFactPrimaryPath.path)) {
     safeKept = [`当前接口：\`${audit.focusedFactPrimaryPath.display}\`。`, safeKept].filter(Boolean).join('\n\n');
   }

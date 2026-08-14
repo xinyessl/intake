@@ -560,6 +560,8 @@ test('发布前动作一致性审计覆盖整份答案，禁止同答先劝停�
     assert.match(text, /只问“先做哪个验证\/第一步做什么”时，只给一个最小只读验证/);
     assert.match(text, /只剩粗体步骤标题，后面必须有正文或子项/);
     assert.match(text, /行尾逗号、分号或冒号后必须有同句后半段或紧邻正文/);
+    assert.match(text, /普通行、粗体行或 Markdown heading 形式的“N\. 步骤标题”/);
+    assert.match(text, /水平分隔线不算步骤内容/);
   });
 
   const readOnly = fn('这个列表刷新已确认纯只读，可以刷新后看现有数量吗？', { matched: true });
@@ -1203,10 +1205,9 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   const selfReferenceFallback = bundle.fallback(selfReferenceDraft, selfReferenceAudit);
   assert.doesNotMatch(selfReferenceFallback, /按第3步结果/);
   const selfReferenceSecondAudit = bundle.audit(selfReferenceFallback, '给我一个能直接照着走的排查顺序。', route);
-  assert.ok(selfReferenceSecondAudit.violations.includes('nonsequential_top_level_steps'), '删除自引用标题后跳号由下一轮连续编号门处理');
-  const selfReferenceFinal = bundle.fallback(selfReferenceFallback, selfReferenceSecondAudit);
-  assert.match(selfReferenceFinal, /3\. 整理脱敏证据/);
-  assert.deepEqual(bundle.audit(selfReferenceFinal, '给我一个能直接照着走的排查顺序。', route).violations, []);
+  assert.ok(!selfReferenceSecondAudit.violations.includes('nonsequential_top_level_steps'), '删除自引用标题后应在同一fallback内重排剩余已有步骤');
+  assert.match(selfReferenceFallback, /3\. 整理脱敏证据/);
+  assert.deepEqual(selfReferenceSecondAudit.violations, []);
   assert.deepEqual(bundle.audit('1. 固定现象。\n2. 根据第1步原文核对已有响应。', '给我排查顺序。', route).violations, [], '引用前一步是正常流程');
   assert.deepEqual(bundle.audit('第3步：整理已有请求。', '我已做到第2步，接下来呢？', route).violations, [], '“第N步：动作”是合法定义而不是自引用');
   assert.deepEqual(bundle.audit('做到第2步后先停。', '我已经做到第2步，下一步先停还是继续？', route).violations, [], '用户本轮明确的第N步可作为外部引用，不要求答案重新定义');
@@ -1246,13 +1247,13 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.deepEqual(ungroundedStartAudit.nonSequentialTopLevelSteps.map(item => [item.expected, item.number]), [[1, 3], [2, 4], [3, 5]]);
   const ungroundedStartFallback = bundle.fallback(ungroundedStartDraft, ungroundedStartAudit);
   assert.match(ungroundedStartFallback, /^1\. 固定截图内容$/m);
-  assert.match(ungroundedStartFallback, /^2\. 核已有响应$/m);
-  assert.match(ungroundedStartFallback, /^3\. 整理材料$/m);
+  assert.doesNotMatch(ungroundedStartFallback, /核已有响应/, '步骤唯一正文被其它作用域审计删除后，空标题也须在最终重审中删除');
+  assert.match(ungroundedStartFallback, /^2\. 整理材料$/m);
   assert.deepEqual(bundle.audit(ungroundedStartFallback, '我只有截图，没有日志，最少还要补什么？', route).violations, []);
   assert.ok(bundle.audit('3. 只读核已有响应', '下一步先做什么？', route).violations.includes('nonsequential_top_level_steps'), '单个顶层步骤也须从本轮合法起点开始');
-  assert.deepEqual(bundle.audit('3. 继续核已有响应', '已经做到第二步，接下来呢？', route).violations, [], '用户明确做到第二步时可从第三步承接');
-  assert.deepEqual(bundle.audit('1. 顶层步骤\n    7. 嵌套原始编号\n2. 下一顶层步骤', '怎么核对？', route).violations, [], '四空格嵌套编号不参与顶层连续性审计');
-  assert.deepEqual(bundle.audit('1. 顶层步骤\n```text\n9. 文件中的原文编号\n```\n2. 下一顶层步骤', '怎么核对？', route).violations, [], '代码围栏里的编号不参与顶层连续性审计');
+  assert.deepEqual(bundle.audit('3. 继续核已有响应。', '已经做到第二步，接下来呢？', route).violations, [], '用户明确做到第二步时可从第三步承接，完整句步骤无需额外正文');
+  assert.deepEqual(bundle.audit('1. 顶层步骤\n    7. 嵌套原始编号\n2. 下一顶层步骤\n只读整理已有内容。', '怎么核对？', route).violations, [], '四空格嵌套编号不参与顶层连续性审计且可作为父步骤正文');
+  assert.deepEqual(bundle.audit('1. 顶层步骤\n```text\n9. 文件中的原文编号\n```\n2. 下一顶层步骤\n只读整理已有内容。', '怎么核对？', route).violations, [], '代码围栏里的编号不参与顶层连续性审计且可作为父步骤正文');
 
   const incompleteThreeWayDraft = [
     '先做这一个验证：拿一条已有记录做三边原文对照。',
@@ -1735,6 +1736,54 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     '然后只读比较已有页面。',
   ].join('\n');
   assert.ok(!bundle.audit(completePunctuation, '今天视图怎么排查？', atomicRoute).violations.includes('dangling_closing_punctuation'), '句内分号、引出列表和紧邻正文不属于悬空收口');
+
+  const r69EmptyNumberedDraft = [
+    '1. 先把三边现象记下来（同一时刻）',
+    '---',
+    '2. 抓已经发生的请求',
+    '---',
+    '---',
+    '4. 排除仍未确认的实现原因',
+    '只读保留已有页面、请求和响应原文。',
+  ].join('\n');
+  const r69EmptyNumberedAudit = bundle.audit(r69EmptyNumberedDraft, '今天视图不一致，给我排查顺序。', atomicRoute);
+  assert.ok(r69EmptyNumberedAudit.violations.includes('empty_numbered_section'), '生产DOM中普通编号标题后只有分隔线必须判空');
+  assert.ok(r69EmptyNumberedAudit.violations.includes('nonsequential_top_level_steps'), '生产DOM缺第3步且跳到第4步必须同时判编号不连续');
+  assert.deepEqual(r69EmptyNumberedAudit.emptyNumberedSections.map(item => item.line), [
+    '1. 先把三边现象记下来（同一时刻）',
+    '2. 抓已经发生的请求',
+  ]);
+  assert.deepEqual(r69EmptyNumberedAudit.nonSequentialTopLevelSteps.map(item => [item.expected, item.number]), [[3, 4]]);
+  assert.match(bundle.revision(r69EmptyNumberedDraft, r69EmptyNumberedAudit), /只有编号步骤标题、没有任何正文\/表格\/列表\/代码块/);
+  const r69EmptyNumberedFallback = bundle.fallback(r69EmptyNumberedDraft, r69EmptyNumberedAudit);
+  assert.doesNotMatch(r69EmptyNumberedFallback, /先把三边现象记下来|抓已经发生的请求/);
+  assert.match(r69EmptyNumberedFallback, /^1\. 排除仍未确认的实现原因$/m, '删除空步骤后剩余已有步骤直接重排为连续编号');
+  assert.doesNotMatch(r69EmptyNumberedFallback, /^4\./m);
+  assert.deepEqual(bundle.audit(r69EmptyNumberedFallback, '今天视图不一致，给我排查顺序。', atomicRoute).violations, []);
+
+  const completeNumberedSections = [
+    '### 1. 固定当前观察',
+    '只读记录页面文案。',
+    '**2. 核已有响应**',
+    '| 项 | 原文 |',
+    '| --- | --- |',
+    '| 响应 | 已保存 |',
+    '3. 整理材料',
+    '- 已有页面',
+    '- 已有响应',
+    '4. 保留代码样例',
+    '```text',
+    'existing response',
+    '```',
+  ].join('\n');
+  assert.ok(!bundle.audit(completeNumberedSections, '今天视图怎么排查？', atomicRoute).violations.includes('empty_numbered_section'), '普通/粗体/heading步骤分别有正文、表格、列表或代码块时放行');
+  const nestedNumberedSections = [
+    '1. 固定当前观察',
+    '    1.1 只读抄录页面原文',
+    '2. 整理已有材料',
+    '保留脱敏截图。',
+  ].join('\n');
+  assert.ok(!bundle.audit(nestedNumberedSections, '今天视图怎么排查？', atomicRoute).violations.includes('empty_numbered_section'), '四空格嵌套步骤属于父步骤正文，不误判为空或顶层步骤');
 
   const oneDecisionRowWithoutBranchLead = [
     '怎么判断：',
