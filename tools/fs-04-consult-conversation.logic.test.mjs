@@ -880,6 +880,11 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     '交给对接方改传参/序列化口径。',
     '让第三方调整编码规则。',
     '通知开发统一协议口径。',
+    '优先让对接按字符串传完整号。',
+    '请接口方以文本格式发送。',
+    '要求厂商按指定格式传。',
+    '通知供应商修改编码口径。',
+    '让院方调整字段格式。',
   ]) {
     const actionAudit = bundle.audit(wording, '患者号对不上，下一步怎么查？', focusedPatientIdRoute);
     assert.ok(actionAudit.violations.includes('cross_actor_side_effect'), wording);
@@ -893,6 +898,12 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.doesNotMatch(q128SideEffectFallback, /交给对接方改|传参\/序列化口径/);
   assert.deepEqual(bundle.audit(q128SideEffectFallback, '患者号字段第二步对不上，后面先停还是继续？', focusedPatientIdRoute).violations, []);
   assert.deepEqual(bundle.audit('只读核对已有序列化日志和协议字段，不修改配置。', '患者号怎么继续排查？', focusedPatientIdRoute).violations, [], '只读查看已有机制证据不得误判为修改动作');
+  assert.deepEqual(bundle.audit('不要让对接按数字传；只读核对已有报文。', '患者号怎么继续排查？', focusedPatientIdRoute).violations, [], '否定动作与既有报文只读核对不得误判');
+  assert.deepEqual(bundle.audit(
+    '仅在隔离测试环境、专用测试数据、明确授权、回滚清理方案、幂等性与影响范围均确认后，可让接口方单次受控按指定格式发送。',
+    '隔离测试环境和专用测试数据已获授权，回滚清理、幂等性、影响范围都确认了，怎么受控验证？',
+    focusedPatientIdRoute,
+  ).violations, [], '完整受控条件仍允许跨主体条件式验证');
   assert.deepEqual(bundle.audit('只读对照已有 patient_id 源值与出站报文。', q127R28Question, focusedPatientIdRoute).violations, [], '当前聚焦字段与只读动作应放行');
   assert.deepEqual(bundle.audit(
     '统计100份已核报文，其中80份确认数字转换后发生精度丢失。',
