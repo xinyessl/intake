@@ -1727,7 +1727,14 @@ function consultHasControlledActionBundle(question) {
 }
 
 function consultConcretePaths(text) {
-  return Array.from(new Set((String(text || '').match(/(?<![\p{L}\p{N}_.{}<>:-])(?:(?:…|\.{2,})\s*)?\/(?:[A-Za-z0-9_.{}<>:-]+\/)*(?:[A-Za-z0-9_.{}<>:-]+|\*)\/?(?:\?[A-Za-z0-9_./?={}&<>:%+-]*)?/gu) || [])
+  const source = String(text || '');
+  const absolute = source.match(/(?<![\p{L}\p{N}_.{}<>:-])(?:(?:…|\.{2,})\s*)?\/(?:[A-Za-z0-9_.{}<>:-]+\/)*(?:[A-Za-z0-9_.{}<>:-]+|\*)\/?(?:\?[A-Za-z0-9_./?={}&<>:%+-]*)?/gu) || [];
+  const relative = (source.match(/(?<![\p{L}\p{N}_.{}<>:\/-])(?:[A-Za-z0-9_.{}<>:-]+\/)+(?:[A-Za-z0-9_.{}<>:-]+|\*)(?:\?[A-Za-z0-9_./?={}&<>:%+-]*)?/gu) || [])
+    .filter(token => /[A-Za-z]/.test(token))
+    .filter(token => !/^\d{2,4}\/\d{1,2}\/\d{1,2}$/.test(token))
+    .filter(token => !token.split(/[/?]/).filter(Boolean).every(segment => /^[A-Za-z][A-Za-z0-9]*(?:Id|ID|Code|Status|No|Type)$/.test(segment)))
+    .filter(token => token.split(/[/?]/).some(segment => segment.length > 2));
+  return Array.from(new Set([...absolute, ...relative]
     .map(x => x.replace(/[),.;，。；：]+$/g, '')).filter(Boolean)));
 }
 
@@ -1740,7 +1747,7 @@ function consultRouteScopeText(route) {
 }
 
 function consultScopeEntityTerms() {
-  return ['外部调度', '调度', '补跑', '重跑', '同步任务', 'ETL', '批处理', '患教', '患者教育', '收费', '退费', '药师反馈', '反馈', '监护', '药物重整', '医嘱干预', '患者列表', '患者三元身份', '患者身份', '用药咨询', 'AI 状态', 'AI状态'];
+  return ['外部调度', '调度', '补跑', '重跑', '统计同步', '同步任务', 'ETL', '批处理', '折线图', '患教', '患者教育', '收费', '退费', '药师反馈', '反馈', '监护', '药物重整', '医嘱干预', '患者列表', '患者三元身份', '患者身份', '用药咨询', 'AI 状态', 'AI状态'];
 }
 
 function consultDiagnosticMechanismTerms(text) {

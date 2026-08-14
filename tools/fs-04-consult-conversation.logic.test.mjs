@@ -718,6 +718,9 @@ test('发布前确定性语义校验：路径必须来自用户或route并逐字
   assert.deepEqual(bundle.audit('调用 GET /pwrsapi/month/view/today；不要混淆 GET /month/view。', '今天视图接口是什么？', route).violations, []);
   for (const bad of [
     '调用 GET /month/view/today。',
+    '过滤关键字 month/view/today。',
+    '路径含 month/view/today，别看 month/view。',
+    '也可以简称 pwrsapi/month/view/today。',
     '抓包筛选 …/month/view/today。',
     '升级材料不要写 GET .../month/view/today。',
     '也不要写 GET .. /month/view/today。',
@@ -741,10 +744,14 @@ test('发布前确定性语义校验：路径必须来自用户或route并逐字
   assert.deepEqual(bundle.audit(mixedFallback, '今天视图接口是什么？', route).violations, []);
   const userPath = bundle.audit('按你提供的 /custom/probe 只读核当前请求。', '我抓到 /custom/probe，怎么判断？', { matched: true, answerFacts: ['只核当前请求'] });
   assert.deepEqual(userPath.violations, [], '用户本轮原文路径可照实引用');
+  const userRelativePath = bundle.audit('按你提供的 vendor/probe 只读核当前请求。', '我抓到 vendor/probe，怎么判断？', { matched: true, answerFacts: ['只核当前请求'] });
+  assert.deepEqual(userRelativePath.violations, [], '用户本轮逐字提供的裸相对路径可照实引用');
   const inventedWithoutKnownPath = bundle.audit('建议再看 GET /guessed/path。', '还要看哪里？', { matched: true, answerFacts: ['继续核当前请求'] });
   assert.deepEqual(inventedWithoutKnownPath.violations, ['unexpected_concrete_path'], '没有已核路径时也不能新增具体路径');
   const slashWords = bundle.audit('核对服务器/JVM 时间、year/week 字段和接口/页面展示差异。', '怎么只读核时间？', route);
   assert.deepEqual(slashWords.violations, [], '中英文普通斜杠短语不能被当作具体路径');
+  const naturalSlashText = bundle.audit('日期是 2026/08/14，A/B 两组都正常，附件名 report.xlsx。', '怎么记录现场值？', route);
+  assert.deepEqual(naturalSlashText.violations, [], '自然日期、短分组比对和无斜杠文件名不得误判成路径');
 });
 
 test('发布前事实作用域审计：相邻模块、通配路径不串入，显式切题放行', () => {
@@ -787,6 +794,10 @@ test('发布前事实作用域审计：相邻模块、通配路径不串入，�
   const leakedFallback = bundle.fallback(leaked, leakedAudit);
   assert.equal(leakedFallback, '今天视图仍调用 GET /pwrsapi/month/view/today。');
   assert.deepEqual(bundle.audit(leakedFallback, '今天请求响应都抓到了，重点核什么？', todayRoute).violations, []);
+  const combinedEntityLeak = bundle.audit('不要把折线图、统计同步那套接口掺进来。', '今天请求响应都抓到了，重点核什么？', todayRoute);
+  assert.deepEqual(combinedEntityLeak.violations, ['out_of_scope_entity']);
+  assert.deepEqual(combinedEntityLeak.unexpectedEntityTerms, ['统计同步', '折线图']);
+  assert.deepEqual(bundle.audit('现在切到统计同步和折线图，分别核什么？', '现在切到统计同步和折线图，分别核什么？', todayRoute).violations, [], '用户显式点名组合实体时放行重新路由');
 
   const hiddenMechanism = bundle.audit('页面与响应不一致 → 页面用了别的数据源/缓存。', '今天视图时间对不上，怎么排查？', todayRoute);
   assert.deepEqual(hiddenMechanism.violations, ['out_of_scope_entity']);
