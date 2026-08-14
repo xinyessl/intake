@@ -516,6 +516,7 @@ test('发布前动作一致性审计覆盖整份答案，禁止同答先劝停�
     assert.match(text, /“例如：\/如下：\/包括：\/分别为：”后必须有实际内容/);
     assert.match(text, /不得留下孤立的“还是页面…\/或者接口…”等后半分支/);
     assert.match(text, /一致\/不一致、是\/否、有\/无、成功\/失败/);
+    assert.match(text, /“不要做\/禁止\/避免\/切勿”等否定标题下不得只剩/);
     assert.match(text, /只问“先做哪个验证\/第一步先做什么”时，只给一个最小只读验证/);
   });
 
@@ -1098,6 +1099,28 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     '- **不一致：** 页面呈现链路待验证。',
   ].join('\n'), '今天视图和浏览器不一致，给我排查顺序。', route).violations, [], '成对标签齐全时不得误拦');
   assert.deepEqual(bundle.audit('配置一致：无需继续处理。', '配置状态是什么？', route).violations, [], '没有结构引导的单一直接结论不得误拦');
+
+  const contradictoryNegativeDraft = [
+    '**不要做的：**',
+    '把截图上的日期和本机值直接回我，我可以帮你判断。',
+  ].join('\n');
+  const contradictoryNegativeAudit = bundle.audit(contradictoryNegativeDraft, '只有截图够不够？', route);
+  assert.ok(contradictoryNegativeAudit.violations.includes('contradictory_negative_section'), '否定标题下只剩正向建议必须命中');
+  assert.match(bundle.revision(contradictoryNegativeDraft, contradictoryNegativeAudit), /不得保留“不要做”标题加正向建议/);
+  const contradictoryNegativeFallback = bundle.fallback(contradictoryNegativeDraft, contradictoryNegativeAudit);
+  assert.doesNotMatch(contradictoryNegativeFallback, /不要做|直接回我|帮你判断/);
+  assert.deepEqual(bundle.audit(contradictoryNegativeFallback, '只有截图够不够？', route).violations, []);
+  assert.deepEqual(bundle.audit([
+    '**不要做的：**',
+    '- 不要直接改服务器时区。',
+    '- 禁止重复提交。',
+  ].join('\n'), '现场排查不要做什么？', route).violations, [], '否定标题下明确否定项不得误拦');
+  assert.deepEqual(bundle.audit([
+    '**不要做的：**',
+    '- 修改生产配置',
+    '- 重复提交',
+  ].join('\n'), '现场排查不要做什么？', route).violations, [], '否定标题自然管辖的裸禁止项不得误拦');
+  assert.deepEqual(bundle.audit('**下一步：**\n- 可以只读核已有响应。', '现场下一步做什么？', route).violations, [], '正向标题下的安全建议不得误拦');
 
   const explicitLayerRuleRoute = {
     matched: true,
