@@ -2594,10 +2594,34 @@ function consultAnswerSemanticAudit(answer, question, route) {
     .replace(/需要|必须|要求|应当|须/gu, '需')
     .replace(/认证|登录校验/gu, '鉴权');
   const normalizedQualifierAnswer = normalizeQualifierText(compactLowerAnswer);
-  const missingFocusedRelationshipFacts = focusedRelationshipFacts.map(item => ({
-    ...item,
-    missingTokens: item.tokens.filter(token => !normalizedQualifierAnswer.includes(normalizeQualifierText(token))),
-  })).filter(item => item.missingTokens.length > 0);
+  const focusedClaimSegments = documentLines.flatMap(line => {
+    const raw = String(line || '');
+    if (/^\s*#{1,6}\s+/u.test(raw) || /^\s*(?:\*\*|__)[^\n]+(?:\*\*|__)\s*$/u.test(raw)) return [];
+    if (/^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*$/u.test(raw)) return [];
+    const cells = consultMarkdownTableCells(raw);
+    const claimLine = cells ? cells.join(' ') : raw;
+    return claimLine.split(/[。！？；;\n]/u).map(part => part.replace(/^\s*(?:[-*+]\s+|[1-9]\d*[.、．]\s+)?/u, '').replace(/[*`]/g, '').trim())
+      .filter(part => part && !focusedFactOverreach.includes(part));
+  });
+  const relationClaimRe = /(?:关联|关系|通过|用(?:同一)?|靠|挂(?:到|接)?|归属|对应|连接|指向|映射|保存|存储|承载|序列化|快照|↔|→|<-|->)/iu;
+  const negativeBoundaryRe = /(?:不(?:是|等于|代表|属于|能当作|应描述成)?|非|≠|不得|不能|禁止|并非)/u;
+  const missingFocusedRelationshipFacts = focusedRelationshipFacts.map(item => {
+    if (item.kind === 'relationship_edge' || item.kind === 'relationship_boundary') {
+      const covered = focusedClaimSegments.some(segment => {
+        const normalized = normalizeQualifierText(segment);
+        const groupsCovered = (item.requiredGroups || []).every(group => group.some(token => normalized.includes(normalizeQualifierText(token))));
+        if (!groupsCovered) return false;
+        return item.kind === 'relationship_boundary'
+          ? negativeBoundaryRe.test(segment)
+          : relationClaimRe.test(segment);
+      });
+      return { ...item, missingTokens: covered ? [] : (item.requiredGroups || []).map(group => group[0]) };
+    }
+    return {
+      ...item,
+      missingTokens: item.tokens.filter(token => !normalizedQualifierAnswer.includes(normalizeQualifierText(token))),
+    };
+  }).filter(item => item.missingTokens.length > 0);
   const focusedMustNotConfuse = focusedFactQuestion && route && route.matched
     ? (route.mustNotConfuse || []).map(String).filter(fact => {
         const factPaths = consultConcretePaths(fact);
@@ -2800,7 +2824,7 @@ function consultAnswerRevisionPrompt(draft, audit) {
       ? '用户本轮只是问单个接口、路径、状态码、字段属性或一个是非事实。保留 current route answerFacts/primary section 的直接答案和回答它所必需的 mustNotConfuse 限定；删除现场排查、无当前观察的失败原因、诊断优先级、操作建议、截图/日志邀约及其它未问扩写。用户明确问“为什么/排查/现场/怎么验证/接下来”或提出多个子问题时才可给对应步骤。'
       : '',
     audit.violations.includes('focused_fact_incomplete')
-      ? `用户本轮的原子事实没有覆盖完整。唯一主接口必须同时保留同一 answerFact 直接绑定的请求方法、认证/访问限定和必要固定参数；对象关系题必须覆盖已确认的直接关系/表示边。只从 current route answerFacts 补回：${(audit.missingFocusedRelationshipFacts || []).map(item => item.clause).join('；')}。不得因此扩写响应字段、数据来源、JVM/时区、删除、级联、历史、渲染、兼容、保存操作或现场排查，也不得把相邻接口的认证背景强塞进当前接口。`
+      ? `用户本轮的原子事实没有覆盖完整。唯一主接口必须同时保留同一 answerFact 直接绑定的请求方法、认证/访问限定和必要固定参数；对象关系题的每条 direct edge 必须在同一句或同一表格行绑定来源对象、关系键和目标对象，标题罗列和跨句 token 拼接都不算覆盖，并保留 direct mustNotConfuse 的关系边界。只从 current route answerFacts/mustNotConfuse 补回：${(audit.missingFocusedRelationshipFacts || []).map(item => item.clause).join('；')}。不得因此扩写响应字段、数据来源、JVM/时区、删除、级联、历史、渲染、兼容、保存操作或现场排查，也不得把相邻接口的认证背景强塞进当前接口。`
       : '',
     audit.violations.includes('undefined_ordinal_reference')
       ? `草稿存在未定义的圈号步骤/对照项引用：${(audit.undefinedOrdinalReferences || []).join('、')}。逐项核对前文表格、列表和正文，只能引用已经明确给出含义的序号；“共三项”不得再写④，表格只定义①②③时不得在判断或小结引用③/④或“含④”。删除含未定义序号的完整句/完整表格行，或在不新增事实的前提下改回已定义序号；不得凭空补造第四项。`
@@ -3146,7 +3170,7 @@ function consultFocusedFactGuard(question) {
   if (!focused || operational || multiQuestion) return '';
   return [
     '【单一事实题止答边界】',
-    '用户只询问或用陈述句确认一个接口、路径、状态码、字段/列的类型/长度/取值、对象之间的关联键/关系或一个是非事实。先从 current route 的 answerFacts/primary section 给直接答案，只补回答该事实所必需的限定与 mustNotConfuse 边界；唯一主接口题还必须保留同一 answerFact 直接绑定的请求方法、认证/访问限定与必要固定参数，不得把“止答”误解为只剩路径；关系题必须逐一覆盖用户点名对象在 current route 中已确认的直接挂接边与内容表示/存储边，不能因为止答而漏掉其中一个对象；答到这里就停止。',
+    '用户只询问或用陈述句确认一个接口、路径、状态码、字段/列的类型/长度/取值、对象之间的关联键/关系或一个是非事实。先从 current route 的 answerFacts/primary section 给直接答案，只补回答该事实所必需的限定与 mustNotConfuse 边界；唯一主接口题还必须保留同一 answerFact 直接绑定的请求方法、认证/访问限定与必要固定参数，不得把“止答”误解为只剩路径；关系题必须逐一覆盖用户点名对象在 current route 中已确认的直接挂接边与内容表示/存储边，每条边都要在同一句或同一表格行明确绑定来源对象、关系键和目标对象，标题里罗列对象不能替代关系正文，同一业务键连接多个目标时也不能合并漏答；direct mustNotConfuse 中“共享业务键不是真外键”等关系边界也必须发布；答到这里就停止。',
     '不得主动扩写同表其它列、本地身份元组、联合键、索引、唯一约束、数据库迁移、SQL 用法、相邻模块事实、实施步骤、现场排查、原因假设、动作建议或“把截图发来”等继续邀约。只有用户在本轮明确问到这些内容，且当前有效证据直接覆盖时，才逐项回答。',
     '即使相邻事实本身真实，只要不改变本问答案，也不要作为“顺便提醒”加入；显式切题后不得带入上一主题事实。',
   ].join('\n');
@@ -3195,6 +3219,9 @@ function consultFocusedFactOverreach(answer, question, route) {
       return !(hasAskedAttribute && (hasFocusedToken || statementTokens.length === 0) && !adjacentImplementation);
     }
     if (relationshipOnly) {
+      // 关系表的表头/分隔行本身不承载业务 claim；逐 edge 完整性由后续
+      // 同一表格行审计负责，不能先把结构行当“无关系扩写”删掉。
+      if (consultMarkdownTableCells(statement)) return false;
       const routeSupportsRepresentation = (route && route.answerFacts || []).some(fact => /(?:保存|存储|承载|序列化|快照|JSON|json)/i.test(String(fact || '')));
       const askedRepresentation = /(?:结果|填写|填报|内容|值|载荷|payload|快照)/i.test(q);
       const directRepresentation = askedRepresentation && routeSupportsRepresentation
@@ -3245,6 +3272,60 @@ function consultFocusedRelationshipFacts(question, route) {
   const directRelation = /(?:关联|关系|关联键|共享键|外键|串(?:起|联|起来)?|挂(?:到|接)?|指向|引用|映射|对应|所属|连接|↔|→|<-|->)/i;
   const directRepresentation = /(?:保存|存储|承载|序列化|快照|JSON|json)/i;
   const asksRepresentation = /(?:结果|填写|填报|内容|值|载荷|payload|快照)/i.test(q);
+  const entityAliases = rawValue => {
+    const raw = String(rawValue || '').trim();
+    if (/填写内容/u.test(raw)) return ['填写内容', '内容', '快照'];
+    const identifier = raw.match(/[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?/u)?.[0] || '';
+    const base = identifier.includes('.') ? identifier.slice(0, identifier.lastIndexOf('.')) : identifier;
+    const aliases = new Set([base || identifier].filter(Boolean));
+    if (/(?:^|_)form$/i.test(base)) ['表单模板', '模板', '表单'].forEach(value => aliases.add(value));
+    if (/(?:^|_)(?:element|field)$/i.test(base)) ['字段', '元素'].forEach(value => aliases.add(value));
+    if (/(?:^|_)result$/i.test(base)) ['result', '填写结果', '结果'].forEach(value => aliases.add(value));
+    if (/(?:^|_)option$/i.test(base) || /^option$/i.test(base)) aliases.add('选项');
+    if (/(?:^|_)(?:table|column)$/i.test(base) || /^(?:table|column)$/i.test(base)) ['表格列', '表格', '列'].forEach(value => aliases.add(value));
+    return Array.from(aliases).map(value => value.toLowerCase());
+  };
+  const edgeItems = [];
+  for (const factValue of route.answerFacts || []) {
+    const fact = String(factValue || '').trim();
+    for (const rawClause of fact.split(/[；;。]/u)) {
+      const clause = rawClause.trim();
+      const arrow = clause.match(/(.+?)\s*(?:→|->|↔)\s*(.+)$/u);
+      if (!arrow) continue;
+      const sourceMatch = arrow[1].match(/([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?)\s*$/u);
+      if (!sourceMatch) continue;
+      const source = sourceMatch[1];
+      const sourceParts = source.split('.');
+      const key = sourceParts.length > 1 ? sourceParts[sourceParts.length - 1] : '';
+      const rawTargets = arrow[2].split(/\s*(?:与|和)\s*/u).map(value => value.trim()).filter(Boolean);
+      const targets = rawTargets.flatMap(target => {
+        const slash = target.match(/^([A-Za-z_][A-Za-z0-9_]*)\/([A-Za-z_][A-Za-z0-9_]*)(\.[A-Za-z_][A-Za-z0-9_]*)$/u);
+        return slash ? [`${slash[1]}${slash[3]}`, `${slash[2]}${slash[3]}`] : [target];
+      });
+      for (const target of targets) {
+        const requiredGroups = [entityAliases(source), key ? [key.toLowerCase()] : [], entityAliases(target)].filter(group => group.length);
+        if (/\bJSON\b/i.test(target)) requiredGroups.push(['json']);
+        edgeItems.push({
+          clause: `${source} → ${target}`,
+          tokens: requiredGroups.map(group => group[0]),
+          requiredGroups,
+          kind: 'relationship_edge',
+          source,
+          key,
+          target,
+        });
+      }
+    }
+  }
+  const boundaryItems = (route.mustNotConfuse || []).flatMap(fact => String(fact || '').split(/[；;。]/u))
+    .map(clause => clause.trim()).filter(clause => /(?:外键|foreign\s+key)/iu.test(clause))
+    .map(clause => ({
+      clause,
+      tokens: ['外键'],
+      requiredGroups: [/(?:共享业务键|共享字段)/u.test(clause) ? ['共享业务键', '共享字段'] : [], ['外键']].filter(group => group.length),
+      kind: 'relationship_boundary',
+    }));
+  if (edgeItems.length) return [...edgeItems, ...boundaryItems];
   return (route.answerFacts || []).flatMap(fact => String(fact || '').split(/[；;。]/u))
     .map(clause => clause.trim()).filter(Boolean)
     .filter(clause => directRelation.test(clause) || (asksRepresentation && directRepresentation.test(clause)))

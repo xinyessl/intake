@@ -1670,6 +1670,62 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     atomicRelationshipQuestion,
     formRoute,
   ).violations, [], '点名结果对象时，三条 current route 直接边齐全即可止答');
+
+  const strictFormRoute = {
+    matched: true,
+    route: { title: '自定义表单结构与结果关联' },
+    answerFacts: ['三段关系必须分别回答：pwrs_custom_form.form_id → pwrs_custom_form_element.form_id 与 pwrs_custom_form_result.form_id；pwrs_custom_form_element.element_id → option/table.element_id；pwrs_custom_form_result.content → 填写内容 JSON'],
+    mustNotConfuse: ['不得漏掉 result.form_id；不得说 form_id 直接关联选项或表格列；不得把共享业务键描述成真库外键'],
+  };
+  const q124R73ProductionDraft = [
+    '### 表单模板 ↔ 字段 / 填写结果',
+    '字段表 pwrs_custom_form_element 用同一 form_id 挂到模板。',
+    '字段用 element_id 关联选项和表格列。',
+    '填写结果的 result.content 保存填写内容 JSON 快照。',
+  ].join('\n');
+  const q124R73Audit = bundle.audit(q124R73ProductionDraft, atomicRelationshipQuestion, strictFormRoute);
+  assert.ok(q124R73Audit.violations.includes('focused_fact_incomplete'), 'heading中的填写结果不能与另一句form_id跨句拼成关系边');
+  assert.deepEqual(q124R73Audit.missingFocusedRelationshipFacts.map(item => item.kind), ['relationship_edge', 'relationship_boundary']);
+  assert.match(q124R73Audit.missingFocusedRelationshipFacts[0].clause, /pwrs_custom_form\.form_id → pwrs_custom_form_result\.form_id/);
+  assert.match(q124R73Audit.missingFocusedRelationshipFacts[1].clause, /共享业务键.*真库外键/);
+  const q124R74Fallback = bundle.fallback(q124R73ProductionDraft, q124R73Audit);
+  assert.match(q124R74Fallback, /pwrs_custom_form\.form_id → pwrs_custom_form_result\.form_id/);
+  assert.match(q124R74Fallback, /共享业务键.*真库外键/);
+  assert.doesNotMatch(q124R74Fallback, /级联|删除模板|历史结果|渲染/);
+  assert.deepEqual(bundle.audit(q124R74Fallback, atomicRelationshipQuestion, strictFormRoute).violations, [], 'fallback逐条恢复缺失direct edge和直接反事实边界后必须自审通过');
+
+  const multiTargetPartial = [
+    '模板通过 form_id 关联字段。',
+    '字段通过 element_id 关联选项和表格列。',
+    '填写结果的 result.content 保存填写内容 JSON 快照。',
+    '共享业务键不是真库外键。',
+  ].join('\n');
+  const multiTargetAudit = bundle.audit(multiTargetPartial, atomicRelationshipQuestion, strictFormRoute);
+  assert.equal(multiTargetAudit.missingFocusedRelationshipFacts.filter(item => item.kind === 'relationship_edge').length, 1, '同一form_id连接多个target时每条target edge必须分别成句');
+  assert.match(multiTargetAudit.missingFocusedRelationshipFacts.find(item => item.kind === 'relationship_edge').clause, /form_result/);
+
+  const strictFormTableAnswer = [
+    '| 来源 | 业务键 | 目标 |',
+    '| --- | --- | --- |',
+    '| 模板 | form_id 关联 | 字段 |',
+    '| 模板 | form_id 关联 | 填写结果 |',
+    '| 字段 | element_id 关联 | 选项和表格列 |',
+    '| 填写结果 | result.content 保存 | 填写内容 JSON 快照 |',
+    '',
+    '这些只是共享业务键，不是真库外键。',
+  ].join('\n');
+  assert.deepEqual(bundle.audit(strictFormTableAnswer, atomicRelationshipQuestion, strictFormRoute).violations, [], '同一表格行完整绑定source-key-target时应放行');
+
+  const adjacentClaimsDoNotJoin = [
+    '### 模板 / 填写结果',
+    '模板的 form_id 已确认。',
+    '填写结果页面可以看到。',
+    '字段通过 element_id 关联选项和表格列。',
+    '填写结果的 result.content 保存填写内容 JSON 快照。',
+    '共享业务键不是真库外键。',
+  ].join('\n');
+  assert.ok(bundle.audit(adjacentClaimsDoNotJoin, atomicRelationshipQuestion, strictFormRoute).missingFocusedRelationshipFacts.some(item => /form_result/.test(item.clause)), '相邻句分别出现source/key/target不能冒充同一关系claim');
+
   assert.ok(!bundle.audit(
     '删除模板后，已核规则要求只读核对历史结果是否仍可见。',
     '删除模板后历史结果怎么处理？',
