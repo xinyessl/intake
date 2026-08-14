@@ -654,11 +654,12 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
   const failed = audit('页面等于接口但与浏览器不同，多半是服务端时区差。', '今天视图对不上，怎么排查？', route);
   assert.deepEqual(failed.violations, ['unsupported_likelihood']);
   assert.deepEqual(failed.likelihoodTerms, ['多半']);
-  for (const phrase of ['很常见', '较常见', '比较常见', '常见原因', '经常发生', '多发', '高发', '很多是规则内预期', '不少属于时区差', '多数是预期', '大多不是BUG', '绝大多数无需处理', '少数会异常', '极少出错', '大部分符合预期', '小部分对不上', '几乎全部正常', '频繁出现', '偶尔失败', '有时不同', '首要原因', '主要原因之一', '很像服务端缓存', '更像前端取错字段', '可能是异常兜底', '疑似配置问题', '倾向于时区问题', '高度符合服务端时区差', '强烈符合配置问题', '明显符合前端问题', '更符合缓存问题', '较符合网关问题', '比较符合后端问题', '最容易出现', '很容易丢精度', '尤其容易对不上', '易发生', '很可能就发生在序列化时', '更可能在请求之后', '较可能从网关开始', '比较可能由服务端引起', '超过精度就会直接丢位', '一定会导致字段少位', '必然会出现错误', '肯定会发生变化', '这就是对接方类型传错']) {
+  for (const phrase of ['很常见', '较常见', '比较常见', '常见原因', '经常发生', '多发', '高发', '很多是规则内预期', '不少属于时区差', '多数是预期', '大多不是BUG', '绝大多数无需处理', '少数会异常', '极少出错', '大部分符合预期', '小部分对不上', '几乎全部正常', '频繁出现', '偶尔失败', '有时不同', '首要原因', '主要原因之一', '很像服务端缓存', '更像前端取错字段', '可能是异常兜底', '疑似配置问题', '倾向于时区问题', '高度符合服务端时区差', '强烈符合配置问题', '明显符合前端问题', '更符合缓存问题', '较符合网关问题', '比较符合后端问题', '最容易出现', '很容易丢精度', '尤其容易对不上', '尤其是午夜前后可能与本机不一致', '可能和浏览器本机不一致', '易发生', '很可能就发生在序列化时', '更可能在请求之后', '较可能从网关开始', '比较可能由服务端引起', '超过精度就会直接丢位', '一定会导致字段少位', '必然会出现错误', '肯定会发生变化', '这就是对接方类型传错']) {
     assert.ok(audit(`接口和浏览器不一致${phrase}。`, '今天视图为什么不一致？', route).violations.includes('unsupported_likelihood'), phrase);
   }
   assert.deepEqual(audit('待验证假设：服务端时区和现场约定不一致；可能分支：页面没有照接口响应展示。', '今天视图为什么不一致？', route).violations, [], '明确标为不排序待验证分支时应放行');
   assert.deepEqual(audit('优先查服务端时区。', '今天视图为什么不一致？', route).violations, ['unsupported_likelihood'], '没有当前差异证据不得排序成因');
+  assert.deepEqual(audit('优先怀疑服务端时区。', '今天视图为什么不一致？', route).violations, ['unsupported_likelihood'], '用怀疑/判断包装的成因优先级同样须有当前差异证据');
   assert.deepEqual(audit('页面=接口但与本机不一致，优先查服务端时区。', '现场已确认页面=接口，但与本机不一致。', route).violations, [], '用户已给出直接差异时可据此排查对应层');
   assert.deepEqual(audit('按已核顺序优先查前端展示。', '页面为什么不一致？', { matched: true, route: { title: '展示排查' }, answerFacts: ['说明书明确排查顺序：页面与接口不一致时优先查前端展示'] }).violations, [], 'route明确顺序时放行');
   assert.deepEqual(audit('响应与页面不一致，所以前端展示/缓存异常。', '今天视图不一致，怎么排查？', route).violations, ['unsupported_component_fault', 'out_of_scope_entity'], '答案自己补的条件不能把未核组件故障写成定论或引入未点名机制');
@@ -1119,6 +1120,24 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.doesNotMatch(undefinedOrdinalFallback, /③\/④|含④/);
   assert.match(undefinedOrdinalFallback, /① 原始值|② 已发请求|③ 同一次响应/);
   assert.deepEqual(bundle.audit(undefinedOrdinalFallback, '请求侧正常，下一个检查点是什么？', route).violations, []);
+  const undefinedArabicDraft = [
+    '先固定页面文案。',
+    '再核对已有请求响应。',
+    '响应和页面一致就继续第4步；不一致回到第3步。',
+    '最后整理第3/4步的结论。',
+  ].join('\n');
+  const undefinedArabicAudit = bundle.audit(undefinedArabicDraft, '给我一个能直接照着走的排查顺序。', route);
+  assert.deepEqual(undefinedArabicAudit.undefinedArabicStepReferences.map(item => item.numbers), [[4, 3], [3, 4]]);
+  assert.ok(undefinedArabicAudit.violations.includes('undefined_arabic_step_reference'));
+  const undefinedArabicFallback = bundle.fallback(undefinedArabicDraft, undefinedArabicAudit);
+  assert.doesNotMatch(undefinedArabicFallback, /第3步|第4步|第3\/4步/);
+  assert.deepEqual(bundle.audit(undefinedArabicFallback, '给我一个能直接照着走的排查顺序。', route).violations, []);
+  assert.deepEqual(bundle.audit(
+    '1. 固定页面文案。\n2. 核已有请求。\n3. 对照响应。\n4. 整理结论。\n完成第3/4步后再汇总。',
+    '给我一个能直接照着走的排查顺序。',
+    route,
+  ).violations, [], '答案已定义连续步骤时允许后文引用第3/4步');
+  assert.deepEqual(bundle.audit('做到第2步后先停。', '我已经做到第2步，下一步先停还是继续？', route).violations, [], '用户本轮明确的第N步可作为外部引用，不要求答案重新定义');
   assert.deepEqual(bundle.audit(
     '分三类：①已核事实；②本轮观察；③待验证分支。后文只对照①②③。',
     '怎么组织排查结论？',

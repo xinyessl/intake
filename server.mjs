@@ -1717,7 +1717,7 @@ function consultEvidenceLikelihoodGuard(question, route) {
   ].join('\n');
 }
 
-const CONSULT_LIKELIHOOD_WORD_RE = /(?:最高频|最常见|(?:很|较|比较)?常见(?:原因|问题|场景)?|经常|通常|一般|大概率|多半|往往|(?:高度|强烈|明显|更|较|比较)符合|(?:很|较|更|比较)?可能(?:(?:就|会|在|从|由)?(?:发生|出现|导致|造成|意味着|表明|说明|丢失|丢位|丢精度|截断|变更|变化|失败|异常))|(?:较|更|比较)可能(?:在|从|由)[^。！？；\n]{1,24}|可能(?!分支)[^。！？；\n]{0,12}(?:丢(?:失|位|精度)?|少位|截断|失败|异常|错误|出错)|多发|高发|很多|不少|多数|大多(?:数)?|绝大多数|少数|极少|大部分|小部分|几乎全部|频繁|偶尔|有时|首要原因|主要原因(?:之一)?|典型原因|常见于|可能是|(?:很|更|比较)?像(?=[“"'A-Za-z\u4e00-\u9fff])|看起来(?:很|更)?像|疑似|倾向于|(?:最|很|更|较|比较|尤其)?容易(?:出现|发生|对不上|出错|导致|造成|暴露|碰到|遇到|复现|触发|丢(?:失|位|精度)?|截断|变(?:成|为|更)|漏(?:位|传|掉)?|失败|异常|混淆)|尤其(?:在)?[^。！？；\n]{0,18}(?:时|情况下|场景)|易(?:发|出现|发生|错)|(?:(?:就会|会直接|必然(?:会)?|必定(?:会)?|一定(?:会)?|肯定(?:会)?|绝对(?:会)?|直接(?:导致|造成|引发))[^。！？；\n]{0,18}(?:丢(?:失|位|精度)?|少位|截断|失败|异常|错误|出错|变化|变(?:成|为)|损坏|拒绝))|(?:(?:就是|说明|证明|表明|意味着)[^。！？；\n]{0,28}(?:传错|类型错|配错|改坏|故障|错误|出错)))/g;
+const CONSULT_LIKELIHOOD_WORD_RE = /(?:最高频|最常见|(?:很|较|比较)?常见(?:原因|问题|场景)?|经常|通常|一般|大概率|多半|往往|(?:高度|强烈|明显|更|较|比较)符合|(?:很|较|更|比较)?可能(?:(?:就|会|在|从|由)?(?:发生|出现|导致|造成|意味着|表明|说明|丢失|丢位|丢精度|截断|变更|变化|失败|异常|不一致|对不上|不符|偏差))|(?:较|更|比较)可能(?:在|从|由)[^。！？；\n]{1,24}|可能(?!分支)[^。！？；\n]{0,18}(?:丢(?:失|位|精度)?|少位|截断|失败|异常|错误|出错|不一致|对不上|不符|偏差)|多发|高发|很多|不少|多数|大多(?:数)?|绝大多数|少数|极少|大部分|小部分|几乎全部|频繁|偶尔|有时|首要原因|主要原因(?:之一)?|典型原因|常见于|可能是|(?:很|更|比较)?像(?=[“"'A-Za-z\u4e00-\u9fff])|看起来(?:很|更)?像|疑似|倾向于|(?:最|很|更|较|比较|尤其)?容易(?:出现|发生|对不上|出错|导致|造成|暴露|碰到|遇到|复现|触发|丢(?:失|位|精度)?|截断|变(?:成|为|更)|漏(?:位|传|掉)?|失败|异常|混淆)|尤其(?:是|在)?[^。！？；\n]{0,18}(?:时|情况下|场景|前后)|易(?:发|出现|发生|错)|(?:(?:就会|会直接|必然(?:会)?|必定(?:会)?|一定(?:会)?|肯定(?:会)?|绝对(?:会)?|直接(?:导致|造成|引发))[^。！？；\n]{0,18}(?:丢(?:失|位|精度)?|少位|截断|失败|异常|错误|出错|变化|变(?:成|为)|损坏|拒绝))|(?:(?:就是|说明|证明|表明|意味着)[^。！？；\n]{0,28}(?:传错|类型错|配错|改坏|故障|错误|出错)))/g;
 // “在某个观测点已经看到变化”只证明变化不晚于该观测点，不能自动定位到具体实现机制或责任层。
 // 例如出站报文已经少位，可以保留“出站报文中已变化”，但不能无证据写成“发生在传参/序列化侧”。
 const CONSULT_CAUSAL_LOCALIZATION_RE = /(?:(?:→|=>|所以|因此|说明|表明|证明|意味着|可判定|可以判定|能够判定|由此可见)[^。！？；\n]{0,24})?(?:丢(?:失|位|精度)?|截断|变化|异常|错误|问题|故障|根因|责任)[^。！？；\n]{0,12}(?:发生|出|在|位于|定位|归因|归属)(?:在|于|到|为)?[^。！？；\n]{0,24}(?:传参|序列化|反序列化|类型转换|格式转换|映射|缓存|网关|前端|后端|服务端|数据库|中间件|对接方|第三方|上游|生成号|Excel|中间系统)(?:侧|层|环节|阶段|过程)?/gi;
@@ -1727,7 +1727,7 @@ const CONSULT_DETERMINISTIC_FAILURE_RE = /(?:(?<!不)(?<!未)(?:会|就会)(?:�
 // 有序观测点已经出现差异时，不能把发生边界反向推到该观测点之后。
 // 表格行也按整行审计，避免“B 已不同 → 问题可能在 B 后”躲在分支单元格中。
 const CONSULT_OBSERVATION_ORDER_CONTRADICTION_RE = /(?:请求|报文|响应|收到值|接收值|落库值|页面|展示)[^。！？；\n]{0,36}(?:与|和|≠)[^。！？；\n]{0,18}(?:原始|源端|上一步|前一层)[^。！？；\n]{0,18}(?:不一致|不同|已变化|少位|变样)[^。！？；\n]{0,64}(?:问题|差异|变化|异常)[^。！？；\n]{0,16}(?:可能|说明|表明|意味着)?[^。！？；\n]{0,16}(?:在|于)?(?:发出|该?(?:请求|报文|响应|收到|接收|落库|页面|展示))(?:后|之后|下游)/gi;
-const CONSULT_CAUSAL_PRIORITY_RE = /(?:优先|首先|先)(?:去)?(?:查|看|排查|核对)(?:服务端|服务器|JVM|前端|缓存|错误兜底|网关|登录态|权限|调度|数据库|配置)[^。！？；\n]{0,18}/g;
+const CONSULT_CAUSAL_PRIORITY_RE = /(?:优先|首先|先)(?:去)?(?:查|看|排查|核对|怀疑|判断|考虑)(?:服务端|服务器|JVM|前端|缓存|错误兜底|网关|登录态|权限|调度|数据库|配置)[^。！？；\n]{0,18}/g;
 const CONSULT_DIRECT_RISKY_ACTION_RE = /(?:(?:只能|需要|应当|应该|建议|可以|可|先|再|然后|去|请|让|由|交给|通知|要求)[^。！？；\n]{0,20}(?:改|修改|调整|切换|对齐|校准|统一|转换|修(?:复)?)[^。！？；\n]{0,16}(?:参数|传参(?:方式)?|传输方式|接口入参|报文(?:类型)?|序列化(?:口径|方式|规则)?|编码(?:口径|方式|规则)?|协议(?:口径|规则)?|映射|结构|关联|链路|配置|部署时区|时区|系统时间|环境|产品口径|业务口径|日切要求|服务配置|字符串|数字(?:类型)?|字段格式|数据格式|值类型)|(?:参数|传参(?:方式)?|传输方式|接口入参|报文(?:类型)?|序列化(?:口径|方式|规则)?|编码(?:口径|方式|规则)?|协议(?:口径|规则)?|映射|结构|关联|链路|配置|部署时区|时区|系统时间|产品口径|业务口径|日切要求|服务配置|字符串|数字(?:类型)?|字段格式|数据格式|值类型)[^。！？；\n]{0,24}(?:交给|让|由)[^。！？；\n]{0,16}(?:改|修改|调整|切换|对齐|校准|统一|转换|修(?:复)?)|(?:改|修改|调整|转换|修(?:复)?)(?:成|为)?(?:字符串|数字(?:类型)?|字段格式|数据格式|值类型|传参(?:方式)?|传输方式|序列化(?:口径|方式|规则)?|编码(?:口径|方式|规则)?|协议(?:口径|规则)?|结构|关联|链路)[^。！？；\n]{0,12}(?:再传|重传|重新发送|复测)|(?:压|催|催促|推动|协调)[^。！？；\n]{0,8}(?:对接(?:方)?|接口方|第三方|厂商|供应商|院方|运维|开发)[^。！？；\n]{0,20}(?:按|以)(?:字符串|数字(?:类型)?|指定格式|文本格式|字段格式|数据格式|值类型)[^。！？；\n]{0,8}(?:传|发送))/ig;
 const CONSULT_COMPONENT_FAULT_RE = /(?:服务端|服务器|JVM|前端|后端|缓存|网关|鉴权|权限|数据库|配置|调度|部署|环境)[^。！？；\n]{0,16}(?:异常|故障|问题|错误|不对|有误)/ig;
 
@@ -2332,6 +2332,23 @@ function consultAnswerSemanticAudit(answer, question, route) {
       expected += 1;
     }
   }
+  const definedArabicSteps = new Set(topLevelSteps.map(step => step.number));
+  for (const line of documentLines) {
+    const heading = line.match(/^\s*(?:\*\*|__)?\s*第\s*([1-9]\d*)\s*步(?:\s*[：:、.]|\s+)/u);
+    if (heading) definedArabicSteps.add(Number(heading[1]));
+  }
+  const userArabicSteps = new Set(Array.from(String(question || '').matchAll(/第\s*([1-9]\d*)\s*步/gu), match => Number(match[1])));
+  const undefinedArabicStepReferences = [];
+  for (let lineIndex = 0; lineIndex < documentLines.length; lineIndex++) {
+    const line = documentLines[lineIndex];
+    const referenced = new Set();
+    for (const match of line.matchAll(/第\s*([1-9]\d*)(?:\s*[\/、和及]\s*([1-9]\d*))?\s*步/gu)) {
+      referenced.add(Number(match[1]));
+      if (match[2]) referenced.add(Number(match[2]));
+    }
+    const undefinedNumbers = Array.from(referenced).filter(number => !definedArabicSteps.has(number) && !userArabicSteps.has(number));
+    if (undefinedNumbers.length) undefinedArabicStepReferences.push({ line: line.trim(), lineIndex, numbers: undefinedNumbers });
+  }
   const singleStepOverreach = singleStepQuestion && topLevelSteps.length > 1
     ? { steps: topLevelSteps, truncateFromLine: topLevelSteps[1].lineIndex }
     : null;
@@ -2466,6 +2483,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (missingPrimaryPath) violations.push('missing_primary_path');
   if (focusedFactOverreach.length || missingFocusedMustNotConfuse.length) violations.push('focused_fact_overreach');
   if (undefinedOrdinalReferences.length) violations.push('undefined_ordinal_reference');
+  if (undefinedArabicStepReferences.length) violations.push('undefined_arabic_step_reference');
   if (nonSequentialTopLevelSteps.length) violations.push('nonsequential_top_level_steps');
   if (cardinalityMismatches.length) violations.push('inconsistent_structured_cardinality');
   if (conflictingCountDeclarations.length) violations.push('conflicting_count_declaration');
@@ -2477,7 +2495,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (contradictoryNegativeSections.length) violations.push('contradictory_negative_section');
   if (singleStepOverreach) violations.push('single_step_diagnostic_overreach');
   if (malformedMarkdown.length) violations.push('malformed_markdown');
-  return { checked: true, focusedFactQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, cardinalityMismatches, conflictingCountDeclarations, incompleteLeadIns, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
+  return { checked: true, focusedFactQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, cardinalityMismatches, conflictingCountDeclarations, incompleteLeadIns, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -2510,6 +2528,9 @@ function consultAnswerRevisionPrompt(draft, audit) {
       : '',
     audit.violations.includes('undefined_ordinal_reference')
       ? `草稿存在未定义的圈号步骤/对照项引用：${(audit.undefinedOrdinalReferences || []).join('、')}。逐项核对前文表格、列表和正文，只能引用已经明确给出含义的序号；“共三项”不得再写④，表格只定义①②③时不得在判断或小结引用③/④或“含④”。删除含未定义序号的完整句/完整表格行，或在不新增事实的前提下改回已定义序号；不得凭空补造第四项。`
+      : '',
+    audit.violations.includes('undefined_arabic_step_reference')
+      ? `草稿引用了本答案未定义、用户本轮也未明确给出的阿拉伯数字步骤：${(audit.undefinedArabicStepReferences || []).map(item => `${item.numbers.map(number => `第${number}步`).join('/')}（${item.line}）`).join('；')}。若确有现成步骤正文，只按现有顺序补上连续标题；否则删除含引用的完整句，不得凭空补造缺失步骤。`
       : '',
     audit.violations.includes('nonsequential_top_level_steps')
       ? `草稿的顶层步骤没有从本轮合法起点开始或编号不连续：${(audit.nonSequentialTopLevelSteps || []).map(item => `“${item.line}”应为${item.expected}、实际为${item.number}`).join('；')}。默认从1开始；只有用户本轮明确提到“第N步/做到第N步”时才允许从N或N+1承接。只按现有完整步骤的正文顺序连续重编号；不得为补缺号新增步骤、动作、字段或事实。嵌套清单和代码块不参与顶层编号。`
@@ -2581,6 +2602,7 @@ function consultAnswerSafeFallback(draft, audit) {
     if (audit.violations.includes('focused_fact_overreach') && (audit.focusedFactOverreach || []).includes(part.trim())) return false;
     if (audit.violations.includes('out_of_scope_entity') && (audit.unexpectedEntityTerms || []).some(term => part.toLowerCase().includes(String(term).toLowerCase()))) return false;
     if (audit.violations.includes('undefined_ordinal_reference') && (audit.undefinedOrdinalReferences || []).some(term => part.includes(String(term)))) return false;
+    if (audit.violations.includes('undefined_arabic_step_reference') && (audit.undefinedArabicStepReferences || []).some(item => item.line === part.trim() || item.line.includes(part.trim()))) return false;
     if (audit.violations.includes('unexpected_concrete_path')) {
       const partPaths = new Set(consultConcretePaths(part));
       if ((audit.unexpectedPaths || []).some(pathValue => partPaths.has(String(pathValue)))) return false;
