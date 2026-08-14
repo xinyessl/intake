@@ -1159,6 +1159,26 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     '给我一个能直接照着走的排查顺序。',
     route,
   ).violations, [], '答案已定义连续步骤时允许后文引用第3/4步');
+  const selfReferenceDraft = [
+    '1. 固定页面与已有请求。',
+    '2. 做两层只读对照。',
+    '3. 按第3步结果往下收口。',
+    '页面=响应时保留已有原文。',
+    '4. 整理脱敏证据。',
+  ].join('\n');
+  const selfReferenceAudit = bundle.audit(selfReferenceDraft, '给我一个能直接照着走的排查顺序。', route);
+  assert.ok(selfReferenceAudit.violations.includes('self_referential_step_reference'));
+  assert.deepEqual(selfReferenceAudit.selfReferentialStepReferences.map(item => item.line), ['3. 按第3步结果往下收口。']);
+  assert.match(bundle.revision(selfReferenceDraft, selfReferenceAudit), /自引用没有可执行含义/);
+  const selfReferenceFallback = bundle.fallback(selfReferenceDraft, selfReferenceAudit);
+  assert.doesNotMatch(selfReferenceFallback, /按第3步结果/);
+  const selfReferenceSecondAudit = bundle.audit(selfReferenceFallback, '给我一个能直接照着走的排查顺序。', route);
+  assert.ok(selfReferenceSecondAudit.violations.includes('nonsequential_top_level_steps'), '删除自引用标题后跳号由下一轮连续编号门处理');
+  const selfReferenceFinal = bundle.fallback(selfReferenceFallback, selfReferenceSecondAudit);
+  assert.match(selfReferenceFinal, /3\. 整理脱敏证据/);
+  assert.deepEqual(bundle.audit(selfReferenceFinal, '给我一个能直接照着走的排查顺序。', route).violations, []);
+  assert.deepEqual(bundle.audit('1. 固定现象。\n2. 根据第1步原文核对已有响应。', '给我排查顺序。', route).violations, [], '引用前一步是正常流程');
+  assert.deepEqual(bundle.audit('第3步：整理已有请求。', '我已做到第2步，接下来呢？', route).violations, [], '“第N步：动作”是合法定义而不是自引用');
   assert.deepEqual(bundle.audit('做到第2步后先停。', '我已经做到第2步，下一步先停还是继续？', route).violations, [], '用户本轮明确的第N步可作为外部引用，不要求答案重新定义');
   assert.deepEqual(bundle.audit(
     '分三类：①已核事实；②本轮观察；③待验证分支。后文只对照①②③。',

@@ -2332,6 +2332,11 @@ function consultAnswerSemanticAudit(answer, question, route) {
       expected += 1;
     }
   }
+  const selfReferentialStepReferences = topLevelSteps.filter(step => {
+    const body = step.line.replace(topLevelStepRe, '');
+    const sameStep = new RegExp(`(?:按|根据|依照|参考|完成|继续|回到|返回|执行|做完|做好|做)\\s*第\\s*${step.number}\\s*步(?:\\s*(?:的)?(?:结果|结论|内容|操作|要求|后|再|往下|往后))?`, 'u');
+    return sameStep.test(body);
+  });
   const definedArabicSteps = new Set(topLevelSteps.map(step => step.number));
   for (const line of documentLines) {
     const heading = line.match(/^\s*(?:\*\*|__)?\s*第\s*([1-9]\d*)\s*步(?:\s*[：:、.]|\s+)/u);
@@ -2484,6 +2489,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (focusedFactOverreach.length || missingFocusedMustNotConfuse.length) violations.push('focused_fact_overreach');
   if (undefinedOrdinalReferences.length) violations.push('undefined_ordinal_reference');
   if (undefinedArabicStepReferences.length) violations.push('undefined_arabic_step_reference');
+  if (selfReferentialStepReferences.length) violations.push('self_referential_step_reference');
   if (nonSequentialTopLevelSteps.length) violations.push('nonsequential_top_level_steps');
   if (cardinalityMismatches.length) violations.push('inconsistent_structured_cardinality');
   if (conflictingCountDeclarations.length) violations.push('conflicting_count_declaration');
@@ -2495,7 +2501,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (contradictoryNegativeSections.length) violations.push('contradictory_negative_section');
   if (singleStepOverreach) violations.push('single_step_diagnostic_overreach');
   if (malformedMarkdown.length) violations.push('malformed_markdown');
-  return { checked: true, focusedFactQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, cardinalityMismatches, conflictingCountDeclarations, incompleteLeadIns, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
+  return { checked: true, focusedFactQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, cardinalityMismatches, conflictingCountDeclarations, incompleteLeadIns, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -2531,6 +2537,9 @@ function consultAnswerRevisionPrompt(draft, audit) {
       : '',
     audit.violations.includes('undefined_arabic_step_reference')
       ? `草稿引用了本答案未定义、用户本轮也未明确给出的阿拉伯数字步骤：${(audit.undefinedArabicStepReferences || []).map(item => `${item.numbers.map(number => `第${number}步`).join('/')}（${item.line}）`).join('；')}。若确有现成步骤正文，只按现有顺序补上连续标题；否则删除含引用的完整句，不得凭空补造缺失步骤。`
+      : '',
+    audit.violations.includes('self_referential_step_reference')
+      ? `草稿的顶层步骤定义行引用了自己：${(audit.selfReferentialStepReferences || []).map(item => item.line).join('；')}。“3. 按第3步结果”之类自引用没有可执行含义；删除该完整标题行，让其下已有分支归属前一步，再将后续现有顶层步骤连续重编号。不得新增步骤或事实。`
       : '',
     audit.violations.includes('nonsequential_top_level_steps')
       ? `草稿的顶层步骤没有从本轮合法起点开始或编号不连续：${(audit.nonSequentialTopLevelSteps || []).map(item => `“${item.line}”应为${item.expected}、实际为${item.number}`).join('；')}。默认从1开始；只有用户本轮明确提到“第N步/做到第N步”时才允许从N或N+1承接。只按现有完整步骤的正文顺序连续重编号；不得为补缺号新增步骤、动作、字段或事实。嵌套清单和代码块不参与顶层编号。`
@@ -2603,6 +2612,7 @@ function consultAnswerSafeFallback(draft, audit) {
     if (audit.violations.includes('out_of_scope_entity') && (audit.unexpectedEntityTerms || []).some(term => part.toLowerCase().includes(String(term).toLowerCase()))) return false;
     if (audit.violations.includes('undefined_ordinal_reference') && (audit.undefinedOrdinalReferences || []).some(term => part.includes(String(term)))) return false;
     if (audit.violations.includes('undefined_arabic_step_reference') && (audit.undefinedArabicStepReferences || []).some(item => item.line === part.trim() || item.line.includes(part.trim()))) return false;
+    if (audit.violations.includes('self_referential_step_reference') && (audit.selfReferentialStepReferences || []).some(item => item.line === part.trim() || item.line.includes(part.trim()))) return false;
     if (audit.violations.includes('unexpected_concrete_path')) {
       const partPaths = new Set(consultConcretePaths(part));
       if ((audit.unexpectedPaths || []).some(pathValue => partPaths.has(String(pathValue)))) return false;
