@@ -895,6 +895,23 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     todayAtomicRoute,
   ).violations, [], '显式多问且含现场诊断意图时不触发原子止答');
 
+  const fullyUnsafeDiagnosticDraft = [
+    '多半是缓存或前端数据源故障。',
+    '让开发改时区配置后重新进入页面复测。',
+  ].join('\n');
+  const fullyUnsafeDiagnosticAudit = bundle.audit(
+    fullyUnsafeDiagnosticDraft,
+    '今天视图和浏览器理解不一致，给我一个排查顺序。',
+    todayAtomicRoute,
+  );
+  const fullyUnsafeDiagnosticFallback = bundle.fallback(fullyUnsafeDiagnosticDraft, fullyUnsafeDiagnosticAudit);
+  assert.match(fullyUnsafeDiagnosticFallback, /已知事实（继续作为判断基线）/);
+  assert.match(fullyUnsafeDiagnosticFallback, /GET \/pwrsapi\/month\/view\/today/);
+  assert.match(fullyUnsafeDiagnosticFallback, /1\. 原样记录当前页面/);
+  assert.match(fullyUnsafeDiagnosticFallback, /4\. 整理上述原文与脱敏截图/);
+  assert.doesNotMatch(fullyUnsafeDiagnosticFallback, /当前草稿未通过发布前|改时区配置/);
+  assert.deepEqual(bundle.audit(fullyUnsafeDiagnosticFallback, '今天视图和浏览器理解不一致，给我一个排查顺序。', todayAtomicRoute).violations, [], '草稿全部被清理时，确定性诊断fallback自身也必须通过最终审计');
+
   const patientIdAtomicRoute = {
     matched: true,
     route: { title: '患者号字段类型' },
