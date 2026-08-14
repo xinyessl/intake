@@ -513,6 +513,7 @@ test('发布前动作一致性审计覆盖整份答案，禁止同答先劝停�
     assert.match(text, /声明数量 → 实际内容/);
     assert.match(text, /不得用一行表格冒充“三边对照”/);
     assert.match(text, /不得说“核两件事”却只列一项/);
+    assert.match(text, /结构数量不得从 1 漂成 2/);
     assert.match(text, /“例如：\/如下：\/包括：\/分别为：”后必须有实际内容/);
     assert.match(text, /不得留下孤立的“还是页面…\/或者接口…”等后半分支/);
     assert.match(text, /没有前述主张的“但\/但是\/不过\/然而”转折残句/);
@@ -1059,6 +1060,22 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     '- 已有报文里的字段原文',
   ].join('\n'), '已有报文先核什么？', route).violations, [], '声明两件且清单确有两项时不得误伤');
   assert.deepEqual(bundle.audit('现场已有两条历史记录，可以只读比较。', '现有证据是什么？', route).violations, [], '普通数量陈述没有冒号引导结构时不得误伤');
+  const driftingCountDraft = [
+    '**你现在最少再确认 1 件事（只读）**',
+    '请直接回复这两点中你已看到的结果：',
+    '- 第二步具体差在哪',
+    '- 医院原始现象是哪类',
+  ].join('\n');
+  const driftingCountAudit = bundle.audit(driftingCountDraft, '第二步对不上，后面停还是继续？', route);
+  assert.ok(driftingCountAudit.violations.includes('conflicting_count_declaration'), '同一局部一件事漂成两点必须命中');
+  assert.deepEqual(driftingCountAudit.conflictingCountDeclarations.map(item => [item.firstCount, item.secondCount]), [[1, 2]]);
+  assert.match(bundle.revision(driftingCountDraft, driftingCountAudit), /统一为实际已有清单项数/);
+  const driftingCountFallback = bundle.fallback(driftingCountDraft, driftingCountAudit);
+  assert.doesNotMatch(driftingCountFallback, /1 件事|两点/);
+  assert.match(driftingCountFallback, /第二步具体差在哪/);
+  assert.deepEqual(bundle.audit(driftingCountFallback, '第二步对不上，后面停还是继续？', route).violations, []);
+  assert.deepEqual(bundle.audit('只确认一件事：已有两条历史记录是否一致。', '先确认什么？', route).violations, [], '普通事实数量没有第二个结构动作声明时不得误伤');
+  assert.deepEqual(bundle.audit('请回复两点：\n- 页面值\n- 响应值', '还缺什么？', route).violations, [], '单一数量声明不得误伤');
 
   const orphanedAlternativeDraft = [
     '写清「第二步对不上」的原文现象',
