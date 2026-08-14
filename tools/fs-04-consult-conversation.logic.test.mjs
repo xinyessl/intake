@@ -1860,12 +1860,13 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     route: { title: '自定义表单结构与结果关联' },
     answerFacts: ['三段关系必须分别回答：pwrs_custom_form.form_id → pwrs_custom_form_element.form_id 与 pwrs_custom_form_result.form_id；pwrs_custom_form_element.element_id → option/table.element_id；pwrs_custom_form_result.content → 填写内容 JSON'],
     mustNotConfuse: ['不得漏掉 result.form_id；不得说 form_id 直接关联选项或表格列；不得把共享业务键描述成真库外键'],
+    directEvidenceFacts: ['pwrs_custom_form_result.content 存 elementList 整体 JSON 快照，即整份填写内容。'],
   };
   const q124R73ProductionDraft = [
     '### 表单模板 ↔ 字段 / 填写结果',
     '字段表 pwrs_custom_form_element 用同一 form_id 挂到模板。',
     '字段用 element_id 关联选项和表格列。',
-    '填写结果的 result.content 保存填写内容 JSON 快照。',
+    '填写结果的 result.content 保存整份填写内容 JSON 快照。',
   ].join('\n');
   const q124R73Audit = bundle.audit(q124R73ProductionDraft, atomicRelationshipQuestion, strictFormRoute);
   assert.ok(q124R73Audit.violations.includes('focused_fact_incomplete'), 'heading中的填写结果不能与另一句form_id跨句拼成关系边');
@@ -1881,7 +1882,7 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   const multiTargetPartial = [
     '模板通过 form_id 关联字段。',
     '字段通过 element_id 关联选项和表格列。',
-    '填写结果的 result.content 保存填写内容 JSON 快照。',
+    '填写结果的 result.content 保存整份填写内容 JSON 快照。',
     '共享业务键不是真库外键。',
   ].join('\n');
   const multiTargetAudit = bundle.audit(multiTargetPartial, atomicRelationshipQuestion, strictFormRoute);
@@ -1894,7 +1895,7 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     '| 模板 | form_id 关联 | 字段 |',
     '| 模板 | form_id 关联 | 填写结果 |',
     '| 字段 | element_id 关联 | 选项和表格列 |',
-    '| 填写结果 | result.content 保存 | 填写内容 JSON 快照 |',
+    '| 填写结果 | result.content 保存 | 整份填写内容 JSON 快照 |',
     '',
     '这些只是共享业务键，不是真库外键。',
   ].join('\n');
@@ -1905,10 +1906,52 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     '模板的 form_id 已确认。',
     '填写结果页面可以看到。',
     '字段通过 element_id 关联选项和表格列。',
-    '填写结果的 result.content 保存填写内容 JSON 快照。',
+    '填写结果的 result.content 保存整份填写内容 JSON 快照。',
     '共享业务键不是真库外键。',
   ].join('\n');
   assert.ok(bundle.audit(adjacentClaimsDoNotJoin, atomicRelationshipQuestion, strictFormRoute).missingFocusedRelationshipFacts.some(item => /form_result/.test(item.clause)), '相邻句分别出现source/key/target不能冒充同一关系claim');
+
+  const q124R79ProductionDraft = [
+    '结论：靠三段业务关联键串起模板、字段、选项和填写结果。',
+    '### 表单模板 ↔ 字段、填写结果',
+    '用 form_id：',
+    '用 element_id：',
+    'pwrs_custom_form_element.element_id → 选项表/表格列表的 element_id。',
+    '这些是共享业务键，不是真库外键。',
+    'pwrs_custom_form_result.content → 填写内容 JSON。',
+  ].join('\n');
+  const q124R80Audit = bundle.audit(q124R79ProductionDraft, atomicRelationshipQuestion, strictFormRoute);
+  assert.ok(q124R80Audit.violations.includes('incomplete_structured_lead_in'), '“用 form_id/element_id：”后无内容属于key-specific空引导');
+  assert.ok(q124R80Audit.violations.includes('focused_fact_incomplete'), '空引导和局部箭头不能替代缺失direct edge与表示限定');
+  assert.deepEqual(q124R80Audit.incompleteLeadIns.map(item => item.line), ['用 form_id：', '用 element_id：']);
+  const q124R80Fallback = bundle.fallback(q124R79ProductionDraft, q124R80Audit);
+  assert.match(q124R80Fallback, /pwrs_custom_form\.form_id → pwrs_custom_form_element\.form_id/);
+  assert.match(q124R80Fallback, /pwrs_custom_form\.form_id → pwrs_custom_form_result\.form_id/);
+  assert.match(q124R80Fallback, /pwrs_custom_form_element\.element_id → option\.element_id/);
+  assert.match(q124R80Fallback, /pwrs_custom_form_element\.element_id → table\.element_id/);
+  assert.match(q124R80Fallback, /pwrs_custom_form_result\.content → 整份填写内容 JSON 快照/);
+  assert.match(q124R80Fallback, /共享业务键.*真库外键/);
+  assert.doesNotMatch(q124R80Fallback, /用 (?:form_id|element_id)：/);
+  assert.deepEqual(bundle.audit(q124R80Fallback, atomicRelationshipQuestion, strictFormRoute).violations, [], '关系原子题最终恢复稿必须逐edge与边界自审全绿');
+  assert.ok(bundle.audit('通过 `form_id`：', atomicRelationshipQuestion, strictFormRoute).violations.includes('incomplete_structured_lead_in'), 'Markdown code key空引导也必须命中');
+  assert.ok(!bundle.audit('用 form_id：模板和字段通过 form_id 关联。', atomicRelationshipQuestion, strictFormRoute).violations.includes('incomplete_structured_lead_in'), 'key-specific引导后有同段正文时不得误报空引导');
+
+  const relationshipCleanupChainDraft = [
+    'pwrs_custom_form.form_id → pwrs_custom_form_element.form_id，让运维重跑任务。',
+    'pwrs_custom_form.form_id → pwrs_custom_form_result.form_id，让对接方改参数后复测。',
+    'pwrs_custom_form_element.element_id → option.element_id，让开发重试。',
+    'pwrs_custom_form_element.element_id → table.element_id，让运维补跑。',
+    'pwrs_custom_form_result.content → 整份填写内容 JSON 快照，让对接方修改配置。',
+    '共享业务键不是真库外键。',
+  ].join('\n');
+  const relationshipCleanupChainAudit = bundle.audit(relationshipCleanupChainDraft, atomicRelationshipQuestion, strictFormRoute);
+  assert.ok(relationshipCleanupChainAudit.violations.includes('cross_actor_side_effect'));
+  assert.deepEqual(relationshipCleanupChainAudit.missingFocusedRelationshipFacts, [], '清理前每条direct edge均已出现时首审应视为完整');
+  const relationshipCleanupChainFallback = bundle.fallback(relationshipCleanupChainDraft, relationshipCleanupChainAudit);
+  assert.doesNotMatch(relationshipCleanupChainFallback, /运维|对接方|开发|重跑|复测|补跑|修改配置/);
+  assert.match(relationshipCleanupChainFallback, /pwrs_custom_form\.form_id → pwrs_custom_form_element\.form_id/);
+  assert.match(relationshipCleanupChainFallback, /pwrs_custom_form_result\.content → 整份填写内容 JSON 快照/);
+  assert.deepEqual(bundle.audit(relationshipCleanupChainFallback, atomicRelationshipQuestion, strictFormRoute).violations, [], '其它安全门删掉原本完整edge后，final pass必须从current route全部恢复且不再破坏');
 
   assert.ok(!bundle.audit(
     '删除模板后，已核规则要求只读核对历史结果是否仍可见。',

@@ -2332,7 +2332,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   // 枚举后留下了空壳。段内空引导只删除该 clause，不能连带删掉后面的必要反例。
   const incompleteLeadIns = [];
   const topLevelStepRe = /^(?![ \t]{4})[ \t]{0,3}(?:#{1,6}[ \t]+)?(?:\*\*|__)?[ \t]*([1-9]\d*)[.、．][ \t]+/u;
-  const strongLeadSource = '(?:例如|如下|包括|包含|里面有|内容为|由以下(?:内容|项目|字段|部分)?组成|组成如下|分别为|具体为|可见|重点看)';
+  const strongLeadSource = '(?:例如|如下|包括|包含|里面有|内容为|由以下(?:内容|项目|字段|部分)?组成|组成如下|分别为|具体为|可见|重点看|(?:用|通过)\\s*`?[A-Za-z_][A-Za-z0-9_.]*`?\\s*(?:关联|挂接|连接)?|关联键是)';
   const inlineSemanticBoundary = '(?:别(?:和|跟|把|搞混)|不要混淆|注意|结论|下一步|判断|说明|技术依据|处理建议)';
   const inlineLeadRe = new RegExp(`(?:^|[。！？；]\\s*)([^。！？；\\n]{0,180}?${strongLeadSource}\\s*[：:])\\s*(?=(?:\\*\\*|__)?\\s*${inlineSemanticBoundary})`, 'gu');
   for (let index = 0; index < documentLines.length; index++) {
@@ -2346,7 +2346,8 @@ function consultAnswerSemanticAudit(answer, question, route) {
     }
   }
   for (let index = 0; index < documentLines.length; index++) {
-    const explicitLead = /(?:例如|如下|包括|包含|里面有|内容为|由以下(?:内容|项目|字段|部分)?组成|组成如下|分别为|具体为|可见|重点看)\s*[：:]\s*(?:\*\*|__)?\s*$/u.test(documentLines[index]);
+    const keySpecificLead = /(?:(?:用|通过)\s*`?[A-Za-z_][A-Za-z0-9_.]*`?\s*(?:关联|挂接|连接)?|关联键是)\s*[：:]\s*(?:\*\*|__)?\s*$/u.test(documentLines[index]);
+    const explicitLead = /(?:例如|如下|包括|包含|里面有|内容为|由以下(?:内容|项目|字段|部分)?组成|组成如下|分别为|具体为|可见|重点看|(?:用|通过)\s*`?[A-Za-z_][A-Za-z0-9_.]*`?\s*(?:关联|挂接|连接)?|关联键是)\s*[：:]\s*(?:\*\*|__)?\s*$/u.test(documentLines[index]);
     const genericColonLead = /[：:]\s*(?:\*\*|__)?\s*$/u.test(documentLines[index]);
     if (!explicitLead && !genericColonLead) continue;
     let next = index + 1;
@@ -2355,6 +2356,17 @@ function consultAnswerSemanticAudit(answer, question, route) {
     // 一般冒号标题只在正文已经结束时判空；“例如/如下”等强引导语还要拦截
     // 直接跳到下一步骤/标题的情况。
     if (!explicitLead && next < documentLines.length) continue;
+    // “用 form_id：”是键名专属结构引导，不允许靠下一段普通 prose
+    // 反向补内容；必须同段直接写完整关系，或紧随列表/表格/代码块。
+    // 这可区分合法“用 form_id：模板和字段关联。”与删句后的空壳标题。
+    const nextStructuredContent = topLevelListItemRe.test(nextLine)
+      || !!consultMarkdownTableCells(nextLine)
+      || /^\s*```/u.test(nextLine)
+      || /^\s{2,}\S/u.test(nextLine);
+    if (keySpecificLead && next < documentLines.length && !nextStructuredContent) {
+      incompleteLeadIns.push({ line: documentLines[index].trim(), lineIndex: index, affectedLines: [documentLines[index]] });
+      continue;
+    }
     const nextSectionHeading = /^\s*(?:#{1,6}\s+|(?:\*\*|__)?\s*(?:别(?:和|跟|把|搞混)|不要混淆|注意|结论|下一步|判断|说明|技术依据|处理建议)(?:\*\*|__)?\s*[：:]?)/u.test(nextLine);
     if (explicitLead && next < documentLines.length && !topLevelStepRe.test(nextLine) && !nextSectionHeading) continue;
     const affectedLines = [documentLines[index]];
@@ -3320,6 +3332,16 @@ function consultAnswerSafeFallback(draft, audit) {
     || audit.violations.includes('undefined_observation_variable')) {
     safeKept = String(audit.safeDiagnosticFallback || '').trim();
   }
+  // 原子关系题在各种删句/结构清理之后做最后一次事实恢复。不能只恢复“初稿
+  // 当时缺的边”：初稿中原本完整的边也可能被其它安全门连句删掉。此处直接
+  // 用 current route 已抽取的全部 direct edge、表示限定与 direct 边界重建
+  // 紧凑终稿；之后不再进入破坏性逐句清理，只由调用方做只读终审。
+  if (audit.focusedFactQuestion && (audit.focusedRelationshipFacts || []).some(item => item.kind === 'relationship_edge')) {
+    safeKept = (audit.focusedRelationshipFacts || [])
+      .filter(item => item.kind === 'relationship_edge' || item.kind === 'relationship_boundary')
+      .map(item => `- ${String(item.clause || '').replace(/[。；;]+$/u, '')}。`)
+      .join('\n');
+  }
   safeKept = consultDeduplicateFocusedAtomicAnswer(safeKept, audit);
   const notes = [];
   // 原子事实题的审计只负责删掉越界内容；内部违规原因留在 retrieval.answerAudit，
@@ -3447,6 +3469,7 @@ function consultFocusedFactGuard(question) {
     '【单一事实题止答边界】',
     '用户只询问或用陈述句确认一个接口、路径、状态码、字段/列的类型/长度/取值、对象之间的关联键/关系或一个是非事实。先从 current route 的 answerFacts/primary section 给直接答案，只补回答该事实所必需的限定与 mustNotConfuse 边界；唯一主接口题还必须保留同一 answerFact 直接绑定的请求方法、认证/访问限定与必要固定参数，不得把“止答”误解为只剩路径；关系题必须逐一覆盖用户点名对象在 current route 中已确认的直接挂接边与内容表示/存储边，每条边都要在同一句或同一表格行明确绑定来源对象、关系键和目标对象，标题里罗列对象不能替代关系正文，同一业务键连接多个目标时也不能合并漏答；direct mustNotConfuse 中“共享业务键不是真外键”等关系边界也必须发布；答到这里就停止。',
     '发布前按语义去重：同一主接口只出现一次 method + 精确 path + 同一事实直接限定；必要 mustNotConfuse 只保留一次。不得先写“当前接口”，后面又重复整句 route fact。若“包含/里面有/内容为：”后没有枚举、字段、代码或列表，而在同一段直接进入“别搞混/注意/结论/下一步”，删除该空引导 clause，保留后面的必要边界。',
+    '所有修订、删句、结构清理完成后，再逐条核一次关系 direct edge、内容表示限定与 direct mustNotConfuse；若清理导致缺边，只能从 current route 的直接事实/本轮已注入的 primary evidence 重建紧凑逐句答案，重建后不得再做破坏性删句。“用 form_id：/通过 element_id：/关联键是：”后必须同段给完整关系，或紧随真实列表/表格/代码块，不能留下空键名标题。',
     '不得主动扩写同表其它列、本地身份元组、联合键、索引、唯一约束、数据库迁移、SQL 用法、相邻模块事实、实施步骤、现场排查、原因假设、动作建议或“把截图发来”等继续邀约。只有用户在本轮明确问到这些内容，且当前有效证据直接覆盖时，才逐项回答。',
     '即使相邻事实本身真实，只要不改变本问答案，也不要作为“顺便提醒”加入；显式切题后不得带入上一主题事实。',
   ].join('\n');
@@ -3548,6 +3571,7 @@ function consultFocusedRelationshipFacts(question, route) {
   const directRelation = /(?:关联|关系|关联键|共享键|外键|串(?:起|联|起来)?|挂(?:到|接)?|指向|引用|映射|对应|所属|连接|↔|→|<-|->)/i;
   const directRepresentation = /(?:保存|存储|承载|序列化|快照|JSON|json)/i;
   const asksRepresentation = /(?:结果|填写|填报|内容|值|载荷|payload|快照)/i.test(q);
+  const directEvidenceText = Array.isArray(route.directEvidenceFacts) ? route.directEvidenceFacts.map(String).join('\n') : '';
   const entityAliases = rawValue => {
     const raw = String(rawValue || '').trim();
     if (/填写内容/u.test(raw)) return ['填写内容', '内容', '快照'];
@@ -3579,16 +3603,24 @@ function consultFocusedRelationshipFacts(question, route) {
         return slash ? [`${slash[1]}${slash[3]}`, `${slash[2]}${slash[3]}`] : [target];
       });
       for (const target of targets) {
+        // 地图的紧凑 answerFact 可能只写“填写内容 JSON”，而 current route 的
+        // primary section 已进一步确认 content 是整份/整体 JSON 快照。该限定
+        // 只从本轮实际注入的 direct evidence 提升，不凭字段名或行业常识猜。
+        const evidenceSupportsWholeSnapshot = key.toLowerCase() === 'content'
+          && /\bJSON\b/i.test(target)
+          && /content[^。；\n]{0,180}(?:整份|整体)[^。；\n]{0,80}JSON[^。；\n]{0,80}快照|content[^。；\n]{0,180}JSON[^。；\n]{0,80}(?:整份|整体)[^。；\n]{0,80}快照/iu.test(directEvidenceText);
+        const displayTarget = evidenceSupportsWholeSnapshot ? '整份填写内容 JSON 快照' : target;
         const requiredGroups = [entityAliases(source), key ? [key.toLowerCase()] : [], entityAliases(target)].filter(group => group.length);
         if (/\bJSON\b/i.test(target)) requiredGroups.push(['json']);
+        if (evidenceSupportsWholeSnapshot) requiredGroups.push(['整份', '整体'], ['快照', 'snapshot']);
         edgeItems.push({
-          clause: `${source} → ${target}`,
+          clause: `${source} → ${displayTarget}`,
           tokens: requiredGroups.map(group => group[0]),
           requiredGroups,
           kind: 'relationship_edge',
           source,
           key,
-          target,
+          target: displayTarget,
         });
       }
     }
@@ -5314,6 +5346,10 @@ const server = http.createServer((req, res) => {
         if (route.matched) { try { const ctx = loadRouteContext(proj, cver, route); routeHits = ctx.specHits || []; routeMnc = ctx.mustNotConfuse || []; } catch { routeHits = []; } }
         const asm = assembleConsultSpecHits(!!route.matched, routeHits, searchScored, SPEC_MIN_RELEVANT);
         specHits = asm.specHits; usedSpecSearch = asm.usedSpecSearch; specNoSpec = asm.noSpec;
+        // 发布前关系事实终审只可使用本轮真正注入模型的 current route/spec
+        // 证据。保存文本供 content JSON 的“整份/整体快照”等直接限定复核；
+        // 不从全局地图或未召回相邻模块扩展。
+        if (route.matched) route.directEvidenceFacts = (specHits || []).map(hit => String((hit && hit.text) || '')).filter(Boolean);
       } else {
         specHits = specSearch(proj, cver, retrievalQuery, 5, sub);   // 无地图产品：同样用已补实体的检索问题；正文证据边界仍由 qtext 控制
       }
