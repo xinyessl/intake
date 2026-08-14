@@ -1,0 +1,174 @@
+{
+  "schemaVersion": "1.0",
+  "title": "PWRS 1000-question Browser Plugin evidence Q0101-Q0110 on tag35",
+  "createdAt": "2026-08-14T11:00:00+08:00",
+  "environment": {
+    "surface": "intake 收件·实施端",
+    "browserControl": "official Chrome Browser Plugin visible UI",
+    "answerSource": "visible DOM only",
+    "site": "安吉县人民医院",
+    "modelVersion": "2.7.260814-35",
+    "imageUploads": 0
+  },
+  "release": {
+    "intakeCommit": "976109b",
+    "pwrsCommit": "040abac2d9c288e35601b775098d30f20050e17e",
+    "pwrsTag": "2.7.260814-35",
+    "health": {
+      "ok": true,
+      "projects": 3,
+      "intakes": 678,
+      "kb": 7
+    }
+  },
+  "execution": {
+    "fixtureRange": "Q0101-Q0110",
+    "total": 10,
+    "passed": 6,
+    "failed": 4,
+    "conversationHandling": {
+      "C017": "Restored the visible 2026-08-14 10:24 history card for the Q0096-Q0100 chain; verified Q0096 and Q0100 were in the main chat DOM before Q0101.",
+      "C018": "Clicked visible 新对话; #fChatBox .f-msg=0 before Q0102.",
+      "C019": "Clicked visible 新对话; #fChatBox .f-msg=0 before Q0108."
+    },
+    "criteria": [
+      "current ruling and verified route facts first",
+      "retired history excluded",
+      "global patient identity hospitalId + patientId + visitId",
+      "atomic questions stop at asked scope",
+      "same-topic fact ledger preserved",
+      "unknown details remain local",
+      "diagnosis stays non-destructive",
+      "explicit topic switch overrides prior route"
+    ],
+    "metadataNote": "convId, route and inherited were not visible in the UI DOM and are recorded as unavailable rather than inferred."
+  },
+  "summary": {
+    "passIds": [
+      "Q0101",
+      "Q0102",
+      "Q0105",
+      "Q0106",
+      "Q0108",
+      "Q0109"
+    ],
+    "failIds": [
+      "Q0103",
+      "Q0104",
+      "Q0107",
+      "Q0110"
+    ]
+  },
+  "cases": [
+    {
+      "id": "Q0101",
+      "conversationId": "C017",
+      "question": "这次复测p_id 字段类型时，按这个顺序查到第二步就对不上了，后面先停还是继续？",
+      "rawDom": "这次复测p_id 字段类型时，按这个顺序查到第二步就对不上了，后面先停还是继续？\n  - generic: AI\n  - paragraph:\n    - strong: 先停。\n    - code: p_id\n    - text: 字段类型这件事，说明书已确认的事实很明确，第二步如果已经查到列类型本身，就够定结论了，后面不用继续往下查。\n  - generic: 持续有效的已知规则（先对照这个）\n  - list:\n    - code: pwrs_patient.p_id\n    - text: 的列类型是\n    - strong:\n      - code: character varying(50)\n    - text: （varchar(50)）\n    - text: 业务会写入 UUID 字符串，但\n    - strong: 不是\n    - text: PostgreSQL 原生\n    - code: uuid\n    - text: 类型\n    - text: 不得按名字猜成\n    - code: bigint\n    - text: /\n    - code: integer\n    - text: / 原生\n    - code: uuid\n  - generic: 本轮现场怎么判断\n  - paragraph:\n    - text: 你说「按这个顺序查到第二步就对不上」——此时只需要把第二步\n    - strong: 实际看到的类型结果\n    - text: 和上面规则比一下：\n  - list:\n    - strong:\n      - text: 看到的是\n      - code: character varying(50)\n      - text: 或\n      - code: varchar(50)\n  - paragraph:\n    - text: → 符合经确认事实，复测通过。可以停，后面步骤不用再走。\n    - text: （如果你心里预期的是「原生 uuid」，那是预期错了，不是库错了。）\n  - list:\n    - strong:\n      - text: 看到的是原生\n      - code: uuid\n      - text: ，或 bigint / integer / 其它类型\n  - paragraph:\n    - text: → 和说明书冲突。同样先停，不要继续查，整理第二步的只读结果（截图或\n    - code: information_schema\n    - text: /\n    - code: \\d\n    - text: 输出脱敏）转开发确认。\n  - generic: 我现在只需要你补这一句（最少信息）\n  - paragraph:\n    - text: 第二步你具体看到的列类型显示成什么？\n    - text: （例如：\n    - code: character varying(50)\n    - text: /\n    - code: uuid\n    - text: / 别的）\n    - text: 以及你觉得「应该对上」的是什么？\n  - paragraph:\n    - text: 发过来我直接帮你定：是预期行为可以结案，还是该停在这一步升级。\n    - text: 在这之前别继续后面步骤，也别去扩查同表其它列。\n  - generic: \n  - generic: 这条答疑对你有帮助吗？有价值可沉淀到经验库，帮下一个人少走弯路。\n  - button \" 已解决 · 沉淀经验库\":\n    - generic: \n    - text: 已解决 · 沉淀经验库\n  - generic: \n  - generic: 这个咨询需要升级为需求 / BUG 交运营端处理吗？可直接转成工单。\n  - button \" 🎫 转工单\":\n    - generic: \n    - text: 🎫 转工单\n  ",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "pass",
+      "reason": "恢复 C017 后仅沿 A46 继续；保持 p_id=varchar(50)/UUID 字符串事实，第二步不一致先停并索取实际只读结果。"
+    },
+    {
+      "id": "Q0102",
+      "conversationId": "C018",
+      "question": "AI 药历生成超过 30 秒就自动重试三次吗？",
+      "rawDom": "AI 药历生成超过 30 秒就自动重试三次吗？\n  - generic: AI\n  - paragraph:\n    - strong: 不是。\n    - text: 说明书里没有确认“超过 30 秒就自动重试三次”这条规则。\n  - paragraph: 当前能确认的只有这些：\n  - list:\n    - text: AI 电子药历状态：\n    - code: \"null\"\n    - text: = 未创建/未触发，\n    - code: \"1\"\n    - text: = 生成中，\n    - code: \"2\"\n    - text: = 生成成功，\n    - code: \"3\"\n    - text: = 生成失败；状态链是\n    - code: null → 1 → 2|3\n    - text: 。\n    - strong: 没有\n    - text: 统一任务 ID、CAS，也\n    - strong: 没有\n    - text: 已确认的固定超时时间、重试次数或重试规则。\n  - paragraph:\n    - text: 所以现场\n    - strong: 不能\n    - text: 对外承诺“等 30 秒”“自动重试 3 次”这类固定数字，也别假定迟到的回调一定会被幂等拦住。如果页面一直停在“生成中”（\n    - code: ai_status=1\n    - text: ），先按实际状态和响应排查，别按固定超时/重试去操作或解释。\n  - paragraph: 需要更细的超时/重试机制（如果有实现但未写进当前有效规则），得转开发确认。\n  - generic: \n  - generic: 这条答疑对你有帮助吗？有价值可沉淀到经验库，帮下一个人少走弯路。\n  - button \" 已解决 · 沉淀经验库\":\n    - generic: \n    - text: 已解决 · 沉淀经验库\n  - generic: \n  - generic: 这个咨询需要升级为需求 / BUG 交运营端处理吗？可直接转成工单。\n  - button \" 🎫 转工单\":\n    - generic: \n    - text: 🎫 转工单\n  ",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "pass",
+      "reason": "明确不存在已确认的固定 30 秒、三次自动重试、统一任务ID/CAS/幂等规则，不给固定数字承诺。"
+    },
+    {
+      "id": "Q0103",
+      "conversationId": "C018",
+      "question": "复测时又碰到“AI 药历卡住后，现场连续点了好几次重试”。先让我抓什么信息最有用？",
+      "rawDom": "复测时又碰到“AI 药历卡住后，现场连续点了好几次重试”。先让我抓什么信息最有用？\n  - generic: AI\n  - paragraph:\n    - strong: 先别再点重试。\n    - text: 已确认规则里：AI 药历状态是\n    - code: null→1→2|3\n    - text: （1=生成中，2=成功，3=失败），\n    - strong: 没有\n    - text: 统一任务 ID、CAS，也\n    - strong: 没有\n    - text: 已确认的固定超时和重试/幂等规则。连续点重试可能叠了多笔生成请求，迟到回调不一定会被拦住——所以现在最有用的是\n    - strong: 把已经发生过的现场证据留住\n    - text: ，而不是再触发一次。\n  - paragraph:\n    - text: 本轮现场能确认的：复测时药历卡住后，有人连续点了多次重试。\n    - text: 仍局部未知：重试具体走哪条接口、失败/卡住后的官方处理机制（说明书标了需确认）。\n  - paragraph:\n    - text: 下面只做\n    - strong: 只读留证\n    - text: （刷新、看当前页、看已有网络记录都可以；\n    - strong: 不要再点重试/重新生成/保存\n    - text: ）：\n  - list:\n    - strong: 先定现场条件（不操作业务）\n  - list:\n    - listitem: 记下：哪个环境/版本、哪个账号角色、哪台终端/浏览器、大概几点卡住、大概连点了几次重试。\n    - listitem: 当前页仍停在哪个患者详情/AI 药历相关入口（不要换患者、不要再进别的会改状态的入口）。\n    - text: 页面上现在看到的文案/状态是什么（一直“生成中”、失败提示、空白等），\n    - strong: 原样截图\n    - text: （脱敏即可）。\n  - list:\n    - strong: 只读看浏览器网络里“已经发出去”的请求\n  - list:\n    - text: 打开开发者工具 → Network，\n    - strong: 不要清记录、不要再点重试\n    - text: 。\n    - listitem: 筛出卡在生成期间、以及你点重试时已经出现的请求（按时间排）。\n    - text: 对每一笔相关请求记：完整 URL、方法、关键入参（如\n    - code: patientId\n    - text: 、\n    - code: visitId\n    - text: 、会话/对话相关 ID 若有）、HTTP 状态码、业务码/响应摘要、请求时间先后。\n    - listitem: 判断分支（只描述现象，不重试）：\n    - listitem: 有请求但失败/超时 → 把失败响应和发生时间留下；\n    - listitem: 有多笔几乎同时/连续的生成类请求 → 把次数和间隔留下（这对“连点重试”最有用）；\n    - listitem: 页面像在生成中，但其实没有对应请求 → 把“无请求 + 页面截图”留下。\n  - list:\n    - strong: 对照当前页能看到的状态（仍只读）\n  - list:\n    - listitem: 页面若能直接看到 AI 药历/生成状态相关展示，记现在是“生成中 / 成功 / 失败 / 未触发”哪一类（对应规则里的 1 / 2 / 3 / null）。\n    - text: 若列表或详情有刷新后仍卡在同一状态，再截一张“刷新后仍如此”的图（\n    - strong: 只刷新，不要点重试\n    - text: ）。\n    - listitem: 有正常对照患者时，可只读对比：正常那条的状态展示 vs 这条卡住的展示（不要在正常患者上点生成/重试）。\n  - list:\n    - strong: 整理一页给开发/产品的最小包\n  - list:\n    - listitem: 时间线：卡住时间 → 连点重试次数与间隔 → 现在还卡在什么展示。\n    - listitem: 脱敏截图 + 步骤 2 里那几笔请求的 URL/参数/状态码/响应摘要。\n    - text: 写清：当前资料\n    - strong: 没有\n    - text: 确认“固定超时自动重试 N 次”或“迟到回调一定幂等”，所以需要他们按\n    - strong: 多请求并发/状态机\n    - text: 方向看，而不是按“等 30 秒再点一次”处理。\n  - paragraph:\n    - strong: 拿到后怎么判断（便于你自己先分流）：\n  - list:\n    - listitem: 多笔生成类请求叠在一起 + 页面长期“生成中” → 优先怀疑连点导致的并发/状态未收敛（交给开发查状态机与回调）。\n    - listitem: 单笔请求明确失败/超时，页面仍像生成中 → 前后端状态不同步或回调未落地。\n    - listitem: 完全没有相关请求但页面卡着 → 更像前端展示/本地状态问题，把页面与无请求证据一并升级。\n  - paragraph:\n    - strong: 不要做的：\n    - text: 不要再点重试验证、不要新建会话清会话验证、不要假定“再等固定秒数就好”、不要编造任务 ID 去查库（当前也无统一任务 ID 规则）。\n  - paragraph: 把上面 1～3 的截图 + 网络记录发过来后，可以再帮你收成给开发的一页说明（已确认事实 / 已做排查 / 仍缺什么）。重试与失败处理机制本身若要定规则，需要产品/开发确认（说明书里该项仍是待确认）。\n  - generic: \n  - generic: 这条答疑对你有帮助吗？有价值可沉淀到经验库，帮下一个人少走弯路。\n  - button \" 已解决 · 沉淀经验库\":\n    - generic: \n    - text: 已解决 · 沉淀经验库\n  ",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "fail",
+      "reason": "安全上正确禁止再次重试，但抓包关键患者参数仅举 patientId+visitId，漏掉 tag35 已要求全局覆盖的 hospitalId。"
+    },
+    {
+      "id": "Q0104",
+      "conversationId": "C018",
+      "question": "关于AI 药历重试，按这个顺序查到第二步就对不上了，后面先停还是继续？",
+      "rawDom": "关于AI 药历重试，按这个顺序查到第二步就对不上了，后面先停还是继续？\n  - generic: AI\n  - paragraph:\n    - strong: 先停“再点重试/再触发”这一类动作；第二步对不上时，先把“对不上”钉死，再决定要不要做后面只读步骤。\n  - paragraph:\n    - text: 按已确认规则：状态是\n    - code: null→1→2|3\n    - text: （1 生成中 / 2 成功 / 3 失败），\n    - strong: 没有\n    - text: 统一任务 ID、CAS，也\n    - strong: 没有\n    - text: 已确认的固定超时和重试/幂等规则。所以第二步不是去对“等 30 秒会不会自动重试 3 次”，而是只读看\n    - strong: 已经发出去的请求\n    - text: ——和“固定自动重试”对不上是正常的，对不上不等于要你再点一次重试。\n  - generic: 你现在该怎么做（只读）\n  - list:\n    - strong: 主流程先停\n  - list:\n    - listitem: 不要再点重试、重新生成、新建会话。\n    - text: 浏览器 Network\n    - strong: 不要清空\n    - text: ；页面能留着就先留着。\n  - list:\n    - strong: 先写清：第二步具体“对不上”是哪一种\n    - text: （只选最贴近的一条，原样描述即可）\n  - list:\n    - text: A：卡住/连点重试那段时间，\n    - strong: 几乎看不到\n    - text: 和生成相关的请求\n    - text: B：能看到请求，但是\n    - strong: 失败/超时\n    - text: （记下 HTTP 状态码、业务码、响应摘要）\n    - text: C：能看到\n    - strong: 多笔\n    - text: 生成类请求叠在一起（记下大概几笔、时间间隔）\n    - text: D：请求看起来\n    - strong: 成功了\n    - text: ，但页面仍像“生成中/卡住”\n    - listitem: E：Network 记录已经没了 / 看不全 / 不确定哪几笔是重试点出来的\n  - list:\n    - strong: 第 3 步通常仍值得做（仍只读，不触发业务）\n  - list:\n    - listitem: 看当前页展示更像：生成中 / 成功 / 失败 / 未触发（对应 1 / 2 / 3 / null）\n    - listitem: 再截一张“当前状态 + 脱敏页面”\n    - text: 若只是刷新一下列表/详情且你确认不会顺手点到重试，可以只刷新对照；\n    - strong: 不要点重试来验证\n  - list:\n    - strong: 第 4 步：有没有做完第 3 步都可以先整理一页升级包\n  - list:\n    - listitem: 时间线：何时卡住 → 连点了几次 → 第二步属于 A/B/C/D/E\n    - listitem: 截图 + 已有请求的 URL / 关键入参 / 状态码 / 响应摘要（有多少记多少）\n    - text: 写明：当前资料\n    - strong: 没有\n    - text: 确认固定超时自动重试或迟到回调一定幂等，需要开发按\n    - strong: 多请求并发 / 状态是否收敛\n    - text: 看\n  - generic: 怎么判断“后面先停还是继续”\n  - list:\n    - strong: 对不上的是“没有 30 秒自动重试三次”\n    - text: → 这是规则内预期，\n    - strong: 不用再为了对那条规则往下查\n    - text: ；后面只为\n    - strong: 这次卡住+连点\n    - text: 留证（第 3、4 步只读整理即可）。\n    - strong: 对不上的是请求现象本身\n    - text: （上面 A～D）→\n    - strong: 不要停在半截就结案\n    - text: ，至少把第 2 步现象归到 A/B/C/D + 第 3 步当前状态截图，再按第 4 步升级。\n    - strong: 是 E（记录丢了/看不全）\n    - text: →\n    - strong: 先停触发\n    - text: ；下一轮同条件复现时提前开 Network 再观察，\n    - strong: 仍不要主动连点重试\n    - text: ；若现场不能再安全复现，就把现有页面状态 + “记录已丢”直接升级。\n  - separator\n  - paragraph: 请只回我这两样里的一样（或两样都回），方便直接帮你收成给开发的结论，不用你整包重做：\n  - list:\n    - text: 第二步最接近\n    - strong: A / B / C / D / E\n    - text: 哪一种？\n    - text: 页面上现在更像\n    - strong: 生成中 / 成功 / 失败 / 未触发（或不显示）\n    - text: 哪一种？\n  - generic: \n  - generic: 已参考经验（1条）\n  - generic: \n  - generic: \n  - generic: 这条答疑对你有帮助吗？有价值可沉淀到经验库，帮下一个人少走弯路。\n  - button \" 已解决 · 沉淀经验库\":\n    - generic: \n    - text: 已解决 · 沉淀经验库\n  ",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "fail",
+      "reason": "多数动作只读且禁止连点，但在历史 Network 记录丢失分支建议下一轮同条件复现，未先要求隔离测试环境、专用数据、授权、回滚、幂等和影响范围。"
+    },
+    {
+      "id": "Q0105",
+      "conversationId": "C018",
+      "question": "上午反馈的AI 药历重试问题，数据库这边暂时没权限查。仅靠页面和接口响应能先排除什么？",
+      "rawDom": "上午反馈的AI 药历重试问题，数据库这边暂时没权限查。仅靠页面和接口响应能先排除什么？\n  - generic: AI\n  - paragraph:\n    - strong: 结论先说：\n    - text: 数据库没权限时，\n    - strong: 页面 + 接口响应\n    - text: 仍能先排除一批「前端假卡住 / 请求根本没出去 / 单笔当场失败」类问题；\n    - strong: 排不掉\n    - text: 的是：回调有没有落地、状态有没有被连点覆盖、库里最终写没写成功——这些只能标「当前只能推到中间层，库/服务端日志未核实」。\n  - separator\n  - generic: 持续有效的规则（判断基线）\n  - list:\n    - code: ai_status\n    - text: ：\n    - code: \"null\"\n    - text: 未创建/未触发，\n    - code: \"1\"\n    - text: 生成中，\n    - code: \"2\"\n    - text: 成功，\n    - code: \"3\"\n    - text: 失败；链路\n    - code: null→1→2|3\n    - text: 。\n    - strong: 没有\n    - text: 已确认的统一任务 ID、CAS、固定超时秒数、固定重试次数；\n    - strong: 不得\n    - text: 承诺“等 30 秒自动重试 3 次”，也\n    - strong: 不得\n    - text: 假定迟到回调一定被幂等拦住。\n    - text: 重复触发会再置\n    - code: \"1\"\n    - text: ；同一患者并发会互相覆盖状态和结果；接口侧是异步完成、靠轮询/页面状态观察。\n  - separator\n  - generic: 仅靠页面 + 接口，能先排除什么\n  - region \"Markdown 表格\":\n    - table:\n      - rowgroup:\n        - row \"能先排除 / 能钉死的 怎么看（只读） 看到什么算“排除了”\":\n          - columnheader \"能先排除 / 能钉死的\"\n          - columnheader \"怎么看（只读）\"\n          - columnheader \"看到什么算“排除了”\"\n      - rowgroup:\n        - row \"1. 是不是“根本没触发成功” Network 里有没有生成/重试相关请求 有请求 → 排除“点了但请求没发出”；完全没有 → 更像前端未发或点错入口，先别往后端状态机深挖\":\n          - cell \"1. 是不是“根本没触发成功”\":\n            - strong: 1. 是不是“根本没触发成功”\n          - cell \"Network 里有没有生成/重试相关请求\"\n          - cell \"有请求 → 排除“点了但请求没发出”；完全没有 → 更像前端未发或点错入口，先别往后端状态机深挖\"\n        - row \"2. 是不是“单笔请求当场就被拒绝” 该请求的 HTTP 码 + 业务码/响应体 明确 4xx/5xx 或业务失败 → 排除“后端已接单在跑、只是页面慢”；应优先看入参/权限/前置条件\":\n          - cell \"2. 是不是“单笔请求当场就被拒绝”\":\n            - strong: 2. 是不是“单笔请求当场就被拒绝”\n          - cell \"该请求的 HTTP 码 + 业务码/响应体\"\n          - cell \"明确 4xx/5xx 或业务失败 → 排除“后端已接单在跑、只是页面慢”；应优先看入参/权限/前置条件\"\n        - row \"3. 是不是“接口已成功接单，只是还在异步跑” 触发类接口是否 void/成功类响应 + 随后轮询/详情里状态 触发成功且状态长期为 1（生成中） → 符合“异步进行中”，不能据此说已失败，也不能说固定超时该重试了\":\n          - cell \"3. 是不是“接口已成功接单，只是还在异步跑”\":\n            - strong: 3. 是不是“接口已成功接单，只是还在异步跑”\n          - cell \"触发类接口是否 void/成功类响应 + 随后轮询/详情里状态\"\n          - cell \"触发成功且状态长期为 1（生成中） → 符合“异步进行中”，不能据此说已失败，也不能说固定超时该重试了\":\n            - text: 触发成功且状态长期为\n            - strong: 1（生成中）\n            - text: → 符合“异步进行中”，\n            - strong: 不能\n            - text: 据此说已失败，也\n            - strong: 不能\n            - text: 说固定超时该重试了\n        - row \"4. 是不是“前后端展示不一致” 页面文案 vs 接口返回的状态字段 接口已是 2 页面仍像卡住 → 偏前端展示/缓存/未刷新；接口一直是 1 页面也生成中 → 不是单纯前端假状态\":\n          - cell \"4. 是不是“前后端展示不一致”\":\n            - strong: 4. 是不是“前后端展示不一致”\n          - cell \"页面文案 vs 接口返回的状态字段\"\n          - cell \"接口已是 2 页面仍像卡住 → 偏前端展示/缓存/未刷新；接口一直是 1 页面也生成中 → 不是单纯前端假状态\":\n            - text: 接口已是\n            - strong: \"2\"\n            - text: 页面仍像卡住 → 偏前端展示/缓存/未刷新；接口一直是\n            - strong: \"1\"\n            - text: 页面也生成中 → 不是单纯前端假状态\n        - row \"5. 是不是“连点造成多请求叠压” 同一时段是否多笔生成类请求、间隔多久 多笔连续成功接单 → 不能排除并发覆盖；反而支持“状态可能被后一次盖掉”，这是重要现场证据\":\n          - cell \"5. 是不是“连点造成多请求叠压”\":\n            - strong: 5. 是不是“连点造成多请求叠压”\n          - cell \"同一时段是否多笔生成类请求、间隔多久\"\n          - cell \"多笔连续成功接单 → 不能排除并发覆盖；反而支持“状态可能被后一次盖掉”，这是重要现场证据\":\n            - text: 多笔连续成功接单 →\n            - strong: 不能排除\n            - text: 并发覆盖；反而支持“状态可能被后一次盖掉”，这是重要现场证据\n        - row \"6. 终态到底落在哪一类 当前页/详情/轮询响应里的状态 已是 2 → 排除“还在生成”；已是 3 → 排除“还在生成中”，按失败分支收证；长期 1 或 null → 只能描述现象，不能用页面断言库内已失败或未写\":\n          - cell \"6. 终态到底落在哪一类\":\n            - strong: 6. 终态到底落在哪一类\n          - cell \"当前页/详情/轮询响应里的状态\"\n          - cell \"已是 2 → 排除“还在生成”；已是 3 → 排除“还在生成中”，按失败分支收证；长期 1 或 null → 只能描述现象，不能用页面断言库内已失败或未写\":\n            - text: 已是\n            - strong: \"2\"\n            - text: → 排除“还在生成”；已是\n            - strong: \"3\"\n            - text: → 排除“还在生成中”，按失败分支收证；长期\n            - strong: \"1\"\n            - text: 或\n            - strong: \"null\"\n            - text: → 只能描述现象，\n            - strong: 不能\n            - text: 用页面断言库内已失败或未写\n  - separator\n  - text: 仅靠页面 + 接口，\n  - strong: 排不掉\n  - text: 什么（别在现场下死结论）\n  - list:\n    - text: 库里\n    - code: ai_status\n    - text: 是否与接口一致、是否被连点多次覆盖过中间态\n    - listitem: Dify/外部 workflow 是否超时、回调是否到达、有没有幂等拦截\n    - listitem: 主表/明细表是否已部分写入（成功输出会映射多张业务表，但本仓对超时/重试/版本史未确认）\n    - text: “卡了很久”是否等于失败（\n    - strong: 没有\n    - text: 已确认固定超时规则）\n  - paragraph:\n    - text: 这些只能写成：\n    - strong: 已观察到请求与展示状态；库与回调链路未核实\n    - text: 。\n  - separator\n  - generic: 建议你现在只做的只读动作（2～4 步，不要再点重试）\n  - list:\n    - strong: 定现场条件\n  - list:\n    - listitem: 环境/账号角色/患者入口、大概卡住时间、连点了几次。\n    - listitem: 当前页文案更像：生成中 / 成功 / 失败 / 未触发。\n    - listitem: 脱敏截图留一张。\n  - list:\n    - strong: 只读 Network 里“已经发生”的请求（不清空、不再点重试）\n  - list:\n    - listitem: 记：完整 URL、方法、关键入参、HTTP/业务码、响应摘要、时间先后与笔数。\n    - listitem: 按分支归类：无请求 / 单笔失败 / 单笔成功后长期 1 / 多笔叠在一起 / 接口已 2 但页面仍卡。\n  - list:\n    - strong: 对照接口返回的状态（若详情或轮询接口响应里能直接看到状态字段）\n  - list:\n    - text: 记下当前是\n    - code: \"null\"\n    - text: /\n    - code: \"1\"\n    - text: /\n    - code: \"2\"\n    - text: /\n    - code: \"3\"\n    - text: 哪一类（没有就写“响应里看不到状态字段”）。\n    - text: 只刷新观察可以；\n    - strong: 不要\n    - text: 再点重试验证。\n  - list:\n    - strong: 整理最小升级包（给开发时直接用）\n  - list:\n    - listitem: 时间线 + 连点次数 + 上表对应分支。\n    - listitem: 写明：无库权限；已用页面/接口排除了哪些；仍缺库状态与回调日志。\n  - separator\n  - generic: 你回我两句就能继续收口\n  - list:\n    - text: 接口/页面现在更像：\n    - strong: 长期 1\n    - text: 、\n    - strong: 已是 2\n    - text: 、\n    - strong: 已是 3\n    - text: 、\n    - strong: null/未触发\n    - text: 、还是\n    - strong: 接口和页面不一致\n    - text: ？\n    - text: Network 更像：\n    - strong: 无请求 / 单笔失败 / 单笔成功 / 多笔连点\n    - text: ？\n  - paragraph: 有这两条，就能明确写出“现场已排除 A/B，还不能排除 C，下一步该谁看什么”，而不用等数据库权限。\n  - generic: \n  - generic: 已参考经验（2条）\n  - generic: \n  - generic: \n  - generic: 这条答疑对你有帮助吗？有价值可沉淀到经验库，帮下一个人少走弯路。\n  - button \" 已解决 · 沉淀经验库\":\n    - generic: \n    - text: 已解决 · 沉淀经验库\n  ",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "pass",
+      "reason": "持续保留未知的超时/重试边界，页面与接口能排除的范围和库/回调局部未知分开，禁止再点重试。"
+    },
+    {
+      "id": "Q0106",
+      "conversationId": "C018",
+      "question": "我要区分“我的监护列表页”和具体监护详情页，两个路径是什么？",
+      "rawDom": "我要区分“我的监护列表页”和具体监护详情页，两个路径是什么？\n  - generic: AI\n  - paragraph:\n    - strong: 结论：两个是不同前端页面路径，别和后端接口混。\n  - paragraph: 按已确认的模块地图事实：\n  - list:\n    - strong: 「我的监护」列表页\n  - list:\n    - text: 路径：\n    - code: tablet/pages/ucenter/info/custody.vue\n    - listitem: 位置：Pad 个人中心里的「我的监护」列表。\n  - list:\n    - strong: 具体监护详情页\n  - list:\n    - text: 路径：\n    - code: tablet/pages/patient/info/custody.vue?careTypeId=<监护ID>\n    - listitem: 打开方式：在列表里点一条监护记录后进入。\n    - strong: 必须带\n    - code: careTypeId\n    - text: （监护 ID）；没这个参数就不是按约定打开的详情页。\n  - paragraph:\n    - strong: 别混的一点：\n    - code: /care/order\n    - text: 是\n    - strong: 后端数据接口\n    - text: ，\n    - strong: 不是\n    - text: 页面路由，也不是点列表后打开的地址。排查页面时只对上面两个前端路径，不要把\n    - code: /care/order\n    - text: 当成详情页路径。\n  - generic: \n  - generic: 这条答疑对你有帮助吗？有价值可沉淀到经验库，帮下一个人少走弯路。\n  - button \" 已解决 · 沉淀经验库\":\n    - generic: \n    - text: 已解决 · 沉淀经验库\n  ",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "pass",
+      "reason": "显式切换监护主题，正确给出列表与详情两个前端路径及 careTypeId，并区分 /care/order 是数据接口而非页面路由。"
+    },
+    {
+      "id": "Q0107",
+      "conversationId": "C018",
+      "question": "回到监护记录入口这里，我没太听懂，换成实施能照着做的话再说一遍。",
+      "rawDom": "回到监护记录入口这里，我没太听懂，换成实施能照着做的话再说一遍。\n  - generic: AI\n  - paragraph:\n    - strong: 行，换成现场能直接对照的说法。\n  - paragraph:\n    - text: 你要分的就是两个\n    - strong: 不同页面\n    - text: ，别和后台接口搅在一起。\n  - separator\n  - generic: 一句话先记住\n  - list:\n    - strong: 列表页\n    - text: = 个人中心里「我的监护」那一页（一堆记录）\n    - strong: 详情页\n    - text: = 点进某一条之后，看这一条内容的页面\n    - strong:\n      - code: /care/order\n    - text: = 后台接口，\n    - strong: 不是\n    - text: 你点进去看到的页面地址\n  - separator\n  - generic: 现场怎么认（照着做）\n  - list:\n    - strong: 打开「我的监护」列表\n  - list:\n    - text: 在 Pad 上进：\n    - strong: 个人中心 → 我的监护\n    - listitem: 这页对应路径就是：\n  - paragraph:\n    - code: tablet/pages/ucenter/info/custody.vue\n  - list:\n    - text: 你在这页应该看到的是\n    - strong: 列表\n    - text: （多条监护记录），不是某一条的填写/详情内容。\n  - list:\n    - strong: 从列表点进某一条 → 才是详情\n  - list:\n    - text: 在列表里\n    - strong: 点一条监护记录\n    - listitem: 会打开详情页，路径是：\n  - paragraph:\n    - code: tablet/pages/patient/info/custody.vue?careTypeId=<监护ID>\n  - list:\n    - text: 地址里\n    - strong: 必须有\n    - code: careTypeId=某个监护ID\n    - text: 有\n    - code: careTypeId\n    - text: → 是按约定打开的详情\n    - listitem: 没有 → 不是说明书约定的详情打开方式，先别当详情页问题往下查\n  - list:\n    - strong: 排查时别看错东西\n  - list:\n    - text: 有人说「监护记录进不去 / 列表有详情没有」→ 先分清你卡在\n    - strong: 第 1 步列表\n    - text: 还是\n    - strong: 第 2 步详情\n    - text: 浏览器或抓包里如果只看到\n    - code: /care/order\n    - text: → 那是\n    - strong: 数据接口在干活\n    - text: ，\n    - strong: 不等于\n    - text: 当前页面路径是\n    - code: /care/order\n    - text: 对页面问题：对照上面两个前端路径；对接口问题：再单独看\n    - code: /care/order\n    - text: 请求，两边不要混着报\n  - separator\n  - generic: 你可以现场快速自检的两句\n  - list:\n    - text: 我现在在「个人中心 → 我的监护」且是列表 →\n    - strong: 列表页\n    - text: 我刚点了一条，地址里带了\n    - code: careTypeId\n    - text: →\n    - strong: 详情页\n  - paragraph: 如果你愿意，可以说一下你现在卡在「列表看不到」还是「点进去不对/空白」，我按列表或详情其中一条帮你往下收。\n  - generic: \n  - generic: 这条答疑对你有帮助吗？有价值可沉淀到经验库，帮下一个人少走弯路。\n  - button \" 已解决 · 沉淀经验库\":\n    - generic: \n    - text: 已解决 · 沉淀经验库\n  ",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "fail",
+      "reason": "给对两个前端路径，但面向实施的步骤漏了点记录后先同步患者上下文，也未指出详情数据接口 GET /pwrsapi/applet/follow/care?careTypeId=，仅反复强调 /care/order。"
+    },
+    {
+      "id": "Q0108",
+      "conversationId": "C019",
+      "question": "患者关注是全院药师共用一个状态吗？",
+      "rawDom": "患者关注是全院药师共用一个状态吗？\n  - generic: AI\n  - paragraph:\n    - strong: 不是。\n  - paragraph:\n    - text: 患者关注状态\n    - strong: 不是\n    - text: 全院药师共用的一个全局状态，而是按当前登录药师个人区分的。\n    - text: 每个药师自己的关注记录是独立的，不会互相影响。\n  - generic: \n  - generic: 已参考经验（2条）\n  - generic: \n  - generic: \n  - generic: 这条答疑对你有帮助吗？有价值可沉淀到经验库，帮下一个人少走弯路。\n  - button \" 已解决 · 沉淀经验库\":\n    - generic: \n    - text: 已解决 · 沉淀经验库\n  - generic: \n  - generic: 这个咨询需要升级为需求 / BUG 交运营端处理吗？可直接转成工单。\n  - button \" 🎫 转工单\":\n    - generic: \n    - text: 🎫 转工单\n  ",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "pass",
+      "reason": "准确回答关注不是全院共享而是按当前登录药师个人区分，未串入前一监护主题。"
+    },
+    {
+      "id": "Q0109",
+      "conversationId": "C019",
+      "question": "现场只确认了“一名药师刚关注患者，另一名药师的列表里没有”，还缺哪两样关键信息？",
+      "rawDom": "现场只确认了“一名药师刚关注患者，另一名药师的列表里没有”，还缺哪两样关键信息？\n  - generic: AI\n  - paragraph:\n    - strong: 结论先说：这是规则内的预期行为，不是异常。\n  - paragraph:\n    - text: 患者关注是\n    - strong: 按当前登录药师个人\n    - text: 区分的（一人一份），不是全院药师共用一个状态。A 关注后，B 的列表里看不到，正好符合设计。\n  - generic: 本轮现场已确认\n  - list:\n    - listitem: 一名药师（A）刚做了关注。\n    - listitem: 另一名药师（B）的列表里没有这个患者。\n  - generic: 仍缺的两样关键信息（最少、能直接定论）\n  - paragraph: 要把“完全正常”和“还可能有别的问题”分清楚，现场再补这两点就够了：\n  - list:\n    - strong: 关注的那名药师（A）自己能不能在自己的患者列表/关注列表里看到这个患者？\n  - list:\n    - listitem: 正常：A 能看到 → 说明关注已写到 A 自己名下。\n    - listitem: 不正常：A 自己也看不到 → 再往下看请求/账号，不能只盯 B。\n  - list:\n    - strong: A 和 B 是不是两个完全不同的登录账号（不同药师身份）？\n  - list:\n    - listitem: 正常：确实是两个不同账号 → 列表不一致是预期。\n    - listitem: 不正常：其实是同一个账号或同一身份切换 → 那就要另看缓存/页面刷新问题。\n  - generic: 最少非破坏核对动作（只观察，不改数据）\n  - list:\n    - text: 让 A、B 各自停在\n    - strong: 当前已经打开的患者列表页\n    - text: ，记下实际终端（Web/Pad）、账号名/工号、当前院区/病区筛选条件、列表类型（全部 / 关注 / 其他筛选项），并截一张脱敏图。\n  - list:\n    - listitem: 看到什么算正常：两人筛选条件相同，但只有 A 显示该患者；B 不显示。\n    - listitem: 看到什么要继续：两人其实是同一账号，或筛选条件明显不一致。\n  - list:\n    - text: 只读对比：\n    - strong: 不重新点关注、不取消、不批量操作\n    - text: 。直接问 A 当前列表里是否已有这个患者（或切换到“关注”相关只读页签看已有数据）。\n  - list:\n    - listitem: 正常：A 有、B 无。\n    - listitem: 分支：A 也没有 → 记录 A 当时关注动作后页面提示、是否有请求发出（只观察已有网络面板，不要主动再点一次写操作）。\n  - list:\n    - listitem: 把上面 1、2 的结果发回来（账号是否不同 + A 自己是否可见）。\n  - list:\n    - listitem: 两者都“符合预期” → 直接结案，告诉现场“个人关注设计如此，不用再查库”。\n    - listitem: 任一不符合 → 再整理“A/B 账号、A 是否可见、实际 URL/筛选条件、时间点”升级，仍不要让人重新点关注做验证。\n  - paragraph:\n    - strong: 一句话给现场\n    - text: ：A 关注 B 看不到 = 正常个人关注；补齐“A 自己能否看到 + 是否真两个不同账号”这两样，就能定论。\n  - generic: \n  - generic: 已参考经验（2条）\n  - generic: \n  - generic: \n  - generic: 这条答疑对你有帮助吗？有价值可沉淀到经验库，帮下一个人少走弯路。\n  - button \" 已解决 · 沉淀经验库\":\n    - generic: \n    - text: 已解决 · 沉淀经验库\n  ",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "pass",
+      "reason": "给出两项能改变判断分支的最少信息：关注者本人是否可见、是否确为不同账号；并补充只读筛选对照，禁止重做关注。"
+    },
+    {
+      "id": "Q0110",
+      "conversationId": "C019",
+      "question": "上午反馈的患者关注问题，数据库这边暂时没权限查。仅靠页面和接口响应能先排除什么？",
+      "rawDom": "上午反馈的患者关注问题，数据库这边暂时没权限查。仅靠页面和接口响应能先排除什么？\n  - generic: AI\n  - paragraph:\n    - strong: 结论：数据库暂时查不了，也能先把几类“误判”排掉。\n    - text: 患者关注是\n    - strong: 按当前登录药师个人\n    - text: 的（一人一份），不是全院共用一个状态。A 关注后 B 列表没有，本身就符合规则，不能当全局故障。\n  - separator\n  - generic: 持续有效的已知规则（先当基线）\n  - list:\n    - text: 关注状态跟\n    - strong: 当前登录药师\n    - text: 走，不是所有药师共享。\n    - listitem: 批量关注是“只增不减”，按当前 token 的药师身份写入；已关注的会计入跳过，不会当成失败。\n  - separator\n  - generic: 仅靠页面 + 接口响应，能先排除什么\n  - region \"Markdown 表格\":\n    - table:\n      - rowgroup:\n        - row \"能先排除 怎么判断（只读看页面/已有请求）\":\n          - columnheader \"能先排除\"\n          - columnheader \"怎么判断（只读看页面/已有请求）\"\n      - rowgroup:\n        - row \"“关注是全院共用，一人点了别人必须立刻有” A 有、B 无 → 这是预期，不是共用状态坏了。\":\n          - cell \"“关注是全院共用，一人点了别人必须立刻有”\":\n            - strong: “关注是全院共用，一人点了别人必须立刻有”\n          - cell \"A 有、B 无 → 这是预期，不是共用状态坏了。\"\n        - row \"“关注接口根本没发出 / 前端没点到” 看 A 当时网络里是否有关注相关请求，且 HTTP/业务码成功；有成功响应就能排除“完全没请求”。\":\n          - cell \"“关注接口根本没发出 / 前端没点到”\":\n            - strong: “关注接口根本没发出 / 前端没点到”\n          - cell \"看 A 当时网络里是否有关注相关请求，且 HTTP/业务码成功；有成功响应就能排除“完全没请求”。\"\n        - row \"“关注接口失败了还显示成功” 看响应体：若是批量关注，正常会带 requestedCount / addedCount / skippedCount 一类结果；addedCount≥1 或“已关注被跳过”都能说明服务端已按该账号处理，而不是前端假成功。\":\n          - cell \"“关注接口失败了还显示成功”\":\n            - strong: “关注接口失败了还显示成功”\n          - cell \"看响应体：若是批量关注，正常会带 requestedCount / addedCount / skippedCount 一类结果；addedCount≥1 或“已关注被跳过”都能说明服务端已按该账号处理，而不是前端假成功。\":\n            - text: 看响应体：若是批量关注，正常会带\n            - code: requestedCount / addedCount / skippedCount\n            - text: 一类结果；\n            - code: addedCount≥1\n            - text: 或“已关注被跳过”都能说明服务端已按该账号处理，而不是前端假成功。\n        - row \"“两人本是同一账号 / 同一身份” 页面上账号名、工号、角色是否明显不同；若是两个不同药师账号，就能排除“其实是同一人缓存没刷”。\":\n          - cell \"“两人本是同一账号 / 同一身份”\":\n            - strong: “两人本是同一账号 / 同一身份”\n          - cell \"页面上账号名、工号、角色是否明显不同；若是两个不同药师账号，就能排除“其实是同一人缓存没刷”。\"\n        - row \"“列表筛选条件不一致导致以为没关注” 对比 A、B 当前页的院区/病区/列表类型（全部 vs 关注等）是否一致；条件差很多时，先排除“筛选不同误当成关注失效”。\":\n          - cell \"“列表筛选条件不一致导致以为没关注”\":\n            - strong: “列表筛选条件不一致导致以为没关注”\n          - cell \"对比 A、B 当前页的院区/病区/列表类型（全部 vs 关注等）是否一致；条件差很多时，先排除“筛选不同误当成关注失效”。\"\n        - row \"“整站患者列表挂了” A 自己列表能正常看到该患者，且其他患者也在 → 可排除列表接口整体不可用。\":\n          - cell \"“整站患者列表挂了”\":\n            - strong: “整站患者列表挂了”\n          - cell \"A 自己列表能正常看到该患者，且其他患者也在 → 可排除列表接口整体不可用。\"\n  - paragraph:\n    - strong: 一句话：能排除的是「共用状态误读、没请求、接口失败、同账号、筛选项不一致、整站列表挂掉」这类。\n  - separator\n  - generic: 本轮现场边界（仍局部未知）\n  - list:\n    - strong: 数据库没权限\n    - text: → 还不能直接证明库里是否落了“该药师 + 该患者”的关注行，也不能用库表去对唯一键。\n    - text: 仅靠页面/接口\n    - strong: 不能\n    - text: 断言：落库明细、是否被别的任务改掉、历史脏数据等（这些本轮资料也不是靠页面就能定的）。\n  - paragraph:\n    - text: 这些未知\n    - strong: 不否定\n    - text: 上面“个人关注”的规则，只是还不能做库级核对。\n  - separator\n  - generic: 最少只读动作（2～4 步，不改数据、不重做关注）\n  - list:\n    - strong: 固定对照双方页面现状（不点关注/不取消）\n  - paragraph: 记录：终端（Web/Pad）、A 与 B 的账号/工号、院区病区筛选、列表类型、该患者在不在各自列表。\n  - list:\n    - listitem: 正常：不同账号 + A 有 B 无 → 个人关注预期。\n    - listitem: 要继续：同账号，或 A 自己也没有。\n  - list:\n    - strong: 只读翻已有网络记录（不要再点一次关注）\n  - paragraph:\n    - text: 找 A 当时关注动作对应的请求与响应：URL、HTTP 状态、业务码、返回里的\n    - code: addedCount\n    - text: /\n    - code: skippedCount\n    - text: （若有）。\n  - list:\n    - text: 有成功且\n    - code: addedCount≥1\n    - text: 或已关注被跳过 → 可排除“接口没处理”。\n    - listitem: 无请求 / 4xx·5xx / 业务失败 → 问题在请求侧，不是“B 看不到”本身。\n  - list:\n    - strong: 分支定论（仍不写库、不重试写操作）\n  - list:\n    - strong: 不同账号 + A 可见 + 关注请求成功\n    - text: → 可结案：属个人关注设计，不必等数据库。\n    - strong: A 自己也不可见，但请求显示成功\n    - text: → 保留请求/响应脱敏截图与时间，再要库权限或转开发对账；现场不要为验证再点关注。\n    - strong: 请求失败或未发出\n    - text: → 按失败码/未发请求排前端与鉴权，同样不要重复提交。\n  - list:\n    - strong: 打包给后续（有库权限或转开发时用）\n  - paragraph:\n    - text: 脱敏：时间、A/B 账号、页面筛选、实际请求 URL、状态码、响应摘要、截图。\n    - text: 有这些后，数据库权限回来只需核对“该药师身份下是否有该患者关注记录”，不用从零复述现象。\n  - separator\n  - paragraph:\n    - strong: 总结给现场：\n    - text: 没库也能先排除“共用关注、没请求、接口失败、同账号、筛选不一致、列表全挂”。\n    - text: 若是「两不同药师 + A 成功关注且自己能看到 + B 看不到」→\n    - strong: 直接按规则结案\n    - text: 。\n    - text: 只有「A 自己也看不到但接口像成功」才值得等库权限或升级开发。\n  - generic: \n  - generic: 已参考经验（2条）\n  - generic: \n  - generic: \n  - generic: 这条答疑对你有帮助吗？有价值可沉淀到经验库，帮下一个人少走弯路。\n  - button \" 已解决 · 沉淀经验库\":\n    - generic: \n    - text: 已解决 · 沉淀经验库\n  ",
+      "convId": "unavailable",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "fail",
+      "reason": "关注个人隔离事实和只读分支正确，但患者相关请求核对没有覆盖 tag35 全局 hospitalId+patientId+visitId 身份边界。"
+    }
+  ]
+}
