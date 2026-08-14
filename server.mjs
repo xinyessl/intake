@@ -1750,13 +1750,15 @@ function consultAnswerSafeFallback(draft, audit) {
   }).join('').trim();
   let safeKept = kept;
   if (audit.violations.includes('unexpected_concrete_path')) {
-    for (const p of audit.unexpectedPaths || []) safeKept = safeKept.split(p).join('该已核接口');
+    for (const p of audit.unexpectedPaths || []) {
+      for (const method of ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']) safeKept = safeKept.split(`${method} ${p}`).join('该已核接口');
+      safeKept = safeKept.split(p).join('该已核接口');
+    }
     safeKept = safeKept.replace(/…\s*该已核接口/g, '该已核接口');
   }
   const notes = [];
   if (audit.violations.includes('unsupported_likelihood')) notes.push('当前证据不支持对原因作频率排序；未确认的原因只能作为不排序的待验证分支。');
   if (audit.violations.includes('cross_actor_side_effect')) notes.push('未满足完整受控条件时，不执行改参、复测、重试、重跑或重新触发；只核已有报文、映射、请求响应、日志和审计。');
-  if (audit.violations.includes('unexpected_concrete_path')) notes.push('具体接口路径只按用户原文或当前 route/Spec 已核字面量逐字表述；未核新路径已改为“该已核接口/当前请求”。');
   return [safeKept || '当前草稿未通过发布前证据与动作安全校验，已停止发布其中未经证实的判断和操作指令。', ...notes].filter(Boolean).join('\n\n');
 }
 

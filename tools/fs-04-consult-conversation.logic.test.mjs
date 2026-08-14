@@ -634,8 +634,11 @@ test('发布前确定性语义校验：路径必须来自用户或route并逐字
     const fallback = bundle.fallback(bad, audit);
     assert.doesNotMatch(fallback, /\/month\/view\/today|\/pwrsapi\/month\/view\/today\//);
     assert.match(fallback, /该已核接口/);
+    assert.doesNotMatch(fallback, /GET\s+该已核接口|具体接口路径只按/);
     assert.deepEqual(bundle.audit(fallback, '今天视图接口是什么？', route).violations, []);
   }
+  const methodFallback = bundle.fallback('请找 GET /month/view/today，再核当前响应。', bundle.audit('请找 GET /month/view/today，再核当前响应。', '今天视图接口是什么？', route));
+  assert.equal(methodFallback, '请找 该已核接口，再核当前响应。', '降级替换整个方法+路径，不留下“GET 该已核接口”残句或审计元话术');
   const userPath = bundle.audit('按你提供的 /custom/probe 只读核当前请求。', '我抓到 /custom/probe，怎么判断？', { matched: true, answerFacts: ['只核当前请求'] });
   assert.deepEqual(userPath.violations, [], '用户本轮原文路径可照实引用');
   const inventedWithoutKnownPath = bundle.audit('建议再看 GET /guessed/path。', '还要看哪里？', { matched: true, answerFacts: ['继续核当前请求'] });
