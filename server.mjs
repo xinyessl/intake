@@ -2762,18 +2762,18 @@ function consultCurrentRulingGuard(question, route) {
   ].join('\n');
 }
 
-// 短、单一的字段类型/枚举值/是否类事实题只回答所问属性；避免模型把相邻表结构、
-// 本地唯一元组或索引约束当成“顺便补充”带入答案。
+// 短、单一的字段类型/枚举值/是否/对象关联类事实题只回答所问属性；避免模型把相邻表结构、
+// 本地唯一元组、删除级联、历史行为或索引约束当成“顺便补充”带入答案。
 function consultFocusedFactGuard(question) {
   const q = String(question || '').trim();
   if (!q || q.length > 180) return '';
-  const focused = /(?:字段|列(?!表)|column|类型|type|是不是|是否|能否|能不能|会不会|是.*吗|分别是什么|值是什么|长度(?:多少|是什么)|状态码(?:是|为|什么|多少)|(?:调用|使用|走|用|是)(?:的|哪|哪个|什么)?接口|哪个接口|接口(?:是|为|叫|地址|路径)?什么|路径(?:是|为)?什么|(?:调用|使用|走|接口|路径)[^。！？；\n]{0,28}\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/|varchar|uuid|integer|bigint)/i.test(q);
-  const operational = /(?:为什么|怎么(?:排查|判断|验证|处理|解决|核对|看)|如何|排查|复现|留证|下一步|接下来|现场|转开发|抓包|请求和响应|请求.*抓到|响应.*抓到|业务流程|保存|提交|查询.*不到)/i.test(q);
+  const focused = /(?:字段|列(?!表)|column|类型|type|是不是|是否|能否|能不能|会不会|是.*吗|分别是什么|值是什么|长度(?:多少|是什么)|状态码(?:是|为|什么|多少)|(?:靠|通过|使用|用)(?:什么|哪个|哪些)?(?:字段|键|key|ID|id)?(?:来)?关联|关联(?:关系|键|字段|key|ID|id)(?:是|为|什么|哪个|哪些)|(?:怎么|如何)关联|(?:调用|使用|走|用|是)(?:的|哪|哪个|什么)?接口|哪个接口|接口(?:是|为|叫|地址|路径)?什么|路径(?:是|为)?什么|(?:调用|使用|走|接口|路径)[^。！？；\n]{0,28}\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/|varchar|uuid|integer|bigint)/i.test(q);
+  const operational = /(?:为什么|怎么(?:排查|判断|验证|处理|解决|核对|看)|如何(?!关联|串联|挂接)|排查|复现|留证|下一步|接下来|现场|转开发|抓包|请求和响应|请求.*抓到|响应.*抓到|业务流程|保存|提交|查询.*不到)/i.test(q);
   const multiQuestion = (q.match(/[？?；;]/g) || []).length > 1 || /(?:另外|同时|还要|以及).*(?:什么|哪个|是否|怎么|如何)/i.test(q);
   if (!focused || operational || multiQuestion) return '';
   return [
     '【单一事实题止答边界】',
-    '用户只询问或用陈述句确认一个接口、路径、状态码、字段/列的类型/长度/取值或一个是非事实。先从 current route 的 answerFacts/primary section 给直接答案，只补回答该事实所必需的限定与 mustNotConfuse 边界；答到这里就停止。',
+    '用户只询问或用陈述句确认一个接口、路径、状态码、字段/列的类型/长度/取值、对象之间的关联键/关系或一个是非事实。先从 current route 的 answerFacts/primary section 给直接答案，只补回答该事实所必需的限定与 mustNotConfuse 边界；答到这里就停止。',
     '不得主动扩写同表其它列、本地身份元组、联合键、索引、唯一约束、数据库迁移、SQL 用法、相邻模块事实、实施步骤、现场排查、原因假设、动作建议或“把截图发来”等继续邀约。只有用户在本轮明确问到这些内容，且当前有效证据直接覆盖时，才逐项回答。',
     '即使相邻事实本身真实，只要不改变本问答案，也不要作为“顺便提醒”加入；显式切题后不得带入上一主题事实。',
   ].join('\n');
@@ -2786,6 +2786,7 @@ function consultFocusedFactOverreach(answer, question, route) {
   const statusOnly = /状态码(?:是|为|什么|多少)/i.test(q);
   const typeOrLengthOnly = /(?:字段|列|column|varchar|uuid|integer|bigint|patient_id|visit_id|hospitalId|districtCode)/i.test(q)
     && /(?:类型|type|长度(?:多少|是什么))/i.test(q);
+  const relationshipOnly = /(?:(?:靠|通过|使用|用)(?:什么|哪个|哪些)?(?:字段|键|key|ID|id)?(?:来)?关联|关联(?:关系|键|字段|key|ID|id)(?:是|为|什么|哪个|哪些)|(?:怎么|如何)关联)/i.test(q);
   const allowedPaths = new Set(consultConcretePaths(`${q}\n${(route && route.answerFacts || []).join('\n')}\n${(route && route.mustNotConfuse || []).join('\n')}`));
   const focusedTokens = new Set(consultScopeTechnicalTokens(q).map(token => token.toLowerCase()));
   return String(answer || '').split(/(?<=[。！？；\n])/u).map(x => x.trim()).filter(statement => {
@@ -2810,6 +2811,12 @@ function consultFocusedFactOverreach(answer, question, route) {
       const hasAskedAttribute = /(?:类型|长度|varchar|character\s+varying|char|text|uuid|integer|bigint|smallint|\bint\b|\d+\s*(?:位|字符))/i.test(statement);
       const adjacentImplementation = /(?:索引|唯一约束|联合键|主键|缓存|接口|请求|落库|迁移|SQL|身份元组|院区上下文)/i.test(statement);
       return !(hasAskedAttribute && (hasFocusedToken || statementTokens.length === 0) && !adjacentImplementation);
+    }
+    if (relationshipOnly) {
+      const adjacentBehavior = /(?:删除|级联|清理|悬空|历史(?:结果|记录|数据)?|渲染|回显|兼容|复制|重存|迁移|保存|提交|修改|新增|创建|审批|签名|索引|唯一约束|查询性能)/i.test(statement);
+      if (adjacentBehavior) return true;
+      const necessaryRelationship = /(?:关联|关系|关联键|共享键|外键|串(?:起|联|起来)?|挂(?:到|接)?|指向|引用|映射|对应|所属|连接|↔|→|<-|->|(?:靠|通过|用)\s*[^。！？；\n]{0,24}(?:字段|键|key|ID|id))/i.test(statement);
+      return !necessaryRelationship;
     }
     return false;
   });

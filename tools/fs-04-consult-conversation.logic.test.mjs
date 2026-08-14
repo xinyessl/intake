@@ -396,7 +396,7 @@ test('当前裁决优先守卫：废止历史、遗留接口和账号差异不�
   assert.match(SRC, /consultCurrentRulingGuard\(qtext, route\)/);
 });
 
-test('单一事实止答守卫：接口/路径/状态码/字段/是否题只答直接事实', () => {
+test('单一事实止答守卫：接口/路径/状态码/字段/对象关联/是否题只答直接事实', () => {
   const fn = new Function(extractFn(SRC, 'consultFocusedFactGuard') + '\nreturn consultFocusedFactGuard;')();
   for (const q of [
     '工作台今天日期和星期调用哪个接口？',
@@ -406,6 +406,9 @@ test('单一事实止答守卫：接口/路径/状态码/字段/是否题只答�
     'patient_id 字段是什么类型？',
     'status 的值分别是什么？',
     '这个按钮是否支持只读查看？',
+    '自定义表单、字段、选项和填写结果靠什么关联？',
+    '订单和收费记录的关联键是什么？',
+    '这几个对象之间如何关联？',
   ]) {
     const text = fn(q);
     assert.match(text, /单一事实题止答边界/);
@@ -419,6 +422,8 @@ test('单一事实止答守卫：接口/路径/状态码/字段/是否题只答�
     '现场怎么验证这个接口？',
     '这个接口是什么，接下来怎么查？',
     '接口是什么？状态码不对怎么处理？',
+    '自定义表单关联为什么对不上，现场怎么排查？',
+    '删除模板后历史结果怎么处理？',
   ]) assert.equal(fn(q), '', q);
   assert.match(SRC, /consultFocusedFactGuard\(qtext\)/);
 });
@@ -1403,6 +1408,29 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.deepEqual(bundle.audit(normalized, '只有截图够不够？', route).violations, []);
 
   const formRoute = { matched: true, route: { title: '自定义表单关联' }, answerFacts: ['form_id 关联模板和结果，element_id 关联字段与选项，content 保存结果快照'] };
+  const atomicRelationshipQuestion = '自定义表单、字段、选项和填写结果靠什么关联？';
+  const atomicRelationshipDraft = [
+    '模板和填写结果靠 form_id 关联。',
+    '字段和选项靠 element_id 关联。',
+    '删除模板会物理级联删除字段和选项。',
+    '历史结果不会清理，form_id 可能悬空。',
+    '渲染历史结果主要读取 content 快照。',
+    '一句话串起来：模板 form_id → 字段和结果；字段 element_id → 选项。',
+  ].join('\n');
+  const atomicRelationshipAudit = bundle.audit(atomicRelationshipDraft, atomicRelationshipQuestion, formRoute);
+  assert.ok(atomicRelationshipAudit.violations.includes('focused_fact_overreach'), '原子关系题不得顺带扩写删除级联、历史和渲染行为');
+  assert.equal(atomicRelationshipAudit.focusedFactOverreach.length, 3);
+  const atomicRelationshipFallback = bundle.fallback(atomicRelationshipDraft, atomicRelationshipAudit);
+  assert.match(atomicRelationshipFallback, /form_id 关联/);
+  assert.match(atomicRelationshipFallback, /element_id 关联/);
+  assert.match(atomicRelationshipFallback, /form_id →/);
+  assert.doesNotMatch(atomicRelationshipFallback, /删除|级联|历史结果|悬空|渲染|content 快照/);
+  assert.deepEqual(bundle.audit(atomicRelationshipFallback, atomicRelationshipQuestion, formRoute).violations, []);
+  assert.ok(!bundle.audit(
+    '删除模板后，已核规则要求只读核对历史结果是否仍可见。',
+    '删除模板后历史结果怎么处理？',
+    formRoute,
+  ).violations.includes('focused_fact_overreach'), '用户明确问删除后的历史行为时不触发原子关系止答');
   const cleanupResidualDraft = [
     '第二步只读核对 form_id 和 element_id 的已有关系。',
     '列表/统计挂主表的可能空。',
