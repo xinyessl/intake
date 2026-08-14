@@ -319,6 +319,71 @@ test('真实PWRS地图回归：患者安全身份上下文在追问中持续，�
   assert.doesNotMatch(switched.answerFacts.join('\n'), /历史深链|默认院区/);
 });
 
+test('真实PWRS地图回归：tag35当前院区裁决压过废止授权方案，患教请求叠加全局患者身份', {
+  skip: !process.env.PWRS_REAL_MAP,
+}, () => {
+  const S = buildRoutingSandbox(makeDeps());
+  const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
+  for (const question of [
+    '切换院区后同号患者像串人了，第一步怎么缩小范围？',
+    '换另一个账号就正常，这是不是授权院区集合不同？',
+    '账号没有绑定目标院区，患者查询是不是应该拒绝？',
+    '列表要按账号授权院区集合缩小结果吗？',
+  ]) {
+    const hit = S.routeQuestion(map, question, '');
+    assert.equal(hit.route.id, 'DQ-003', `${question}，topN=${JSON.stringify(hit.topN)}`);
+    const facts = hit.answerFacts.join('\n');
+    const mnc = hit.mustNotConfuse.join('\n');
+    assert.match(facts, /院区、病区、科室.*搜索\/上下文条件.*不是账号位置授权/);
+    assert.match(facts, /不得按账号绑定.*授权院区集合.*缩小/);
+    assert.match(facts, /换账号后正常只是一条相关性线索/);
+    assert.match(mnc, /不得复活已废止的账号授权院区、授权院区集合、未授权院区拒绝/);
+  }
+
+  for (const question of [
+    '患教推荐排序这一段，请求和响应都抓到了，重点核对哪几个地方？',
+  ]) {
+    const hit = S.routeQuestion(map, question, '');
+    assert.equal(hit.route.id, 'QR-EDU-RECOMMEND-SORT', `${question}，topN=${JSON.stringify(hit.topN)}`);
+    assert.match(hit.answerFacts.join('\n'), /hospitalId \+ patientId \+ visitId/);
+    assert.match(hit.mustNotConfuse.join('\n'), /不得.*遗漏 hospitalId/);
+  }
+
+  for (const question of [
+    '推荐模板接口抓包时，患者身份参数最少核哪几个？',
+    '患教推荐顺序异常，患者请求先对哪些身份字段？',
+  ]) {
+    const identity = S.routeQuestion(map, question, '');
+    assert.equal(identity.route.id, 'DQ-003', `身份边界题可由全局患者身份路由回答，topN=${JSON.stringify(identity.topN)}`);
+    assert.match(identity.answerFacts.join('\n'), /hospitalId \+ patientId \+ visitId/);
+    assert.match(identity.mustNotConfuse.join('\n'), /districtCode.*仅限内部上游路由/);
+  }
+});
+
+test('真实PWRS地图回归：tag35只继承当前route事实，字段类型显式切题并止于本问', {
+  skip: !process.env.PWRS_REAL_MAP,
+}, () => {
+  const S = buildRoutingSandbox(makeDeps());
+  const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
+  const messages = [
+    { role: 'user', content: '跨院区时一名患者靠哪几个字段才算唯一？' },
+    { role: 'assistant', content: '我猜第一步是比较两个账号的授权院区集合。' },
+    { role: 'user', content: '第一步看过了没异常，接下来呢？' },
+  ];
+  const inherited = S.contextualRouteQuestion(map, messages, messages.at(-1).content, '');
+  assert.equal(inherited.route.id, 'DQ-003');
+  assert.equal(inherited.inherited, true);
+  assert.doesNotMatch(inherited.answerFacts.join('\n'), /比较两个账号的授权院区集合/);
+  assert.match(inherited.mustNotConfuse.join('\n'), /不得复活已废止/);
+
+  const switchedQuestion = 'pwrs_patient.p_id 是 PostgreSQL 原生 uuid 吗？';
+  const switched = S.contextualRouteQuestion(map, [...messages, { role: 'assistant', content: '继续。' }, { role: 'user', content: switchedQuestion }], switchedQuestion, '');
+  assert.equal(switched.route.id, 'QR-PATIENT-ID-COLUMN-TYPE');
+  assert.match(switched.answerFacts.join('\n'), /p_id 虽保存 UUID 字符串.*不是 PostgreSQL 原生 uuid/);
+  assert.match(switched.mustNotConfuse.join('\n'), /只问 p_id.*止于 p_id.*不得主动扩写其它列、本地身份元组、索引、唯一约束/);
+  assert.doesNotMatch(switched.answerFacts.join('\n'), /授权院区集合|历史深链/);
+});
+
 test('真实PWRS地图回归：患者列表接口、数据源与ETL局部未知走专用QR', {
   skip: !process.env.PWRS_REAL_MAP,
 }, () => {

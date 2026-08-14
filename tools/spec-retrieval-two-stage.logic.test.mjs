@@ -8,6 +8,8 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   buildSpecDocument,
+  chunkSpecDocument,
+  stripRetrievalExcluded,
   routeSpecCandidates,
   searchSpecDocuments,
   currentTurnEvidenceGuard,
@@ -33,6 +35,19 @@ function extractBalancedFunction(src, marker) {
   }
   assert.fail(`${marker} 未配平`);
 }
+
+test('废止历史可留在Markdown供审计，但RETRIEVAL-EXCLUDE段不进入目录路由或正文证据', () => {
+  const raw = `---\nid: A06\ntitle: 位置上下文\n---\n## 当前裁决\n院区只是搜索条件，不按账号绑定集合缩小结果。\n<!-- RETRIEVAL-EXCLUDE-START superseded -->\n## 历史方案\n账号授权院区集合决定结果，未授权院区拒绝。\n<!-- RETRIEVAL-EXCLUDE-END -->\n## 当前身份\nhospitalId + patientId + visitId。`;
+  assert.doesNotMatch(stripRetrievalExcluded(raw), /账号授权院区集合|未授权院区拒绝/);
+  const built = doc('docs/specs/A06.md', raw);
+  assert.doesNotMatch(built.routeText, /账号授权院区集合|未授权院区拒绝/);
+  assert.match(built.text, /院区只是搜索条件/);
+  const result = searchSpecDocuments([built], '账号授权院区集合是否决定患者结果？', { n: 5 });
+  assert.doesNotMatch(hitText(result.hits), /账号授权院区集合决定结果|未授权院区拒绝/);
+  const chunks = chunkSpecDocument(built);
+  assert.match(hitText(chunks), /院区只是搜索条件/);
+  assert.doesNotMatch(hitText(chunks), /账号授权院区集合决定结果|未授权院区拒绝/);
+});
 
 test('阶段一目录路由真实生效：只在候选文件内做正文检索，目录本身不成为证据片段', () => {
   const specs = [

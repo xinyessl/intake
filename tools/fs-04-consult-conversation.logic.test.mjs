@@ -345,6 +345,35 @@ test('安全必填上下文守卫：缺身份/租户/院区不得靠历史兼容
   assert.match(SRC, /consultCriticalContextGuard\(qtext, route\)/, '运行时模型 system 必须注入安全上下文守卫');
 });
 
+test('当前裁决优先守卫：废止历史、遗留接口和账号差异不能覆盖现行事实', () => {
+  const fn = new Function(extractFn(SRC, 'consultCurrentRulingGuard') + '\nreturn consultCurrentRulingGuard;')();
+  const route = {
+    matched: true,
+    route: { title: '患者院区身份' },
+    answerFacts: ['当前裁决：院区是搜索条件，不是账号授权集合。', '患教旧接口摘要只列 patientId + visitId 不构成 hospitalId 豁免。'],
+    mustNotConfuse: ['不得复活已废止的授权院区集合。'],
+  };
+  for (const q of ['换账号后正常，先看哪边？', '第一步看过了没异常，继续。', '接口是200。']) {
+    const text = fn(q, route);
+    assert.match(text, /当前裁决优先于废止历史与遗留契约/);
+    assert.match(text, /不能作为并列候选/);
+    assert.match(text, /换账号后正常、第一步没异常或接口返回 200.*不足以推翻当前裁决/);
+  }
+  assert.equal(fn('普通排序事实', { matched: true, route: { title: '排序' }, answerFacts: ['升序'] }), '');
+  assert.match(SRC, /consultCurrentRulingGuard\(qtext, route\)/);
+});
+
+test('单一事实止答守卫：字段类型题不扩写相邻列、tuple、索引或步骤', () => {
+  const fn = new Function(extractFn(SRC, 'consultFocusedFactGuard') + '\nreturn consultFocusedFactGuard;')();
+  for (const q of ['pwrs_patient.p_id 是 PostgreSQL 原生 uuid 吗？', 'patient_id 字段是什么类型？', 'status 的值分别是什么？']) {
+    const text = fn(q);
+    assert.match(text, /单一事实题止答边界/);
+    assert.match(text, /不得主动扩写同表其它列、本地身份元组、联合键、索引、唯一约束/);
+  }
+  assert.equal(fn('患者请求和响应抓到了，下一步怎么排查？'), '');
+  assert.match(SRC, /consultFocusedFactGuard\(qtext\)/);
+});
+
 test('精确路径前缀守卫：保留尾斜杠且不扩写相似路径或中间子串', () => {
   const fn = new Function(extractFn(SRC, 'consultExactPathBoundaryGuard') + '\nreturn consultExactPathBoundaryGuard;')();
   const route = {

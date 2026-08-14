@@ -22,6 +22,14 @@ const CONCEPT_NORMALIZATIONS = [
   [/(?:入院评估)/, 'AdmissionAssessment CustomForm resultId'],
 ];
 
+// Spec 可以保留已经废止的方案供人工追溯，但这类历史正文不能再次进入机器路由、
+// 二阶段正文切片或模型证据。成对标记之间的内容在建文档索引前统一剥离；
+// 原始 Markdown 仍完整保存在产品仓，兼顾审计与“当前事实只来自有效正文”。
+const RETRIEVAL_EXCLUDE_RE = /<!--\s*RETRIEVAL-EXCLUDE-START(?:\s+[^>]*)?-->[\s\S]*?<!--\s*RETRIEVAL-EXCLUDE-END\s*-->/gi;
+export function stripRetrievalExcluded(text) {
+  return String(text || '').replace(RETRIEVAL_EXCLUDE_RE, '\n');
+}
+
 function uniq(list) { return [...new Set(list.filter(Boolean))]; }
 function frontmatter(text) {
   const m = String(text || '').match(/^\uFEFF?---\r?\n([\s\S]*?)\r?\n---/);
@@ -95,8 +103,9 @@ function structuredRouteHints(text) {
 }
 
 export function buildSpecDocument(input) {
-  const text = String((input && input.text) || '');
-  const fm = frontmatter(text);
+  const rawText = String((input && input.text) || '');
+  const fm = frontmatter(rawText);
+  const text = stripRetrievalExcluded(rawText);
   const file = String((input && input.file) || '');
   const title = String((input && input.title) || fm.title || file.split('/').pop() || '').replace(/\.md$/i, '').trim();
   const module = String((input && input.module) || fm.module || '').trim();

@@ -932,7 +932,7 @@ function contextualRouteQuestion(map, messages, currentQuestion, subKey = '') {
         const bridgeRoute = routeQuestion(map, bridgeQuestion, subKey);
         const bridgeId = String(bridgeRoute.route && bridgeRoute.route.id || '');
         if (bridgeRoute.matched && bridgeId && bridgeId !== candidateId) { blocked = true; break; }
-        const bridgeEntities = bridgeQuestion.match(/按钮|菜单|医嘱|收费|监护|患教|反馈|药品|检验|体温单|权限|角色|token|登录|退出|登出|缓存|配置|模板|处方|病历|评估/ig) || [];
+        const bridgeEntities = bridgeQuestion.match(/按钮|菜单|医嘱|收费|监护|患教|反馈|药品|检验|体温单|权限|角色|token|登录|退出|登出|缓存|配置|模板|处方|病历|评估|数据库|表名|字段|列类型|varchar|uuid|p_id|pwrs_patient/ig) || [];
         if (bridgeEntities.some(term => !candidateText.includes(term.toLowerCase()))) { blocked = true; break; }
       }
       if (!blocked) prior = candidate;
@@ -958,7 +958,7 @@ function contextualRouteQuestion(map, messages, currentQuestion, subKey = '') {
   const priorText = String(priorCard && priorCard.searchText || [priorCard && priorCard.title, ...((priorCard && priorCard.keywords) || [])].filter(Boolean).join(' ')).toLowerCase();
   // 当前轮即使没路由成功，只要显式出现上一轮没有的新业务实体，也不能继承旧 route。
   // 例如患者列表后问“这个红色按钮点哪个”：按钮实体没有证据，应保持 miss，不能被“这个”污染成患者事实。
-  const entityTerms = current.match(/按钮|菜单|医嘱|收费|监护|患教|反馈|药品|检验|体温单|权限|角色|token|登录|缓存|配置|模板|处方|病历|评估/ig) || [];
+  const entityTerms = current.match(/按钮|菜单|医嘱|收费|监护|患教|反馈|药品|检验|体温单|权限|角色|token|登录|缓存|配置|模板|处方|病历|评估|数据库|表名|字段|列类型|varchar|uuid|p_id|pwrs_patient/ig) || [];
   const highRiskUiUnknown = entityTerms.some(term => /^(?:按钮|菜单)$/.test(term) && !previous.toLowerCase().includes(term.toLowerCase()));
   if (highRiskUiUnknown) return { ...direct, contextOverride: true, contextPreviousRouteId: priorId };
   const explicitUnknownEntity = entityTerms.some(term => !previous.toLowerCase().includes(term.toLowerCase()) && !priorText.includes(term.toLowerCase()));
@@ -1700,9 +1700,40 @@ function consultEvidenceLedgerGuard(question, route) {
     '【同主题已核事实账本（持续基线）】',
     '本轮 route 的 answerFacts、mustNotConfuse 与重新召回的正文/源码，是这个主题当前仍有效的事实账本。除非用户明确切到新实体，或提供了有证据的新事实与旧规则冲突，否则这些已核事实持续有效。',
     '历史 assistant 的解释、示例、猜测和假设不进入账本；只能继承 route/spec/source 证据。本轮没有再次重复业务名，也不代表旧事实失效。',
+    '用户只说“第一步看过了/没异常/继续”时，只能继承“排查已推进”这一现场进度；不得把上一条 assistant 自己定义的第一步、示例字段或归因复述成已经核实的事实。只有用户本轮明确给出的观察结果，才能加入现场证据。',
     '若本轮只是“这个动作/这个列表/下一步”等承接型泛化诊断，只允许沿当前继承 route 的实体与已核事实回答；即使本轮关键词又召回了其它相邻 Spec，也不得主动引入用户未点名的新业务实体，更不得列出该相邻实体的接口、字段、表名、按钮或状态作为补充示例。只有用户明确点名新实体时才切换 route 并使用新实体证据。',
     '答复顺序固定为：①先陈述持续有效的已知规则；②再说明本轮现场已经确认到哪；③只把仍缺日志、数据库权限、具体处理路径等未覆盖细节局部标为未知；④给最少、非破坏的下一步。禁止把第③项扩大成“说明书未覆盖整个主题”。',
     '“上午反馈/数据库无权限/只靠页面或响应/目前只能确认请求发出/还缺什么/复测到某一步”等表达，都是同主题的证据限制或进度，不是推翻事实账本的新证据。明确新实体或新主题仍以当前新 route 为准，旧账本不得串入。',
+  ].join('\n');
+}
+
+// 当前/最终裁决优先于同仓遗留实现和历史方案。具体裁决内容仍只来自 route facts；
+// 本守卫负责优先级，不在 intake 里硬编码某个产品字段或业务答案。
+function consultCurrentRulingGuard(question, route) {
+  if (!route || !route.matched) return '';
+  const facts = [...(route.answerFacts || []), ...(route.mustNotConfuse || [])].join('\n');
+  if (!/(?:当前裁决|最终决议|当前规则|已废止|已覆盖|不再作为|不得复活|不构成.*豁免)/i.test(facts)) return '';
+  return [
+    '【当前裁决优先于废止历史与遗留契约】',
+    'route/Spec 已明确标成“当前、最终、覆盖、废止或不再适用”的内容必须按时间与证据等级裁决：当前有效事实优先；被覆盖的历史方案、遗留接口摘要和 assistant 旧解释不能作为并列候选，更不能因为某个现场线索看似吻合就复活。',
+    '答复先直接应用当前裁决，再把遗留实现只局部标成实现缺口。若当前事实逐条否定了某个旧方案，答案也必须逐条守住这些反事实边界，不得换一种说法重新引入旧方案。',
+    '用户说换账号后正常、第一步没异常或接口返回 200，只是现场相关性/进度证据，不足以推翻当前裁决；先围绕当前裁决允许的只读观测做对比，不能沿用历史 assistant 对该线索的归因。',
+  ].join('\n');
+}
+
+// 短、单一的字段类型/枚举值/是否类事实题只回答所问属性；避免模型把相邻表结构、
+// 本地唯一元组或索引约束当成“顺便补充”带入答案。
+function consultFocusedFactGuard(question) {
+  const q = String(question || '').trim();
+  if (!q || q.length > 180) return '';
+  const focused = /(?:字段|列|column|类型|type|是不是|是否|是.*吗|分别是什么|值是什么|长度(?:多少|是什么)|varchar|uuid|integer|bigint)/i.test(q);
+  const operational = /(?:为什么|怎么|如何|排查|复现|留证|下一步|接下来|请求|响应|接口|页面|列表|业务流程|保存|提交|查询)/i.test(q);
+  if (!focused || operational) return '';
+  return [
+    '【单一事实题止答边界】',
+    '用户只问一个字段/列的类型、长度、取值或一个是非事实。先直接回答该属性，并只补一句回答这个属性所必需的限定；答到这里就停止。',
+    '不得主动扩写同表其它列、本地身份元组、联合键、索引、唯一约束、数据库迁移、SQL 用法、相邻模块事实或实施步骤。只有用户在本轮明确问到这些内容，且当前有效证据直接覆盖时，才逐项回答。',
+    '即使相邻事实本身真实，只要不改变本问答案，也不要作为“顺便提醒”加入；显式切题后不得带入上一主题事实。',
   ].join('\n');
 }
 
@@ -3414,7 +3445,7 @@ const server = http.createServer((req, res) => {
       else {
         // PD-04：命中 mustNotConfuse → 作负向提示注入 system（易混淆项，勿臆造）。answerFacts 已在 specHits 顶段（consultSystem 走 specExcerpts）。
         const mncNote = routeMnc.length ? '\n【以下为该问题的易混淆项，请勿臆造、勿张冠李戴】' + routeMnc.map(x => '\n· ' + x).join('') : '';
-        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationMode) + '\n' + consultEvidenceLedgerGuard(qtext, route) + '\n' + consultRuleApplicationGuard(qtext, route) + '\n' + consultCriticalContextGuard(qtext, route) + '\n' + consultExactPathBoundaryGuard(qtext, route) + '\n' + consultGenericControlledActionGuard(qtext) + '\n' + consultOperationalSafetyGuard(qtext, route) + '\n' + consultFileArtifactGuard(qtext, route) + '\n' + consultDiagnosticGuard(qtext, route) + '\n' + consultNonDestructiveDiagnosticGuard(qtext, route) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
+        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationMode) + '\n' + consultEvidenceLedgerGuard(qtext, route) + '\n' + consultCurrentRulingGuard(qtext, route) + '\n' + consultRuleApplicationGuard(qtext, route) + '\n' + consultCriticalContextGuard(qtext, route) + '\n' + consultFocusedFactGuard(qtext) + '\n' + consultExactPathBoundaryGuard(qtext, route) + '\n' + consultGenericControlledActionGuard(qtext) + '\n' + consultOperationalSafetyGuard(qtext, route) + '\n' + consultFileArtifactGuard(qtext, route) + '\n' + consultDiagnosticGuard(qtext, route) + '\n' + consultNonDestructiveDiagnosticGuard(qtext, route) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
           piece = String(piece == null ? '' : piece); if (!piece) return;
           if (!kbInjected && kbRefs.length) { kbInjected = true; sse({ kb: kbRefs, kbInjected: true }); }
           reply += piece; sse({ v: piece });
