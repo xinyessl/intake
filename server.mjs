@@ -1696,7 +1696,7 @@ function consultHasControlledActionBundle(question) {
 }
 
 function consultConcretePaths(text) {
-  return Array.from(new Set((String(text || '').match(/(?<![A-Za-z0-9_.{}<>:-])\/(?:[A-Za-z0-9_.{}<>:-]+\/)*[A-Za-z0-9_.{}<>:-]+\/?(?:\?[A-Za-z0-9_./?={}&<>:%+-]*)?/g) || [])
+  return Array.from(new Set((String(text || '').match(/(?<![\p{L}\p{N}_.{}<>:-])\/(?:[A-Za-z0-9_.{}<>:-]+\/)*[A-Za-z0-9_.{}<>:-]+\/?(?:\?[A-Za-z0-9_./?={}&<>:%+-]*)?/gu) || [])
     .map(x => x.replace(/[),.;，。；：]+$/g, '')).filter(Boolean)));
 }
 

@@ -640,6 +640,8 @@ test('发布前确定性语义校验：路径必须来自用户或route并逐字
   assert.deepEqual(userPath.violations, [], '用户本轮原文路径可照实引用');
   const inventedWithoutKnownPath = bundle.audit('建议再看 GET /guessed/path。', '还要看哪里？', { matched: true, answerFacts: ['继续核当前请求'] });
   assert.deepEqual(inventedWithoutKnownPath.violations, ['unexpected_concrete_path'], '没有已核路径时也不能新增具体路径');
+  const slashWords = bundle.audit('核对服务器/JVM 时间、year/week 字段和接口/页面展示差异。', '怎么只读核时间？', route);
+  assert.deepEqual(slashWords.violations, [], '中英文普通斜杠短语不能被当作具体路径');
 });
 
 test('跨主体副作用动作不能通过对接方、运维或开发外包绕过', () => {
