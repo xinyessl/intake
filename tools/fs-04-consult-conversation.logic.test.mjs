@@ -1097,6 +1097,17 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.doesNotMatch(skippedTopLevelStepFallback, /^5\. 整理材料$/m);
   assert.deepEqual(bundle.audit(skippedTopLevelStepFallback, '请求和响应都抓到了，重点核哪几处？', route).violations, []);
   assert.deepEqual(bundle.audit('2. 继续核响应\n只读比较。\n3. 整理已有证据\n不执行写操作。', '已经做到第二步，后面怎么查？', route).violations, [], '承接现场既有第二步时允许从2开始但后续仍须连续');
+  const ungroundedStartDraft = '3. 固定截图内容\n只读抄录页面原文。\n4. 核已有响应\n比较 year/week。\n5. 整理材料\n保留脱敏截图。';
+  const ungroundedStartAudit = bundle.audit(ungroundedStartDraft, '我只有截图，没有日志，最少还要补什么？', route);
+  assert.ok(ungroundedStartAudit.violations.includes('nonsequential_top_level_steps'), '用户未明示既有步骤时，新清单不得从3开始');
+  assert.deepEqual(ungroundedStartAudit.nonSequentialTopLevelSteps.map(item => [item.expected, item.number]), [[1, 3], [2, 4], [3, 5]]);
+  const ungroundedStartFallback = bundle.fallback(ungroundedStartDraft, ungroundedStartAudit);
+  assert.match(ungroundedStartFallback, /^1\. 固定截图内容$/m);
+  assert.match(ungroundedStartFallback, /^2\. 核已有响应$/m);
+  assert.match(ungroundedStartFallback, /^3\. 整理材料$/m);
+  assert.deepEqual(bundle.audit(ungroundedStartFallback, '我只有截图，没有日志，最少还要补什么？', route).violations, []);
+  assert.ok(bundle.audit('3. 只读核已有响应', '下一步先做什么？', route).violations.includes('nonsequential_top_level_steps'), '单个顶层步骤也须从本轮合法起点开始');
+  assert.deepEqual(bundle.audit('3. 继续核已有响应', '已经做到第二步，接下来呢？', route).violations, [], '用户明确做到第二步时可从第三步承接');
   assert.deepEqual(bundle.audit('1. 顶层步骤\n    7. 嵌套原始编号\n2. 下一顶层步骤', '怎么核对？', route).violations, [], '四空格嵌套编号不参与顶层连续性审计');
   assert.deepEqual(bundle.audit('1. 顶层步骤\n```text\n9. 文件中的原文编号\n```\n2. 下一顶层步骤', '怎么核对？', route).violations, [], '代码围栏里的编号不参与顶层连续性审计');
 
