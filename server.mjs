@@ -1693,7 +1693,7 @@ function consultFinalActionConsistencyGuard(question, route) {
     '编辑、删除、新建、保存、提交、发送、完成、签名、审批、星标、可能标记已读的打开、改参数、改报文类型、改映射、改配置、重试、复现、补跑或重跑，只要不能归入 B 或 C，就必须从最终答案所有位置删除，改成检查已有页面、请求、响应、报文、映射、截图、日志或审计。动作换成由第三方执行也不改变副作用：不得写成“让对接方改字符串/参数/映射/配置后用同一患者复测”“让运维重跑”或“让开发重试”来绕过守卫。不能因为同一答案别处写了“不要操作”“只读”“别重复”，就保留这里的正向点击或重做指令；否定提醒不能抵消冲突动作。',
     '若最终答案任何一处说“不要操作/不要重复/只读”，则其它任何一处都不得再建议点击编辑、删除、发送、完成等未知动作来观察是否发请求，也不得用“点了是否被拦住”“试一下看看”之类问句变相放行。用户只问“这个按钮是否发请求”时，只能查已有请求、日志、审计、代码或契约；没有既有证据就局部说明当前无法安全确认，不能让现场点击未知按钮补抓。',
     '发布前还要核对步骤和对照项的编号引用：后文引用①②③④等序号时，每个序号都必须在本答案前文有明确对应项；不得出现“共三项”却引用④、表格只定义①②③却在判断或小结写③/④等未定义引用。顶层阿拉伯数字步骤默认必须从1开始并按正文出现顺序连续递增，不得从3起步、从1、2、3直接跳到5或重复编号；只有用户本轮明确说到“第N步/做到第N步”时，才允许从N或N+1承接。已有完整步骤只能重编号，不能为补缺号新增步骤或事实。发现后必须删除含未定义序号的完整句/完整表格行，或在不新增事实的前提下改回已经定义的序号。',
-    '结构化答案还必须逐项核对“声明数量 → 实际内容”：声称二/三/四边、项、份、件、条、处或个对照时，紧随其后的对照表或 Markdown 清单必须确实给出相同数量的完整项；不得用一行表格冒充“三边对照”，也不得说“核两件事”却只列一项。同一小节里“确认/回复/补充/核对 N 件/项/点/条”等结构数量不得从 1 漂成 2；统一数量或删除不必要的数量承诺。“例如：/如下：/包括：/包含：/内容为：/由以下组成：/分别为：”后必须有实际内容，不能直接跳到下一步骤或“别搞混/注意/结论/下一步”等新小节；任何以冒号结尾的标题/提示语都不得出现在正文末尾而没有子内容。清理并列项后不得留下孤立的“还是页面…/或者接口…”等后半分支，也不得留下以“还是/或者/或是/或”结尾却没有后一项的前半分支；不得在答案开头或“结论/判断”等纯标题后直接留下没有前述主张的“但/但是/不过/然而”转折残句。删除示例或引用正文时必须连同整句引号一起删除，不得留下单独一行的「/」/“/”/『/』等孤立引号。明确要求对照/比较/分支判断时，若使用“一致/不一致、是/否、有/无、成功/失败、存在/不存在、命中/未命中”等成对标签，必须给齐两边，或改写成不承诺另一边的单一直接结论；不得只列“一致”后直接跳到未标注的另一种判断。“不要做/禁止/避免/切勿”等否定标题下不得只剩“可以/建议/请/应该/优先/最好/即可/帮你”等正向建议；正向替代动作必须移到独立的“可以做/下一步”标题下。用户明确只问“先做哪个验证/第一步做什么”时，只给一个最小只读验证，不追加第二、第三步或可转发的修改指令。',
+    '结构化答案还必须逐项核对“声明数量 → 实际内容”：声称二/三/四边、项、份、件、条、处或个对照时，紧随其后的对照表或 Markdown 清单必须确实给出相同数量的完整项；不得用一行表格冒充“三边对照”，也不得说“核两件事”却只列一项。同一小节里“确认/回复/补充/核对 N 件/项/点/条”等结构数量不得从 1 漂成 2；统一数量或删除不必要的数量承诺。“例如：/如下：/包括：/包含：/内容为：/由以下组成：/分别为：”后必须有实际内容，“里面有：”同样受此约束；无论跨块还是同一 paragraph，都不能在没有枚举、字段、代码或列表时直接跳到“别搞混/注意/结论/下一步”等新语义分句；任何以冒号结尾的标题/提示语都不得出现在正文末尾而没有子内容。清理并列项后不得留下孤立的“还是页面…/或者接口…”等后半分支，也不得留下以“还是/或者/或是/或”结尾却没有后一项的前半分支；不得在答案开头或“结论/判断”等纯标题后直接留下没有前述主张的“但/但是/不过/然而”转折残句。删除示例或引用正文时必须连同整句引号一起删除，不得留下单独一行的「/」/“/”/『/』等孤立引号。明确要求对照/比较/分支判断时，若使用“一致/不一致、是/否、有/无、成功/失败、存在/不存在、命中/未命中”等成对标签，必须给齐两边，或改写成不承诺另一边的单一直接结论；不得只列“一致”后直接跳到未标注的另一种判断。“不要做/禁止/避免/切勿”等否定标题下不得只剩“可以/建议/请/应该/优先/最好/即可/帮你”等正向建议；正向替代动作必须移到独立的“可以做/下一步”标题下。用户明确只问“先做哪个验证/第一步做什么”时，只给一个最小只读验证，不追加第二、第三步或可转发的修改指令。',
     '最终稿中的每个有序/无序列表项若只剩粗体步骤标题，后面必须有正文或子项；若直接遇到分隔线、新节、下一同级列表项或答案结束，删除该空列表项，不得补造内容。每个自然句也必须完整收口：行尾逗号、分号或冒号后必须有同句后半段或紧邻正文；若直接进入分隔线、新节、统一安全尾注或答案结束，删除该悬空完整句。列表项内部的正常分号、下一行有真实正文/子项及以句号/问号/叹号完整结束的粗体单句不得误删。',
     '普通行、粗体行或 Markdown heading 形式的“N. 步骤标题”都必须有自己的正文、表格、列表或代码块；水平分隔线不算步骤内容。若到下一同级编号步骤、分隔线、新节或文末仍无内容，删除该空编号步骤；删除后只把剩余已有步骤连续重编号，不得补造缺失步骤。四空格缩进的嵌套步骤属于父步骤内容，不参与顶层编号。',
     '用户问“只有这份证据/没有另一份证据，够不够、是否足够、能不能判断”时，第一句话必须明确回答：现有证据够完成什么、不够完成什么；随后只从 current/inherited route 的直接事实和已核主接口给最小缺口，不得退成页面、终端、账号、版本等跨主题通用材料清单。用户明确索要完整提单/转开发材料清单时才可给通用清单。若本轮没有可核验附件，不得声称看见截图里的数字或内容。',
@@ -2263,12 +2263,26 @@ function consultAnswerSemanticAudit(answer, question, route) {
       });
     }
   }
-  // 冒号式引导语必须真正引出内容；若下一非空行已经进入新步骤/标题或已结束，
-  // 说明模型删掉示例后留下了空壳。
+  // 冒号式引导语必须真正引出内容；若同一段内直接转入“别搞混/注意/结论”
+  // 等新语义分句，或下一非空行已经进入新步骤/标题或已结束，说明模型删掉
+  // 枚举后留下了空壳。段内空引导只删除该 clause，不能连带删掉后面的必要反例。
   const incompleteLeadIns = [];
   const topLevelStepRe = /^(?![ \t]{4})[ \t]{0,3}(?:#{1,6}[ \t]+)?(?:\*\*|__)?[ \t]*([1-9]\d*)[.、．][ \t]+/u;
+  const strongLeadSource = '(?:例如|如下|包括|包含|里面有|内容为|由以下(?:内容|项目|字段|部分)?组成|组成如下|分别为|具体为|可见|重点看)';
+  const inlineSemanticBoundary = '(?:别(?:和|跟|把|搞混)|不要混淆|注意|结论|下一步|判断|说明|技术依据|处理建议)';
+  const inlineLeadRe = new RegExp(`(?:^|[。！？；]\\s*)([^。！？；\\n]{0,180}?${strongLeadSource}\\s*[：:])\\s*(?=(?:\\*\\*|__)?\\s*${inlineSemanticBoundary})`, 'gu');
   for (let index = 0; index < documentLines.length; index++) {
-    const explicitLead = /(?:例如|如下|包括|包含|内容为|由以下(?:内容|项目|字段|部分)?组成|组成如下|分别为|具体为|可见|重点看)\s*[：:]\s*(?:\*\*|__)?\s*$/u.test(documentLines[index]);
+    for (const match of String(documentLines[index] || '').matchAll(inlineLeadRe)) {
+      incompleteLeadIns.push({
+        line: documentLines[index].trim(),
+        lineIndex: index,
+        inlineClause: String(match[1] || '').trim(),
+        affectedLines: [],
+      });
+    }
+  }
+  for (let index = 0; index < documentLines.length; index++) {
+    const explicitLead = /(?:例如|如下|包括|包含|里面有|内容为|由以下(?:内容|项目|字段|部分)?组成|组成如下|分别为|具体为|可见|重点看)\s*[：:]\s*(?:\*\*|__)?\s*$/u.test(documentLines[index]);
     const genericColonLead = /[：:]\s*(?:\*\*|__)?\s*$/u.test(documentLines[index]);
     if (!explicitLead && !genericColonLead) continue;
     let next = index + 1;
@@ -2277,7 +2291,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
     // 一般冒号标题只在正文已经结束时判空；“例如/如下”等强引导语还要拦截
     // 直接跳到下一步骤/标题的情况。
     if (!explicitLead && next < documentLines.length) continue;
-    const nextSectionHeading = /^\s*(?:#{1,6}\s+|(?:\*\*|__)?\s*(?:别搞混|注意|结论|下一步|判断|说明|技术依据|处理建议)(?:\*\*|__)?\s*[：:]?)/u.test(nextLine);
+    const nextSectionHeading = /^\s*(?:#{1,6}\s+|(?:\*\*|__)?\s*(?:别(?:和|跟|把|搞混)|不要混淆|注意|结论|下一步|判断|说明|技术依据|处理建议)(?:\*\*|__)?\s*[：:]?)/u.test(nextLine);
     if (explicitLead && next < documentLines.length && !topLevelStepRe.test(nextLine) && !nextSectionHeading) continue;
     const affectedLines = [documentLines[index]];
     let previous = index - 1;
@@ -2663,13 +2677,15 @@ function consultAnswerSemanticAudit(answer, question, route) {
       missingTokens: item.tokens.filter(token => !normalizedQualifierAnswer.includes(normalizeQualifierText(token))),
     };
   }).filter(item => item.missingTokens.length > 0);
+  const focusedAnswerPaths = new Set(consultConcretePaths(text));
   const focusedMustNotConfuse = focusedFactQuestion && route && route.matched
     ? (route.mustNotConfuse || []).map(String).filter(fact => {
         const factPaths = consultConcretePaths(fact);
-        return factPaths.length && factPaths.some(pathValue => String(question || '').includes(pathValue));
+        // 用户原文点名，或草稿已经主动给出该反例时，都把它视为本轮需要
+        // 保住的边界；后续原子去重不能因删除重复主接口句而顺带吞掉反例。
+        return factPaths.length && factPaths.some(pathValue => String(question || '').includes(pathValue) || focusedAnswerPaths.has(pathValue));
       })
     : [];
-  const focusedAnswerPaths = new Set(consultConcretePaths(text));
   const missingFocusedMustNotConfuse = focusedMustNotConfuse.filter(fact =>
     !consultConcretePaths(fact).some(pathValue => focusedAnswerPaths.has(pathValue))
   );
@@ -2905,7 +2921,7 @@ function consultAnswerRevisionPrompt(draft, audit) {
       ? `草稿同一局部结构的数量声明互相冲突：${(audit.conflictingCountDeclarations || []).map(item => `“${item.first}”=${item.firstCount}，但“${item.second}”=${item.secondCount}`).join('；')}。统一为实际已有清单项数，或删除不必要的数量承诺；不得为了凑数新增问题、字段或动作。`
       : '',
     audit.violations.includes('incomplete_structured_lead_in')
-      ? '草稿含“例如：/如下：/包括：/包含：/内容为：/由以下组成：/分别为：”后直接跳到下一步骤、新小节或结束的空引导句，或文末以冒号结尾却没有任何子内容的空标题/提示语。删除该完整引导句及其孤立步骤标题，或只用草稿中已经存在的内容补成完整自然句；禁止补造示例或注意事项。'
+      ? '草稿含“例如：/如下：/包括：/包含：/里面有：/内容为：/由以下组成：/分别为：”后未给任何枚举、字段、代码或列表，就在同一段内直接进入“别搞混/注意/结论/下一步”等新语义分句，跨块跳到下一步骤、新小节或结束，或文末以冒号结尾而没有子内容。删除该完整空引导 clause 及其孤立步骤标题，保留后面的必要反例；也可只用草稿中已经存在的内容补成完整自然句。禁止补造示例、字段或注意事项。'
       : '',
     audit.violations.includes('empty_diagnostic_branch')
       ? '草稿存在只有分支标题、没有任何判断或安全动作的空诊断分支。只能用草稿已有正文补回；若没有现成内容，删除该完整分支标题，不得凭常识补造步骤。'
@@ -2949,6 +2965,48 @@ function consultReplaceUnexpectedPath(text, pathValue) {
   const suffix = '(?![A-Za-z0-9_.{}<>:/?={}&%+\\-])';
   let out = String(text || '').replace(new RegExp(`\\b(?:GET|POST|PUT|PATCH|DELETE)\\s+${escaped}${suffix}`, 'gu'), '该已核接口');
   return out.replace(new RegExp(`(?<![A-Za-z0-9_.{}<>:\\-])${escaped}${suffix}`, 'gu'), '该已核接口');
+}
+
+// 原子接口 fallback 可能同时保留草稿里的裸主接口句，又从 route 恢复一条
+// 带认证限定的完整主接口句。按 claim 去重：同一主路径只留限定最完整的一句，
+// 再核必要 mustNotConfuse 是否仍在；不拼接、不改写接口事实。
+function consultDeduplicateFocusedAtomicAnswer(text, audit) {
+  if (!audit || !audit.focusedFactQuestion || !audit.focusedFactPrimaryPath) return String(text || '');
+  const primary = audit.focusedFactPrimaryPath;
+  const parts = String(text || '').split(/(?<=[。！？；\n])/u);
+  const candidates = parts.map((part, index) => ({ part, index }))
+    .filter(item => consultConcretePaths(item.part).includes(primary.path));
+  if (candidates.length > 1) {
+    const qualifierTokens = (audit.focusedRelationshipFacts || [])
+      .filter(item => item.kind === 'interface_qualifier' && item.path === primary.path)
+      .flatMap(item => item.tokens || []);
+    const normalize = value => String(value || '').toLowerCase().replace(/\s+/g, '')
+      .replace(/不需要|不校验|免(?:于)?/gu, '无需')
+      .replace(/需要|必须|要求|应当|须/gu, '需')
+      .replace(/认证|登录校验/gu, '鉴权');
+    const mustNotConfusePaths = new Set(consultConcretePaths((audit.focusedMustNotConfuse || []).join('\n')));
+    const scored = candidates.map(item => {
+      const normalized = normalize(item.part);
+      const qualifiers = qualifierTokens.filter(token => normalized.includes(normalize(token))).length;
+      const boundaryPaths = consultConcretePaths(item.part).filter(pathValue => mustNotConfusePaths.has(pathValue)).length;
+      const method = primary.method && new RegExp(`\\b${primary.method}\\s+`, 'i').test(item.part) ? 1 : 0;
+      return { ...item, score: qualifiers * 10 + boundaryPaths * 3 + method };
+    });
+    scored.sort((a, b) => b.score - a.score || a.index - b.index);
+    const keepIndex = scored[0].index;
+    const duplicateIndexes = new Set(candidates.map(item => item.index).filter(index => index !== keepIndex));
+    for (let index = 0; index < parts.length; index++) if (duplicateIndexes.has(index)) parts[index] = '';
+  }
+  let output = parts.join('').trim();
+  const outputPaths = new Set(consultConcretePaths(output));
+  for (const fact of audit.focusedMustNotConfuse || []) {
+    const factPaths = consultConcretePaths(fact);
+    if (factPaths.length && !factPaths.some(pathValue => outputPaths.has(pathValue))) {
+      output = [output, /[。！？]$/u.test(fact.trim()) ? fact.trim() : `${fact.trim()}。`].filter(Boolean).join('\n');
+      factPaths.forEach(pathValue => outputPaths.add(pathValue));
+    }
+  }
+  return output;
 }
 
 function consultAnswerSafeFallback(draft, audit) {
@@ -3012,6 +3070,9 @@ function consultAnswerSafeFallback(draft, audit) {
   }
   const conflictingCountLines = new Set((audit.conflictingCountDeclarations || []).flatMap(item => [item.first, item.second]));
   if (conflictingCountLines.size) fallbackDraft = fallbackDraft.split('\n').filter(line => !conflictingCountLines.has(line.trim())).join('\n');
+  for (const lead of audit.incompleteLeadIns || []) {
+    if (lead.inlineClause) fallbackDraft = fallbackDraft.replace(lead.inlineClause, '');
+  }
   const incompleteLines = new Set((audit.incompleteLeadIns || []).flatMap(item => item.affectedLines || []));
   if (incompleteLines.size) fallbackDraft = fallbackDraft.split('\n').filter(line => !incompleteLines.has(line)).join('\n');
   const emptyBranchLines = new Set((audit.emptyDiagnosticBranchHeadings || []).map(item => item.line));
@@ -3092,6 +3153,7 @@ function consultAnswerSafeFallback(draft, audit) {
     || audit.violations.includes('undefined_observation_variable')) {
     safeKept = String(audit.safeDiagnosticFallback || '').trim();
   }
+  safeKept = consultDeduplicateFocusedAtomicAnswer(safeKept, audit);
   const notes = [];
   // 原子事实题的审计只负责删掉越界内容；内部违规原因留在 retrieval.answerAudit，
   // 不能再以“安全尾注”形式污染用户正文，否则字段类型/接口题仍然没有真正止答。
@@ -3217,6 +3279,7 @@ function consultFocusedFactGuard(question) {
   return [
     '【单一事实题止答边界】',
     '用户只询问或用陈述句确认一个接口、路径、状态码、字段/列的类型/长度/取值、对象之间的关联键/关系或一个是非事实。先从 current route 的 answerFacts/primary section 给直接答案，只补回答该事实所必需的限定与 mustNotConfuse 边界；唯一主接口题还必须保留同一 answerFact 直接绑定的请求方法、认证/访问限定与必要固定参数，不得把“止答”误解为只剩路径；关系题必须逐一覆盖用户点名对象在 current route 中已确认的直接挂接边与内容表示/存储边，每条边都要在同一句或同一表格行明确绑定来源对象、关系键和目标对象，标题里罗列对象不能替代关系正文，同一业务键连接多个目标时也不能合并漏答；direct mustNotConfuse 中“共享业务键不是真外键”等关系边界也必须发布；答到这里就停止。',
+    '发布前按语义去重：同一主接口只出现一次 method + 精确 path + 同一事实直接限定；必要 mustNotConfuse 只保留一次。不得先写“当前接口”，后面又重复整句 route fact。若“包含/里面有/内容为：”后没有枚举、字段、代码或列表，而在同一段直接进入“别搞混/注意/结论/下一步”，删除该空引导 clause，保留后面的必要边界。',
     '不得主动扩写同表其它列、本地身份元组、联合键、索引、唯一约束、数据库迁移、SQL 用法、相邻模块事实、实施步骤、现场排查、原因假设、动作建议或“把截图发来”等继续邀约。只有用户在本轮明确问到这些内容，且当前有效证据直接覆盖时，才逐项回答。',
     '即使相邻事实本身真实，只要不改变本问答案，也不要作为“顺便提醒”加入；显式切题后不得带入上一主题事实。',
   ].join('\n');

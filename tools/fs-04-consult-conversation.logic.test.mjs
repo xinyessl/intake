@@ -414,6 +414,8 @@ test('单一事实止答守卫：接口/路径/状态码/字段/对象关联/是
     assert.match(text, /单一事实题止答边界/);
     assert.match(text, /current route 的 answerFacts\/primary section/);
     assert.match(text, /认证\/访问限定与必要固定参数/);
+    assert.match(text, /同一主接口只出现一次 method \+ 精确 path/);
+    assert.match(text, /同一段直接进入“别搞混\/注意\/结论\/下一步”/);
     assert.match(text, /不得主动扩写同表其它列、本地身份元组、联合键、索引、唯一约束/);
     assert.match(text, /现场排查、原因假设、动作建议/);
   }
@@ -850,6 +852,7 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + extractFn(SRC, 'consultAnswerRevisionPrompt') + '\n'
     + extractFn(SRC, 'consultReplaceUnexpectedPath') + '\n'
+    + extractFn(SRC, 'consultDeduplicateFocusedAtomicAnswer') + '\n'
     + extractFn(SRC, 'consultNormalizeSafeMarkdown') + '\n'
     + extractFn(SRC, 'consultAnswerSafeFallback') + '\n'
     + 'return { audit:consultAnswerSemanticAudit, revision:consultAnswerRevisionPrompt, fallback:consultAnswerSafeFallback };',
@@ -1540,6 +1543,22 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     answerFacts: ['GET /pwrsapi/month/view/today 返回 year/week'],
     mustNotConfuse: ['不得答已废止的 GET /month/view'],
   }).violations, []);
+  const q120R75ProductionDraft = [
+    '当前接口：GET /pwrsapi/month/view/today。',
+    '返回是 Map<String,String>，里面有：别和已删除的 GET /month/view 月历网格接口搞混。',
+    '工作台通过需合法 JWT 的 GET /pwrsapi/month/view/today 获取当前日期与星期。',
+  ].join('\n');
+  const q120R75ProductionAudit = bundle.audit(q120R75ProductionDraft, todayStatementQuestion, todayAtomicRoute);
+  assert.ok(q120R75ProductionAudit.violations.includes('incomplete_structured_lead_in'), '同一paragraph内“里面有：”后直接转防混淆也必须判空');
+  assert.ok(q120R75ProductionAudit.incompleteLeadIns.some(item => item.inlineClause && /Map<String,String>.*里面有：/u.test(item.inlineClause)), '段内空引导须精确记录可删clause');
+  const q120R76Fallback = bundle.fallback(q120R75ProductionDraft, q120R75ProductionAudit);
+  assert.equal((q120R76Fallback.match(/GET \/pwrsapi\/month\/view\/today/g) || []).length, 1, '原子接口fallback最终只保留一次method+path');
+  assert.match(q120R76Fallback, /需合法 JWT/);
+  assert.match(q120R76Fallback, /GET \/month\/view/);
+  assert.doesNotMatch(q120R76Fallback, /Map<String,String>|里面有：/);
+  assert.deepEqual(bundle.audit(q120R76Fallback, todayStatementQuestion, todayAtomicRoute).violations, [], '段内空引导清理与原子接口去重后的终稿须自审全绿');
+  assert.ok(!bundle.audit('返回包含：year、week。', '这个响应包含哪些字段？', todayAtomicRoute).violations.includes('incomplete_structured_lead_in'), '冒号后有合法内联字段枚举时放行');
+  assert.ok(bundle.audit('响应内容为：**注意**：不要混淆其它接口。', '这个响应是什么？', todayAtomicRoute).violations.includes('incomplete_structured_lead_in'), 'Markdown inline强调的新语义分句不能冒充引导内容');
   assert.deepEqual(bundle.audit('**1. 只读核对**\n比较已有请求与已有响应原文。', '第一步先做什么？', route).violations, [], '单步问题只给一个顶层步骤时应放行');
 
   const twoSourcesOneRowDraft = [
@@ -2157,6 +2176,7 @@ test('发布前确定性语义校验：路径必须来自用户或route并逐字
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + extractFn(SRC, 'consultAnswerRevisionPrompt') + '\n'
     + extractFn(SRC, 'consultReplaceUnexpectedPath') + '\n'
+    + extractFn(SRC, 'consultDeduplicateFocusedAtomicAnswer') + '\n'
     + extractFn(SRC, 'consultNormalizeSafeMarkdown') + '\n'
     + extractFn(SRC, 'consultAnswerSafeFallback') + '\n'
     + 'return { audit:consultAnswerSemanticAudit, revision:consultAnswerRevisionPrompt, fallback:consultAnswerSafeFallback };',
@@ -2249,6 +2269,7 @@ test('发布前事实作用域审计：相邻模块、通配路径不串入，�
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + extractFn(SRC, 'consultAnswerRevisionPrompt') + '\n'
     + extractFn(SRC, 'consultReplaceUnexpectedPath') + '\n'
+    + extractFn(SRC, 'consultDeduplicateFocusedAtomicAnswer') + '\n'
     + extractFn(SRC, 'consultNormalizeSafeMarkdown') + '\n'
     + extractFn(SRC, 'consultAnswerSafeFallback') + '\n'
     + 'return { audit:consultAnswerSemanticAudit, revision:consultAnswerRevisionPrompt, fallback:consultAnswerSafeFallback };',
