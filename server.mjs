@@ -1696,8 +1696,20 @@ function consultHasControlledActionBundle(question) {
 }
 
 function consultConcretePaths(text) {
-  return Array.from(new Set((String(text || '').match(/(?<![\p{L}\p{N}_.{}<>:-])(?:(?:…|\.{2,})\s*)?\/(?:[A-Za-z0-9_.{}<>:-]+\/)*[A-Za-z0-9_.{}<>:-]+\/?(?:\?[A-Za-z0-9_./?={}&<>:%+-]*)?/gu) || [])
+  return Array.from(new Set((String(text || '').match(/(?<![\p{L}\p{N}_.{}<>:-])(?:(?:…|\.{2,})\s*)?\/(?:[A-Za-z0-9_.{}<>:-]+\/)*(?:[A-Za-z0-9_.{}<>:-]+|\*)\/?(?:\?[A-Za-z0-9_./?={}&<>:%+-]*)?/gu) || [])
     .map(x => x.replace(/[),.;，。；：]+$/g, '')).filter(Boolean)));
+}
+
+function consultRouteScopeText(route) {
+  if (!route || !route.matched) return '';
+  const refs = [...(route.primaryRefs || []), ...(route.contextRefs || []), ...(route.specRefs || [])];
+  return [route.route && route.route.id, route.route && route.route.title, ...(route.answerFacts || []), ...(route.mustNotConfuse || []),
+    ...refs.flatMap(ref => ref && typeof ref === 'object' ? [ref.specId, ref.title, ref.path, ref.section, ref.anchor] : [ref])]
+    .filter(Boolean).join(' ');
+}
+
+function consultScopeEntityTerms() {
+  return ['外部调度', '调度', '补跑', '重跑', '同步任务', 'ETL', '批处理', '患教', '收费', '药师反馈', '反馈', '监护', '药物重整', '医嘱干预', '患者列表'];
 }
 
 function consultAnswerSemanticAudit(answer, question, route) {
@@ -1709,16 +1721,19 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const negativeOrConditional = /(?:不得|不能|不要|禁止|不可|不应|先别|停止|未确认|任一项没有|仅当|只有[^。！？；\n]{0,30}(?:才|之后|后))/i;
   const unsafeActorActions = controlled ? [] : text.split(/(?<=[。！？；\n])/u)
     .map(x => x.trim()).filter(x => x && actorAction.test(x) && !negativeOrConditional.test(x));
-  const routeText = route && route.matched
-    ? [route.route && route.route.title, ...(route.answerFacts || []), ...(route.mustNotConfuse || [])].filter(Boolean).join(' ')
-    : '';
+  const routeText = consultRouteScopeText(route);
+  const scopeText = `${question || ''}\n${routeText}`;
   const allowedPaths = new Set(consultConcretePaths(`${question || ''}\n${routeText}`));
   const unexpectedPaths = consultConcretePaths(text).filter(p => !allowedPaths.has(p));
+  const unexpectedEntityTerms = consultScopeEntityTerms()
+    .filter(term => text.toLowerCase().includes(term.toLowerCase()) && !scopeText.toLowerCase().includes(term.toLowerCase()))
+    .filter((term, index, terms) => !terms.slice(0, index).some(parent => parent.includes(term)));
   const violations = [];
   if (likelihoodTerms.length) violations.push('unsupported_likelihood');
   if (unsafeActorActions.length) violations.push('cross_actor_side_effect');
   if (unexpectedPaths.length) violations.push('unexpected_concrete_path');
-  return { checked: true, likelihoodAllowed, likelihoodTerms, unsafeActorActionCount: unsafeActorActions.length, unexpectedPaths, violations };
+  if (unexpectedEntityTerms.length) violations.push('out_of_scope_entity');
+  return { checked: true, likelihoodAllowed, likelihoodTerms, unsafeActorActionCount: unsafeActorActions.length, unexpectedPaths, unexpectedEntityTerms, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -1733,6 +1748,9 @@ function consultAnswerRevisionPrompt(draft, audit) {
       : '',
     audit.violations.includes('unexpected_concrete_path')
       ? '草稿出现了用户原文和当前 route/Spec 事实都没有的具体路径，或把已核路径用省略号、缩写、去前缀/尾斜杠的方式改写。删除这些新路径；已核路径必须逐字保留每个路径段和斜杠。不能安全恢复原字面量时改写为“该已核接口”或“当前请求”，不要猜路径。'
+      : '',
+    audit.violations.includes('out_of_scope_entity')
+      ? `草稿引入了当前问题与当前/继承 route 事实未点名的相邻模块或任务：${(audit.unexpectedEntityTerms || []).join('、')}。删除这些模块、接口和动作所在的整句，只围绕当前已核主题作答；用户显式切到新实体时才允许进入新 route。`
       : '',
     '保留草稿中已经由 Spec/route/源码确认的事实和局部未知边界；不得把当前主题整体降级为“说明书未覆盖”。',
     '<draft>', String(draft || ''), '</draft>',
@@ -1755,6 +1773,7 @@ function consultAnswerSafeFallback(draft, audit) {
     if (audit.violations.includes('unsupported_likelihood') && CONSULT_LIKELIHOOD_WORD_RE.test(part)) { CONSULT_LIKELIHOOD_WORD_RE.lastIndex = 0; return false; }
     CONSULT_LIKELIHOOD_WORD_RE.lastIndex = 0;
     if (audit.violations.includes('cross_actor_side_effect') && actorAction.test(part) && !negativeOrConditional.test(part)) return false;
+    if (audit.violations.includes('out_of_scope_entity') && (audit.unexpectedEntityTerms || []).some(term => part.toLowerCase().includes(String(term).toLowerCase()))) return false;
     return true;
   }).join('').trim();
   let safeKept = kept;
@@ -1764,7 +1783,7 @@ function consultAnswerSafeFallback(draft, audit) {
   }
   const notes = [];
   if (audit.violations.includes('unsupported_likelihood')) notes.push('当前证据不支持对原因作频率排序；未确认的原因只能作为不排序的待验证分支。');
-  if (audit.violations.includes('cross_actor_side_effect')) notes.push('未满足完整受控条件时，不执行改参、复测、重试、重跑或重新触发；只核已有报文、映射、请求响应、日志和审计。');
+  if (audit.violations.includes('cross_actor_side_effect')) notes.push('未满足完整受控条件时，不执行这些改动或重复操作；只核已有报文、映射、请求响应、日志和审计。');
   return [safeKept || '当前草稿未通过发布前证据与动作安全校验，已停止发布其中未经证实的判断和操作指令。', ...notes].filter(Boolean).join('\n\n');
 }
 
@@ -3640,10 +3659,14 @@ const server = http.createServer((req, res) => {
             version: 1,
             checked: true,
             initialViolations: initialAudit.violations,
+            initialUnexpectedPaths: initialAudit.unexpectedPaths || [],
+            initialUnexpectedEntities: initialAudit.unexpectedEntityTerms || [],
             revisionAttempted,
             revisionAccepted,
             fallbackUsed,
             finalViolations: finalAudit.violations,
+            finalUnexpectedPaths: finalAudit.unexpectedPaths || [],
+            finalUnexpectedEntities: finalAudit.unexpectedEntityTerms || [],
             likelihoodEvidence: initialAudit.likelihoodAllowed,
           };
           if (retrieval) retrieval.answerAudit = answerAudit;

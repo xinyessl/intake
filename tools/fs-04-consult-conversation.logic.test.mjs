@@ -534,6 +534,8 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
     + extractFn(SRC, 'consultHasLikelihoodEvidence') + '\n'
     + extractFn(SRC, 'consultHasControlledActionBundle') + '\n'
     + extractFn(SRC, 'consultConcretePaths') + '\n'
+    + extractFn(SRC, 'consultRouteScopeText') + '\n'
+    + extractFn(SRC, 'consultScopeEntityTerms') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + 'return consultAnswerSemanticAudit;',
   )();
@@ -560,6 +562,8 @@ test('发布前确定性语义校验：跨主体副作用触发，否定句和�
     + extractFn(SRC, 'consultHasLikelihoodEvidence') + '\n'
     + extractFn(SRC, 'consultHasControlledActionBundle') + '\n'
     + extractFn(SRC, 'consultConcretePaths') + '\n'
+    + extractFn(SRC, 'consultRouteScopeText') + '\n'
+    + extractFn(SRC, 'consultScopeEntityTerms') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + 'return consultAnswerSemanticAudit;',
   )();
@@ -568,7 +572,7 @@ test('发布前确定性语义校验：跨主体副作用触发，否定句和�
   assert.deepEqual(failed.violations, ['cross_actor_side_effect']);
   assert.equal(failed.unsafeActorActionCount, 1);
   assert.deepEqual(audit('确认服务器时区不对后，转运维/开发按部署规范改时区。', '今天视图和浏览器不一致，怎么处理？', route).violations, ['cross_actor_side_effect']);
-  assert.deepEqual(audit('不得让运维重跑，也不能让开发重试。', '同步中断怎么办？', route).violations, []);
+  assert.deepEqual(audit('不得让运维重跑，也不能让开发重试。', '同步中断，能不能让运维重跑或开发重试？', route).violations, []);
   assert.deepEqual(audit(
     '在已确认条件下，可让对接方受控改参数后单次复测。',
     '隔离测试环境、专用测试数据、明确授权、回滚清理、幂等性和影响范围都已确认。',
@@ -583,6 +587,8 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     + extractFn(SRC, 'consultHasLikelihoodEvidence') + '\n'
     + extractFn(SRC, 'consultHasControlledActionBundle') + '\n'
     + extractFn(SRC, 'consultConcretePaths') + '\n'
+    + extractFn(SRC, 'consultRouteScopeText') + '\n'
+    + extractFn(SRC, 'consultScopeEntityTerms') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + extractFn(SRC, 'consultAnswerRevisionPrompt') + '\n'
     + extractFn(SRC, 'consultReplaceUnexpectedPath') + '\n'
@@ -610,6 +616,8 @@ test('发布前确定性语义校验：路径必须来自用户或route并逐字
     + extractFn(SRC, 'consultHasLikelihoodEvidence') + '\n'
     + extractFn(SRC, 'consultHasControlledActionBundle') + '\n'
     + extractFn(SRC, 'consultConcretePaths') + '\n'
+    + extractFn(SRC, 'consultRouteScopeText') + '\n'
+    + extractFn(SRC, 'consultScopeEntityTerms') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + extractFn(SRC, 'consultAnswerRevisionPrompt') + '\n'
     + extractFn(SRC, 'consultReplaceUnexpectedPath') + '\n'
@@ -653,6 +661,47 @@ test('发布前确定性语义校验：路径必须来自用户或route并逐字
   assert.deepEqual(inventedWithoutKnownPath.violations, ['unexpected_concrete_path'], '没有已核路径时也不能新增具体路径');
   const slashWords = bundle.audit('核对服务器/JVM 时间、year/week 字段和接口/页面展示差异。', '怎么只读核时间？', route);
   assert.deepEqual(slashWords.violations, [], '中英文普通斜杠短语不能被当作具体路径');
+});
+
+test('发布前事实作用域审计：相邻模块、通配路径不串入，显式切题放行', () => {
+  const likelihoodConst = SRC.match(/const CONSULT_LIKELIHOOD_WORD_RE = [^;]+;/)?.[0] || '';
+  const bundle = new Function(
+    likelihoodConst + '\n'
+    + extractFn(SRC, 'consultHasLikelihoodEvidence') + '\n'
+    + extractFn(SRC, 'consultHasControlledActionBundle') + '\n'
+    + extractFn(SRC, 'consultConcretePaths') + '\n'
+    + extractFn(SRC, 'consultRouteScopeText') + '\n'
+    + extractFn(SRC, 'consultScopeEntityTerms') + '\n'
+    + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
+    + extractFn(SRC, 'consultAnswerRevisionPrompt') + '\n'
+    + extractFn(SRC, 'consultReplaceUnexpectedPath') + '\n'
+    + extractFn(SRC, 'consultAnswerSafeFallback') + '\n'
+    + 'return { audit:consultAnswerSemanticAudit, revision:consultAnswerRevisionPrompt, fallback:consultAnswerSafeFallback };',
+  )();
+  const todayRoute = {
+    matched: true,
+    route: { id: 'QR-TODAY', title: '工作台今天日期星期' },
+    primaryRefs: [{ specId: 'STAT-04a', title: '今天视图' }],
+    answerFacts: ['GET /pwrsapi/month/view/today 返回 year/week，日期来自 JVM 时区'],
+    mustNotConfuse: ['不得答 GET /month/view'],
+  };
+  const leaked = '今天视图仍调用 GET /pwrsapi/month/view/today。今天视图与外部调度、/comm/*、补跑无关。';
+  const leakedAudit = bundle.audit(leaked, '今天请求响应都抓到了，重点核什么？', todayRoute);
+  assert.deepEqual(leakedAudit.violations, ['unexpected_concrete_path', 'out_of_scope_entity']);
+  assert.deepEqual(leakedAudit.unexpectedPaths, ['/comm/*']);
+  assert.deepEqual(leakedAudit.unexpectedEntityTerms, ['外部调度', '补跑']);
+  assert.match(bundle.revision(leaked, leakedAudit), /当前\/继承 route 事实未点名/);
+  const leakedFallback = bundle.fallback(leaked, leakedAudit);
+  assert.equal(leakedFallback, '今天视图仍调用 GET /pwrsapi/month/view/today。');
+  assert.deepEqual(bundle.audit(leakedFallback, '今天请求响应都抓到了，重点核什么？', todayRoute).violations, []);
+
+  const patientRoute = { matched: true, route: { id: 'QR-PATIENT', title: '患者详情' }, answerFacts: ['患者身份核 hospitalId + patientId + visitId'] };
+  assert.deepEqual(bundle.audit('再看患教模板和患者详情。', '患者详情身份怎么核？', patientRoute).violations, ['out_of_scope_entity']);
+  assert.deepEqual(bundle.audit('患教模板身份怎么核？', '现在切到患教模板，身份怎么核？', patientRoute).violations, [], '用户显式点名的新实体可进入新 route');
+
+  const feedbackRoute = { matched: true, route: { id: 'QR-FEEDBACK', title: '药师反馈' }, answerFacts: ['反馈发送后锁定正文'] };
+  assert.deepEqual(bundle.audit('反馈锁定后再查收费记录。', '反馈发送后还能改吗？', feedbackRoute).violations, ['out_of_scope_entity']);
+  assert.deepEqual(bundle.audit('收费记录只读核对。', '现在切到收费记录怎么查？', feedbackRoute).violations, [], '显式收费新实体放行');
 });
 
 test('跨主体副作用动作不能通过对接方、运维或开发外包绕过', () => {
