@@ -1676,19 +1676,44 @@ function consultEvidenceLikelihoodGuard(question, route) {
   ].join('\n');
 }
 
-const CONSULT_LIKELIHOOD_WORD_RE = /(?:最高频|最常见|(?:很|较|比较)?常见(?:原因|问题|场景)?|经常|通常|一般|大概率|多半|往往|多发|高发|很多|不少|多数|大多(?:数)?|绝大多数|少数|极少|大部分|小部分|几乎全部|频繁|偶尔|有时|首要原因|主要原因(?:之一)?|典型原因|常见于|可能是|(?:很|更|比较)?像(?=[“"'A-Za-z\u4e00-\u9fff])|看起来(?:很|更)?像|疑似|倾向于|(?:最|更|较|比较|尤其)?容易(?:出现|发生|对不上|出错|导致|造成)|易(?:发|出现|发生|错))/g;
+const CONSULT_LIKELIHOOD_WORD_RE = /(?:最高频|最常见|(?:很|较|比较)?常见(?:原因|问题|场景)?|经常|通常|一般|大概率|多半|往往|多发|高发|很多|不少|多数|大多(?:数)?|绝大多数|少数|极少|大部分|小部分|几乎全部|频繁|偶尔|有时|首要原因|主要原因(?:之一)?|典型原因|常见于|可能是|(?:很|更|比较)?像(?=[“"'A-Za-z\u4e00-\u9fff])|看起来(?:很|更)?像|疑似|倾向于|(?:最|更|较|比较|尤其)?容易(?:出现|发生|对不上|出错|导致|造成|暴露|碰到|遇到|复现|触发)|尤其(?:在)?[^。！？；\n]{0,18}(?:时|情况下|场景)|易(?:发|出现|发生|错))/g;
 const CONSULT_CAUSAL_PRIORITY_RE = /(?:优先|首先|先)(?:去)?(?:查|看|排查|核对)(?:服务端|服务器|JVM|前端|缓存|错误兜底|网关|登录态|权限|调度|数据库|配置)[^。！？；\n]{0,18}/g;
 const CONSULT_DIRECT_RISKY_ACTION_RE = /(?:(?:只能|需要|应当|应该|建议|可以|可|先|再|然后|去|请|让|由|交给|通知|要求)[^。！？；\n]{0,20}(?:改|修改|调整|切换|对齐|校准|统一)[^。！？；\n]{0,16}(?:参数|报文(?:类型)?|映射|配置|部署时区|时区|系统时间|环境|产品口径|业务口径|日切要求|服务配置)|(?:参数|报文(?:类型)?|映射|配置|部署时区|时区|系统时间|产品口径|业务口径|日切要求|服务配置)[^。！？；\n]{0,24}(?:交给|让|由)[^。！？；\n]{0,16}(?:改|修改|调整|切换|对齐|校准|统一))/ig;
 const CONSULT_COMPONENT_FAULT_RE = /(?:服务端|服务器|JVM|前端|后端|缓存|网关|鉴权|权限|数据库|配置|调度|部署|环境)[^。！？；\n]{0,16}(?:异常|故障|问题|错误|不对|有误)/ig;
 
-function consultHasLikelihoodEvidence(question, route) {
+function consultHasLikelihoodEvidence(question, route, claim = '') {
   const q = String(question || '').trim();
-  const routeText = route && route.matched
-    ? [route.route && route.route.title, ...(route.answerFacts || []), ...(route.mustNotConfuse || [])].filter(Boolean).join(' ')
-    : '';
   const userSample = /(?:统计|样本|抽样|最近|近)\s*(?:了|的)?\s*\d+\s*(?:次|条|例|份)[^。；\n]{0,30}(?:其中|有|占)\s*\d+|(?:占比|比例|频率)\s*(?:为|是|达到)?\s*\d+(?:\.\d+)?\s*%|百分之\s*[零一二三四五六七八九十百\d]+/i.test(q);
-  const routedFrequency = /(?:统计样本|抽样结果|发生频率|占比|比例|百分之|\d+(?:\.\d+)?\s*%|明确(?:规定|定义|写明)[^。；\n]{0,24}(?:最高频|最常见|(?:很|较|比较)?常见|经常|通常|一般|大概率|多半|往往|多发|高发|很多|不少|多数|大多(?:数)?|绝大多数|少数|极少|大部分|小部分|几乎全部|频繁|偶尔|有时|首要原因|主要原因|典型原因|常见于)|(?:最高频|最常见|(?:很|较|比较)?常见|经常|通常|一般|大概率|多半|往往|多发|高发|很多|不少|多数|大多(?:数)?|绝大多数|少数|极少|大部分|小部分|几乎全部|频繁|偶尔|有时|首要原因|主要原因|典型原因|常见于)[^。；\n]{0,24}(?:规则|结论|定义|统计|样本|比例))/i.test(routeText);
-  return userSample || routedFrequency;
+  const frequencyEvidenceRe = /(?:统计样本|抽样结果|发生频率|占比|比例|百分之|\d+(?:\.\d+)?\s*%|明确(?:规定|定义|写明)[^。；\n]{0,24}(?:最高频|最常见|(?:很|较|比较)?常见|经常|通常|一般|大概率|多半|往往|多发|高发|很多|不少|多数|大多(?:数)?|绝大多数|少数|极少|大部分|小部分|几乎全部|频繁|偶尔|有时|首要原因|主要原因|典型原因|常见于)|(?:最高频|最常见|(?:很|较|比较)?常见|经常|通常|一般|大概率|多半|往往|多发|高发|很多|不少|多数|大多(?:数)?|绝大多数|少数|极少|大部分|小部分|几乎全部|频繁|偶尔|有时|首要原因|主要原因|典型原因|常见于)[^。；\n]{0,24}(?:规则|结论|定义|统计|样本|比例))/i;
+  const routeEvidence = route && route.matched
+    ? [...(route.answerFacts || []), ...(route.mustNotConfuse || [])].filter(item => frequencyEvidenceRe.test(String(item || '')))
+    : [];
+  const evidenceTexts = [...(userSample ? [q] : []), ...routeEvidence.map(String)];
+  if (!String(claim || '').trim()) return evidenceTexts.length > 0;
+  if (!evidenceTexts.length) return false;
+  const claimTokens = (value) => {
+    const cleaned = String(value || '').toLowerCase()
+      .replace(CONSULT_LIKELIHOOD_WORD_RE, ' ')
+      .replace(/(?:统计样本|抽样结果|最近|近|其中|确认|明确|写明|规定|定义|基于|给的|原因|问题|情况|属于|规则内|预期|的是|是|有|占比|比例|频率|百分之|\d+(?:\.\d+)?\s*%?)/g, ' ')
+      .replace(/[^\p{L}\p{N}_]+/gu, ' ');
+    CONSULT_LIKELIHOOD_WORD_RE.lastIndex = 0;
+    const tokens = new Set(cleaned.match(/[a-z_][a-z0-9_]{2,}/g) || []);
+    for (const chunk of cleaned.match(/[\u4e00-\u9fff]{2,}/g) || []) {
+      tokens.add(chunk);
+      for (let i = 0; i < chunk.length - 1; i += 1) tokens.add(chunk.slice(i, i + 2));
+    }
+    return tokens;
+  };
+  const target = claimTokens(claim);
+  if (!target.size) return false;
+  return evidenceTexts.some(source => {
+    const sourceTokens = claimTokens(source);
+    let overlaps = 0;
+    for (const token of target) {
+      if (sourceTokens.has(token)) overlaps += token.length > 2 ? 2 : 1;
+    }
+    return overlaps >= 2;
+  });
 }
 
 function consultHasCausalPriorityEvidence(question, route) {
@@ -1751,7 +1776,7 @@ function consultScopeEntityTerms() {
 }
 
 function consultDiagnosticMechanismTerms(text) {
-  return Array.from(new Set(String(text || '').match(/(?:缓存|数据源|错误兜底|本地存储|消息队列|中间件|代理层|网关)/g) || []));
+  return Array.from(new Set(String(text || '').match(/(?:缓存|数据源|错误兜底|本地存储|消息队列|中间件|代理层|网关|东八区|(?:UTC|GMT)\s*[+-]?\d{1,2}(?::\d{2})?|Asia\/Shanghai)/gi) || []));
 }
 
 function consultScopeTechnicalTokens(text) {
@@ -1787,8 +1812,15 @@ function consultNormalizeSafeMarkdown(text) {
 
 function consultAnswerSemanticAudit(answer, question, route) {
   const text = String(answer || '').trim();
-  const likelihoodAllowed = consultHasLikelihoodEvidence(question, route);
-  const likelihoodTerms = likelihoodAllowed ? [] : Array.from(new Set(text.match(CONSULT_LIKELIHOOD_WORD_RE) || []));
+  const likelihoodClaims = text.split(/(?<=[。！？；\n])/u).map(x => x.trim()).filter(statement => {
+    const matched = CONSULT_LIKELIHOOD_WORD_RE.test(statement);
+    CONSULT_LIKELIHOOD_WORD_RE.lastIndex = 0;
+    return matched;
+  });
+  const unsupportedLikelihoodClaims = likelihoodClaims.filter(statement => !consultHasLikelihoodEvidence(question, route, statement));
+  const likelihoodAllowed = likelihoodClaims.length ? unsupportedLikelihoodClaims.length === 0 : consultHasLikelihoodEvidence(question, route);
+  const likelihoodTerms = Array.from(new Set(unsupportedLikelihoodClaims.flatMap(statement => statement.match(CONSULT_LIKELIHOOD_WORD_RE) || [])));
+  CONSULT_LIKELIHOOD_WORD_RE.lastIndex = 0;
   const causalPriorityAllowed = consultHasCausalPriorityEvidence(question, route);
   const causalPriorityTerms = causalPriorityAllowed ? [] : Array.from(new Set(text.match(CONSULT_CAUSAL_PRIORITY_RE) || []));
   const controlled = consultHasControlledActionBundle(question);
@@ -1823,7 +1855,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (unexpectedPaths.length) violations.push('unexpected_concrete_path');
   if (unexpectedScopeTerms.length) violations.push('out_of_scope_entity');
   if (malformedMarkdown.length) violations.push('malformed_markdown');
-  return { checked: true, likelihoodAllowed, likelihoodTerms, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, malformedMarkdown, violations };
+  return { checked: true, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {

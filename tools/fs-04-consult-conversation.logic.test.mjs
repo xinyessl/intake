@@ -573,6 +573,20 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
     answerFacts: ['统计样本明确写明：服务端时区差是最常见原因'],
   });
   assert.deepEqual(routedSample.violations, []);
+  const unrelatedRouteStats = audit('服务端时区差是最常见原因。', '今天视图为什么不一致？', {
+    matched: true,
+    route: { title: '今天视图混合统计' },
+    answerFacts: ['权限问题占比 80%', '日期来自服务端 JVM 当前时区'],
+  });
+  assert.deepEqual(unrelatedRouteStats.violations, ['unsupported_likelihood'], 'route 里其它主题的统计事实不能给当前概率 claim 全局开绿灯');
+  assert.deepEqual(unrelatedRouteStats.unsupportedLikelihoodClaims, ['服务端时区差是最常见原因。']);
+  const mixedRouteStats = audit('权限问题占比 80%。服务端时区差是最常见原因。', '按当前已核统计分别怎么说？', {
+    matched: true,
+    route: { title: '混合统计' },
+    answerFacts: ['统计样本写明：权限问题占比 80%', '日期来自服务端 JVM 当前时区'],
+  });
+  assert.deepEqual(mixedRouteStats.violations, ['unsupported_likelihood'], '同一答案只允许有直接证据的概率句，另一句仍须拦截');
+  assert.deepEqual(mixedRouteStats.unsupportedLikelihoodClaims, ['服务端时区差是最常见原因。']);
   assert.deepEqual(audit('绝大多数属于服务端时区差。', '按权威比例怎么说？', {
     matched: true,
     route: { title: '时区统计' },
@@ -806,6 +820,12 @@ test('发布前事实作用域审计：相邻模块、通配路径不串入，�
   assert.deepEqual(bundle.audit('页面与响应不一致 → 页面呈现链路待验证。', '今天视图时间对不上，怎么排查？', todayRoute).violations, [], '没有scope证据时退回不点名具体机制的呈现层假设');
   assert.deepEqual(bundle.audit('待验证假设：缓存异常。', '已确认当前页面使用缓存，今天视图时间对不上。', todayRoute).violations, [], '用户显式给缓存线索时放行');
   assert.deepEqual(bundle.audit('待验证假设：数据源选择异常。', '今天视图时间对不上，怎么排查？', { ...todayRoute, answerFacts: [...todayRoute.answerFacts, '页面数据源由工作台当前上下文选择'] }).violations, [], 'route facts显式给数据源时放行');
+  const timezoneValueLeak = bundle.audit('服务器可能不是东八区，也可能是 UTC+0 或 GMT+8。', '今天视图时间对不上，怎么排查？', todayRoute);
+  assert.ok(timezoneValueLeak.violations.includes('out_of_scope_entity'));
+  assert.ok(timezoneValueLeak.unexpectedEntityTerms.includes('东八区'));
+  assert.ok(timezoneValueLeak.unexpectedEntityTerms.includes('UTC+0'));
+  assert.ok(timezoneValueLeak.unexpectedEntityTerms.includes('GMT+8'));
+  assert.deepEqual(bundle.audit('已核环境是 UTC+8，按这个事实对照响应。', '现场确认环境是 UTC+8，怎么只读核？', todayRoute).violations, [], '用户本轮逐字给出具体时区值时放行');
 
   const patientIdentityLeak = '这个接口不依赖患者 hospitalId/patientId/visitId；今天视图时间不是患者三元身份链路。';
   const patientIdentityAudit = bundle.audit(patientIdentityLeak, '今天请求响应都抓到了，重点核什么？', todayRoute);
