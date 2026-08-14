@@ -2404,7 +2404,22 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const malformedMarkdown = [...consultMalformedMarkdownTokens(text), ...consultMalformedProseTokens(text), ...consultMalformedTableTokens(text)];
   const requiredPrimaryPath = consultRequiredPrimaryPath(question, route, text);
   const missingPrimaryPath = requiredPrimaryPath && !consultConcretePaths(text).includes(requiredPrimaryPath.path) ? requiredPrimaryPath : null;
-  const focusedFactOverreach = consultFocusedFactOverreach(text, question);
+  let focusedFactPrimaryPath = null;
+  if (focusedFactQuestion && /(?:(?:调用|使用|走|用)(?:的|哪|哪个|什么)?接口|哪个接口|接口(?:是|为|叫|地址|路径)?什么|路径(?:是|为)?什么)/i.test(String(question || '')) && route && route.matched) {
+    const forbiddenFocusedPaths = new Set(consultConcretePaths((route.mustNotConfuse || []).join('\n')));
+    const focusedCandidates = [];
+    for (const fact of route.answerFacts || []) {
+      const factText = String(fact || '');
+      const method = factText.match(/\b(GET|POST|PUT|PATCH|DELETE)\b/i)?.[1]?.toUpperCase() || '';
+      for (const pathValue of consultConcretePaths(factText)) {
+        if (!pathValue.startsWith('/') || pathValue.includes('*') || forbiddenFocusedPaths.has(pathValue)) continue;
+        focusedCandidates.push({ path: pathValue, method, display: `${method ? `${method} ` : ''}${pathValue}` });
+      }
+    }
+    const uniqueFocusedCandidates = Array.from(new Map(focusedCandidates.map(item => [item.path, item])).values());
+    if (uniqueFocusedCandidates.length === 1) focusedFactPrimaryPath = uniqueFocusedCandidates[0];
+  }
+  const focusedFactOverreach = consultFocusedFactOverreach(text, question, route);
   const violations = [];
   if (likelihoodTerms.length || causalPriorityTerms.length) violations.push('unsupported_likelihood');
   if (contradictoryObservationOrderClaims.length) violations.push('contradictory_observation_order');
@@ -2426,7 +2441,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (contradictoryNegativeSections.length) violations.push('contradictory_negative_section');
   if (singleStepOverreach) violations.push('single_step_diagnostic_overreach');
   if (malformedMarkdown.length) violations.push('malformed_markdown');
-  return { checked: true, focusedFactQuestion, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, nonSequentialTopLevelSteps, cardinalityMismatches, conflictingCountDeclarations, incompleteLeadIns, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
+  return { checked: true, focusedFactQuestion, focusedFactPrimaryPath, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, nonSequentialTopLevelSteps, cardinalityMismatches, conflictingCountDeclarations, incompleteLeadIns, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -2582,6 +2597,9 @@ function consultAnswerSafeFallback(draft, audit) {
   }).filter(line => line.trim());
   const proseSafeKept = keptLines.filter(line => !consultMalformedProseTokens(line).length).join('\n');
   let safeKept = consultNormalizeSafeMarkdown(consultNormalizeSafeTables(proseSafeKept));
+  if (audit.focusedFactPrimaryPath && !consultConcretePaths(safeKept).includes(audit.focusedFactPrimaryPath.path)) {
+    safeKept = [`当前接口：\`${audit.focusedFactPrimaryPath.display}\`。`, safeKept].filter(Boolean).join('\n\n');
+  }
   if (audit.violations.includes('missing_primary_path') && audit.missingPrimaryPath) {
     const exact = audit.missingPrimaryPath.display;
     safeKept = [safeKept, `当前请求应逐字核对已核主接口：\`${exact}\`。`].filter(Boolean).join('\n\n');
@@ -2700,11 +2718,38 @@ function consultFocusedFactGuard(question) {
   ].join('\n');
 }
 
-function consultFocusedFactOverreach(answer, question) {
+function consultFocusedFactOverreach(answer, question, route) {
   if (!consultFocusedFactGuard(question)) return [];
+  const q = String(question || '').trim();
+  const interfaceOnly = /(?:(?:调用|使用|走|用)(?:的|哪|哪个|什么)?接口|哪个接口|接口(?:是|为|叫|地址|路径)?什么|路径(?:是|为)?什么)/i.test(q);
+  const statusOnly = /状态码(?:是|为|什么|多少)/i.test(q);
+  const typeOrLengthOnly = /(?:字段|列|column|varchar|uuid|integer|bigint|patient_id|visit_id|hospitalId|districtCode)/i.test(q)
+    && /(?:类型|type|长度(?:多少|是什么))/i.test(q);
+  const allowedPaths = new Set(consultConcretePaths(`${q}\n${(route && route.answerFacts || []).join('\n')}\n${(route && route.mustNotConfuse || []).join('\n')}`));
+  const focusedTokens = new Set(consultScopeTechnicalTokens(q).map(token => token.toLowerCase()));
   return String(answer || '').split(/(?<=[。！？；\n])/u).map(x => x.trim()).filter(statement => {
     if (!statement) return false;
-    return /(?:现场(?:怎么|如何|快速|排查|核对)|排查步骤|下一步|接下来|开发者工具|\bNetwork\b|抓包|复现|留证|优先查|建议(?:先|再|去|让)|(?:打开|点击|刷新)[^。！？；\n]{0,24}(?:页面|工作台|网络|请求|接口)|如果[^。！？；\n]{0,36}(?:失败|异常|报错|没调到|没有请求)|把[^。！？；\n]{0,30}(?:截图|日志|请求|响应)[^。！？；\n]{0,16}(?:发来|贴出|提供)|需要更细|再一起看)/i.test(statement);
+    if (/^[^。！？\n]{1,40}[：:]$/u.test(statement)) return false;
+    if (/(?:现场(?:怎么|如何|快速|排查|核对)|排查步骤|下一步|接下来|开发者工具|\bNetwork\b|抓包|复现|留证|优先查|建议(?:先|再|去|让)|(?:打开|点击|刷新)[^。！？；\n]{0,24}(?:页面|工作台|网络|请求|接口)|如果[^。！？；\n]{0,36}(?:失败|异常|报错|没调到|没有请求)|把[^。！？；\n]{0,30}(?:截图|日志|请求|响应)[^。！？；\n]{0,16}(?:发来|贴出|提供)|需要更细|再一起看)/i.test(statement)) return true;
+    if (interfaceOnly) {
+      const paths = consultConcretePaths(statement);
+      const hasAllowedPath = paths.some(pathValue => allowedPaths.has(pathValue));
+      // 原子接口题只保留“方法 + 精确路径”及带精确路径的必要防混淆。
+      // 即使响应字段、参数、来源时区等事实本身存在于同一 route，也不是本问目标。
+      const adjacentContract = /(?:响应|返回(?:值|体)?|字段|参数|请求体|数据来源|来自|时区|\bJVM\b|\byear\b|\bweek\b|Map\s*<)/i.test(statement);
+      return adjacentContract || (consultConcretePaths(statement).length > 0 && !hasAllowedPath);
+    }
+    if (statusOnly) {
+      return !/(?:HTTP\s*)?\d{3}|状态码/i.test(statement);
+    }
+    if (typeOrLengthOnly) {
+      const statementTokens = consultScopeTechnicalTokens(statement).map(token => token.toLowerCase());
+      const hasFocusedToken = statementTokens.some(token => focusedTokens.has(token));
+      const hasAskedAttribute = /(?:类型|长度|varchar|character\s+varying|char|text|uuid|integer|bigint|smallint|\bint\b|\d+\s*(?:位|字符))/i.test(statement);
+      const adjacentImplementation = /(?:索引|唯一约束|联合键|主键|缓存|接口|请求|落库|迁移|SQL|身份元组|院区上下文)/i.test(statement);
+      return !(hasAskedAttribute && (hasFocusedToken || statementTokens.length === 0) && !adjacentImplementation);
+    }
+    return false;
   });
 }
 

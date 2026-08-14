@@ -634,8 +634,9 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
   ].join('\n');
   const atomicAudit = audit(atomicDraft, '工作台今天日期和星期调用哪个接口？', atomicRoute);
   assert.deepEqual(atomicAudit.violations, ['unsupported_likelihood', 'focused_fact_overreach']);
-  assert.equal(atomicAudit.focusedFactOverreach.length, 3);
-  assert.deepEqual(audit('调用 GET /pwrsapi/month/view/today，返回 year/week；不得混淆已废止的 GET /month/view。', '工作台今天日期和星期调用哪个接口？', atomicRoute).violations, []);
+  assert.equal(atomicAudit.focusedFactOverreach.length, 4);
+  assert.ok(audit('调用 GET /pwrsapi/month/view/today，返回 year/week；不得混淆已废止的 GET /month/view。', '工作台今天日期和星期调用哪个接口？', atomicRoute).violations.includes('focused_fact_overreach'));
+  assert.deepEqual(audit('调用 GET /pwrsapi/month/view/today；不得混淆已废止的 GET /month/view。', '工作台今天日期和星期调用哪个接口？', atomicRoute).violations, []);
   assert.ok(!audit('调用 GET /pwrsapi/month/view/today 后现场怎么核对？', '工作台接口为什么不一致，现场怎么验证？', atomicRoute).violations.includes('focused_fact_overreach'), '显式诊断题不触发原子止答审计');
   const failed = audit('页面等于接口但与浏览器不同，多半是服务端时区差。', '今天视图对不上，怎么排查？', route);
   assert.deepEqual(failed.violations, ['unsupported_likelihood']);
@@ -861,6 +862,54 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(q127R27Fallback, /只看同一次已有原始号与出站报文/);
   assert.doesNotMatch(q127R27Fallback, /会出现少位|就是会丢位/);
   assert.deepEqual(bundle.audit(q127R27Fallback, '对接方把患者号当数字传，长号码开始丢位，先让他们做哪个验证？', route).violations, []);
+
+  const todayAtomicRoute = {
+    matched: true,
+    route: { title: '工作台今天日期接口' },
+    answerFacts: [
+      '工作台今天日期和星期调用 GET /pwrsapi/month/view/today（需合法 JWT）',
+      '响应包含 year、week，日期来自服务端 JVM 当前时区',
+    ],
+    mustNotConfuse: ['不得与已废止的 GET /month/view 月历网格接口混淆'],
+  };
+  const todayAtomicDraft = [
+    '工作台今天日期和星期调用 GET /pwrsapi/month/view/today（需合法 JWT）。',
+    '响应是 Map<String,String>，包含 year 和 week。',
+    '日期来自服务端 JVM 当前时区。',
+    '别混淆：不是已废止的 GET /month/view 月历网格接口。',
+  ].join('\n');
+  const todayAtomicAudit = bundle.audit(todayAtomicDraft, '工作台今天日期和星期调用哪个接口？', todayAtomicRoute);
+  assert.ok(todayAtomicAudit.violations.includes('focused_fact_overreach'), '原子接口题不得因同route事实真实而扩写响应字段和JVM时区');
+  assert.deepEqual(todayAtomicAudit.focusedFactOverreach, [
+    '响应是 Map<String,String>，包含 year 和 week。',
+    '日期来自服务端 JVM 当前时区。',
+  ]);
+  const todayAtomicFallback = bundle.fallback(todayAtomicDraft, todayAtomicAudit);
+  assert.match(todayAtomicFallback, /GET \/pwrsapi\/month\/view\/today/);
+  assert.match(todayAtomicFallback, /GET \/month\/view/);
+  assert.doesNotMatch(todayAtomicFallback, /Map<String,String>|\byear\b|\bweek\b|JVM 当前时区/);
+  assert.deepEqual(bundle.audit(todayAtomicFallback, '工作台今天日期和星期调用哪个接口？', todayAtomicRoute).violations, []);
+  assert.deepEqual(bundle.audit(
+    '工作台今天日期和星期调用 GET /pwrsapi/month/view/today；如果响应不一致，现场怎么排查？',
+    '工作台今天日期和星期调用哪个接口，响应不一致时现场怎么排查？',
+    todayAtomicRoute,
+  ).violations, [], '显式多问且含现场诊断意图时不触发原子止答');
+
+  const patientIdAtomicRoute = {
+    matched: true,
+    route: { title: '患者号字段类型' },
+    answerFacts: ['pwrs_patient.patient_id 是 character varying(50)，不是数字类型'],
+  };
+  const patientIdAtomicDraft = [
+    'pwrs_patient.patient_id 是 character varying(50)，不是数字类型。',
+    '该字段还参与患者身份元组和缓存键。',
+  ].join('\n');
+  const patientIdAtomicAudit = bundle.audit(patientIdAtomicDraft, 'pwrs_patient.patient_id 在 PostgreSQL 里是什么类型和长度？', patientIdAtomicRoute);
+  assert.ok(patientIdAtomicAudit.violations.includes('focused_fact_overreach'), '原子字段属性题不得追加身份元组或缓存实现');
+  const patientIdAtomicFallback = bundle.fallback(patientIdAtomicDraft, patientIdAtomicAudit);
+  assert.match(patientIdAtomicFallback, /patient_id 是 character varying\(50\)/);
+  assert.doesNotMatch(patientIdAtomicFallback, /身份元组|缓存键/);
+  assert.deepEqual(bundle.audit(patientIdAtomicFallback, 'pwrs_patient.patient_id 在 PostgreSQL 里是什么类型和长度？', patientIdAtomicRoute).violations, []);
 
   assert.deepEqual(bundle.audit('已核规则明确写明：缺 hospitalId 会导致请求被拒绝。', '缺 hospitalId 会怎样？', {
     matched: true,
@@ -1320,7 +1369,7 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     '数值传输很容易丢精度。',
   ].join('\n');
   const patientFieldAudit = bundle.audit(patientFieldDraft, 'pwrs_patient.patient_id 在 PostgreSQL 里是什么类型和长度？', patientFieldRoute);
-  assert.deepEqual(patientFieldAudit.violations, ['unsupported_likelihood']);
+  assert.deepEqual(patientFieldAudit.violations, ['unsupported_likelihood', 'focused_fact_overreach']);
   assert.equal(patientFieldAudit.focusedFactQuestion, true);
   const patientFieldFallback = bundle.fallback(patientFieldDraft, patientFieldAudit);
   assert.equal(patientFieldFallback, '`pwrs_patient.patient_id` 是 `character varying(50)`。', '原子事实题降级后不得附加概率/动作审计尾注');
@@ -1439,12 +1488,12 @@ test('发布前确定性语义校验：路径必须来自用户或route并逐字
     const revision = bundle.revision(bad, audit);
     assert.match(revision, /省略号、缩写、去前缀\/尾斜杠/);
     const fallback = bundle.fallback(bad, audit);
-    assert.doesNotMatch(fallback, /\/month\/view\/today|\/pwrsapi\/month\/view\/today\//);
+    assert.equal(fallback, '当前接口：`GET /pwrsapi/month/view/today`。', '原子接口题的坏路径被删后，应从当前route恢复唯一已核精确路径');
     assert.doesNotMatch(fallback, /该已核接口|GET\s+该已核接口|具体接口路径只按/);
     assert.deepEqual(bundle.audit(fallback, '今天视图接口是什么？', route).violations, []);
   }
   const methodFallback = bundle.fallback('请找 GET /month/view/today，再核当前响应。', bundle.audit('请找 GET /month/view/today，再核当前响应。', '今天视图接口是什么？', route));
-  assert.equal(methodFallback, '当前草稿未通过发布前证据与动作安全校验，已停止发布其中未经证实的判断和操作指令。', '未知路径所在整句应删除，不保留“GET 该已核接口”残句');
+  assert.equal(methodFallback, '当前接口：`GET /pwrsapi/month/view/today`。', '未知路径所在整句删除后，用route唯一已核路径回答原子接口题');
   const mixedDraft = '完整接口 GET /pwrsapi/month/view/today；不要简称 /pwrsapi。';
   const mixedFallback = bundle.fallback(mixedDraft, bundle.audit(mixedDraft, '今天视图接口是什么？', route));
   assert.equal(mixedFallback, '完整接口 GET /pwrsapi/month/view/today；', '未核短前缀所在分句整体删除，合法完整路径不受污染');
