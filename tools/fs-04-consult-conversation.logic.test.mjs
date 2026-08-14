@@ -620,6 +620,7 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
     + extractFn(SRC, 'consultRequiredPrimaryPath') + '\n'
     + extractFn(SRC, 'consultFocusedFactGuard') + '\n'
     + extractFn(SRC, 'consultFocusedFactOverreach') + '\n'
+    + extractFn(SRC, 'consultFocusedRelationshipFacts') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + 'return consultAnswerSemanticAudit;',
   )();
@@ -774,6 +775,7 @@ test('发布前确定性语义校验：跨主体副作用触发，否定句和�
     + extractFn(SRC, 'consultRequiredPrimaryPath') + '\n'
     + extractFn(SRC, 'consultFocusedFactGuard') + '\n'
     + extractFn(SRC, 'consultFocusedFactOverreach') + '\n'
+    + extractFn(SRC, 'consultFocusedRelationshipFacts') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + 'return consultAnswerSemanticAudit;',
   )();
@@ -832,6 +834,7 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     + extractFn(SRC, 'consultRequiredPrimaryPath') + '\n'
     + extractFn(SRC, 'consultFocusedFactGuard') + '\n'
     + extractFn(SRC, 'consultFocusedFactOverreach') + '\n'
+    + extractFn(SRC, 'consultFocusedRelationshipFacts') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + extractFn(SRC, 'consultAnswerRevisionPrompt') + '\n'
     + extractFn(SRC, 'consultReplaceUnexpectedPath') + '\n'
@@ -1481,13 +1484,21 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   ].join('\n');
   const atomicRelationshipAudit = bundle.audit(atomicRelationshipDraft, atomicRelationshipQuestion, formRoute);
   assert.ok(atomicRelationshipAudit.violations.includes('focused_fact_overreach'), '原子关系题不得顺带扩写删除级联、历史和渲染行为');
+  assert.ok(atomicRelationshipAudit.violations.includes('focused_fact_incomplete'), '用户点名填写结果时不得漏掉 route 已核的 content 表示边');
   assert.equal(atomicRelationshipAudit.focusedFactOverreach.length, 3);
+  assert.deepEqual(atomicRelationshipAudit.missingFocusedRelationshipFacts.map(item => item.missingTokens), [['content']]);
   const atomicRelationshipFallback = bundle.fallback(atomicRelationshipDraft, atomicRelationshipAudit);
   assert.match(atomicRelationshipFallback, /form_id 关联/);
   assert.match(atomicRelationshipFallback, /element_id 关联/);
   assert.match(atomicRelationshipFallback, /form_id →/);
-  assert.doesNotMatch(atomicRelationshipFallback, /删除|级联|历史结果|悬空|渲染|content 快照/);
+  assert.match(atomicRelationshipFallback, /content 保存结果快照/);
+  assert.doesNotMatch(atomicRelationshipFallback, /删除|级联|历史结果|悬空|渲染/);
   assert.deepEqual(bundle.audit(atomicRelationshipFallback, atomicRelationshipQuestion, formRoute).violations, []);
+  assert.deepEqual(bundle.audit(
+    '模板和填写结果靠 form_id 关联。\n字段和选项靠 element_id 关联。\ncontent 保存结果快照。',
+    atomicRelationshipQuestion,
+    formRoute,
+  ).violations, [], '点名结果对象时，三条 current route 直接边齐全即可止答');
   assert.ok(!bundle.audit(
     '删除模板后，已核规则要求只读核对历史结果是否仍可见。',
     '删除模板后历史结果怎么处理？',
@@ -1749,6 +1760,7 @@ test('发布前确定性语义校验：路径必须来自用户或route并逐字
     + extractFn(SRC, 'consultRequiredPrimaryPath') + '\n'
     + extractFn(SRC, 'consultFocusedFactGuard') + '\n'
     + extractFn(SRC, 'consultFocusedFactOverreach') + '\n'
+    + extractFn(SRC, 'consultFocusedRelationshipFacts') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + extractFn(SRC, 'consultAnswerRevisionPrompt') + '\n'
     + extractFn(SRC, 'consultReplaceUnexpectedPath') + '\n'
@@ -1840,6 +1852,7 @@ test('发布前事实作用域审计：相邻模块、通配路径不串入，�
     + extractFn(SRC, 'consultRequiredPrimaryPath') + '\n'
     + extractFn(SRC, 'consultFocusedFactGuard') + '\n'
     + extractFn(SRC, 'consultFocusedFactOverreach') + '\n'
+    + extractFn(SRC, 'consultFocusedRelationshipFacts') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + extractFn(SRC, 'consultAnswerRevisionPrompt') + '\n'
     + extractFn(SRC, 'consultReplaceUnexpectedPath') + '\n'

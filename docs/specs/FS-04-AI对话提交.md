@@ -180,8 +180,9 @@ depends_on: [FS-01]
 - **AC-114【“典型现象/表现”须有同 claim 证据】** Given 当前问题与 current/inherited route 没有同一对象的统计样本或明确典型性结论 When 终稿把某原因写成“典型现象/表现/场景/特征/模式/症状（边界）” Then 作为 `unsupported_likelihood` 触发整句修订/删除；同一 claim 的已核统计样本可照实，普通已核字段命名不受影响。
 - **AC-115【诊断分支标题不得为空】** Given 诊断终稿以短 Markdown 标题列出“失败/无请求/无字段/缺响应/不一致/异常”等用 `/`、`或`、`、`组合的分支 When 下一非空行已进入另一 Markdown 标题或答案结束 Then 记为 `empty_diagnostic_branch`，触发一次不新增事实的修订；草稿无现成正文时删除该空分支标题。标题下已有判断或安全动作时放行。
 - **AC-116【特殊时点倾向必须有同 claim 证据】** Given 诊断终稿用“尤其接近/临近/靠近/恰逢午夜、零点、日切、跨日、月末、年末或边界”等措辞强调某时点更值得怀疑 When 用户本轮与 current/inherited route 没有该时点的直接统计或明确结论 Then 记为 `unsupported_likelihood`，触发一次不新增事实的修订；仍存在时删除完整句或完整表格行。route 对同一时点 claim 有直接统计样本时放行。
+- **AC-117【关系型原子题须覆盖点名对象的全部直接边】** Given 用户只问多个对象“靠什么关联”，且 current route 的 `answerFacts` 已分别确认挂接键与某个点名结果/内容对象的表示或存储字段 When 终稿遗漏其中任一直接字段 token，或仅用将被原子止答删除的历史/渲染句提到该 token Then 记为 `focused_fact_incomplete`，触发一次不新增事实的全文修订；仍遗漏时从 current route 原句补回该直接边。删除、级联、历史、渲染、兼容、保存操作和现场排查仍按 `focused_fact_overreach` 删除；不得用“止答”名义漏掉用户点名对象。
 
-> **AC 编号**：现编号至 **AC-116**（保留既有历史编号与 AC-19-KB）。AC-44 至 AC-116 为 P1。
+> **AC 编号**：现编号至 **AC-117**（保留既有历史编号与 AC-19-KB）。AC-44 至 AC-117 为 P1。
 
 ## 4. 接口契约
 > 统一前缀 `/api`；除 `consult`（SSE）外返回 `{...}` JSON。**本条 100% 复用现有端点，不新增端点**；提交人 `reporter`、归档医院 `site` 服务端按当前登录用户收敛（忽略越权传参）。契约锚点见 `docs/specs/00-实施端-spec清单.md §4` 对照表。
