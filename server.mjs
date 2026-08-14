@@ -2065,7 +2065,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   // 内容完整。只在表头明确以“对照项/观测点/来源”等按行列项时比较数据行，
   // 避免把横向三列表误判为缺少三行。
   const chineseCount = { '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10 };
-  const structuredCountRe = /(?:共|做|核对|对照|比较|检查|保留|拿)?\s*([一二两三四五六七八九十]|\d{1,2})\s*(边|项|份|件(?:事|内容)?|条(?:记录|数据|内容)?|处(?:位置|断点)?|个(?:值|字段|位置|观测点|检查点|对照点)?)\s*(?:原文|值|字段|位置|观测点|检查点|数据)?\s*(?:对照|核对|比较|检查|分别)?/gu;
+  const structuredCountRe = /(?:共|做|核对|对照|比较|检查|保留|拿|至少还要|还要|需要|缺)?\s*([一二两三四五六七八九十]|\d{1,2})\s*(边|项|份|样(?:东西|材料|信息)?|件(?:事|内容)?|条(?:记录|数据|内容)?|处(?:位置|断点)?|个(?:值|字段|位置|观测点|检查点|对照点)?)\s*(?:原文|值|字段|位置|观测点|检查点|数据)?\s*(?:对照|核对|比较|检查|分别)?/gu;
   const cardinalityMismatches = [];
   for (let index = 0; index + 1 < documentLines.length; index++) {
     const headerCells = consultMarkdownTableCells(documentLines[index]);
@@ -2076,11 +2076,16 @@ function consultAnswerSemanticAudit(answer, question, route) {
       dataRows.push(documentLines[end]); end++;
     }
     const firstHeader = String(headerCells[0] || '').replace(/[*_`]/g, '').trim();
-    if (!/(?:对照|观测|检查)?(?:项|点|边)|来源|位置|环节|侧|阶段/u.test(firstHeader)) { index = end - 1; continue; }
+    const missingItemColumnIndexes = headerCells.map((header, headerIndex) => ({
+      header: String(header || '').replace(/[*_`]/g, '').trim(),
+      headerIndex,
+    })).filter(item => /(?:还缺|待补|需补|缺少|需要(?:补充|提供)?|最少材料)/u.test(item.header)).map(item => item.headerIndex);
+    const explicitlyMissingItems = missingItemColumnIndexes.length > 0;
+    if (!explicitlyMissingItems && !/(?:对照|观测|检查)?(?:项|点|边)|来源|位置|环节|侧|阶段/u.test(firstHeader)) { index = end - 1; continue; }
     // “对照边/对照项/观测点”明确表示每一数据行是一项，列数不能拿来
     // 充当声明数量；“来源记录 | 已有请求 | 已有响应”这类横向表才允许
     // 用列数满足声明。
-    const explicitlyRowOriented = /^(?:对照|观测|检查)?(?:项|点|边)$/u.test(firstHeader);
+    const explicitlyRowOriented = /^(?:对照|观测|检查)?(?:项|点|边)$/u.test(firstHeader) || explicitlyMissingItems;
     const lookbackStart = Math.max(0, index - 3);
     const lookback = documentLines.slice(lookbackStart, index);
     let declaration = null;
@@ -2095,11 +2100,18 @@ function consultAnswerSemanticAudit(answer, question, route) {
         break;
       }
     }
+    const missingItemCount = explicitlyMissingItems ? dataRows.reduce((sum, row) => {
+      const cells = consultMarkdownTableCells(row) || [];
+      const targetText = missingItemColumnIndexes.map(cellIndex => String(cells[cellIndex] || '')).join(' ');
+      const explicitMarkers = targetText.match(/[①②③④⑤⑥⑦⑧⑨⑩]|(?:^|[；;])\s*\d{1,2}[.、．]/gu) || [];
+      return sum + Math.max(1, explicitMarkers.length);
+    }, 0) : dataRows.length;
+    const actualStructuredItems = explicitlyMissingItems ? missingItemCount : dataRows.length;
     const horizontallyComplete = !explicitlyRowOriented && headerCells.length === declaration?.expected;
-    if (declaration && dataRows.length !== declaration.expected && !horizontallyComplete) {
+    if (declaration && actualStructuredItems !== declaration.expected && !horizontallyComplete) {
       cardinalityMismatches.push({
         ...declaration,
-        actual: dataRows.length,
+        actual: actualStructuredItems,
         tableStart: index,
         tableEnd: end,
         tableBlock: documentLines.slice(index, end).join('\n'),

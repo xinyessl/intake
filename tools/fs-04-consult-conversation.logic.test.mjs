@@ -1576,6 +1576,42 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   ].join('\n');
   assert.deepEqual(bundle.audit(completeBranchTable, '已经对照请求和页面，怎么判断？', atomicRoute).violations, [], '至少两条完整分支表格放行');
 
+  const missingTwoButOneRow = [
+    '至少还要两样东西：',
+    '| 已有 | 还缺（不用日志） |',
+    '| --- | --- |',
+    '| 页面截图 | ① 本机日期、星期、时区 |',
+    '日志不是第一步必需品。',
+  ].join('\n');
+  const missingTwoAudit = bundle.audit(missingTwoButOneRow, '只有截图没有日志，够不够？', atomicRoute);
+  assert.ok(missingTwoAudit.violations.includes('inconsistent_structured_cardinality'), '“还缺”清单的两样东西不能用两列表头充当两项');
+  assert.equal(missingTwoAudit.cardinalityMismatches[0].actual, 1);
+  const missingTwoFallback = bundle.fallback(missingTwoButOneRow, missingTwoAudit);
+  assert.doesNotMatch(missingTwoFallback, /还缺|本机日期/);
+  assert.match(missingTwoFallback, /日志不是第一步必需品/);
+  const missingTwoRows = [
+    '至少还要两样东西：',
+    '| 已有 | 还缺 |',
+    '| --- | --- |',
+    '| 页面截图 | 本机日期、星期、时区 |',
+    '| 页面截图 | 已有请求的状态码与响应 |',
+  ].join('\n');
+  assert.ok(!bundle.audit(missingTwoRows, '只有截图没有日志，够不够？', atomicRoute).violations.includes('inconsistent_structured_cardinality'), '两条明确待补项应满足声明');
+  const missingTwoInOneCell = [
+    '至少还要两样东西：',
+    '| 已有 | 还缺 |',
+    '| --- | --- |',
+    '| 页面截图 | ① 本机日期；② 已有请求响应 |',
+  ].join('\n');
+  assert.ok(!bundle.audit(missingTwoInOneCell, '只有截图没有日志，够不够？', atomicRoute).violations.includes('inconsistent_structured_cardinality'), '同一单元格清楚列出①②也可满足声明');
+  const ordinaryTwoSideTable = [
+    '做两边对照：',
+    '| 页面 | 接口 |',
+    '| --- | --- |',
+    '| 已有文案 | 已有响应 |',
+  ].join('\n');
+  assert.ok(!bundle.audit(ordinaryTwoSideTable, '页面和接口怎么对照？', atomicRoute).violations.includes('inconsistent_structured_cardinality'), '普通横向两边表仍按两列满足声明');
+
   const oneDecisionRowWithoutBranchLead = [
     '怎么判断：',
     '| 对照 | 含义 | 还要不要日志 |',
