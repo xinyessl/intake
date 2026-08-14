@@ -512,6 +512,7 @@ test('发布前动作一致性审计覆盖整份答案，禁止同答先劝停�
     assert.match(text, /删除含未定义序号的完整句\/完整表格行/);
     assert.match(text, /声明数量 → 实际内容/);
     assert.match(text, /不得用一行表格冒充“三边对照”/);
+    assert.match(text, /不得说“核两件事”却只列一项/);
     assert.match(text, /“例如：\/如下：\/包括：\/分别为：”后必须有实际内容/);
     assert.match(text, /不得留下孤立的“还是页面…\/或者接口…”等后半分支/);
     assert.match(text, /只问“先做哪个验证\/第一步先做什么”时，只给一个最小只读验证/);
@@ -1033,6 +1034,28 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   ].join('\n'), '已有证据怎么对照？', route).violations, [], '横向三列表不按数据行数误判');
   assert.deepEqual(bundle.audit('重点看：\n- 已有请求原文\n- 已有响应原文', '下一步看什么？', route).violations, [], '冒号后有真实列表内容时不得误判为空引导');
   assert.deepEqual(bundle.audit('**1. 只读核对**\n比较已有请求与已有响应原文。', '第一步先做什么？', route).violations, [], '单步问题只给一个顶层步骤时应放行');
+
+  const twoSourcesOneRowDraft = [
+    '并排只读对照两份原文：',
+    '| 对照边 | 记什么 |',
+    '| --- | --- |',
+    '| 医院原始患者号 | 完整原文 |',
+    '同一笔样例只核两件事：',
+    '- 报文里字段是字符串还是数字',
+  ].join('\n');
+  const twoSourcesOneRowAudit = bundle.audit(twoSourcesOneRowDraft, '我应该先让他们做哪个验证？', route);
+  assert.equal(twoSourcesOneRowAudit.cardinalityMismatches.length, 2, '表格两份仅一行、清单两件仅一项都必须命中');
+  assert.deepEqual(twoSourcesOneRowAudit.cardinalityMismatches.map(item => [item.kind, item.expected, item.actual]), [['table', 2, 1], ['list', 2, 1]]);
+  assert.ok(twoSourcesOneRowAudit.violations.includes('inconsistent_structured_cardinality'));
+  const twoSourcesOneRowFallback = bundle.fallback(twoSourcesOneRowDraft, twoSourcesOneRowAudit);
+  assert.doesNotMatch(twoSourcesOneRowFallback, /两份原文|对照边|两件事|字符串还是数字/);
+  assert.deepEqual(bundle.audit(twoSourcesOneRowFallback, '我应该先让他们做哪个验证？', route).violations, []);
+  assert.deepEqual(bundle.audit([
+    '只核两件事：',
+    '- 已有报文里的字段类型',
+    '- 已有报文里的字段原文',
+  ].join('\n'), '已有报文先核什么？', route).violations, [], '声明两件且清单确有两项时不得误伤');
+  assert.deepEqual(bundle.audit('现场已有两条历史记录，可以只读比较。', '现有证据是什么？', route).violations, [], '普通数量陈述没有冒号引导结构时不得误伤');
 
   const orphanedAlternativeDraft = [
     '写清「第二步对不上」的原文现象',

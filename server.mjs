@@ -1683,7 +1683,7 @@ function consultFinalActionConsistencyGuard(question, route) {
     '编辑、删除、新建、保存、提交、发送、完成、签名、审批、星标、可能标记已读的打开、改参数、改报文类型、改映射、改配置、重试、复现、补跑或重跑，只要不能归入 B 或 C，就必须从最终答案所有位置删除，改成检查已有页面、请求、响应、报文、映射、截图、日志或审计。动作换成由第三方执行也不改变副作用：不得写成“让对接方改字符串/参数/映射/配置后用同一患者复测”“让运维重跑”或“让开发重试”来绕过守卫。不能因为同一答案别处写了“不要操作”“只读”“别重复”，就保留这里的正向点击或重做指令；否定提醒不能抵消冲突动作。',
     '若最终答案任何一处说“不要操作/不要重复/只读”，则其它任何一处都不得再建议点击编辑、删除、发送、完成等未知动作来观察是否发请求，也不得用“点了是否被拦住”“试一下看看”之类问句变相放行。用户只问“这个按钮是否发请求”时，只能查已有请求、日志、审计、代码或契约；没有既有证据就局部说明当前无法安全确认，不能让现场点击未知按钮补抓。',
     '发布前还要核对步骤和对照项的编号引用：后文引用①②③④等序号时，每个序号都必须在本答案前文有明确对应项；不得出现“共三项”却引用④、表格只定义①②③却在判断或小结写③/④等未定义引用。发现后必须删除含未定义序号的完整句/完整表格行，或在不新增事实的前提下改回已经定义的序号。',
-    '结构化答案还必须逐项核对“声明数量 → 实际内容”：声称二/三/四边、项、份或个对照时，紧随其后的对照表/清单必须确实给出相同数量的完整项；不得用一行表格冒充“三边对照”。“例如：/如下：/包括：/分别为：”后必须有实际内容，不能直接跳到下一步骤；清理并列项后不得留下孤立的“还是页面…/或者接口…”等后半分支。用户明确只问“先做哪个验证/第一步先做什么”时，只给一个最小只读验证，不追加第二、第三步或可转发的修改指令。',
+    '结构化答案还必须逐项核对“声明数量 → 实际内容”：声称二/三/四边、项、份、件、条、处或个对照时，紧随其后的对照表或 Markdown 清单必须确实给出相同数量的完整项；不得用一行表格冒充“三边对照”，也不得说“核两件事”却只列一项。“例如：/如下：/包括：/分别为：”后必须有实际内容，不能直接跳到下一步骤；清理并列项后不得留下孤立的“还是页面…/或者接口…”等后半分支。用户明确只问“先做哪个验证/第一步先做什么”时，只给一个最小只读验证，不追加第二、第三步或可转发的修改指令。',
     '该审计只删除不安全或互相矛盾的动作，不新增业务事实，也不给纯事实回答强加诊断步骤。若用户只问事实且现有证据已经足够，直接回答后停止；若已明确动作只读，可保留相应只读观察；若受控条件全部齐全，可条件式说明单次受控验证。',
   ].join('\n');
 }
@@ -2042,7 +2042,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   // 内容完整。只在表头明确以“对照项/观测点/来源”等按行列项时比较数据行，
   // 避免把横向三列表误判为缺少三行。
   const chineseCount = { '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10 };
-  const structuredCountRe = /(?:共|做|核对|对照|比较|检查|保留|拿)?\s*([一二两三四五六七八九十]|\d{1,2})\s*(边|项|份|个(?:值|字段|位置|观测点|检查点|对照点)?)\s*(?:原文|值|字段|位置|观测点|检查点|数据)?\s*(?:对照|核对|比较|检查|分别)?/gu;
+  const structuredCountRe = /(?:共|做|核对|对照|比较|检查|保留|拿)?\s*([一二两三四五六七八九十]|\d{1,2})\s*(边|项|份|件(?:事|内容)?|条(?:记录|数据|内容)?|处(?:位置|断点)?|个(?:值|字段|位置|观测点|检查点|对照点)?)\s*(?:原文|值|字段|位置|观测点|检查点|数据)?\s*(?:对照|核对|比较|检查|分别)?/gu;
   const cardinalityMismatches = [];
   for (let index = 0; index + 1 < documentLines.length; index++) {
     const headerCells = consultMarkdownTableCells(documentLines[index]);
@@ -2053,7 +2053,11 @@ function consultAnswerSemanticAudit(answer, question, route) {
       dataRows.push(documentLines[end]); end++;
     }
     const firstHeader = String(headerCells[0] || '').replace(/[*_`]/g, '').trim();
-    if (!/(?:对照|观测|检查)?(?:项|点)|来源|位置|环节|侧|阶段/u.test(firstHeader)) { index = end - 1; continue; }
+    if (!/(?:对照|观测|检查)?(?:项|点|边)|来源|位置|环节|侧|阶段/u.test(firstHeader)) { index = end - 1; continue; }
+    // “对照边/对照项/观测点”明确表示每一数据行是一项，列数不能拿来
+    // 充当声明数量；“来源记录 | 已有请求 | 已有响应”这类横向表才允许
+    // 用列数满足声明。
+    const explicitlyRowOriented = /^(?:对照|观测|检查)?(?:项|点|边)$/u.test(firstHeader);
     const lookbackStart = Math.max(0, index - 3);
     const lookback = documentLines.slice(lookbackStart, index);
     let declaration = null;
@@ -2068,16 +2072,58 @@ function consultAnswerSemanticAudit(answer, question, route) {
         break;
       }
     }
-    if (declaration && dataRows.length !== declaration.expected && headerCells.length !== declaration.expected) {
+    const horizontallyComplete = !explicitlyRowOriented && headerCells.length === declaration?.expected;
+    if (declaration && dataRows.length !== declaration.expected && !horizontallyComplete) {
       cardinalityMismatches.push({
         ...declaration,
         actual: dataRows.length,
         tableStart: index,
         tableEnd: end,
         tableBlock: documentLines.slice(index, end).join('\n'),
+        structureBlock: documentLines.slice(index, end).join('\n'),
+        kind: 'table',
       });
     }
     index = end - 1;
+  }
+  // 同样核对“只看两件事：”后紧随的 Markdown 清单。这里只统计顶层列表
+  // 标记，不把缩进说明行当新项；普通叙述中的“两条记录”若没有冒号引导结构，
+  // 不进入基数审计。
+  const topLevelListItemRe = /^\s{0,3}(?:[-*+]\s+|[1-9]\d*[.、．]\s+)/u;
+  for (let index = 0; index < documentLines.length; index++) {
+    const line = documentLines[index];
+    if (!/[：:]\s*(?:\*\*|__)?\s*$/u.test(line)) continue;
+    const matches = Array.from(line.matchAll(structuredCountRe));
+    const supported = matches.map(match => ({
+      match,
+      expected: /^\d+$/.test(match[1]) ? Number(match[1]) : chineseCount[match[1]],
+    })).filter(item => item.expected >= 2).at(-1);
+    if (!supported) continue;
+    let cursor = index + 1;
+    while (cursor < documentLines.length && !documentLines[cursor].trim()) cursor++;
+    if (cursor >= documentLines.length || consultMarkdownTableCells(documentLines[cursor])) continue;
+    const start = cursor;
+    const listItems = [];
+    let sawItem = false;
+    while (cursor < documentLines.length) {
+      const current = documentLines[cursor];
+      if (!current.trim()) { if (sawItem) { cursor++; continue; } break; }
+      if (topLevelListItemRe.test(current)) { listItems.push(current); sawItem = true; cursor++; continue; }
+      if (sawItem && /^\s{2,}\S/u.test(current)) { cursor++; continue; }
+      break;
+    }
+    if (listItems.length && listItems.length !== supported.expected) {
+      cardinalityMismatches.push({
+        line: line.trim(),
+        lineIndex: index,
+        expected: supported.expected,
+        actual: listItems.length,
+        structureStart: start,
+        structureEnd: cursor,
+        structureBlock: documentLines.slice(start, cursor).join('\n'),
+        kind: 'list',
+      });
+    }
   }
   // 冒号式引导语必须真正引出内容；若下一非空行已经进入新步骤/标题或已结束，
   // 说明模型删掉示例后留下了空壳。
@@ -2247,7 +2293,7 @@ function consultAnswerRevisionPrompt(draft, audit) {
       ? `草稿存在未定义的圈号步骤/对照项引用：${(audit.undefinedOrdinalReferences || []).join('、')}。逐项核对前文表格、列表和正文，只能引用已经明确给出含义的序号；“共三项”不得再写④，表格只定义①②③时不得在判断或小结引用③/④或“含④”。删除含未定义序号的完整句/完整表格行，或在不新增事实的前提下改回已定义序号；不得凭空补造第四项。`
       : '',
     audit.violations.includes('inconsistent_structured_cardinality')
-      ? `草稿声明的对照数量与实际结构不一致：${(audit.cardinalityMismatches || []).map(item => `声明${item.expected}项、实际${item.actual}项`).join('；')}。只有草稿中已经存在的内容才能保留；把声明改成实际数量，或删除数量声明/不完整表格，禁止为了凑数新增字段、来源或观测点。`
+      ? `草稿声明的对照数量与实际结构不一致：${(audit.cardinalityMismatches || []).map(item => `${item.kind === 'list' ? '清单' : '表格'}声明${item.expected}项、实际${item.actual}项`).join('；')}。只有草稿中已经存在的内容才能保留；把声明改成实际数量，或删除数量声明/不完整表格或清单，禁止为了凑数新增字段、来源或观测点。`
       : '',
     audit.violations.includes('incomplete_structured_lead_in')
       ? '草稿含“例如：/如下：/包括：/分别为：”后直接跳到下一步骤或结束的空引导句。删除该完整引导句及其孤立步骤标题，或只用草稿中已经存在的内容补成完整自然句；禁止补造示例。'
@@ -2309,7 +2355,8 @@ function consultAnswerSafeFallback(draft, audit) {
     fallbackDraft = fallbackDraft.split('\n').slice(0, audit.singleStepOverreach.truncateFromLine).join('\n');
   }
   for (const mismatch of audit.cardinalityMismatches || []) {
-    if (mismatch.tableBlock) fallbackDraft = fallbackDraft.replace(mismatch.tableBlock, '');
+    if (mismatch.structureBlock) fallbackDraft = fallbackDraft.replace(mismatch.structureBlock, '');
+    else if (mismatch.tableBlock) fallbackDraft = fallbackDraft.replace(mismatch.tableBlock, '');
     if (mismatch.line) fallbackDraft = fallbackDraft.split('\n').filter(line => line.trim() !== mismatch.line).join('\n');
   }
   const incompleteLines = new Set((audit.incompleteLeadIns || []).flatMap(item => item.affectedLines || []));
