@@ -585,6 +585,7 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     + extractFn(SRC, 'consultConcretePaths') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + extractFn(SRC, 'consultAnswerRevisionPrompt') + '\n'
+    + extractFn(SRC, 'consultReplaceUnexpectedPath') + '\n'
     + extractFn(SRC, 'consultAnswerSafeFallback') + '\n'
     + 'return { audit:consultAnswerSemanticAudit, revision:consultAnswerRevisionPrompt, fallback:consultAnswerSafeFallback };',
   )();
@@ -611,6 +612,7 @@ test('发布前确定性语义校验：路径必须来自用户或route并逐字
     + extractFn(SRC, 'consultConcretePaths') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + extractFn(SRC, 'consultAnswerRevisionPrompt') + '\n'
+    + extractFn(SRC, 'consultReplaceUnexpectedPath') + '\n'
     + extractFn(SRC, 'consultAnswerSafeFallback') + '\n'
     + 'return { audit:consultAnswerSemanticAudit, revision:consultAnswerRevisionPrompt, fallback:consultAnswerSafeFallback };',
   )();
@@ -639,6 +641,10 @@ test('发布前确定性语义校验：路径必须来自用户或route并逐字
   }
   const methodFallback = bundle.fallback('请找 GET /month/view/today，再核当前响应。', bundle.audit('请找 GET /month/view/today，再核当前响应。', '今天视图接口是什么？', route));
   assert.equal(methodFallback, '请找 该已核接口，再核当前响应。', '降级替换整个方法+路径，不留下“GET 该已核接口”残句或审计元话术');
+  const mixedDraft = '完整接口 GET /pwrsapi/month/view/today；不要简称 /pwrsapi。';
+  const mixedFallback = bundle.fallback(mixedDraft, bundle.audit(mixedDraft, '今天视图接口是什么？', route));
+  assert.equal(mixedFallback, '完整接口 GET /pwrsapi/month/view/today；不要简称 该已核接口。', '未核短前缀只替换独立 token，不得污染已核完整长路径');
+  assert.deepEqual(bundle.audit(mixedFallback, '今天视图接口是什么？', route).violations, []);
   const userPath = bundle.audit('按你提供的 /custom/probe 只读核当前请求。', '我抓到 /custom/probe，怎么判断？', { matched: true, answerFacts: ['只核当前请求'] });
   assert.deepEqual(userPath.violations, [], '用户本轮原文路径可照实引用');
   const inventedWithoutKnownPath = bundle.audit('建议再看 GET /guessed/path。', '还要看哪里？', { matched: true, answerFacts: ['继续核当前请求'] });
