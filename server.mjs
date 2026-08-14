@@ -1772,7 +1772,7 @@ function consultRouteScopeText(route) {
 }
 
 function consultScopeEntityTerms() {
-  return ['外部调度', '调度', '补跑', '重跑', '统计同步', '同步任务', 'ETL', '批处理', '折线图', '患教', '患者教育', '收费', '退费', '药师反馈', '反馈', '监护', '药物重整', '医嘱干预', '患者列表', '患者三元身份', '患者身份', '用药咨询', 'AI 状态', 'AI状态'];
+  return ['外部调度', '调度', '补跑', '重跑', '统计同步', '同步任务', 'ETL', '批处理', '折线图', '患教', '患者教育', '收费', '退费', '药师反馈', '反馈', '监护', '药物重整', '医嘱干预', '患者列表', '患者三元身份', '患者身份', '患者入参', '患者参数', '用药咨询', '医生', '药师', '订单', '患者', 'AI 状态', 'AI状态'];
 }
 
 function consultDiagnosticMechanismTerms(text) {
@@ -1797,6 +1797,45 @@ function consultMalformedMarkdownTokens(text) {
   const withoutFences = source.replace(/```/g, '');
   if (((withoutFences.match(/`/g) || []).length % 2) !== 0) issues.push('unbalanced_code');
   return issues;
+}
+
+function consultMalformedProseTokens(text) {
+  const source = String(text || '').replace(/```[\s\S]*?```/g, '').replace(/`[^`]*`/g, '');
+  const pairs = [['(', ')', 'unbalanced_ascii_paren'], ['（', '）', 'unbalanced_cjk_paren'], ['【', '】', 'unbalanced_cjk_bracket']];
+  const issues = [];
+  for (const [open, close, label] of pairs) {
+    let depth = 0, invalid = false;
+    for (const ch of source) {
+      if (ch === open) depth += 1;
+      else if (ch === close) {
+        depth -= 1;
+        if (depth < 0) { invalid = true; break; }
+      }
+    }
+    if (invalid || depth !== 0) issues.push(label);
+  }
+  return issues;
+}
+
+function consultRequiredPrimaryPath(question, route, answer = '') {
+  if (!route || !route.matched) return null;
+  const answerText = String(answer || '');
+  const questionRequestsInterface = /(?:请求|响应|接口|抓包|Network|路径)/i.test(String(question || ''));
+  const discussesRequestCheck = questionRequestsInterface && /(?:请求|接口|抓包|Network|\bpath\b|路径)[^。！？；\n]{0,28}(?:核对|检查|对照|确认|状态|返回|方法)|(?:核对|检查|对照|确认)[^。！？；\n]{0,20}(?:请求|接口|\bpath\b|路径)/i.test(answerText);
+  if (!discussesRequestCheck) return null;
+  const forbidden = new Set(consultConcretePaths((route.mustNotConfuse || []).join('\n')));
+  const candidates = [];
+  for (const fact of route.answerFacts || []) {
+    const factText = String(fact || '');
+    for (const pathValue of consultConcretePaths(factText)) {
+      if (!pathValue.startsWith('/') || forbidden.has(pathValue)) continue;
+      const escaped = pathValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const method = factText.match(new RegExp(`\\b(GET|POST|PUT|PATCH|DELETE)\\s+${escaped}`, 'i'))?.[1]?.toUpperCase() || '';
+      candidates.push({ path: pathValue, method, display: `${method ? `${method} ` : ''}${pathValue}` });
+    }
+  }
+  const unique = Array.from(new Map(candidates.map(item => [item.path, item])).values());
+  return unique.length === 1 ? unique[0] : null;
 }
 
 function consultNormalizeSafeMarkdown(text) {
@@ -1847,15 +1886,18 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const scopeTechnicalTokens = new Set(consultScopeTechnicalTokens(scopeText).map(token => token.toLowerCase()));
   const unexpectedTechnicalTokens = consultScopeTechnicalTokens(text).filter(token => !scopeTechnicalTokens.has(token.toLowerCase()));
   const unexpectedScopeTerms = Array.from(new Set([...unexpectedEntityTerms, ...unexpectedMechanismTerms, ...unexpectedTechnicalTokens]));
-  const malformedMarkdown = consultMalformedMarkdownTokens(text);
+  const malformedMarkdown = [...consultMalformedMarkdownTokens(text), ...consultMalformedProseTokens(text)];
+  const requiredPrimaryPath = consultRequiredPrimaryPath(question, route, text);
+  const missingPrimaryPath = requiredPrimaryPath && !consultConcretePaths(text).includes(requiredPrimaryPath.path) ? requiredPrimaryPath : null;
   const violations = [];
   if (likelihoodTerms.length || causalPriorityTerms.length) violations.push('unsupported_likelihood');
   if (unsupportedComponentClaims.length) violations.push('unsupported_component_fault');
   if (unsafeActorActions.length || unsafeDirectActions.length) violations.push('cross_actor_side_effect');
   if (unexpectedPaths.length) violations.push('unexpected_concrete_path');
   if (unexpectedScopeTerms.length) violations.push('out_of_scope_entity');
+  if (missingPrimaryPath) violations.push('missing_primary_path');
   if (malformedMarkdown.length) violations.push('malformed_markdown');
-  return { checked: true, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, malformedMarkdown, violations };
+  return { checked: true, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -1877,8 +1919,11 @@ function consultAnswerRevisionPrompt(draft, audit) {
     audit.violations.includes('out_of_scope_entity')
       ? `草稿引入了当前问题与当前/继承 route 事实未点名的相邻模块或任务：${(audit.unexpectedEntityTerms || []).join('、')}。删除这些模块、接口和动作所在的整句，只围绕当前已核主题作答；用户显式切到新实体时才允许进入新 route。`
       : '',
+    audit.violations.includes('missing_primary_path')
+      ? `当前答案正在核对请求/响应，而当前 route 只有一个已核主接口。必须逐字写出 ${audit.missingPrimaryPath.display}，不得用 path、today 接口、该接口、省略号或裸相对路径代替。若 route 有多个合法接口则不得强塞其中一个。`
+      : '',
     audit.violations.includes('malformed_markdown')
-      ? '草稿含未闭合的 Markdown 粗体、行内代码或代码围栏。修订时必须闭合成对标记；无法自然闭合就删除该行的格式标记，正文句意必须完整。'
+      ? '草稿含未闭合的 Markdown 粗体、行内代码、代码围栏、中文/英文括号或书名式括号。修订时必须输出语法完整的自然句并闭合成对标记；无法自然恢复就删除整句，禁止保留半截列表项、孤立标点或残缺括号。'
       : '',
     '保留草稿中已经由 Spec/route/源码确认的事实和局部未知边界；不得把当前主题整体降级为“说明书未覆盖”。',
     '<draft>', String(draft || ''), '</draft>',
@@ -1915,7 +1960,12 @@ function consultAnswerSafeFallback(draft, audit) {
     }
     return true;
   }).join('').trim();
-  const safeKept = consultNormalizeSafeMarkdown(kept);
+  const proseSafeKept = kept.split('\n').filter(line => !consultMalformedProseTokens(line).length).join('\n');
+  let safeKept = consultNormalizeSafeMarkdown(proseSafeKept);
+  if (audit.violations.includes('missing_primary_path') && audit.missingPrimaryPath) {
+    const exact = audit.missingPrimaryPath.display;
+    safeKept = [safeKept, `当前请求应逐字核对已核主接口：\`${exact}\`。`].filter(Boolean).join('\n\n');
+  }
   const notes = [];
   if (audit.violations.includes('unsupported_likelihood')) notes.push('当前证据不支持对原因作频率排序；未确认的原因只能作为不排序的待验证分支。');
   if (audit.violations.includes('unsupported_component_fault')) notes.push('未由当前事实确认的组件原因仅作为待验证分支，不作故障定论。');

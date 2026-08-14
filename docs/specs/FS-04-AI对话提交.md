@@ -152,8 +152,9 @@ depends_on: [FS-01]
 - **AC-67【裸相对路径与组合业务实体同样受当前作用域约束】** Given 当前用户或 current/inherited route facts/refs 仅确认带前导斜杠的绝对路径 When 最终稿以“路径含/过滤关键字/简称”等方式输出 month/view/today、api/x 等不带前导斜杠的 slash-separated 技术 token Then 该 token 仍按具体路径审计；一次修订仅可恢复为当前已核绝对路径的完整字面量，不得去前缀、去斜杠或缩短，无法可靠恢复时删除完整自然句。用户或 route 本身逐字给出相对路径时可照实引用；自然日期、A/B 短分组、普通中文斜杠短语和无斜杠文件名不得误判。Given 最终稿出现折线图、统计同步等组合业务实体短语 When 当前用户和 route scope 未点名 Then 删除所在整句；用户显式切到该实体并重新路由时放行。本条不放松 AC-61/62 的显式切题和最终稿复审。
 
 - **AC-68【概率证据逐 claim 绑定，具体时区值受 current scope 约束】** Given 同一 route 含一条统计/比例事实和其它非统计事实 When 最终答案出现多个概率、频率、比例或成因排序 claim Then 服务端须按自然句分别绑定直接证据；统计事实只支持与其同一对象的 claim，不得用 route 级布尔值给整份答案开绿灯。混合答案中有证据句保留、无证据句触发一次全文修订并在失败时整句删除；用户给出的数字样本或 answerFact 对同一对象明确写出频率/比例时可照实引用。Given 最终稿出现东八区、UTC/GMT 偏移、Asia/Shanghai 等具体环境值 When 用户本轮及 current/inherited route facts/refs 未逐字给出 Then 作为越界技术事实删除所在整句；用户或 route 逐字给出时放行。本条不放松 AC-59/63/66。
+- **AC-69【最终删句后句法完整，唯一主接口精确保留】** Given 初稿或一次修订稿因概率、路径、技术机制或相邻业务实体越界而需要删除内容 When 服务端准备发布最终稿 Then 必须再次审计 Markdown 标记、中文/英文括号及自然句完整性；未闭合括号、半截列表项、孤立标点或残句不得发布，无法自然恢复时删除完整句。患者、医生、药师、订单等业务实体只有逐字出现在用户本轮或 current/inherited route facts/refs 时才可引用，显式新实体切题后按新 route 放行。Given 用户与答案正在核对请求/响应且当前 route 的 `answerFacts` 只有一个已核主接口 When 最终稿准备发布 Then 必须逐字保留该接口的 HTTP 方法与完整路径，不得用 `path`、“today 接口”“该接口”或裸相对路径代替；route 有多个合法接口时不得强塞任意一个。本条不放松 AC-60/61/62。
 
-> **AC 编号**：现编号至 **AC-68**（保留既有历史编号与 AC-19-KB）。AC-44/AC-45/AC-46/AC-47/AC-48/AC-49/AC-50/AC-51/AC-52/AC-53/AC-54/AC-55/AC-56/AC-57/AC-58/AC-59/AC-60/AC-61/AC-62/AC-63/AC-64/AC-65/AC-66/AC-67/AC-68 为 P1。
+> **AC 编号**：现编号至 **AC-69**（保留既有历史编号与 AC-19-KB）。AC-44/AC-45/AC-46/AC-47/AC-48/AC-49/AC-50/AC-51/AC-52/AC-53/AC-54/AC-55/AC-56/AC-57/AC-58/AC-59/AC-60/AC-61/AC-62/AC-63/AC-64/AC-65/AC-66/AC-67/AC-68/AC-69 为 P1。
 
 ## 4. 接口契约
 > 统一前缀 `/api`；除 `consult`（SSE）外返回 `{...}` JSON。**本条 100% 复用现有端点，不新增端点**；提交人 `reporter`、归档医院 `site` 服务端按当前登录用户收敛（忽略越权传参）。契约锚点见 `docs/specs/00-实施端-spec清单.md §4` 对照表。
@@ -303,6 +304,7 @@ depends_on: [FS-01]
   - 同一真逻辑套件与 normal/deep 精确基线锁定无证据比例定性与配置口径动作：很多/多数/绝大多数/少数/大部分等无直接统计证据时触发修订，route 统计事实放行；对齐/校准/统一配置、时区和业务口径触发动作门，只读对照已有请求与页面放行（AC-66）。
   - 同一真逻辑套件与 normal/deep 精确基线锁定裸相对路径与组合实体：已核绝对路径不得缩成 month/view/today 等裸 token，用户逐字相对路径放行；自然日期、A/B 和文件名不误拦；今天视图不得串入折线图/统计同步，显式切题放行（AC-67）。
   - 同一真逻辑套件与 normal/deep 精确基线锁定概率 claim 逐句证据绑定与具体时区值：同 route 无关统计不得全局放行，混合 facts 只放行同对象证据句；东八区、UTC/GMT 偏移和 Asia/Shanghai 未在 current scope 时删除，用户逐字值放行（AC-68）。
+  - 同一真逻辑套件与 normal/deep 精确基线锁定最终稿范围、句法与唯一主接口：未点名患者/医生/药师/订单触发整句删除，显式 scope 放行；中英文括号与 Markdown 标记不闭合不得发布；请求核对且 route 只有一个已核主接口时精确保留 HTTP 方法和完整路径，多接口不强塞（AC-69）。
   - `tools/spec-retrieval-two-stage.logic.test.mjs` 直接执行生产纯逻辑，覆盖目录路由真实生效、第 61 份以后可达、后部接口/字段进入 Top5、精确 API/`snake_case`/`camelCase`/状态强匹配、word≠Word、SQL 连接≠WebSocket、监护/反馈不串、显式 subsystem、本轮事实边界、短代词追问和自然问法概念归一，以及普通事实问答不向模型注入全量目录；并以 PWRS 真实 86 份 Spec 回归 git 目录第 79 份 `PWRS-SYS-07a`、第 82 份 `PWRS-SYS-10`、Pad 反馈对象接口、异常检验近 5 天和跨院区复合身份正文 Top5（AC-44）。
 - **接口（B 组 · 连真库冒烟）**：
   - `POST /api/intake-chat`（真实现场账号会话，`type='intake'` + `project=hlyy` + `messages`）→ 断言 `{ok:true}` 且（AI 配置时）产出 record 建单后 `savedId` 非空、`SELECT type,lifecycle,site,reporter FROM intakes WHERE id=savedId` 为 `requirement|bug` / `待处理` / `reporter`=登录用户；AI 未配时 `savedId` 空、返回降级文案不 500（AC-9/11/14）。
@@ -345,4 +347,5 @@ depends_on: [FS-01]
 - [x] AC-66 无证据比例定性与配置口径动作门专项通过：模糊比例词、route 统计事实、对齐/校准/统一配置动作与只读对照正反例均有确定性自动化证据；待生产可见浏览器验收。
 - [x] AC-67 裸相对路径与组合实体作用域专项通过：绝对路径缩写、用户逐字相对路径、自然斜杠文本、折线图/统计同步相邻主题及显式切题均有确定性自动化证据；待生产可见浏览器验收。
 - [x] AC-68 概率逐 claim 证据绑定与具体时区值作用域专项通过：无关统计、多 facts 混合、用户数字样本、route 同对象统计和 UTC/GMT/东八区正反例均有确定性自动化证据；待生产可见浏览器验收。
+- [x] AC-69 最终稿范围/句法/唯一主接口专项通过：患者/医生/药师/订单 current scope 正反例、中英文括号残句、唯一主接口精确保留与多接口不强塞均有确定性自动化证据；待生产可见浏览器验收。
 - [ ] 人类验收通过。

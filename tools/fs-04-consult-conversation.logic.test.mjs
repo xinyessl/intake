@@ -544,6 +544,8 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
     + extractFn(SRC, 'consultDiagnosticMechanismTerms') + '\n'
     + extractFn(SRC, 'consultScopeTechnicalTokens') + '\n'
     + extractFn(SRC, 'consultMalformedMarkdownTokens') + '\n'
+    + extractFn(SRC, 'consultMalformedProseTokens') + '\n'
+    + extractFn(SRC, 'consultRequiredPrimaryPath') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + 'return consultAnswerSemanticAudit;',
   )();
@@ -617,6 +619,8 @@ test('发布前确定性语义校验：跨主体副作用触发，否定句和�
     + extractFn(SRC, 'consultDiagnosticMechanismTerms') + '\n'
     + extractFn(SRC, 'consultScopeTechnicalTokens') + '\n'
     + extractFn(SRC, 'consultMalformedMarkdownTokens') + '\n'
+    + extractFn(SRC, 'consultMalformedProseTokens') + '\n'
+    + extractFn(SRC, 'consultRequiredPrimaryPath') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + 'return consultAnswerSemanticAudit;',
   )();
@@ -663,6 +667,8 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     + extractFn(SRC, 'consultDiagnosticMechanismTerms') + '\n'
     + extractFn(SRC, 'consultScopeTechnicalTokens') + '\n'
     + extractFn(SRC, 'consultMalformedMarkdownTokens') + '\n'
+    + extractFn(SRC, 'consultMalformedProseTokens') + '\n'
+    + extractFn(SRC, 'consultRequiredPrimaryPath') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + extractFn(SRC, 'consultAnswerRevisionPrompt') + '\n'
     + extractFn(SRC, 'consultReplaceUnexpectedPath') + '\n'
@@ -697,6 +703,24 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   const normalized = bundle.fallback(malformed, malformedAudit);
   assert.equal(normalized, '只有截图不够。\n请只读核已有响应。');
   assert.deepEqual(bundle.audit(normalized, '只有截图够不够？', route).violations, []);
+
+  const brokenProse = '核对请求方法。是否不该有多余业务参数（这条接口不依赖患者入参；';
+  const brokenAudit = bundle.audit(brokenProse, '今天视图请求和响应抓到了，重点核什么？', {
+    matched: true,
+    route: { title: '工作台今天视图' },
+    answerFacts: ['GET /pwrsapi/month/view/today 返回 year/week'],
+  });
+  assert.ok(brokenAudit.violations.includes('out_of_scope_entity'), '未点名患者实体不得混入今天视图');
+  assert.ok(brokenAudit.violations.includes('missing_primary_path'), '讨论请求核对时须保留唯一已核主接口');
+  assert.ok(brokenAudit.violations.includes('malformed_markdown'), '中英文括号不闭合也属于最终稿完整性错误');
+  const brokenFallback = bundle.fallback(brokenProse, brokenAudit);
+  assert.doesNotMatch(brokenFallback, /患者入参|（|；$/);
+  assert.match(brokenFallback, /GET \/pwrsapi\/month\/view\/today/);
+  assert.deepEqual(bundle.audit(brokenFallback, '今天视图请求和响应抓到了，重点核什么？', {
+    matched: true,
+    route: { title: '工作台今天视图' },
+    answerFacts: ['GET /pwrsapi/month/view/today 返回 year/week'],
+  }).violations, []);
 });
 
 test('发布前确定性语义校验：路径必须来自用户或route并逐字保留', () => {
@@ -716,6 +740,8 @@ test('发布前确定性语义校验：路径必须来自用户或route并逐字
     + extractFn(SRC, 'consultDiagnosticMechanismTerms') + '\n'
     + extractFn(SRC, 'consultScopeTechnicalTokens') + '\n'
     + extractFn(SRC, 'consultMalformedMarkdownTokens') + '\n'
+    + extractFn(SRC, 'consultMalformedProseTokens') + '\n'
+    + extractFn(SRC, 'consultRequiredPrimaryPath') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + extractFn(SRC, 'consultAnswerRevisionPrompt') + '\n'
     + extractFn(SRC, 'consultReplaceUnexpectedPath') + '\n'
@@ -730,6 +756,14 @@ test('发布前确定性语义校验：路径必须来自用户或route并逐字
     mustNotConfuse: ['不得答已废止的 GET /month/view'],
   };
   assert.deepEqual(bundle.audit('调用 GET /pwrsapi/month/view/today；不要混淆 GET /month/view。', '今天视图接口是什么？', route).violations, []);
+  const missingPrimary = bundle.audit('核对 path、方法、HTTP 状态和响应字段。', '今天请求响应抓到了，重点核什么？', route);
+  assert.deepEqual(missingPrimary.violations, ['missing_primary_path']);
+  assert.equal(missingPrimary.missingPrimaryPath.display, 'GET /pwrsapi/month/view/today');
+  const requiredFallback = bundle.fallback('核对 path、方法、HTTP 状态和响应字段。', missingPrimary);
+  assert.match(requiredFallback, /当前请求应逐字核对已核主接口：`GET \/pwrsapi\/month\/view\/today`/);
+  assert.deepEqual(bundle.audit(requiredFallback, '今天请求响应抓到了，重点核什么？', route).violations, []);
+  const multipleRoute = { matched: true, route: { title: '多接口只读核对' }, answerFacts: ['GET /api/a 读取列表', 'GET /api/b 读取详情'] };
+  assert.deepEqual(bundle.audit('核对当前请求的状态和响应。', '这个请求响应重点核什么？', multipleRoute).violations, [], '多个合法接口时不得强塞任意一个');
   for (const bad of [
     '调用 GET /month/view/today。',
     '过滤关键字 month/view/today。',
@@ -785,6 +819,8 @@ test('发布前事实作用域审计：相邻模块、通配路径不串入，�
     + extractFn(SRC, 'consultDiagnosticMechanismTerms') + '\n'
     + extractFn(SRC, 'consultScopeTechnicalTokens') + '\n'
     + extractFn(SRC, 'consultMalformedMarkdownTokens') + '\n'
+    + extractFn(SRC, 'consultMalformedProseTokens') + '\n'
+    + extractFn(SRC, 'consultRequiredPrimaryPath') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + extractFn(SRC, 'consultAnswerRevisionPrompt') + '\n'
     + extractFn(SRC, 'consultReplaceUnexpectedPath') + '\n'
@@ -847,6 +883,9 @@ test('发布前事实作用域审计：相邻模块、通配路径不串入，�
   assert.deepEqual(bundle.audit('患者身份要核 hospitalId、patientId、visitId，districtCode 不能替代。', '患者身份怎么核？', patientRoute).violations, [], '当前患者 route 的身份字段不应被误拦');
   assert.deepEqual(bundle.audit('hospitalId、patientId、visitId 三项都要核。', '现在切到患者详情，身份怎么核？', patientRoute).violations, [], '用户显式点名患者实体后允许新 route 事实');
   assert.deepEqual(bundle.audit('患教模板身份怎么核？', '现在切到患教模板，身份怎么核？', patientRoute).violations, [], '用户显式点名的新实体可进入新 route');
+  assert.deepEqual(bundle.audit('患者身份按当前规则核对。', '患者详情身份怎么核？', patientRoute).violations, [], 'current route 点名患者时允许患者实体');
+  assert.deepEqual(bundle.audit('医生与药师只读核现有咨询记录。', '医生和药师的咨询怎么核？', { matched: true, route: { title: '医生药师咨询' }, answerFacts: ['医生与药师可查看既有咨询'] }).violations, [], '医生/药师在 current scope 中放行');
+  assert.deepEqual(bundle.audit('今天视图正常后再核医生订单。', '今天视图时间重点核什么？', todayRoute).violations, ['out_of_scope_entity'], '未点名医生/订单不得从相邻主题串入');
   const patientEduLeak = bundle.audit('患者详情正常，再核患教的 ai_status。', '患者详情身份怎么核？', patientRoute);
   assert.deepEqual(patientEduLeak.violations, ['out_of_scope_entity']);
   assert.deepEqual(patientEduLeak.unexpectedEntityTerms, ['患教', 'ai_status']);
