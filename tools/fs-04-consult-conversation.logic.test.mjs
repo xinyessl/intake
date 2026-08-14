@@ -510,6 +510,10 @@ test('发布前动作一致性审计覆盖整份答案，禁止同答先劝停�
     assert.match(text, /动作换成由第三方执行也不改变副作用/);
     assert.match(text, /表格只定义①②③却在判断或小结写③\/④/);
     assert.match(text, /删除含未定义序号的完整句\/完整表格行/);
+    assert.match(text, /声明数量 → 实际内容/);
+    assert.match(text, /不得用一行表格冒充“三边对照”/);
+    assert.match(text, /“例如：\/如下：\/包括：\/分别为：”后必须有实际内容/);
+    assert.match(text, /只问“先做哪个验证\/第一步先做什么”时，只给一个最小只读验证/);
   });
 
   const readOnly = fn('这个列表刷新已确认纯只读，可以刷新后看现有数量吗？', { matched: true });
@@ -985,6 +989,49 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     '请求响应都抓到了，怎么核？',
     route,
   ).violations, [], '表格定义的序号可在正文合法复用');
+
+  const incompleteThreeWayDraft = [
+    '先做这一个验证：拿一条已有记录做三边原文对照。',
+    '| 对照点 | 看什么 |',
+    '| --- | --- |',
+    '| 收进来/页面上看到的 | 已有回执里的原文 |',
+    '**2. 核报文格式**',
+    '在已抓到的报文里看字段，例如：',
+    '**3. 决定下一步**',
+    '再把结论转给对接方。',
+  ].join('\n');
+  const incompleteThreeWayAudit = bundle.audit(
+    incompleteThreeWayDraft,
+    '我应该先让他们做哪个验证？',
+    route,
+  );
+  assert.ok(incompleteThreeWayAudit.violations.includes('inconsistent_structured_cardinality'), '声明三边时按行列项的表格不能只有一条数据');
+  assert.deepEqual(incompleteThreeWayAudit.cardinalityMismatches.map(item => [item.expected, item.actual]), [[3, 1]]);
+  assert.ok(incompleteThreeWayAudit.violations.includes('incomplete_structured_lead_in'), '例如：后直接进入新步骤属于空引导句');
+  assert.ok(incompleteThreeWayAudit.violations.includes('single_step_diagnostic_overreach'), '只问先做哪个验证时不得展开多个顶层步骤');
+  assert.match(bundle.revision(incompleteThreeWayDraft, incompleteThreeWayAudit), /禁止为了凑数新增字段/);
+  assert.match(bundle.revision(incompleteThreeWayDraft, incompleteThreeWayAudit), /不得把一个问题扩成完整排查流程/);
+  const incompleteThreeWayFallback = bundle.fallback(incompleteThreeWayDraft, incompleteThreeWayAudit);
+  assert.doesNotMatch(incompleteThreeWayFallback, /三边|收进来\/页面上看到的|例如：|\*\*2\.|\*\*3\./);
+  assert.deepEqual(bundle.audit(incompleteThreeWayFallback, '我应该先让他们做哪个验证？', route).violations, []);
+
+  assert.deepEqual(bundle.audit([
+    '对照三份已有值：',
+    '| 对照项 | 原文 |',
+    '| --- | --- |',
+    '| 来源记录 | 已留存值 |',
+    '| 已有请求 | 已发送值 |',
+    '| 已有响应 | 已返回值 |',
+    '只比较三份原文，不执行写操作。',
+  ].join('\n'), '已有证据怎么做三份对照？', route).violations, [], '声明三份且表格确有三项时不得误伤');
+  assert.deepEqual(bundle.audit([
+    '三边横向对照：',
+    '| 来源记录 | 已有请求 | 已有响应 |',
+    '| --- | --- | --- |',
+    '| 原文A | 原文A | 原文A |',
+  ].join('\n'), '已有证据怎么对照？', route).violations, [], '横向三列表不按数据行数误判');
+  assert.deepEqual(bundle.audit('重点看：\n- 已有请求原文\n- 已有响应原文', '下一步看什么？', route).violations, [], '冒号后有真实列表内容时不得误判为空引导');
+  assert.deepEqual(bundle.audit('**1. 只读核对**\n比较已有请求与已有响应原文。', '第一步先做什么？', route).violations, [], '单步问题只给一个顶层步骤时应放行');
 
   const explicitLayerRuleRoute = {
     matched: true,

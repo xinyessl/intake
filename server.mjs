@@ -1683,6 +1683,7 @@ function consultFinalActionConsistencyGuard(question, route) {
     '编辑、删除、新建、保存、提交、发送、完成、签名、审批、星标、可能标记已读的打开、改参数、改报文类型、改映射、改配置、重试、复现、补跑或重跑，只要不能归入 B 或 C，就必须从最终答案所有位置删除，改成检查已有页面、请求、响应、报文、映射、截图、日志或审计。动作换成由第三方执行也不改变副作用：不得写成“让对接方改字符串/参数/映射/配置后用同一患者复测”“让运维重跑”或“让开发重试”来绕过守卫。不能因为同一答案别处写了“不要操作”“只读”“别重复”，就保留这里的正向点击或重做指令；否定提醒不能抵消冲突动作。',
     '若最终答案任何一处说“不要操作/不要重复/只读”，则其它任何一处都不得再建议点击编辑、删除、发送、完成等未知动作来观察是否发请求，也不得用“点了是否被拦住”“试一下看看”之类问句变相放行。用户只问“这个按钮是否发请求”时，只能查已有请求、日志、审计、代码或契约；没有既有证据就局部说明当前无法安全确认，不能让现场点击未知按钮补抓。',
     '发布前还要核对步骤和对照项的编号引用：后文引用①②③④等序号时，每个序号都必须在本答案前文有明确对应项；不得出现“共三项”却引用④、表格只定义①②③却在判断或小结写③/④等未定义引用。发现后必须删除含未定义序号的完整句/完整表格行，或在不新增事实的前提下改回已经定义的序号。',
+    '结构化答案还必须逐项核对“声明数量 → 实际内容”：声称二/三/四边、项、份或个对照时，紧随其后的对照表/清单必须确实给出相同数量的完整项；不得用一行表格冒充“三边对照”。“例如：/如下：/包括：/分别为：”后必须有实际内容，不能直接跳到下一步骤。用户明确只问“先做哪个验证/第一步先做什么”时，只给一个最小只读验证，不追加第二、第三步或可转发的修改指令。',
     '该审计只删除不安全或互相矛盾的动作，不新增业务事实，也不给纯事实回答强加诊断步骤。若用户只问事实且现有证据已经足够，直接回答后停止；若已明确动作只读，可保留相应只读观察；若受控条件全部齐全，可条件式说明单次受控验证。',
   ].join('\n');
 }
@@ -2019,6 +2020,7 @@ async function consultStreamFinalAnswer(answer, writeChunk, options = {}) {
 
 function consultAnswerSemanticAudit(answer, question, route) {
   const text = String(answer || '').trim();
+  const documentLines = text.split('\n');
   // 圈号经常用来跨表格/段落引用观测点。模型删句或修订后若只剩“③/④”这类
   // 未定义引用，实施无法照做；定义必须出现在结构起点（行首/表格单元格）或
   // 冒号、分号后的枚举项，普通正文里的“第③步/含④”只算引用。
@@ -2036,6 +2038,73 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const undefinedOrdinalReferences = Array.from(new Set(ordinalUses
     .filter(item => !ordinalDefinitions.has(item.ordinal))
     .map(item => item.ordinal)));
+  // “三边/三项对照”与实际表格行数是文档级契约，Markdown 列数正确并不代表
+  // 内容完整。只在表头明确以“对照项/观测点/来源”等按行列项时比较数据行，
+  // 避免把横向三列表误判为缺少三行。
+  const chineseCount = { '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10 };
+  const structuredCountRe = /(?:共|做|核对|对照|比较|检查|保留|拿)?\s*([一二两三四五六七八九十]|\d{1,2})\s*(边|项|份|个(?:值|字段|位置|观测点|检查点|对照点)?)\s*(?:原文|值|字段|位置|观测点|检查点|数据)?\s*(?:对照|核对|比较|检查|分别)?/gu;
+  const cardinalityMismatches = [];
+  for (let index = 0; index + 1 < documentLines.length; index++) {
+    const headerCells = consultMarkdownTableCells(documentLines[index]);
+    if (!headerCells || !/^\s*\|?\s*:?-{3,}/.test(documentLines[index + 1])) continue;
+    let end = index + 2;
+    const dataRows = [];
+    while (end < documentLines.length && consultMarkdownTableCells(documentLines[end])) {
+      dataRows.push(documentLines[end]); end++;
+    }
+    const firstHeader = String(headerCells[0] || '').replace(/[*_`]/g, '').trim();
+    if (!/(?:对照|观测|检查)?(?:项|点)|来源|位置|环节|侧|阶段/u.test(firstHeader)) { index = end - 1; continue; }
+    const lookbackStart = Math.max(0, index - 3);
+    const lookback = documentLines.slice(lookbackStart, index);
+    let declaration = null;
+    for (let offset = lookback.length - 1; offset >= 0; offset--) {
+      const matches = Array.from(lookback[offset].matchAll(structuredCountRe));
+      const supported = matches.map(match => ({
+        match,
+        expected: /^\d+$/.test(match[1]) ? Number(match[1]) : chineseCount[match[1]],
+      })).filter(item => item.expected >= 2).at(-1);
+      if (supported) {
+        declaration = { line: lookback[offset].trim(), lineIndex: lookbackStart + offset, expected: supported.expected };
+        break;
+      }
+    }
+    if (declaration && dataRows.length !== declaration.expected && headerCells.length !== declaration.expected) {
+      cardinalityMismatches.push({
+        ...declaration,
+        actual: dataRows.length,
+        tableStart: index,
+        tableEnd: end,
+        tableBlock: documentLines.slice(index, end).join('\n'),
+      });
+    }
+    index = end - 1;
+  }
+  // 冒号式引导语必须真正引出内容；若下一非空行已经进入新步骤/标题或已结束，
+  // 说明模型删掉示例后留下了空壳。
+  const incompleteLeadIns = [];
+  const topLevelStepRe = /^\s*(?:\*\*|__)?\s*([1-9]\d*)[.、．]\s+/u;
+  for (let index = 0; index < documentLines.length; index++) {
+    if (!/(?:例如|如下|包括|分别为|具体为|可见|重点看)\s*[：:]\s*(?:\*\*|__)?\s*$/u.test(documentLines[index])) continue;
+    let next = index + 1;
+    while (next < documentLines.length && !documentLines[next].trim()) next++;
+    const nextLine = documentLines[next] || '';
+    if (next < documentLines.length && !topLevelStepRe.test(nextLine) && !/^\s*#{1,6}\s+/.test(nextLine)) continue;
+    const affectedLines = [documentLines[index]];
+    let previous = index - 1;
+    while (previous >= 0 && !documentLines[previous].trim()) previous--;
+    if (previous >= 0 && topLevelStepRe.test(documentLines[previous])) affectedLines.push(documentLines[previous]);
+    incompleteLeadIns.push({ line: documentLines[index].trim(), lineIndex: index, affectedLines });
+  }
+  // 明确只问“先做哪个验证/第一步做什么”时，回答只能给一个最小只读验证。
+  // 这里按文档顶层编号审计，不限制一个验证内部的表格或无编号对照项。
+  const singleStepQuestion = /(?:先(?:让[^。！？\n]{0,20})?(?:做|查|核|看)?(?:哪个|哪一(?:个|项|步)?|什么)(?:验证|检查|核对|动作|步骤)|第一步(?:先)?(?:做|查|核|看)(?:什么|哪一(?:个|项|步)?))/u.test(String(question || ''));
+  const topLevelSteps = documentLines.map((line, lineIndex) => {
+    const match = line.match(topLevelStepRe);
+    return match ? { number: Number(match[1]), lineIndex, line: line.trim() } : null;
+  }).filter(Boolean);
+  const singleStepOverreach = singleStepQuestion && topLevelSteps.length > 1
+    ? { steps: topLevelSteps, truncateFromLine: topLevelSteps[1].lineIndex }
+    : null;
   const focusedFactQuestion = !!consultFocusedFactGuard(question);
   const likelihoodClaims = text.split(/(?<=[。！？；\n])/u).map(x => x.trim()).filter(statement => {
     const matched = CONSULT_LIKELIHOOD_WORD_RE.test(statement);
@@ -2124,8 +2193,11 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (missingPrimaryPath) violations.push('missing_primary_path');
   if (focusedFactOverreach.length) violations.push('focused_fact_overreach');
   if (undefinedOrdinalReferences.length) violations.push('undefined_ordinal_reference');
+  if (cardinalityMismatches.length) violations.push('inconsistent_structured_cardinality');
+  if (incompleteLeadIns.length) violations.push('incomplete_structured_lead_in');
+  if (singleStepOverreach) violations.push('single_step_diagnostic_overreach');
   if (malformedMarkdown.length) violations.push('malformed_markdown');
-  return { checked: true, focusedFactQuestion, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, malformedMarkdown, violations };
+  return { checked: true, focusedFactQuestion, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, cardinalityMismatches, incompleteLeadIns, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -2158,6 +2230,15 @@ function consultAnswerRevisionPrompt(draft, audit) {
       : '',
     audit.violations.includes('undefined_ordinal_reference')
       ? `草稿存在未定义的圈号步骤/对照项引用：${(audit.undefinedOrdinalReferences || []).join('、')}。逐项核对前文表格、列表和正文，只能引用已经明确给出含义的序号；“共三项”不得再写④，表格只定义①②③时不得在判断或小结引用③/④或“含④”。删除含未定义序号的完整句/完整表格行，或在不新增事实的前提下改回已定义序号；不得凭空补造第四项。`
+      : '',
+    audit.violations.includes('inconsistent_structured_cardinality')
+      ? `草稿声明的对照数量与实际结构不一致：${(audit.cardinalityMismatches || []).map(item => `声明${item.expected}项、实际${item.actual}项`).join('；')}。只有草稿中已经存在的内容才能保留；把声明改成实际数量，或删除数量声明/不完整表格，禁止为了凑数新增字段、来源或观测点。`
+      : '',
+    audit.violations.includes('incomplete_structured_lead_in')
+      ? '草稿含“例如：/如下：/包括：/分别为：”后直接跳到下一步骤或结束的空引导句。删除该完整引导句及其孤立步骤标题，或只用草稿中已经存在的内容补成完整自然句；禁止补造示例。'
+      : '',
+    audit.violations.includes('single_step_diagnostic_overreach')
+      ? '用户只问先做哪个验证或第一步做什么。只保留一个最小只读验证及完成它所必需的对照项，删除第二、第三步、后续处置和可转发的修改指令；不得把一个问题扩成完整排查流程。'
       : '',
     audit.violations.includes('malformed_markdown')
       ? '草稿含未闭合的 Markdown 粗体、行内代码、代码围栏、中文/英文括号，或列数不齐/只有单个残留单元格的 Markdown 表格。修订时必须输出语法完整的自然句并闭合成对标记；表格必须保留完整表头、分隔行与列数一致的数据行，删掉一个违规单元格时删除其完整数据行，无法保住有效数据行就删除整张表。禁止保留半截列表项、孤立标点、残缺括号或空列表格。'
@@ -2205,7 +2286,17 @@ function consultAnswerSafeFallback(draft, audit) {
     }
     return true;
   };
-  const keptLines = String(draft || '').split('\n').map(line => {
+  let fallbackDraft = String(draft || '');
+  if (audit.singleStepOverreach && Number.isInteger(audit.singleStepOverreach.truncateFromLine)) {
+    fallbackDraft = fallbackDraft.split('\n').slice(0, audit.singleStepOverreach.truncateFromLine).join('\n');
+  }
+  for (const mismatch of audit.cardinalityMismatches || []) {
+    if (mismatch.tableBlock) fallbackDraft = fallbackDraft.replace(mismatch.tableBlock, '');
+    if (mismatch.line) fallbackDraft = fallbackDraft.split('\n').filter(line => line.trim() !== mismatch.line).join('\n');
+  }
+  const incompleteLines = new Set((audit.incompleteLeadIns || []).flatMap(item => item.affectedLines || []));
+  if (incompleteLines.size) fallbackDraft = fallbackDraft.split('\n').filter(line => !incompleteLines.has(line)).join('\n');
+  const keptLines = fallbackDraft.split('\n').map(line => {
     if (consultMarkdownTableCells(line)) return keepPart(line) ? line : '';
     return line.split(/(?<=[。！？；])/u).filter(keepPart).join('');
   }).filter(line => line.trim());
