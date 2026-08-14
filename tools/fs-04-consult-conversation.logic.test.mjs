@@ -545,12 +545,13 @@ test('最终证据概率守卫禁止无依据成因排序，并让核心事实�
 test('发布前确定性语义校验：无证据概率词触发一次修订，有直接样本时不误拦', () => {
   const likelihoodConst = SRC.match(/const CONSULT_LIKELIHOOD_WORD_RE = [^;]+;/)?.[0] || '';
   const causalLocalizationConst = SRC.match(/const CONSULT_CAUSAL_LOCALIZATION_RE = [^;]+;/)?.[0] || '';
+  const deterministicFailureConst = SRC.match(/const CONSULT_DETERMINISTIC_FAILURE_RE = [^;]+;/)?.[0] || '';
   const priorityConst = SRC.match(/const CONSULT_CAUSAL_PRIORITY_RE = [^;]+;/)?.[0] || '';
   const directActionConst = SRC.match(/const CONSULT_DIRECT_RISKY_ACTION_RE = [^;]+;/)?.[0] || '';
   const componentFaultConst = SRC.match(/const CONSULT_COMPONENT_FAULT_RE = [^;]+;/)?.[0] || '';
-  assert.ok(likelihoodConst && causalLocalizationConst, '应找到概率与因果定位检测常量');
+  assert.ok(likelihoodConst && causalLocalizationConst && deterministicFailureConst, '应找到概率、因果定位与确定故障检测常量');
   const audit = new Function(
-    likelihoodConst + '\n' + causalLocalizationConst + '\n' + priorityConst + '\n' + directActionConst + '\n' + componentFaultConst + '\n'
+    likelihoodConst + '\n' + causalLocalizationConst + '\n' + deterministicFailureConst + '\n' + priorityConst + '\n' + directActionConst + '\n' + componentFaultConst + '\n'
     + extractFn(SRC, 'consultHasLikelihoodEvidence') + '\n'
     + extractFn(SRC, 'consultRouteScopeText') + '\n'
     + extractFn(SRC, 'consultHasCausalPriorityEvidence') + '\n'
@@ -652,11 +653,12 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
 test('发布前确定性语义校验：跨主体副作用触发，否定句和完整受控条件不误拦', () => {
   const likelihoodConst = SRC.match(/const CONSULT_LIKELIHOOD_WORD_RE = [^;]+;/)?.[0] || '';
   const causalLocalizationConst = SRC.match(/const CONSULT_CAUSAL_LOCALIZATION_RE = [^;]+;/)?.[0] || '';
+  const deterministicFailureConst = SRC.match(/const CONSULT_DETERMINISTIC_FAILURE_RE = [^;]+;/)?.[0] || '';
   const priorityConst = SRC.match(/const CONSULT_CAUSAL_PRIORITY_RE = [^;]+;/)?.[0] || '';
   const directActionConst = SRC.match(/const CONSULT_DIRECT_RISKY_ACTION_RE = [^;]+;/)?.[0] || '';
   const componentFaultConst = SRC.match(/const CONSULT_COMPONENT_FAULT_RE = [^;]+;/)?.[0] || '';
   const audit = new Function(
-    likelihoodConst + '\n' + causalLocalizationConst + '\n' + priorityConst + '\n' + directActionConst + '\n' + componentFaultConst + '\n'
+    likelihoodConst + '\n' + causalLocalizationConst + '\n' + deterministicFailureConst + '\n' + priorityConst + '\n' + directActionConst + '\n' + componentFaultConst + '\n'
     + extractFn(SRC, 'consultHasLikelihoodEvidence') + '\n'
     + extractFn(SRC, 'consultRouteScopeText') + '\n'
     + extractFn(SRC, 'consultHasCausalPriorityEvidence') + '\n'
@@ -708,11 +710,12 @@ test('发布前确定性语义校验：跨主体副作用触发，否定句和�
 test('二次修订失败时安全降级：删违规句、保留已核事实并追加边界', () => {
   const likelihoodConst = SRC.match(/const CONSULT_LIKELIHOOD_WORD_RE = [^;]+;/)?.[0] || '';
   const causalLocalizationConst = SRC.match(/const CONSULT_CAUSAL_LOCALIZATION_RE = [^;]+;/)?.[0] || '';
+  const deterministicFailureConst = SRC.match(/const CONSULT_DETERMINISTIC_FAILURE_RE = [^;]+;/)?.[0] || '';
   const priorityConst = SRC.match(/const CONSULT_CAUSAL_PRIORITY_RE = [^;]+;/)?.[0] || '';
   const directActionConst = SRC.match(/const CONSULT_DIRECT_RISKY_ACTION_RE = [^;]+;/)?.[0] || '';
   const componentFaultConst = SRC.match(/const CONSULT_COMPONENT_FAULT_RE = [^;]+;/)?.[0] || '';
   const bundle = new Function(
-    likelihoodConst + '\n' + causalLocalizationConst + '\n' + priorityConst + '\n' + directActionConst + '\n' + componentFaultConst + '\n'
+    likelihoodConst + '\n' + causalLocalizationConst + '\n' + deterministicFailureConst + '\n' + priorityConst + '\n' + directActionConst + '\n' + componentFaultConst + '\n'
     + extractFn(SRC, 'consultHasLikelihoodEvidence') + '\n'
     + extractFn(SRC, 'consultRouteScopeText') + '\n'
     + extractFn(SRC, 'consultHasCausalPriorityEvidence') + '\n'
@@ -795,6 +798,28 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
 
   const observationOnly = '已有出站报文里的患者号已经比原始完整号码少位；目前只能确认变化不晚于这个观测点，具体发生环节仍待逐层证据确认。';
   assert.deepEqual(bundle.audit(observationOnly, '对接方把患者号当数字传，长号码开始丢位，先让他们做哪个验证？', route).violations, [], '只陈述观测边界、不定具体机制应放行');
+
+  const q127R27Draft = [
+    'patient_id 是 varchar(50) 字符串。',
+    '不能当成数字类型传；当数字传时，长号码会出现少位、丢精度或对不上。',
+    '不带引号的裸数字就是会丢位的写法。',
+    '只看同一次已有原始号与出站报文，不改、不重传。',
+  ].join('\n');
+  const q127R27Audit = bundle.audit(q127R27Draft, '对接方把患者号当数字传，长号码开始丢位，先让他们做哪个验证？', route);
+  assert.deepEqual(q127R27Audit.violations, ['unsupported_likelihood'], '“会出现/就是会”的确定故障写法不能绕过claim证据门');
+  assert.equal(q127R27Audit.unsupportedDeterministicFailureClaims.length, 2);
+  const q127R27Fallback = bundle.fallback(q127R27Draft, q127R27Audit);
+  assert.match(q127R27Fallback, /patient_id 是 varchar\(50\) 字符串/);
+  assert.match(q127R27Fallback, /只看同一次已有原始号与出站报文/);
+  assert.doesNotMatch(q127R27Fallback, /会出现少位|就是会丢位/);
+  assert.deepEqual(bundle.audit(q127R27Fallback, '对接方把患者号当数字传，长号码开始丢位，先让他们做哪个验证？', route).violations, []);
+
+  assert.deepEqual(bundle.audit('已核规则明确写明：缺 hospitalId 会导致请求被拒绝。', '缺 hospitalId 会怎样？', {
+    matched: true,
+    route: { title: '患者身份契约' },
+    answerFacts: ['当前规则明确：缺 hospitalId 会导致请求被拒绝'],
+  }).violations, [], '同一claim有权威确定规则时允许“会导致”');
+  assert.deepEqual(bundle.audit('按当前契约传字符串不会出现少位。', '患者号字段怎么传？', route).violations, [], '否定故障句不误拦');
 
   const explicitLayerRuleRoute = {
     matched: true,
@@ -882,11 +907,12 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
 test('发布前确定性语义校验：路径必须来自用户或route并逐字保留', () => {
   const likelihoodConst = SRC.match(/const CONSULT_LIKELIHOOD_WORD_RE = [^;]+;/)?.[0] || '';
   const causalLocalizationConst = SRC.match(/const CONSULT_CAUSAL_LOCALIZATION_RE = [^;]+;/)?.[0] || '';
+  const deterministicFailureConst = SRC.match(/const CONSULT_DETERMINISTIC_FAILURE_RE = [^;]+;/)?.[0] || '';
   const priorityConst = SRC.match(/const CONSULT_CAUSAL_PRIORITY_RE = [^;]+;/)?.[0] || '';
   const directActionConst = SRC.match(/const CONSULT_DIRECT_RISKY_ACTION_RE = [^;]+;/)?.[0] || '';
   const componentFaultConst = SRC.match(/const CONSULT_COMPONENT_FAULT_RE = [^;]+;/)?.[0] || '';
   const bundle = new Function(
-    likelihoodConst + '\n' + causalLocalizationConst + '\n' + priorityConst + '\n' + directActionConst + '\n' + componentFaultConst + '\n'
+    likelihoodConst + '\n' + causalLocalizationConst + '\n' + deterministicFailureConst + '\n' + priorityConst + '\n' + directActionConst + '\n' + componentFaultConst + '\n'
     + extractFn(SRC, 'consultHasLikelihoodEvidence') + '\n'
     + extractFn(SRC, 'consultRouteScopeText') + '\n'
     + extractFn(SRC, 'consultHasCausalPriorityEvidence') + '\n'
@@ -971,11 +997,12 @@ test('发布前确定性语义校验：路径必须来自用户或route并逐字
 test('发布前事实作用域审计：相邻模块、通配路径不串入，显式切题放行', () => {
   const likelihoodConst = SRC.match(/const CONSULT_LIKELIHOOD_WORD_RE = [^;]+;/)?.[0] || '';
   const causalLocalizationConst = SRC.match(/const CONSULT_CAUSAL_LOCALIZATION_RE = [^;]+;/)?.[0] || '';
+  const deterministicFailureConst = SRC.match(/const CONSULT_DETERMINISTIC_FAILURE_RE = [^;]+;/)?.[0] || '';
   const priorityConst = SRC.match(/const CONSULT_CAUSAL_PRIORITY_RE = [^;]+;/)?.[0] || '';
   const directActionConst = SRC.match(/const CONSULT_DIRECT_RISKY_ACTION_RE = [^;]+;/)?.[0] || '';
   const componentFaultConst = SRC.match(/const CONSULT_COMPONENT_FAULT_RE = [^;]+;/)?.[0] || '';
   const bundle = new Function(
-    likelihoodConst + '\n' + causalLocalizationConst + '\n' + priorityConst + '\n' + directActionConst + '\n' + componentFaultConst + '\n'
+    likelihoodConst + '\n' + causalLocalizationConst + '\n' + deterministicFailureConst + '\n' + priorityConst + '\n' + directActionConst + '\n' + componentFaultConst + '\n'
     + extractFn(SRC, 'consultHasLikelihoodEvidence') + '\n'
     + extractFn(SRC, 'consultRouteScopeText') + '\n'
     + extractFn(SRC, 'consultHasCausalPriorityEvidence') + '\n'

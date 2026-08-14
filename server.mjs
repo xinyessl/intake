@@ -1695,6 +1695,9 @@ const CONSULT_LIKELIHOOD_WORD_RE = /(?:最高频|最常见|(?:很|较|比较)?�
 // “在某个观测点已经看到变化”只证明变化不晚于该观测点，不能自动定位到具体实现机制或责任层。
 // 例如出站报文已经少位，可以保留“出站报文中已变化”，但不能无证据写成“发生在传参/序列化侧”。
 const CONSULT_CAUSAL_LOCALIZATION_RE = /(?:(?:→|=>|所以|因此|说明|表明|证明|意味着|可判定|可以判定|能够判定|由此可见)[^。！？；\n]{0,24})?(?:丢(?:失|位|精度)?|截断|变化|异常|错误|问题|故障|根因|责任)[^。！？；\n]{0,12}(?:发生|出|在|位于|定位|归因|归属)(?:在|于|到|为)?[^。！？；\n]{0,24}(?:传参|序列化|反序列化|类型转换|格式转换|映射|缓存|网关|前端|后端|服务端|数据库|中间件|对接方|第三方)(?:侧|层|环节|阶段|过程)?/g;
+// 无证据确定故障还会绕成“会出现少位”“就是会丢位的写法”，既不带概率副词也不写“发生在某层”。
+// 否定句（不会出现/不会丢位）不属于正向故障断言；权威 route 对同一 claim 有明确规则时仍可放行。
+const CONSULT_DETERMINISTIC_FAILURE_RE = /(?:(?<!不)(?<!未)(?:会|就会)(?:直接)?(?:出现|发生|导致|造成|引发)?[^。！？；\n]{0,18}(?:丢(?:失|位|精度)?|少位|截断|失败|异常|错误|出错|对不上|末尾变\s*0)|就是[^。！？；\n]{0,12}(?<!不)(?:会|必然会)[^。！？；\n]{0,12}(?:丢(?:失|位|精度)?|少位|截断|失败|异常|错误|出错|对不上)[^。！？；\n]{0,10}(?:写法|类型|格式|传法|结果)?)/g;
 const CONSULT_CAUSAL_PRIORITY_RE = /(?:优先|首先|先)(?:去)?(?:查|看|排查|核对)(?:服务端|服务器|JVM|前端|缓存|错误兜底|网关|登录态|权限|调度|数据库|配置)[^。！？；\n]{0,18}/g;
 const CONSULT_DIRECT_RISKY_ACTION_RE = /(?:(?:只能|需要|应当|应该|建议|可以|可|先|再|然后|去|请|让|由|交给|通知|要求)[^。！？；\n]{0,20}(?:改|修改|调整|切换|对齐|校准|统一|转换)[^。！？；\n]{0,16}(?:参数|报文(?:类型)?|映射|配置|部署时区|时区|系统时间|环境|产品口径|业务口径|日切要求|服务配置|字符串|数字(?:类型)?|字段格式|数据格式|值类型)|(?:参数|报文(?:类型)?|映射|配置|部署时区|时区|系统时间|产品口径|业务口径|日切要求|服务配置|字符串|数字(?:类型)?|字段格式|数据格式|值类型)[^。！？；\n]{0,24}(?:交给|让|由)[^。！？；\n]{0,16}(?:改|修改|调整|切换|对齐|校准|统一|转换)|(?:改|修改|调整|转换)(?:成|为)?(?:字符串|数字(?:类型)?|字段格式|数据格式|值类型)[^。！？；\n]{0,12}(?:再传|重传|重新发送|复测))/ig;
 const CONSULT_COMPONENT_FAULT_RE = /(?:服务端|服务器|JVM|前端|后端|缓存|网关|鉴权|权限|数据库|配置|调度|部署|环境)[^。！？；\n]{0,16}(?:异常|故障|问题|错误|不对|有误)/ig;
@@ -2007,15 +2010,23 @@ function consultAnswerSemanticAudit(answer, question, route) {
     return matched;
   });
   const unsupportedCausalLocalizationClaims = causalLocalizationClaims.filter(statement => !consultHasLikelihoodEvidence(question, route, statement));
-  const likelihoodAllowed = (likelihoodClaims.length || causalLocalizationClaims.length)
-    ? unsupportedLikelihoodClaims.length === 0 && unsupportedCausalLocalizationClaims.length === 0
+  const deterministicFailureClaims = text.split(/(?<=[。！？；\n])/u).map(x => x.trim()).filter(statement => {
+    const matched = CONSULT_DETERMINISTIC_FAILURE_RE.test(statement);
+    CONSULT_DETERMINISTIC_FAILURE_RE.lastIndex = 0;
+    return matched;
+  });
+  const unsupportedDeterministicFailureClaims = deterministicFailureClaims.filter(statement => !consultHasLikelihoodEvidence(question, route, statement));
+  const likelihoodAllowed = (likelihoodClaims.length || causalLocalizationClaims.length || deterministicFailureClaims.length)
+    ? unsupportedLikelihoodClaims.length === 0 && unsupportedCausalLocalizationClaims.length === 0 && unsupportedDeterministicFailureClaims.length === 0
     : consultHasLikelihoodEvidence(question, route);
   const likelihoodTerms = Array.from(new Set([
     ...unsupportedLikelihoodClaims.flatMap(statement => statement.match(CONSULT_LIKELIHOOD_WORD_RE) || []),
     ...unsupportedCausalLocalizationClaims.flatMap(statement => statement.match(CONSULT_CAUSAL_LOCALIZATION_RE) || []),
+    ...unsupportedDeterministicFailureClaims.flatMap(statement => statement.match(CONSULT_DETERMINISTIC_FAILURE_RE) || []),
   ]));
   CONSULT_LIKELIHOOD_WORD_RE.lastIndex = 0;
   CONSULT_CAUSAL_LOCALIZATION_RE.lastIndex = 0;
+  CONSULT_DETERMINISTIC_FAILURE_RE.lastIndex = 0;
   const causalPriorityAllowed = consultHasCausalPriorityEvidence(question, route);
   const causalPriorityTerms = causalPriorityAllowed ? [] : Array.from(new Set(text.match(CONSULT_CAUSAL_PRIORITY_RE) || []));
   const controlled = consultHasControlledActionBundle(question);
@@ -2055,7 +2066,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (missingPrimaryPath) violations.push('missing_primary_path');
   if (focusedFactOverreach.length) violations.push('focused_fact_overreach');
   if (malformedMarkdown.length) violations.push('malformed_markdown');
-  return { checked: true, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, malformedMarkdown, violations };
+  return { checked: true, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -2063,7 +2074,7 @@ function consultAnswerRevisionPrompt(draft, audit) {
     '【发布前确定性语义校验未通过：只允许修订一次】',
     '下面是尚未发送给用户的草稿。请只输出修订后的完整答案，不要解释修订过程，不要增加任何新业务事实、接口、字段、按钮、原因或示例。',
     audit.violations.includes('unsupported_likelihood')
-      ? '草稿含无直接证据的概率、频率、比例或成因定性。删除整句中的“最高频/最常见/常见/经常/通常/一般/大概率/多半/往往/很可能/多发/高发/很多/不少/多数/大多/绝大多数/少数/极少/大部分/小部分/几乎全部/频繁/偶尔/有时/首要原因/主要原因/典型原因/常见于/可能是/很像/更像/疑似/倾向于/最容易出现/很容易丢位或丢精度”等定性，也删除无已核契约支持的“一定会/必然/肯定会/就会直接导致”“就是某方传错或配置错”等确定因果整句。某个观测点已经出现差异，只能说明变化不晚于该观测点；没有逐层证据时，不得进一步写成“发生在传参/序列化/转换/网关/前后端/数据库等具体侧或环节”。若本轮没有已观察到的页面、请求或响应差异，也删除“优先查服务端/前端/缓存/配置”等成因排序。原因只能改成不排序的“待验证假设/可能分支”，证据收集步骤仍可按只读顺序说明。'
+      ? '草稿含无直接证据的概率、频率、比例或成因定性。删除整句中的“最高频/最常见/常见/经常/通常/一般/大概率/多半/往往/很可能/多发/高发/很多/不少/多数/大多/绝大多数/少数/极少/大部分/小部分/几乎全部/频繁/偶尔/有时/首要原因/主要原因/典型原因/常见于/可能是/很像/更像/疑似/倾向于/最容易出现/很容易丢位或丢精度”等定性，也删除无已核契约支持的“一定会/必然/肯定会/就会直接导致”“会出现少位/丢精度/对不上”“就是会丢位的写法”“就是某方传错或配置错”等确定因果整句。某个观测点已经出现差异，只能说明变化不晚于该观测点；没有逐层证据时，不得进一步写成“发生在传参/序列化/转换/网关/前后端/数据库等具体侧或环节”。若当前只在诊断一个字段或对象，只保留直接回答它所需的事实，不得借技术依据枚举同表其它未问字段。若本轮没有已观察到的页面、请求或响应差异，也删除“优先查服务端/前端/缓存/配置”等成因排序。原因只能改成不排序的“待验证假设/可能分支”，证据收集步骤仍可按只读顺序说明。'
       : '',
     audit.violations.includes('unsupported_component_fault')
       ? '草稿把用户或 route 尚未确认的组件故障写成了定论。逐句按“已核事实 / 本轮观察 / 待验证假设 / 安全动作”四类重写；前端、后端、服务端、缓存、网关、鉴权、权限、数据库、配置、调度、部署或环境等未核原因只能明确标成“待验证假设/可能分支”，条件分支、表格和小结也不能绕过。'
@@ -2104,12 +2115,13 @@ function consultAnswerSafeFallback(draft, audit) {
   const actorAction = /(?:让|请|交给|通知|要求|转)?\s*(?:实施|用户|患者|对接方|第三方|运维|开发)[^。！？；\n]{0,64}(?:(?:改|修改|调整|切换|对齐|校准|统一|转换)[^。！？；\n]{0,16}(?:参数|报文(?:类型)?|类型|映射|配置|时区|系统时间|环境|产品口径|业务口径|日切要求|服务配置|字符串|数字(?:类型)?|字段格式|数据格式|值类型)|对时|重试|复测|重跑|补跑|重新触发|再次触发|再点|点一次|提交|保存|发送|完成|签名|审批|星标|再传|重传|重新发送)/ig;
   const negatedActorPrefix = /(?:不得|不能|不要|禁止|不可|不应|先别|停止|未确认)\s*$/i;
   const keepPart = part => {
-    if (audit.violations.includes('unsupported_likelihood') && (CONSULT_LIKELIHOOD_WORD_RE.test(part) || CONSULT_CAUSAL_PRIORITY_RE.test(part) || CONSULT_CAUSAL_LOCALIZATION_RE.test(part))) {
-      CONSULT_LIKELIHOOD_WORD_RE.lastIndex = 0; CONSULT_CAUSAL_PRIORITY_RE.lastIndex = 0; CONSULT_CAUSAL_LOCALIZATION_RE.lastIndex = 0; return false;
+    if (audit.violations.includes('unsupported_likelihood') && (CONSULT_LIKELIHOOD_WORD_RE.test(part) || CONSULT_CAUSAL_PRIORITY_RE.test(part) || CONSULT_CAUSAL_LOCALIZATION_RE.test(part) || CONSULT_DETERMINISTIC_FAILURE_RE.test(part))) {
+      CONSULT_LIKELIHOOD_WORD_RE.lastIndex = 0; CONSULT_CAUSAL_PRIORITY_RE.lastIndex = 0; CONSULT_CAUSAL_LOCALIZATION_RE.lastIndex = 0; CONSULT_DETERMINISTIC_FAILURE_RE.lastIndex = 0; return false;
     }
     CONSULT_LIKELIHOOD_WORD_RE.lastIndex = 0;
     CONSULT_CAUSAL_PRIORITY_RE.lastIndex = 0;
     CONSULT_CAUSAL_LOCALIZATION_RE.lastIndex = 0;
+    CONSULT_DETERMINISTIC_FAILURE_RE.lastIndex = 0;
     if (audit.violations.includes('cross_actor_side_effect') && Array.from(part.matchAll(actorAction))
       .some(match => !negatedActorPrefix.test(part.slice(0, match.index)))) return false;
     if (audit.violations.includes('cross_actor_side_effect') && Array.from(part.matchAll(CONSULT_DIRECT_RISKY_ACTION_RE))
