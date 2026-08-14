@@ -282,12 +282,41 @@ test('真实PWRS地图回归：患者产品身份键与Proxy路由字段不混�
     '历史深链只有 patientId+visitId，还能不能自动认院区？',
     '两个院区有相同 patientId 和 visitId，页面该怎么避免串人？',
     '少了 hospitalId 时直接拿 token 当前院区补上就行吧？',
+    '旧收藏链接只有患者号和住院号，系统会自动补当前院区吗？',
+    '院区参数没带，先用默认院区顶一下可以吗？',
+    '页面只有 districtCode，能把它当 hospitalId 补到患者身份里吗？',
   ]) {
     const hit = S.routeQuestion(map, question, '');
     assert.equal(hit.route.id, 'DQ-003', `${question}，topN=${JSON.stringify(hit.topN)}`);
     assert.match(hit.answerFacts.join('\n'), /固定使用 hospitalId \+ patientId \+ visitId/);
+    assert.match(hit.answerFacts.join('\n'), /缺少 hospitalId 时必须拒绝.*重新选择医院\/院区.*从患者列表重新进入/);
+    assert.match(hit.answerFacts.join('\n'), /历史深链、旧链接和收藏链接.*不得自动补齐或兼容放行/);
+    assert.match(hit.answerFacts.join('\n'), /不得回退 token 当前院区、默认院区或 districtCode/);
     assert.match(hit.mustNotConfuse.join('\n'), /districtCode 仅限内部上游路由/);
+    assert.match(hit.mustNotConfuse.join('\n'), /不得臆造历史兼容、系统自动补齐.*本地唯一约束/);
   }
+});
+
+test('真实PWRS地图回归：患者安全身份上下文在追问中持续，显式登录新实体必须切题', {
+  skip: !process.env.PWRS_REAL_MAP,
+}, () => {
+  const S = buildRoutingSandbox(makeDeps());
+  const map = JSON.parse(fs.readFileSync(process.env.PWRS_REAL_MAP, 'utf8'));
+  const messages = [
+    { role: 'user', content: '跨院区时一名患者靠哪几个字段才算唯一？' },
+    { role: 'assistant', content: '历史兼容和本地唯一约束都只是模型猜测，不能进入事实账本。' },
+    { role: 'user', content: '如果这是以前收藏的旧链接，缺了院区还能自动补吗？' },
+  ];
+  const inherited = S.contextualRouteQuestion(map, messages, messages.at(-1).content, '');
+  assert.equal(inherited.route.id, 'DQ-003');
+  assert.match(inherited.answerFacts.join('\n'), /历史深链、旧链接和收藏链接.*不得自动补齐或兼容放行/);
+  assert.doesNotMatch(inherited.answerFacts.join('\n'), /本地唯一约束/);
+
+  const switchedQuestion = '患者身份先放下，登录 token 到底是谁签发的？';
+  const switched = S.contextualRouteQuestion(map, [...messages, { role: 'assistant', content: '继续。' }, { role: 'user', content: switchedQuestion }], switchedQuestion, '');
+  assert.notEqual(switched.route.id, 'DQ-003');
+  assert.match(switched.answerFacts.join('\n'), /usercenter.*签发|统一用户中心.*签发/i);
+  assert.doesNotMatch(switched.answerFacts.join('\n'), /历史深链|默认院区/);
 });
 
 test('真实PWRS地图回归：患者列表接口、数据源与ETL局部未知走专用QR', {

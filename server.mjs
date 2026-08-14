@@ -1706,6 +1706,23 @@ function consultEvidenceLedgerGuard(question, route) {
   ].join('\n');
 }
 
+// 安全必填上下文（身份/租户/医院院区等）不能被模型用“历史兼容”或默认值猜测放宽。
+// 只有当前 route/facts 已出现这类安全上下文才注入；具体必填字段与拒绝方式仍完全来自证据。
+function consultCriticalContextGuard(question, route) {
+  if (!route || !route.matched) return '';
+  const facts = [...(route.answerFacts || []), ...(route.mustNotConfuse || [])].join('\n');
+  const topic = [question, route.route && route.route.title, facts].filter(Boolean).join('\n');
+  if (!/(?:身份键|身份上下文|租户键|租户上下文|医院|院区|hospitalId|tenant(?:Id)?|scope)/i.test(topic)) return '';
+  if (!/(?:必填|必须|缺少|缺失|不得|拒绝|重新选择|重新进入|不回退|默认|兼容|补齐|身份键)/i.test(facts)) return '';
+  return [
+    '【安全必填上下文事实守卫】',
+    '当前 route/Spec/源码若已确认身份键、租户键、医院或院区等安全上下文为必填，就必须逐字沿用该契约：缺失时按证据拒绝或提示回到可信入口重新选择，不得为了显得兼容而放宽。',
+    '不得自行补充“历史链接会兼容”“系统会自动补齐”，也不得猜测可从 token、默认租户/默认院区、相邻路由字段或看似等价字段回退。只有当前证据明确写出的兼容策略才可以回答。',
+    '证据没有说明的旧链接处理、本地唯一约束、缓存规则、数据库约束或自动映射都只做局部未知，禁止编造成实现事实；尤其不能用这些猜测推翻 answerFacts 或 mustNotConfuse 已确认的拒绝边界。',
+    '用户明确换到新的实体或主题时只使用新 route；旧身份/租户事实不得串入。',
+  ].join('\n');
+}
+
 // 命中经确认业务规则后，先判断现场现象是不是规则本身的正常结果，再决定要不要调查。
 // 这不是放松证据门：只允许使用当前 route/specHits 的已核事实，不能把历史模型自由文本当证据。
 function consultRuleApplicationGuard(question, route) {
@@ -3397,7 +3414,7 @@ const server = http.createServer((req, res) => {
       else {
         // PD-04：命中 mustNotConfuse → 作负向提示注入 system（易混淆项，勿臆造）。answerFacts 已在 specHits 顶段（consultSystem 走 specExcerpts）。
         const mncNote = routeMnc.length ? '\n【以下为该问题的易混淆项，请勿臆造、勿张冠李戴】' + routeMnc.map(x => '\n· ' + x).join('') : '';
-        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationMode) + '\n' + consultEvidenceLedgerGuard(qtext, route) + '\n' + consultRuleApplicationGuard(qtext, route) + '\n' + consultExactPathBoundaryGuard(qtext, route) + '\n' + consultGenericControlledActionGuard(qtext) + '\n' + consultOperationalSafetyGuard(qtext, route) + '\n' + consultFileArtifactGuard(qtext, route) + '\n' + consultDiagnosticGuard(qtext, route) + '\n' + consultNonDestructiveDiagnosticGuard(qtext, route) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
+        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationMode) + '\n' + consultEvidenceLedgerGuard(qtext, route) + '\n' + consultRuleApplicationGuard(qtext, route) + '\n' + consultCriticalContextGuard(qtext, route) + '\n' + consultExactPathBoundaryGuard(qtext, route) + '\n' + consultGenericControlledActionGuard(qtext) + '\n' + consultOperationalSafetyGuard(qtext, route) + '\n' + consultFileArtifactGuard(qtext, route) + '\n' + consultDiagnosticGuard(qtext, route) + '\n' + consultNonDestructiveDiagnosticGuard(qtext, route) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
           piece = String(piece == null ? '' : piece); if (!piece) return;
           if (!kbInjected && kbRefs.length) { kbInjected = true; sse({ kb: kbRefs, kbInjected: true }); }
           reply += piece; sse({ v: piece });

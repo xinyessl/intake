@@ -305,6 +305,44 @@ test('通用非破坏诊断守卫：写操作不能包装成只做一次，四�
   assert.equal(fn('token 是谁签发的？', { matched: true, route: { title: '登录 token' } }), '');
 });
 
+test('安全必填上下文守卫：缺身份/租户/院区不得靠历史兼容或默认值猜测补齐', () => {
+  const fn = new Function(extractFn(SRC, 'consultCriticalContextGuard') + '\nreturn consultCriticalContextGuard;')();
+  const patientRoute = {
+    matched: true,
+    route: { title: '患者院区身份' },
+    answerFacts: [
+      '产品身份键固定为 hospitalId + patientId + visitId。',
+      '缺少 hospitalId 必须拒绝并提示重新选择医院/院区；历史深链也不得回退。',
+    ],
+    mustNotConfuse: ['不得回退 token 当前院区、默认院区或 districtCode。'],
+  };
+  for (const q of [
+    '跨院区时一名患者靠哪几个字段才算唯一？',
+    '历史收藏链接缺院区还能兼容吗？',
+    '少了 hospitalId 能从 token 当前院区补吗？',
+    'districtCode 能不能代替 hospitalId？',
+  ]) {
+    const text = fn(q, patientRoute);
+    assert.match(text, /安全必填上下文事实守卫/);
+    assert.match(text, /缺失时按证据拒绝或提示回到可信入口重新选择/);
+    assert.match(text, /不得自行补充“历史链接会兼容”“系统会自动补齐”/);
+    assert.match(text, /token、默认租户\/默认院区、相邻路由字段/);
+    assert.match(text, /旧链接处理、本地唯一约束、缓存规则、数据库约束或自动映射.*局部未知/);
+    assert.match(text, /新 route.*旧身份\/租户事实不得串入/);
+  }
+
+  const tenantRoute = {
+    matched: true,
+    route: { title: '租户上下文' },
+    answerFacts: ['tenantId 为必填租户键；缺失时拒绝。'],
+    mustNotConfuse: ['不得使用默认租户。'],
+  };
+  assert.match(fn('旧入口没有 tenantId，自动补当前租户可以吗？', tenantRoute), /安全必填上下文事实守卫/);
+  assert.equal(fn('登录 token 是谁签发的？', { matched: true, route: { title: '登录认证' }, answerFacts: ['token 由 usercenter 签发'], mustNotConfuse: [] }), '');
+  assert.equal(fn('红色按钮在哪里？', { matched: false }), '');
+  assert.match(SRC, /consultCriticalContextGuard\(qtext, route\)/, '运行时模型 system 必须注入安全上下文守卫');
+});
+
 test('精确路径前缀守卫：保留尾斜杠且不扩写相似路径或中间子串', () => {
   const fn = new Function(extractFn(SRC, 'consultExactPathBoundaryGuard') + '\nreturn consultExactPathBoundaryGuard;')();
   const route = {
