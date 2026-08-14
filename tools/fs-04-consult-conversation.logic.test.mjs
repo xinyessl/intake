@@ -518,7 +518,7 @@ test('最终证据概率守卫禁止无依据成因排序，并让核心事实�
     const text = fn(q, route);
     assert.match(text, /最终证据与概率语言审计/);
     assert.match(text, /Spec 正文、源码、已核经验库或统计样本直接写明频率/);
-    assert.match(text, /“最高频”“最常见”“常见\/很常见\/较常见\/比较常见”“经常”“通常”“一般”“大概率”“多半”“往往”“多发\/高发”“首要原因\/主要原因（之一）”“典型原因”“常见于”/);
+    assert.match(text, /“最高频”“最常见”“常见\/很常见\/较常见\/比较常见”“经常”“通常”“一般”“大概率”“多半”“往往”“多发\/高发”“很多\/不少\/多数\/大多\/绝大多数”“少数\/极少\/大部分\/小部分\/几乎全部”“首要原因\/主要原因（之一）”“典型原因”“常见于”/);
     assert.match(text, /只能列不排序的“待验证假设\/可能分支”/);
     assert.match(text, /排查顺序只能依据本轮已有页面、请求、响应、原始报文、日志或审计/);
     assert.match(text, /核心事实题或已定位的共享键、字段类型、接口契约答清后立即停止/);
@@ -551,7 +551,7 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
   const failed = audit('页面等于接口但与浏览器不同，多半是服务端时区差。', '今天视图对不上，怎么排查？', route);
   assert.deepEqual(failed.violations, ['unsupported_likelihood']);
   assert.deepEqual(failed.likelihoodTerms, ['多半']);
-  for (const phrase of ['很常见', '较常见', '比较常见', '常见原因', '经常发生', '多发', '高发', '首要原因', '主要原因之一', '很像服务端缓存', '更像前端取错字段', '可能是异常兜底', '疑似配置问题', '倾向于时区问题', '最容易出现', '尤其容易对不上', '易发生']) {
+  for (const phrase of ['很常见', '较常见', '比较常见', '常见原因', '经常发生', '多发', '高发', '很多是规则内预期', '不少属于时区差', '多数是预期', '大多不是BUG', '绝大多数无需处理', '少数会异常', '极少出错', '大部分符合预期', '小部分对不上', '几乎全部正常', '频繁出现', '偶尔失败', '有时不同', '首要原因', '主要原因之一', '很像服务端缓存', '更像前端取错字段', '可能是异常兜底', '疑似配置问题', '倾向于时区问题', '最容易出现', '尤其容易对不上', '易发生']) {
     assert.ok(audit(`接口和浏览器不一致${phrase}。`, '今天视图为什么不一致？', route).violations.includes('unsupported_likelihood'), phrase);
   }
   assert.deepEqual(audit('待验证假设：服务端时区和现场约定不一致；可能分支：页面没有照接口响应展示。', '今天视图为什么不一致？', route).violations, [], '明确标为不排序待验证分支时应放行');
@@ -573,6 +573,11 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
     answerFacts: ['统计样本明确写明：服务端时区差是最常见原因'],
   });
   assert.deepEqual(routedSample.violations, []);
+  assert.deepEqual(audit('绝大多数属于服务端时区差。', '按权威比例怎么说？', {
+    matched: true,
+    route: { title: '时区统计' },
+    answerFacts: ['统计样本明确写明：绝大多数属于服务端时区差'],
+  }).violations, [], 'route 有直接统计比例证据时可照实使用模糊比例词');
   const namedField = audit('说明书称它是常见字段名。', '这个字段叫什么？', {
     matched: true,
     route: { title: '字段命名' },
@@ -610,6 +615,9 @@ test('发布前确定性语义校验：跨主体副作用触发，否定句和�
   const directUnsafe = audit('要统一体验只能改部署时区或产品口径。', '今天视图和浏览器不一致，怎么排查？', route);
   assert.deepEqual(directUnsafe.violations, ['cross_actor_side_effect'], '不写执行主体也不能把配置/时区/口径修改包装成诊断结论');
   assert.equal(directUnsafe.unsafeDirectActionCount, 1);
+  assert.deepEqual(audit('优先对齐服务端时区与业务日切要求。', '今天视图和浏览器不一致，怎么排查？', route).violations, ['cross_actor_side_effect'], '对齐配置/时区/业务日切仍是副作用动作');
+  assert.deepEqual(audit('请运维校准系统时间并统一业务口径。', '今天视图和浏览器不一致，怎么排查？', route).violations, ['cross_actor_side_effect'], '跨主体校准/统一口径不能绕过动作门');
+  assert.deepEqual(audit('把已有接口响应与页面显示并排对齐核对。', '今天视图和浏览器不一致，怎么排查？', route).violations, [], '只读对照已有请求与页面不按配置修改误拦');
   assert.deepEqual(audit('不得让运维重跑，也不能让开发重试。', '同步中断，能不能让运维重跑或开发重试？', route).violations, []);
   assert.deepEqual(audit('规范正文说明该设置可以修改。', '这个设置是否支持修改？', { matched: true, route: { title: '设置能力' }, answerFacts: ['该设置支持修改'] }).violations, [], '核心能力事实题不强塞诊断动作门');
   assert.deepEqual(audit(
