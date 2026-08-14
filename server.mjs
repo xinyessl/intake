@@ -1682,6 +1682,7 @@ function consultFinalActionConsistencyGuard(question, route) {
     '每个动作只能归入三类后保留：A. 读取当前已显示页面、已有请求/响应、原始报文、已有映射、截图、历史记录、日志或审计；B. route/Spec/源码已经明确证明无副作用的刷新、列表/只读页签切换或查看；C. 隔离环境或专用数据、明确授权、回滚/清理、幂等性与影响范围全部齐全后的条件式单次受控动作。',
     '编辑、删除、新建、保存、提交、发送、完成、签名、审批、星标、可能标记已读的打开、改参数、改报文类型、改映射、改配置、重试、复现、补跑或重跑，只要不能归入 B 或 C，就必须从最终答案所有位置删除，改成检查已有页面、请求、响应、报文、映射、截图、日志或审计。动作换成由第三方执行也不改变副作用：不得写成“让对接方改字符串/参数/映射/配置后用同一患者复测”“让运维重跑”或“让开发重试”来绕过守卫。不能因为同一答案别处写了“不要操作”“只读”“别重复”，就保留这里的正向点击或重做指令；否定提醒不能抵消冲突动作。',
     '若最终答案任何一处说“不要操作/不要重复/只读”，则其它任何一处都不得再建议点击编辑、删除、发送、完成等未知动作来观察是否发请求，也不得用“点了是否被拦住”“试一下看看”之类问句变相放行。用户只问“这个按钮是否发请求”时，只能查已有请求、日志、审计、代码或契约；没有既有证据就局部说明当前无法安全确认，不能让现场点击未知按钮补抓。',
+    '发布前还要核对步骤和对照项的编号引用：后文引用①②③④等序号时，每个序号都必须在本答案前文有明确对应项；不得出现“共三项”却引用④、表格只定义①②③却在判断或小结写③/④等未定义引用。发现后必须删除含未定义序号的完整句/完整表格行，或在不新增事实的前提下改回已经定义的序号。',
     '该审计只删除不安全或互相矛盾的动作，不新增业务事实，也不给纯事实回答强加诊断步骤。若用户只问事实且现有证据已经足够，直接回答后停止；若已明确动作只读，可保留相应只读观察；若受控条件全部齐全，可条件式说明单次受控验证。',
   ].join('\n');
 }
@@ -2018,6 +2019,23 @@ async function consultStreamFinalAnswer(answer, writeChunk, options = {}) {
 
 function consultAnswerSemanticAudit(answer, question, route) {
   const text = String(answer || '').trim();
+  // 圈号经常用来跨表格/段落引用观测点。模型删句或修订后若只剩“③/④”这类
+  // 未定义引用，实施无法照做；定义必须出现在结构起点（行首/表格单元格）或
+  // 冒号、分号后的枚举项，普通正文里的“第③步/含④”只算引用。
+  const ordinalDefinitions = new Set();
+  const ordinalUses = [];
+  for (const line of text.split('\n')) {
+    for (const match of line.matchAll(/[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]/gu)) {
+      const ordinal = match[0];
+      const before = line.slice(0, match.index).replace(/(?:\*\*|__|`)+$/g, '');
+      const structuralDefinition = /(?:^|[|:：;；])\s*(?:[-*+]\s*)?(?:[（(]\s*)?$/.test(before);
+      if (structuralDefinition) ordinalDefinitions.add(ordinal);
+      ordinalUses.push({ ordinal, line: line.trim() });
+    }
+  }
+  const undefinedOrdinalReferences = Array.from(new Set(ordinalUses
+    .filter(item => !ordinalDefinitions.has(item.ordinal))
+    .map(item => item.ordinal)));
   const focusedFactQuestion = !!consultFocusedFactGuard(question);
   const likelihoodClaims = text.split(/(?<=[。！？；\n])/u).map(x => x.trim()).filter(statement => {
     const matched = CONSULT_LIKELIHOOD_WORD_RE.test(statement);
@@ -2105,8 +2123,9 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (unexpectedScopeTerms.length) violations.push('out_of_scope_entity');
   if (missingPrimaryPath) violations.push('missing_primary_path');
   if (focusedFactOverreach.length) violations.push('focused_fact_overreach');
+  if (undefinedOrdinalReferences.length) violations.push('undefined_ordinal_reference');
   if (malformedMarkdown.length) violations.push('malformed_markdown');
-  return { checked: true, focusedFactQuestion, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, malformedMarkdown, violations };
+  return { checked: true, focusedFactQuestion, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -2136,6 +2155,9 @@ function consultAnswerRevisionPrompt(draft, audit) {
       : '',
     audit.violations.includes('focused_fact_overreach')
       ? '用户本轮只是问单个接口、路径、状态码、字段属性或一个是非事实。保留 current route answerFacts/primary section 的直接答案和回答它所必需的 mustNotConfuse 限定；删除现场排查、无当前观察的失败原因、诊断优先级、操作建议、截图/日志邀约及其它未问扩写。用户明确问“为什么/排查/现场/怎么验证/接下来”或提出多个子问题时才可给对应步骤。'
+      : '',
+    audit.violations.includes('undefined_ordinal_reference')
+      ? `草稿存在未定义的圈号步骤/对照项引用：${(audit.undefinedOrdinalReferences || []).join('、')}。逐项核对前文表格、列表和正文，只能引用已经明确给出含义的序号；“共三项”不得再写④，表格只定义①②③时不得在判断或小结引用③/④或“含④”。删除含未定义序号的完整句/完整表格行，或在不新增事实的前提下改回已定义序号；不得凭空补造第四项。`
       : '',
     audit.violations.includes('malformed_markdown')
       ? '草稿含未闭合的 Markdown 粗体、行内代码、代码围栏、中文/英文括号，或列数不齐/只有单个残留单元格的 Markdown 表格。修订时必须输出语法完整的自然句并闭合成对标记；表格必须保留完整表头、分隔行与列数一致的数据行，删掉一个违规单元格时删除其完整数据行，无法保住有效数据行就删除整张表。禁止保留半截列表项、孤立标点、残缺括号或空列表格。'
@@ -2176,6 +2198,7 @@ function consultAnswerSafeFallback(draft, audit) {
     if (audit.violations.includes('unsupported_component_fault') && (audit.unsupportedComponentClaims || []).includes(part.trim())) return false;
     if (audit.violations.includes('focused_fact_overreach') && (audit.focusedFactOverreach || []).includes(part.trim())) return false;
     if (audit.violations.includes('out_of_scope_entity') && (audit.unexpectedEntityTerms || []).some(term => part.toLowerCase().includes(String(term).toLowerCase()))) return false;
+    if (audit.violations.includes('undefined_ordinal_reference') && (audit.undefinedOrdinalReferences || []).some(term => part.includes(String(term)))) return false;
     if (audit.violations.includes('unexpected_concrete_path')) {
       const partPaths = new Set(consultConcretePaths(part));
       if ((audit.unexpectedPaths || []).some(pathValue => partPaths.has(String(pathValue)))) return false;

@@ -508,6 +508,8 @@ test('发布前动作一致性审计覆盖整份答案，禁止同答先劝停�
     assert.match(text, /改参数、改报文类型、改映射、改配置/);
     assert.match(text, /让对接方改字符串\/参数\/映射\/配置后用同一患者复测/);
     assert.match(text, /动作换成由第三方执行也不改变副作用/);
+    assert.match(text, /表格只定义①②③却在判断或小结写③\/④/);
+    assert.match(text, /删除含未定义序号的完整句\/完整表格行/);
   });
 
   const readOnly = fn('这个列表刷新已确认纯只读，可以刷新后看现有数量吗？', { matched: true });
@@ -955,6 +957,34 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     '已确认 A=B 且 C 不同，能确定什么？',
     route,
   ).violations, [], '已核有序观测点允许不带概率排序地陈述确定边界');
+
+  const undefinedOrdinalDraft = [
+    '对照三份已经存在的值：',
+    '| 对照项 | 看什么 |',
+    '| --- | --- |',
+    '| ① 原始值 | 全文逐位 |',
+    '| ② 已发请求 | 作为基准 |',
+    '| ③ 同一次响应 | 与①②逐位比较 |',
+    '若③/④已经变化，就把①②③（有则含④）留给开发。',
+  ].join('\n');
+  const undefinedOrdinalAudit = bundle.audit(undefinedOrdinalDraft, '请求侧正常，下一个检查点是什么？', route);
+  assert.deepEqual(undefinedOrdinalAudit.undefinedOrdinalReferences, ['④']);
+  assert.ok(undefinedOrdinalAudit.violations.includes('undefined_ordinal_reference'), '表格只定义①②③时不得在后文引用未定义④');
+  assert.match(bundle.revision(undefinedOrdinalDraft, undefinedOrdinalAudit), /不得凭空补造第四项/);
+  const undefinedOrdinalFallback = bundle.fallback(undefinedOrdinalDraft, undefinedOrdinalAudit);
+  assert.doesNotMatch(undefinedOrdinalFallback, /③\/④|含④/);
+  assert.match(undefinedOrdinalFallback, /① 原始值|② 已发请求|③ 同一次响应/);
+  assert.deepEqual(bundle.audit(undefinedOrdinalFallback, '请求侧正常，下一个检查点是什么？', route).violations, []);
+  assert.deepEqual(bundle.audit(
+    '分三类：①已核事实；②本轮观察；③待验证分支。后文只对照①②③。',
+    '怎么组织排查结论？',
+    route,
+  ).violations, [], '冒号/分号内联定义与后文合法引用不得误伤');
+  assert.deepEqual(bundle.audit(
+    '| 对照项 | 值 |\n| --- | --- |\n| ① 请求 | 已发出 |\n| ② 响应 | 已收到 |\n结论按①②对照。',
+    '请求响应都抓到了，怎么核？',
+    route,
+  ).violations, [], '表格定义的序号可在正文合法复用');
 
   const explicitLayerRuleRoute = {
     matched: true,
