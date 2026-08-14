@@ -665,6 +665,13 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
   for (const phrase of ['典型现象边界', '典型表现', '典型场景', '典型特征']) {
     assert.ok(audit(`这是服务端时区问题的${phrase}。`, '今天视图为什么不一致？', route).violations.includes('unsupported_likelihood'), phrase);
   }
+  for (const phrase of ['尤其接近午夜', '尤其临近零点', '尤其靠近日切边界', '尤其恰逢月末']) {
+    assert.ok(audit(`接口与浏览器不一致（${phrase}）。`, '今天视图为什么不一致？', route).violations.includes('unsupported_likelihood'), phrase);
+  }
+  const q121R65Draft = '不一致且两端时区不同（尤其接近午夜） → 符合“服务端 JVM 时区 vs 浏览器本地”的已知差异，优先核服务器 JVM 时区与系统时间。';
+  const q121R65Audit = audit(q121R65Draft, '现在卡在“今天视图显示的年份或星期和浏览器理解不一致”。给我一个能直接照着走的排查顺序。', route);
+  assert.ok(q121R65Audit.violations.includes('unsupported_likelihood'), '单次现场差异不能把接近午夜包装成特殊时段倾向');
+  assert.ok(q121R65Audit.likelihoodTerms.some(term => term.includes('尤其接近午夜')));
   assert.deepEqual(audit('待验证假设：服务端时区和现场约定不一致；可能分支：页面没有照接口响应展示。', '今天视图为什么不一致？', route).violations, [], '明确标为不排序待验证分支时应放行');
   assert.deepEqual(audit('优先查服务端时区。', '今天视图为什么不一致？', route).violations, ['unsupported_likelihood'], '没有当前差异证据不得排序成因');
   assert.deepEqual(audit('优先怀疑服务端时区。', '今天视图为什么不一致？', route).violations, ['unsupported_likelihood'], '用怀疑/判断包装的成因优先级同样须有当前差异证据');
@@ -728,6 +735,11 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
     route: { title: '已核时段统计' },
     answerFacts: ['统计样本明确写明：午夜附近更容易和浏览器理解对不上'],
   }).violations, [], 'route 对同一时段概率 claim 有直接样本时应放行');
+  assert.deepEqual(audit('尤其接近午夜时更容易和浏览器理解对不上。', '按已核时段统计怎么说？', {
+    matched: true,
+    route: { title: '已核时段统计' },
+    answerFacts: ['统计样本明确写明：尤其接近午夜时更容易和浏览器理解对不上'],
+  }).violations, [], 'route 对同一敏感时点 claim 有直接统计时可照实引用');
   assert.deepEqual(audit('缺 hospitalId 就会拒绝该请求。', '缺 hospitalId 会怎样？', {
     matched: true,
     route: { title: '患者身份边界' },
