@@ -562,6 +562,9 @@ test('发布前动作一致性审计覆盖整份答案，禁止同答先劝停�
     assert.match(text, /行尾逗号、分号或冒号后必须有同句后半段或紧邻正文/);
     assert.match(text, /普通行、粗体行或 Markdown heading 形式的“N\. 步骤标题”/);
     assert.match(text, /水平分隔线不算步骤内容/);
+    assert.match(text, /第一句话必须明确回答：现有证据够完成什么、不够完成什么/);
+    assert.match(text, /不得退成页面、终端、账号、版本等跨主题通用材料清单/);
+    assert.match(text, /若本轮没有可核验附件，不得声称看见截图里的数字或内容/);
   });
 
   const readOnly = fn('这个列表刷新已确认纯只读，可以刷新后看现有数量吗？', { matched: true });
@@ -984,6 +987,44 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(fullyUnsafeDiagnosticFallback, /4\. 整理上述原文与脱敏截图/);
   assert.doesNotMatch(fullyUnsafeDiagnosticFallback, /当前草稿未通过发布前|改时区配置/);
   assert.deepEqual(bundle.audit(fullyUnsafeDiagnosticFallback, '今天视图和浏览器理解不一致，给我一个排查顺序。', todayAtomicRoute).violations, [], '草稿全部被清理时，确定性诊断fallback自身也必须通过最终审计');
+
+  const q122Question = '现场还卡在今天视图时间这里，我只拿得到这张截图，没有日志，够不够？';
+  const q122GenericFallbackDraft = [
+    '已知事实（继续作为判断基线）：',
+    '- 工作台通过需合法 JWT 的 GET /pwrsapi/month/view/today 获取当前日期与星期',
+    '- 响应为 Map<String,String>，包含 year=yyyy年M月d日 与 week=星期X',
+    '最小只读排查：',
+    '1. 原样记录当前页面、终端、账号角色、版本和发生时间。',
+    '2. 整理截图后转开发。',
+  ].join('\n');
+  const q122GenericAudit = bundle.audit(q122GenericFallbackDraft, q122Question, todayAtomicRoute);
+  assert.equal(q122GenericAudit.evidenceSufficiencyQuestion, true);
+  assert.ok(q122GenericAudit.violations.includes('missing_evidence_sufficiency_verdict'), '泛模板即使包含route事实，也必须先直接回答截图够什么/不够什么');
+  assert.ok(!q122GenericAudit.violations.includes('missing_evidence_minimum_route_fact'), '草稿已逐字包含主接口时不重复报路径缺失');
+  assert.match(bundle.revision(q122GenericFallbackDraft, q122GenericAudit), /第一句话必须直接回答现有证据够完成什么、不够完成什么/);
+  const q122Fallback = bundle.fallback(q122GenericFallbackDraft, q122GenericAudit);
+  assert.match(q122Fallback, /^结论：这张截图只够固定当前页面现象，不能单独完成与已核规则的对照，也不足以闭环原因。/);
+  assert.match(q122Fallback, /GET \/pwrsapi\/month\/view\/today 完整响应/);
+  assert.match(q122Fallback, /响应内容只按 current route 已核事实核对：响应包含 year、week/);
+  assert.match(q122Fallback, /同一时刻本机显示的日期和星期/);
+  assert.match(q122Fallback, /不必先拿服务器日志/);
+  assert.match(q122Fallback, /若本轮实际没有上传可核验附件/);
+  assert.match(q122Fallback, /不能声称看见图内数字或内容/);
+  assert.doesNotMatch(q122Fallback, /账号角色|版本、发生时间|完整提单材料/);
+  assert.deepEqual(bundle.audit(q122Fallback, q122Question, todayAtomicRoute).violations, [], '确定性证据充分性fallback自身必须通过终稿审计');
+
+  const q122MissingRouteDraft = '结论：这张截图只够固定页面现象，不够闭环原因。\n再看已有请求即可。';
+  const q122MissingRouteAudit = bundle.audit(q122MissingRouteDraft, q122Question, todayAtomicRoute);
+  assert.ok(q122MissingRouteAudit.violations.includes('missing_evidence_minimum_route_fact'), '有结论但漏current route唯一主接口仍不满足最小缺口');
+  assert.equal(q122MissingRouteAudit.missingEvidenceMinimumPath.path, '/pwrsapi/month/view/today');
+  assert.match(bundle.revision(q122MissingRouteDraft, q122MissingRouteAudit), /current\/inherited route 的已核主接口/);
+
+  const fullTicketQuestion = '我要整理完整转开发提单：现在只有截图没有日志，完整材料清单还要什么？';
+  const fullTicketAudit = bundle.audit('请记录页面、终端、账号角色、版本和发生时间。', fullTicketQuestion, todayAtomicRoute);
+  assert.equal(fullTicketAudit.fullHandoffMaterialQuestion, true);
+  assert.equal(fullTicketAudit.evidenceSufficiencyQuestion, false, '显式索要完整提单材料时允许泛清单，不强制改写为局部充分性答案');
+  assert.ok(!fullTicketAudit.violations.includes('missing_evidence_sufficiency_verdict'));
+  assert.ok(!fullTicketAudit.violations.includes('missing_evidence_minimum_route_fact'));
 
   const patientIdAtomicRoute = {
     matched: true,
@@ -1643,8 +1684,10 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.ok(missingTwoAudit.violations.includes('inconsistent_structured_cardinality'), '“还缺”清单的两样东西不能用两列表头充当两项');
   assert.equal(missingTwoAudit.cardinalityMismatches[0].actual, 1);
   const missingTwoFallback = bundle.fallback(missingTwoButOneRow, missingTwoAudit);
-  assert.doesNotMatch(missingTwoFallback, /还缺|本机日期/);
-  assert.match(missingTwoFallback, /日志不是第一步必需品/);
+  assert.doesNotMatch(missingTwoFallback, /还缺两样|账号角色|版本/);
+  assert.match(missingTwoFallback, /结论：这张截图只够固定当前页面现象/);
+  assert.match(missingTwoFallback, /同一时刻本机显示的日期和星期/);
+  assert.match(missingTwoFallback, /不必先拿服务器日志/);
   const missingTwoRows = [
     '至少还要两样东西：',
     '| 已有 | 还缺 |',
@@ -1797,7 +1840,8 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.equal(oneDecisionRowAudit.incompleteResultBranchTables[0].actual, 1);
   const oneDecisionRowFallback = bundle.fallback(oneDecisionRowWithoutBranchLead, oneDecisionRowAudit);
   assert.doesNotMatch(oneDecisionRowFallback, /怎么判断|页面=接口但不等于本机/);
-  assert.match(oneDecisionRowFallback, /继续保留已有截图/);
+  assert.match(oneDecisionRowFallback, /^结论：这张截图只够固定当前页面现象/);
+  assert.match(oneDecisionRowFallback, /GET \/pwrsapi\/month\/view\/today 完整响应/);
   assert.deepEqual(bundle.audit(oneDecisionRowFallback, '只有截图没有日志，够不够，怎么判断？', atomicRoute).violations, []);
   const oneRowFactTable = [
     '| 字段 | 类型 |',

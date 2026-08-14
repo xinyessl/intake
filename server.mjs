@@ -1696,6 +1696,7 @@ function consultFinalActionConsistencyGuard(question, route) {
     '结构化答案还必须逐项核对“声明数量 → 实际内容”：声称二/三/四边、项、份、件、条、处或个对照时，紧随其后的对照表或 Markdown 清单必须确实给出相同数量的完整项；不得用一行表格冒充“三边对照”，也不得说“核两件事”却只列一项。同一小节里“确认/回复/补充/核对 N 件/项/点/条”等结构数量不得从 1 漂成 2；统一数量或删除不必要的数量承诺。“例如：/如下：/包括：/包含：/内容为：/由以下组成：/分别为：”后必须有实际内容，不能直接跳到下一步骤或“别搞混/注意/结论/下一步”等新小节；任何以冒号结尾的标题/提示语都不得出现在正文末尾而没有子内容。清理并列项后不得留下孤立的“还是页面…/或者接口…”等后半分支，也不得留下以“还是/或者/或是/或”结尾却没有后一项的前半分支；不得在答案开头或“结论/判断”等纯标题后直接留下没有前述主张的“但/但是/不过/然而”转折残句。删除示例或引用正文时必须连同整句引号一起删除，不得留下单独一行的「/」/“/”/『/』等孤立引号。明确要求对照/比较/分支判断时，若使用“一致/不一致、是/否、有/无、成功/失败、存在/不存在、命中/未命中”等成对标签，必须给齐两边，或改写成不承诺另一边的单一直接结论；不得只列“一致”后直接跳到未标注的另一种判断。“不要做/禁止/避免/切勿”等否定标题下不得只剩“可以/建议/请/应该/优先/最好/即可/帮你”等正向建议；正向替代动作必须移到独立的“可以做/下一步”标题下。用户明确只问“先做哪个验证/第一步做什么”时，只给一个最小只读验证，不追加第二、第三步或可转发的修改指令。',
     '最终稿中的每个有序/无序列表项若只剩粗体步骤标题，后面必须有正文或子项；若直接遇到分隔线、新节、下一同级列表项或答案结束，删除该空列表项，不得补造内容。每个自然句也必须完整收口：行尾逗号、分号或冒号后必须有同句后半段或紧邻正文；若直接进入分隔线、新节、统一安全尾注或答案结束，删除该悬空完整句。列表项内部的正常分号、下一行有真实正文/子项及以句号/问号/叹号完整结束的粗体单句不得误删。',
     '普通行、粗体行或 Markdown heading 形式的“N. 步骤标题”都必须有自己的正文、表格、列表或代码块；水平分隔线不算步骤内容。若到下一同级编号步骤、分隔线、新节或文末仍无内容，删除该空编号步骤；删除后只把剩余已有步骤连续重编号，不得补造缺失步骤。四空格缩进的嵌套步骤属于父步骤内容，不参与顶层编号。',
+    '用户问“只有这份证据/没有另一份证据，够不够、是否足够、能不能判断”时，第一句话必须明确回答：现有证据够完成什么、不够完成什么；随后只从 current/inherited route 的直接事实和已核主接口给最小缺口，不得退成页面、终端、账号、版本等跨主题通用材料清单。用户明确索要完整提单/转开发材料清单时才可给通用清单。若本轮没有可核验附件，不得声称看见截图里的数字或内容。',
     '该审计只删除不安全或互相矛盾的动作，不新增业务事实，也不给纯事实回答强加诊断步骤。若用户只问事实且现有证据已经足够，直接回答后停止；若已明确动作只读，可保留相应只读观察；若受控条件全部齐全，可条件式说明单次受控验证。',
   ].join('\n');
 }
@@ -2528,7 +2529,11 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const unsafeActorActions = controlled ? [] : text.split(/(?<=[。！？；\n])/u)
     .map(x => x.trim()).filter(statement => statement && Array.from(statement.matchAll(actorAction))
       .some(match => !negatedActorPrefix.test(statement.slice(0, match.index))));
-  const diagnosticQuestion = /(?:排查|不一致|对不上|异常|故障|现场|验证|复测|下一步|怎么判断|如何判断|怎么确认|检查|留证|只能确认|能确定|不知道|未知|走到哪|还缺什么)/i.test(String(question || ''));
+  const questionText = String(question || '');
+  const fullHandoffMaterialQuestion = /(?:(?:完整|全部|全套|正式)[^。！？\n]{0,16}(?:提单|工单|转开发|交接|材料包|留证包)|(?:提单|工单|转开发|交接)[^。！？\n]{0,16}(?:完整|全部|全套|材料清单|最少补哪些信息))/u.test(questionText);
+  const evidenceSufficiencyQuestion = !fullHandoffMaterialQuestion
+    && /(?:只有|仅有|只(?:有|拿得到|拿到|能拿到)|没有|拿不到)[^。！？\n]{0,48}(?:够不够|够吗|是否足够|足不足够|能不能判断|能否判断|可以判断吗)/u.test(questionText);
+  const diagnosticQuestion = /(?:排查|不一致|对不上|异常|故障|现场|验证|复测|下一步|怎么判断|如何判断|怎么确认|检查|留证|只能确认|能确定|不知道|未知|走到哪|还缺什么|够不够|够吗|是否足够|能不能判断|能否判断)/i.test(questionText);
   const unsafeDirectActions = controlled || !diagnosticQuestion ? [] : text.split(/(?<=[。！？；\n])/u)
     .map(x => x.trim()).filter(statement => statement && Array.from(statement.matchAll(CONSULT_DIRECT_RISKY_ACTION_RE))
       .some(match => !negatedActorPrefix.test(statement.slice(0, match.index))));
@@ -2596,10 +2601,23 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const missingFocusedMustNotConfuse = focusedMustNotConfuse.filter(fact =>
     !consultConcretePaths(fact).some(pathValue => focusedAnswerPaths.has(pathValue))
   );
+  const firstMeaningfulLine = documentLines.find(line => line.trim())?.replace(/^\s*(?:#{1,6}\s+|[-*+]\s+|[1-9]\d*[.、．]\s+)?/u, '').replace(/[*_`]/g, '').trim() || '';
+  const hasEvidenceSufficiencyVerdict = !evidenceSufficiencyQuestion
+    || /(?:只够|足够|够(?:用|判断|固定|完成)|不够|不足|不能单独|尚不能|只能固定|只能证明)/u.test(firstMeaningfulLine);
+  const currentRouteFacts = route && route.matched ? (route.answerFacts || []).map(String).map(item => item.trim()).filter(Boolean) : [];
+  const currentRoutePathFacts = currentRouteFacts.flatMap(fact => {
+    const method = fact.match(/\b(GET|POST|PUT|PATCH|DELETE)\b/i)?.[1]?.toUpperCase() || '';
+    return consultConcretePaths(fact).filter(pathValue => pathValue.startsWith('/') && !pathValue.includes('*'))
+      .map(pathValue => ({ path: pathValue, method, display: `${method ? `${method} ` : ''}${pathValue}`, fact }));
+  });
+  const uniqueRoutePathFacts = Array.from(new Map(currentRoutePathFacts.map(item => [item.path, item])).values());
+  const minimumRoutePath = uniqueRoutePathFacts.length === 1 ? uniqueRoutePathFacts[0] : null;
+  const missingEvidenceMinimumPath = evidenceSufficiencyQuestion && minimumRoutePath
+    && !consultConcretePaths(text).includes(minimumRoutePath.path) ? minimumRoutePath : null;
   let safeDiagnosticFallback = '';
   if (diagnosticQuestion) {
     const confirmedFacts = route && route.matched
-      ? [...(route.answerFacts || []).slice(0, 3), ...(route.mustNotConfuse || []).slice(0, 1)].map(String).map(x => x.trim()).filter(Boolean)
+      ? [...currentRouteFacts.slice(0, 3), ...(route.mustNotConfuse || []).slice(0, 1)].map(String).map(x => x.trim()).filter(Boolean)
       : [];
     const knownBlock = confirmedFacts.length
       ? ['已知事实（继续作为判断基线）：', ...confirmedFacts.map(fact => `- ${fact}`)].join('\n')
@@ -2612,7 +2630,32 @@ function consultAnswerSemanticAudit(answer, question, route) {
           '3. 按“没有请求 / 请求失败 / 响应正常但页面不一致”三种观测结果分开记录，不把未核原因写成结论。',
           '4. 整理上述原文与脱敏截图；拿不到的项明确标成缺失，不用找 spec 代替现场证据。',
         ];
-    safeDiagnosticFallback = [knownBlock, '最小只读排查：', ...safeSteps].join('\n\n');
+    if (evidenceSufficiencyQuestion) {
+      const mentionsScreenshot = /(?:截图|图片|附图|这张图|图里)/u.test(questionText);
+      const timeEvidenceTopic = /(?:今天|日期|星期|时间|时区|today)/iu.test(`${questionText}\n${currentRouteFacts.join('\n')}`);
+      const responseFacts = currentRouteFacts.filter(fact => /(?:响应|返回|包含|字段|状态码|业务码)/u.test(fact)).slice(0, 2);
+      const verdict = mentionsScreenshot
+        ? '结论：这张截图只够固定当前页面现象，不能单独完成与已核规则的对照，也不足以闭环原因。'
+        : '结论：现有受限证据只够固定已经提供的观测点，不能单独完成与已核规则的对照，也不足以闭环原因。';
+      const attachmentBoundary = mentionsScreenshot
+        ? '若本轮实际没有上传可核验附件，只能按你文字描述的“有一张截图”处理，不能声称看见图内数字或内容。'
+        : '';
+      const minimumEvidenceSteps = [];
+      if (minimumRoutePath) {
+        minimumEvidenceSteps.push(`1. 最少再补同一次或已有的 ${minimumRoutePath.display} 完整响应；若该页面刷新已确认只读，也可以使用一次只读刷新产生的响应。`);
+      } else {
+        minimumEvidenceSteps.push('1. 最少再补一份能直接核对当前已知事实的同一次已有请求/响应原文；没有既有证据时只记录缺失，不为抓包重复未知业务操作。');
+      }
+      if (responseFacts.length) minimumEvidenceSteps.push(`2. 响应内容只按 current route 已核事实核对：${responseFacts.join('；')}。`);
+      if (timeEvidenceTopic) {
+        minimumEvidenceSteps.push(`${minimumEvidenceSteps.length + 1}. 同时记录同一时刻本机显示的日期和星期，再与页面现象、接口响应做三边只读对照；这一步不必先拿服务器日志。`);
+      } else {
+        minimumEvidenceSteps.push(`${minimumEvidenceSteps.length + 1}. 把这份响应与同一时刻的页面现象逐字对照；这一步不必先拿服务器日志。`);
+      }
+      safeDiagnosticFallback = [verdict, attachmentBoundary, knownBlock, '最小缺口：', ...minimumEvidenceSteps].filter(Boolean).join('\n\n');
+    } else {
+      safeDiagnosticFallback = [knownBlock, '最小只读排查：', ...safeSteps].join('\n\n');
+    }
   }
   const violations = [];
   if (likelihoodTerms.length || causalPriorityTerms.length) violations.push('unsupported_likelihood');
@@ -2629,6 +2672,8 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (selfReferentialStepReferences.length) violations.push('self_referential_step_reference');
   if (nonSequentialTopLevelSteps.length) violations.push('nonsequential_top_level_steps');
   if (emptyNumberedSections.length) violations.push('empty_numbered_section');
+  if (!hasEvidenceSufficiencyVerdict) violations.push('missing_evidence_sufficiency_verdict');
+  if (missingEvidenceMinimumPath) violations.push('missing_evidence_minimum_route_fact');
   if (cardinalityMismatches.length) violations.push('inconsistent_structured_cardinality');
   if (incompleteResultBranchTables.length) violations.push('incomplete_result_branch_set');
   if (conflictingCountDeclarations.length) violations.push('conflicting_count_declaration');
@@ -2643,7 +2688,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (contradictoryNegativeSections.length) violations.push('contradictory_negative_section');
   if (singleStepOverreach) violations.push('single_step_diagnostic_overreach');
   if (malformedMarkdown.length) violations.push('malformed_markdown');
-  return { checked: true, diagnosticQuestion, focusedFactQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, focusedRelationshipFacts, missingFocusedRelationshipFacts, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, emptyNumberedSections, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, emptyDiagnosticBranchHeadings, emptyListStepItems, danglingClosingPunctuationLines, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
+  return { checked: true, diagnosticQuestion, evidenceSufficiencyQuestion, fullHandoffMaterialQuestion, hasEvidenceSufficiencyVerdict, minimumRoutePath, missingEvidenceMinimumPath, focusedFactQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, focusedRelationshipFacts, missingFocusedRelationshipFacts, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, emptyNumberedSections, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, emptyDiagnosticBranchHeadings, emptyListStepItems, danglingClosingPunctuationLines, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -2691,6 +2736,12 @@ function consultAnswerRevisionPrompt(draft, audit) {
       : '',
     audit.violations.includes('empty_numbered_section')
       ? `草稿存在只有编号步骤标题、没有任何正文/表格/列表/代码块的空步骤：${(audit.emptyNumberedSections || []).map(item => item.line).join('；')}。编号标题可能是普通行、粗体或 Markdown heading；水平分隔线不算内容。只能接回草稿里已经存在的内容，没有时删除该完整标题，再按剩余已有步骤顺序连续重编号；不得补造缺失步骤。`
+      : '',
+    audit.violations.includes('missing_evidence_sufficiency_verdict')
+      ? '用户问现有受限证据“够不够/是否足够/能不能判断”。第一句话必须直接回答现有证据够完成什么、不够完成什么；不得先铺已知事实、排查步骤或泛化材料清单。截图只能固定页面现象，不能单独闭环原因；未实际收到可核验附件时不得声称看见图内数字。'
+      : '',
+    audit.violations.includes('missing_evidence_minimum_route_fact')
+      ? `用户问的是当前主题证据是否足够，最小缺口必须优先引用 current/inherited route 的已核主接口 ${audit.missingEvidenceMinimumPath.display} 及直接响应事实；不得退成页面、终端、账号角色、版本等通用提单材料。只有用户明确索要完整提单/转开发材料清单时才给泛清单。`
       : '',
     audit.violations.includes('inconsistent_structured_cardinality')
       ? `草稿声明的对照数量与实际结构不一致：${(audit.cardinalityMismatches || []).map(item => `${item.kind === 'list' ? '清单' : '表格'}声明${item.expected}项、实际${item.actual}项`).join('；')}。只有草稿中已经存在的内容才能保留；把声明改成实际数量，或删除数量声明/不完整表格或清单，禁止为了凑数新增字段、来源或观测点。`
@@ -2882,6 +2933,9 @@ function consultAnswerSafeFallback(draft, audit) {
   if (audit.violations.includes('missing_primary_path') && audit.missingPrimaryPath) {
     const exact = audit.missingPrimaryPath.display;
     safeKept = [safeKept, `当前请求应逐字核对已核主接口：\`${exact}\`。`].filter(Boolean).join('\n\n');
+  }
+  if (audit.violations.includes('missing_evidence_sufficiency_verdict') || audit.violations.includes('missing_evidence_minimum_route_fact')) {
+    safeKept = String(audit.safeDiagnosticFallback || '').trim();
   }
   const notes = [];
   // 原子事实题的审计只负责删掉越界内容；内部违规原因留在 retrieval.answerAudit，
