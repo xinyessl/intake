@@ -1683,7 +1683,7 @@ function consultFinalActionConsistencyGuard(question, route) {
     '编辑、删除、新建、保存、提交、发送、完成、签名、审批、星标、可能标记已读的打开、改参数、改报文类型、改映射、改配置、重试、复现、补跑或重跑，只要不能归入 B 或 C，就必须从最终答案所有位置删除，改成检查已有页面、请求、响应、报文、映射、截图、日志或审计。动作换成由第三方执行也不改变副作用：不得写成“让对接方改字符串/参数/映射/配置后用同一患者复测”“让运维重跑”或“让开发重试”来绕过守卫。不能因为同一答案别处写了“不要操作”“只读”“别重复”，就保留这里的正向点击或重做指令；否定提醒不能抵消冲突动作。',
     '若最终答案任何一处说“不要操作/不要重复/只读”，则其它任何一处都不得再建议点击编辑、删除、发送、完成等未知动作来观察是否发请求，也不得用“点了是否被拦住”“试一下看看”之类问句变相放行。用户只问“这个按钮是否发请求”时，只能查已有请求、日志、审计、代码或契约；没有既有证据就局部说明当前无法安全确认，不能让现场点击未知按钮补抓。',
     '发布前还要核对步骤和对照项的编号引用：后文引用①②③④等序号时，每个序号都必须在本答案前文有明确对应项；不得出现“共三项”却引用④、表格只定义①②③却在判断或小结写③/④等未定义引用。发现后必须删除含未定义序号的完整句/完整表格行，或在不新增事实的前提下改回已经定义的序号。',
-    '结构化答案还必须逐项核对“声明数量 → 实际内容”：声称二/三/四边、项、份、件、条、处或个对照时，紧随其后的对照表或 Markdown 清单必须确实给出相同数量的完整项；不得用一行表格冒充“三边对照”，也不得说“核两件事”却只列一项。“例如：/如下：/包括：/分别为：”后必须有实际内容，不能直接跳到下一步骤；清理并列项后不得留下孤立的“还是页面…/或者接口…”等后半分支。用户明确只问“先做哪个验证/第一步先做什么”时，只给一个最小只读验证，不追加第二、第三步或可转发的修改指令。',
+    '结构化答案还必须逐项核对“声明数量 → 实际内容”：声称二/三/四边、项、份、件、条、处或个对照时，紧随其后的对照表或 Markdown 清单必须确实给出相同数量的完整项；不得用一行表格冒充“三边对照”，也不得说“核两件事”却只列一项。“例如：/如下：/包括：/分别为：”后必须有实际内容，不能直接跳到下一步骤；清理并列项后不得留下孤立的“还是页面…/或者接口…”等后半分支。明确要求对照/比较/分支判断时，若使用“一致/不一致、是/否、有/无、成功/失败、存在/不存在、命中/未命中”等成对标签，必须给齐两边，或改写成不承诺另一边的单一直接结论；不得只列“一致”后直接跳到未标注的另一种判断。用户明确只问“先做哪个验证/第一步先做什么”时，只给一个最小只读验证，不追加第二、第三步或可转发的修改指令。',
     '该审计只删除不安全或互相矛盾的动作，不新增业务事实，也不给纯事实回答强加诊断步骤。若用户只问事实且现有证据已经足够，直接回答后停止；若已明确动作只读，可保留相应只读观察；若受控条件全部齐全，可条件式说明单次受控验证。',
   ].join('\n');
 }
@@ -2155,6 +2155,50 @@ function consultAnswerSemanticAudit(answer, question, route) {
     if (/[。！？；?！]$/u.test(previousLine)) continue;
     orphanedAlternativeLines.push({ line: current, lineIndex: index, previousLine });
   }
+  // 在明确“对照/比较/分支判断”的局部结构里，成对标签不能只剩一边。
+  // 例如写了“一致：...”后直接进入未标注的另一种判断，会让实施不知道
+  // 后一句究竟属于哪个条件。普通单句“配置一致：无需处理”没有结构引导，放行。
+  const incompletePairedBranches = [];
+  const pairedBranchLabels = [
+    ['一致', '不一致'], ['是', '否'], ['有', '无'], ['成功', '失败'],
+    ['存在', '不存在'], ['命中', '未命中'],
+  ];
+  const normalizedBranchLabel = line => String(line || '')
+    .replace(/^\s*(?:[-*+]\s+|[1-9]\d*[.、．]\s+)?/u, '')
+    .replace(/[*_`]/g, '')
+    .trim();
+  const structuralLeadRe = /(?:对照|比较|分支|分别|两种|判断|情况|结果)[^。！？\n]{0,28}[：:]?\s*$/u;
+  for (let index = 0; index < documentLines.length; index++) {
+    const normalized = normalizedBranchLabel(documentLines[index]);
+    const pair = pairedBranchLabels.find(labels => labels.some(label => new RegExp(`^${label}\\s*[：:]`, 'u').test(normalized)));
+    if (!pair) continue;
+    let leadIndex = index - 1;
+    while (leadIndex >= 0 && !documentLines[leadIndex].trim()) leadIndex--;
+    let explicitLeadIndex = -1;
+    for (let probe = leadIndex; probe >= Math.max(0, index - 5); probe--) {
+      if (structuralLeadRe.test(normalizedBranchLabel(documentLines[probe]))) { explicitLeadIndex = probe; break; }
+    }
+    if (explicitLeadIndex < 0) continue;
+    let end = index + 1;
+    while (end < documentLines.length && end <= index + 8) {
+      const raw = documentLines[end];
+      const clean = normalizedBranchLabel(raw);
+      if (/^#{1,6}\s+/u.test(raw) || (/^\*\*[^*]+\*\*\s*$/u.test(raw.trim()) && end > index + 1)) break;
+      end++;
+    }
+    const branchBlock = documentLines.slice(explicitLeadIndex + 1, end).map(normalizedBranchLabel);
+    const present = pair.filter(label => branchBlock.some(line => new RegExp(`^${label}\\s*[：:]`, 'u').test(line)));
+    if (present.length === pair.length) continue;
+    incompletePairedBranches.push({
+      pair,
+      present,
+      missing: pair.filter(label => !present.includes(label)),
+      leadIndex: explicitLeadIndex,
+      start: index,
+      end,
+      block: documentLines.slice(explicitLeadIndex, end).join('\n'),
+    });
+  }
   // 明确只问“先做哪个验证/第一步做什么”时，回答只能给一个最小只读验证。
   // 这里按文档顶层编号审计，不限制一个验证内部的表格或无编号对照项。
   const singleStepQuestion = /(?:先(?:让[^。！？\n]{0,20})?(?:做|查|核|看)?(?:哪个|哪一(?:个|项|步)?|什么)(?:验证|检查|核对|动作|步骤)|第一步(?:先)?(?:做|查|核|看)(?:什么|哪一(?:个|项|步)?))/u.test(String(question || ''));
@@ -2256,9 +2300,10 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (cardinalityMismatches.length) violations.push('inconsistent_structured_cardinality');
   if (incompleteLeadIns.length) violations.push('incomplete_structured_lead_in');
   if (orphanedAlternativeLines.length) violations.push('orphaned_alternative_fragment');
+  if (incompletePairedBranches.length) violations.push('incomplete_paired_branch');
   if (singleStepOverreach) violations.push('single_step_diagnostic_overreach');
   if (malformedMarkdown.length) violations.push('malformed_markdown');
-  return { checked: true, focusedFactQuestion, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, cardinalityMismatches, incompleteLeadIns, orphanedAlternativeLines, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
+  return { checked: true, focusedFactQuestion, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, cardinalityMismatches, incompleteLeadIns, orphanedAlternativeLines, incompletePairedBranches, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -2300,6 +2345,9 @@ function consultAnswerRevisionPrompt(draft, audit) {
       : '',
     audit.violations.includes('orphaned_alternative_fragment')
       ? `草稿在前一并列项被删除后留下孤立后半分支：${(audit.orphanedAlternativeLines || []).map(item => item.line).join('；')}。删除这些以“还是/或者”开头、却没有可对应前项的完整行；不得猜测或补造被删掉的前项。完整“是 A 还是 B？”问句和“还是先停”式直接结论应保持。`
+      : '',
+    audit.violations.includes('incomplete_paired_branch')
+      ? `草稿在明确对照/比较/分支判断中只给了成对标签的一边：${(audit.incompletePairedBranches || []).map(item => `${item.pair.join('/')} 缺 ${item.missing.join('、')}`).join('；')}。只能用草稿已有内容补齐明确标签，或把整组改成不承诺另一边的单一直接结论；若无法保证语义完整，删除这组判断。不得凭空补造缺失分支的事实或处置。`
       : '',
     audit.violations.includes('single_step_diagnostic_overreach')
       ? '用户只问先做哪个验证或第一步做什么。只保留一个最小只读验证及完成它所必需的对照项，删除第二、第三步、后续处置和可转发的修改指令；不得把一个问题扩成完整排查流程。'
@@ -2363,6 +2411,9 @@ function consultAnswerSafeFallback(draft, audit) {
   if (incompleteLines.size) fallbackDraft = fallbackDraft.split('\n').filter(line => !incompleteLines.has(line)).join('\n');
   const orphanedLines = new Set((audit.orphanedAlternativeLines || []).map(item => item.line));
   if (orphanedLines.size) fallbackDraft = fallbackDraft.split('\n').filter(line => !orphanedLines.has(line.trim())).join('\n');
+  for (const group of audit.incompletePairedBranches || []) {
+    if (group.block) fallbackDraft = fallbackDraft.replace(group.block, '');
+  }
   const keptLines = fallbackDraft.split('\n').map(line => {
     if (consultMarkdownTableCells(line)) return keepPart(line) ? line : '';
     return line.split(/(?<=[。！？；])/u).filter(keepPart).join('');

@@ -515,6 +515,7 @@ test('发布前动作一致性审计覆盖整份答案，禁止同答先劝停�
     assert.match(text, /不得说“核两件事”却只列一项/);
     assert.match(text, /“例如：\/如下：\/包括：\/分别为：”后必须有实际内容/);
     assert.match(text, /不得留下孤立的“还是页面…\/或者接口…”等后半分支/);
+    assert.match(text, /一致\/不一致、是\/否、有\/无、成功\/失败/);
     assert.match(text, /只问“先做哪个验证\/第一步先做什么”时，只给一个最小只读验证/);
   });
 
@@ -1074,6 +1075,29 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.deepEqual(bundle.audit('是接口返回不同，还是页面显示不同？', '这两种情况怎么分？', route).violations, [], '完整二选一问句不得误伤');
   assert.deepEqual(bundle.audit('先停还是继续\n还是先停，不要继续。', '第二步断了怎么处理？', route).violations, [], '还是先停式直接结论不得误伤');
   assert.deepEqual(bundle.audit('两种分支：\n或者接口没有返回，先只读留证。', '还有什么分支？', route).violations, [], '明确冒号引出的或者分支不得误伤');
+
+  const incompletePairedDraft = [
+    '**再对照：接口返回和浏览器本机是否一致**',
+    '- **一致：** 本机和服务端对今天理解相同。',
+    '- 判断重点：差是否卡在日期交界。',
+    '',
+    '**整理最小留证**',
+    '- 页面截图',
+  ].join('\n');
+  const incompletePairedAudit = bundle.audit(incompletePairedDraft, '今天视图和浏览器不一致，给我排查顺序。', route);
+  assert.ok(incompletePairedAudit.violations.includes('incomplete_paired_branch'), '明确对照结构只剩一致分支必须命中');
+  assert.deepEqual(incompletePairedAudit.incompletePairedBranches.map(item => item.missing), [['不一致']]);
+  assert.match(bundle.revision(incompletePairedDraft, incompletePairedAudit), /不得凭空补造缺失分支/);
+  const incompletePairedFallback = bundle.fallback(incompletePairedDraft, incompletePairedAudit);
+  assert.doesNotMatch(incompletePairedFallback, /再对照|一致：|判断重点/);
+  assert.match(incompletePairedFallback, /整理最小留证/);
+  assert.deepEqual(bundle.audit(incompletePairedFallback, '今天视图和浏览器不一致，给我排查顺序。', route).violations, []);
+  assert.deepEqual(bundle.audit([
+    '**比较页面与响应：**',
+    '- **一致：** 页面展示了本次响应。',
+    '- **不一致：** 页面呈现链路待验证。',
+  ].join('\n'), '今天视图和浏览器不一致，给我排查顺序。', route).violations, [], '成对标签齐全时不得误拦');
+  assert.deepEqual(bundle.audit('配置一致：无需继续处理。', '配置状态是什么？', route).violations, [], '没有结构引导的单一直接结论不得误拦');
 
   const explicitLayerRuleRoute = {
     matched: true,
