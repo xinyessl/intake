@@ -1694,6 +1694,7 @@ function consultFinalActionConsistencyGuard(question, route) {
     '若最终答案任何一处说“不要操作/不要重复/只读”，则其它任何一处都不得再建议点击编辑、删除、发送、完成等未知动作来观察是否发请求，也不得用“点了是否被拦住”“试一下看看”之类问句变相放行。用户只问“这个按钮是否发请求”时，只能查已有请求、日志、审计、代码或契约；没有既有证据就局部说明当前无法安全确认，不能让现场点击未知按钮补抓。',
     '发布前还要核对步骤和对照项的编号引用：后文引用①②③④等序号时，每个序号都必须在本答案前文有明确对应项；不得出现“共三项”却引用④、表格只定义①②③却在判断或小结写③/④等未定义引用。顶层阿拉伯数字步骤默认必须从1开始并按正文出现顺序连续递增，不得从3起步、从1、2、3直接跳到5或重复编号；只有用户本轮明确说到“第N步/做到第N步”时，才允许从N或N+1承接。已有完整步骤只能重编号，不能为补缺号新增步骤或事实。发现后必须删除含未定义序号的完整句/完整表格行，或在不新增事实的前提下改回已经定义的序号。',
     '结构化答案还必须逐项核对“声明数量 → 实际内容”：声称二/三/四边、项、份、件、条、处或个对照时，紧随其后的对照表或 Markdown 清单必须确实给出相同数量的完整项；不得用一行表格冒充“三边对照”，也不得说“核两件事”却只列一项。同一小节里“确认/回复/补充/核对 N 件/项/点/条”等结构数量不得从 1 漂成 2；统一数量或删除不必要的数量承诺。“例如：/如下：/包括：/包含：/内容为：/由以下组成：/分别为：”后必须有实际内容，不能直接跳到下一步骤或“别搞混/注意/结论/下一步”等新小节；任何以冒号结尾的标题/提示语都不得出现在正文末尾而没有子内容。清理并列项后不得留下孤立的“还是页面…/或者接口…”等后半分支，也不得留下以“还是/或者/或是/或”结尾却没有后一项的前半分支；不得在答案开头或“结论/判断”等纯标题后直接留下没有前述主张的“但/但是/不过/然而”转折残句。删除示例或引用正文时必须连同整句引号一起删除，不得留下单独一行的「/」/“/”/『/』等孤立引号。明确要求对照/比较/分支判断时，若使用“一致/不一致、是/否、有/无、成功/失败、存在/不存在、命中/未命中”等成对标签，必须给齐两边，或改写成不承诺另一边的单一直接结论；不得只列“一致”后直接跳到未标注的另一种判断。“不要做/禁止/避免/切勿”等否定标题下不得只剩“可以/建议/请/应该/优先/最好/即可/帮你”等正向建议；正向替代动作必须移到独立的“可以做/下一步”标题下。用户明确只问“先做哪个验证/第一步做什么”时，只给一个最小只读验证，不追加第二、第三步或可转发的修改指令。',
+    '最终稿中的每个有序/无序列表项若只剩粗体步骤标题，后面必须有正文或子项；若直接遇到分隔线、新节、下一同级列表项或答案结束，删除该空列表项，不得补造内容。每个自然句也必须完整收口：行尾逗号、分号或冒号后必须有同句后半段或紧邻正文；若直接进入分隔线、新节、统一安全尾注或答案结束，删除该悬空完整句。列表项内部的正常分号、下一行有真实正文/子项及以句号/问号/叹号完整结束的粗体单句不得误删。',
     '该审计只删除不安全或互相矛盾的动作，不新增业务事实，也不给纯事实回答强加诊断步骤。若用户只问事实且现有证据已经足够，直接回答后停止；若已明确动作只读，可保留相应只读观察；若受控条件全部齐全，可条件式说明单次受控验证。',
   ].join('\n');
 }
@@ -2259,6 +2260,43 @@ function consultAnswerSemanticAudit(answer, question, route) {
       if (next >= documentLines.length || nextIsHeading) emptyDiagnosticBranchHeadings.push({ line: raw.trim(), lineIndex: index });
     }
   }
+  // 只含粗体标题的有序/无序列表项必须有正文或子项。若下一有效行已经是
+  // 分隔线、新节、同级列表项或答案结束，说明清理后只剩空步骤标题。
+  const emptyListStepItems = [];
+  const listTitleOnlyRe = /^\s*(?:[-+*]\s+|[1-9]\d*[.、．]\s+)(?:\*\*|__)([^\n]+?)(?:\*\*|__)\s*$/u;
+  const horizontalSeparatorRe = /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/u;
+  const markdownSectionRe = /^\s*#{1,6}\s+/u;
+  for (let index = 0; index < documentLines.length; index++) {
+    const match = String(documentLines[index] || '').match(listTitleOnlyRe);
+    if (!match || /[。！？?!]$/u.test(match[1].trim())) continue;
+    let next = index + 1;
+    while (next < documentLines.length && !documentLines[next].trim()) next++;
+    const nextLine = documentLines[next] || '';
+    const hasIndentedBody = /^\s{2,}\S/u.test(nextLine);
+    const noBody = !hasIndentedBody && (next >= documentLines.length
+      || horizontalSeparatorRe.test(nextLine)
+      || markdownSectionRe.test(nextLine)
+      || topLevelStepRe.test(nextLine)
+      || /^\s*[-+*]\s+/u.test(nextLine));
+    if (noBody) emptyListStepItems.push({ line: documentLines[index].trim(), lineIndex: index });
+  }
+  // 逗号、分号或冒号只能连接同一句后半段/后续正文。若其后直接进入分隔线、
+  // 新节、答案结束或统一安全尾注，终稿语义已经悬空，应删除完整句而非补写。
+  const danglingClosingPunctuationLines = [];
+  const safetyFooterRe = /^(?:当前证据|未由当前事实|未满足完整受控条件|这条答疑|这个咨询)/u;
+  for (let index = 0; index < documentLines.length; index++) {
+    const raw = String(documentLines[index] || '');
+    const clean = raw.replace(/(?:\*\*|__|`)+\s*$/u, '').trim();
+    if (!/[，,；;：:]$/u.test(clean) || consultMarkdownTableCells(raw) || horizontalSeparatorRe.test(raw)) continue;
+    let next = index + 1;
+    while (next < documentLines.length && !documentLines[next].trim()) next++;
+    const nextLine = String(documentLines[next] || '').replace(/^\s*(?:[-+*]\s+|[1-9]\d*[.、．]\s+)?/u, '').replace(/[*_`]/g, '').trim();
+    const semanticBoundary = next >= documentLines.length
+      || horizontalSeparatorRe.test(documentLines[next] || '')
+      || markdownSectionRe.test(documentLines[next] || '')
+      || safetyFooterRe.test(nextLine);
+    if (semanticBoundary) danglingClosingPunctuationLines.push({ line: raw.trim(), lineIndex: index, punctuation: clean.slice(-1) });
+  }
   // 全文修订/删句后可能只剩并列结构的后半句，例如上一项已被删除，却留下
   // “还是页面上有字段标题但无选项”。这类句子标记、括号都完整，但缺少可选择
   // 的前项。直接回答“还是先停”或完整的“是 A 还是 B？”不属于孤立残句。
@@ -2574,6 +2612,8 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (conflictingCountDeclarations.length) violations.push('conflicting_count_declaration');
   if (incompleteLeadIns.length) violations.push('incomplete_structured_lead_in');
   if (emptyDiagnosticBranchHeadings.length) violations.push('empty_diagnostic_branch');
+  if (emptyListStepItems.length) violations.push('empty_list_step_item');
+  if (danglingClosingPunctuationLines.length) violations.push('dangling_closing_punctuation');
   if (orphanedAlternativeLines.length) violations.push('orphaned_alternative_fragment');
   if (danglingAlternativeLines.length) violations.push('dangling_alternative_fragment');
   if (orphanedContrastLines.length) violations.push('orphaned_contrast_fragment');
@@ -2581,7 +2621,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (contradictoryNegativeSections.length) violations.push('contradictory_negative_section');
   if (singleStepOverreach) violations.push('single_step_diagnostic_overreach');
   if (malformedMarkdown.length) violations.push('malformed_markdown');
-  return { checked: true, diagnosticQuestion, focusedFactQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, focusedRelationshipFacts, missingFocusedRelationshipFacts, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, emptyDiagnosticBranchHeadings, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
+  return { checked: true, diagnosticQuestion, focusedFactQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, focusedRelationshipFacts, missingFocusedRelationshipFacts, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, emptyDiagnosticBranchHeadings, emptyListStepItems, danglingClosingPunctuationLines, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -2641,6 +2681,12 @@ function consultAnswerRevisionPrompt(draft, audit) {
       : '',
     audit.violations.includes('empty_diagnostic_branch')
       ? '草稿存在只有分支标题、没有任何判断或安全动作的空诊断分支。只能用草稿已有正文补回；若没有现成内容，删除该完整分支标题，不得凭常识补造步骤。'
+      : '',
+    audit.violations.includes('empty_list_step_item')
+      ? `草稿存在只有粗体标题、没有正文或子项的空列表步骤：${(audit.emptyListStepItems || []).map(item => item.line).join('；')}。只能接回草稿里已有的正文/子项；没有现成内容时删除该完整列表项，不得补造动作或证据。`
+      : '',
+    audit.violations.includes('dangling_closing_punctuation')
+      ? `草稿存在以逗号、分号或冒号收尾却没有后半句的悬空句：${(audit.danglingClosingPunctuationLines || []).map(item => item.line).join('；')}。删除该完整自然句，或仅用草稿中紧邻的既有正文恢复完整句；不得凭空续写结论、步骤或分支。`
       : '',
     audit.violations.includes('orphaned_alternative_fragment')
       ? `草稿在前一并列项被删除后留下孤立后半分支：${(audit.orphanedAlternativeLines || []).map(item => item.line).join('；')}。删除这些以“还是/或者”开头、却没有可对应前项的完整行；不得猜测或补造被删掉的前项。完整“是 A 还是 B？”问句和“还是先停”式直接结论应保持。`
@@ -2741,6 +2787,10 @@ function consultAnswerSafeFallback(draft, audit) {
   if (incompleteLines.size) fallbackDraft = fallbackDraft.split('\n').filter(line => !incompleteLines.has(line)).join('\n');
   const emptyBranchLines = new Set((audit.emptyDiagnosticBranchHeadings || []).map(item => item.line));
   if (emptyBranchLines.size) fallbackDraft = fallbackDraft.split('\n').filter(line => !emptyBranchLines.has(line.trim())).join('\n');
+  const emptyStepLines = new Set((audit.emptyListStepItems || []).map(item => item.line));
+  if (emptyStepLines.size) fallbackDraft = fallbackDraft.split('\n').filter(line => !emptyStepLines.has(line.trim())).join('\n');
+  const danglingClosingLines = new Set((audit.danglingClosingPunctuationLines || []).map(item => item.line));
+  if (danglingClosingLines.size) fallbackDraft = fallbackDraft.split('\n').filter(line => !danglingClosingLines.has(line.trim())).join('\n');
   const orphanedLines = new Set((audit.orphanedAlternativeLines || []).map(item => item.line));
   if (orphanedLines.size) fallbackDraft = fallbackDraft.split('\n').filter(line => !orphanedLines.has(line.trim())).join('\n');
   const danglingAlternative = new Set((audit.danglingAlternativeLines || []).map(item => item.line));
@@ -2764,6 +2814,16 @@ function consultAnswerSafeFallback(draft, audit) {
   const postCleanupAudit = safeKept ? consultAnswerSemanticAudit(safeKept, audit.diagnosticQuestion ? '怎么判断？' : '', { matched: false }) : null;
   for (const branches of postCleanupAudit && postCleanupAudit.incompleteResultBranchTables || []) {
     if (branches.block) safeKept = safeKept.replace(branches.block, '');
+  }
+  // 前序删句可能制造新的空步骤或悬空收口，例如删除分号后的危险动作后只剩
+  // “只读核对已有报文；”。最终降级稿必须基于清理后的文本重审并删除完整项/行，
+  // 不能把残缺句直接发布，也不能为了补全语义临时添加事实。
+  const postCleanupStructuralLines = new Set([
+    ...(postCleanupAudit && postCleanupAudit.emptyListStepItems || []).map(item => item.line),
+    ...(postCleanupAudit && postCleanupAudit.danglingClosingPunctuationLines || []).map(item => item.line),
+  ]);
+  if (postCleanupStructuralLines.size) {
+    safeKept = safeKept.split('\n').filter(line => !postCleanupStructuralLines.has(line.trim())).join('\n');
   }
   safeKept = consultNormalizeSafeMarkdown(consultNormalizeSafeTables(safeKept));
   if (audit.focusedFactPrimaryPath && !consultConcretePaths(safeKept).includes(audit.focusedFactPrimaryPath.path)) {

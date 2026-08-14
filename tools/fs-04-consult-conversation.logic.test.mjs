@@ -558,6 +558,8 @@ test('发布前动作一致性审计覆盖整份答案，禁止同答先劝停�
     assert.match(text, /一致\/不一致、是\/否、有\/无、成功\/失败/);
     assert.match(text, /“不要做\/禁止\/避免\/切勿”等否定标题下不得只剩/);
     assert.match(text, /只问“先做哪个验证\/第一步做什么”时，只给一个最小只读验证/);
+    assert.match(text, /只剩粗体步骤标题，后面必须有正文或子项/);
+    assert.match(text, /行尾逗号、分号或冒号后必须有同句后半段或紧邻正文/);
   });
 
   const readOnly = fn('这个列表刷新已确认纯只读，可以刷新后看现有数量吗？', { matched: true });
@@ -1049,7 +1051,7 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.deepEqual(q127R31Audit.focusedTechnicalOverreach.sort(), ['district_code', 'p_id', 'visit_id'].sort());
   const q127R31Fallback = bundle.fallback(q127R31Draft, q127R31Audit);
   assert.match(q127R31Fallback, /pwrs_patient\.patient_id/);
-  assert.match(q127R31Fallback, /只读对照已有源值与出站报文/);
+  assert.doesNotMatch(q127R31Fallback, /只读对照已有源值与出站报文；$/, '删除同句后半段危险动作后，不得发布分号悬空的前半句');
   assert.doesNotMatch(q127R31Fallback, /p_id|visit_id|district_code|压对接方|按字符串传/);
   assert.deepEqual(bundle.audit(q127R31Fallback, q127R28Question, focusedPatientIdRoute).violations, []);
 
@@ -1685,6 +1687,55 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   ].join('\n');
   assert.ok(!bundle.audit(completeBranchHeading, '今天视图三边怎么判断？', atomicRoute).violations.includes('empty_diagnostic_branch'), '分支标题有正文时放行');
 
+  const r68EmptyStepDraft = [
+    '1. **只读核对已有请求**',
+    '比较已有响应和页面。',
+    '2. **仍对不上时，最少留证再转人（只整理已有证据，别补写操作）**',
+    '---',
+    '先确认是不是 **接口返回什么页面就显示什么**；',
+    '当前证据不支持对原因作频率排序。',
+  ].join('\n');
+  const r68EmptyStepAudit = bundle.audit(r68EmptyStepDraft, '今天视图不一致，给我排查顺序。', atomicRoute);
+  assert.ok(r68EmptyStepAudit.violations.includes('empty_list_step_item'), '生产原答的粗体步骤标题后直接分隔线必须判空');
+  assert.ok(r68EmptyStepAudit.violations.includes('dangling_closing_punctuation'), '生产原答的分号收口后直接安全尾注必须判悬空');
+  assert.deepEqual(r68EmptyStepAudit.emptyListStepItems.map(item => item.line), [
+    '2. **仍对不上时，最少留证再转人（只整理已有证据，别补写操作）**',
+  ]);
+  assert.deepEqual(r68EmptyStepAudit.danglingClosingPunctuationLines.map(item => item.line), [
+    '先确认是不是 **接口返回什么页面就显示什么**；',
+  ]);
+  const r68Revision = bundle.revision(r68EmptyStepDraft, r68EmptyStepAudit);
+  assert.match(r68Revision, /只有粗体标题、没有正文或子项/);
+  assert.match(r68Revision, /以逗号、分号或冒号收尾却没有后半句/);
+  const r68EmptyStepFallback = bundle.fallback(r68EmptyStepDraft, r68EmptyStepAudit);
+  assert.match(r68EmptyStepFallback, /1\. \*\*只读核对已有请求\*\*/);
+  assert.match(r68EmptyStepFallback, /比较已有响应和页面/);
+  assert.doesNotMatch(r68EmptyStepFallback, /仍对不上时，最少留证再转人|接口返回什么页面就显示什么/);
+  assert.match(r68EmptyStepFallback, /当前证据不支持对原因作频率排序/);
+  assert.ok(!bundle.audit(r68EmptyStepFallback, '今天视图不一致，给我排查顺序。', atomicRoute).violations.includes('empty_list_step_item'));
+  assert.ok(!bundle.audit(r68EmptyStepFallback, '今天视图不一致，给我排查顺序。', atomicRoute).violations.includes('dangling_closing_punctuation'));
+
+  const completeListBodies = [
+    '1. **仍对不上时，整理已有证据**',
+    '保留已有请求响应和截图。',
+    '- **只读核对**',
+    '  - 已有请求',
+    '  - 已有响应',
+    '- **结论完整。**',
+    '---',
+  ].join('\n');
+  assert.ok(!bundle.audit(completeListBodies, '今天视图怎么排查？', atomicRoute).violations.includes('empty_list_step_item'), '列表标题有正文、子项或本身是完整句时放行');
+  const completePunctuation = [
+    '先核已有请求；再核已有响应。',
+    '- 核已有请求；',
+    '- 核已有响应。',
+    '结论：',
+    '- 页面与响应一致。',
+    '先确认是不是页面和响应一致；',
+    '然后只读比较已有页面。',
+  ].join('\n');
+  assert.ok(!bundle.audit(completePunctuation, '今天视图怎么排查？', atomicRoute).violations.includes('dangling_closing_punctuation'), '句内分号、引出列表和紧邻正文不属于悬空收口');
+
   const oneDecisionRowWithoutBranchLead = [
     '怎么判断：',
     '| 对照 | 含义 | 还要不要日志 |',
@@ -1833,7 +1884,7 @@ test('发布前确定性语义校验：路径必须来自用户或route并逐字
   assert.equal(methodFallback, '当前接口：`GET /pwrsapi/month/view/today`。', '未知路径所在整句删除后，用route唯一已核路径回答原子接口题');
   const mixedDraft = '完整接口 GET /pwrsapi/month/view/today；不要简称 /pwrsapi。';
   const mixedFallback = bundle.fallback(mixedDraft, bundle.audit(mixedDraft, '今天视图接口是什么？', route));
-  assert.equal(mixedFallback, '完整接口 GET /pwrsapi/month/view/today；', '未核短前缀所在分句整体删除，合法完整路径不受污染');
+  assert.equal(mixedFallback, '当前接口：`GET /pwrsapi/month/view/today`。', '未核短前缀导致同句残缺时整句删除，再仅恢复 route 唯一已核精确路径');
   assert.deepEqual(bundle.audit(mixedFallback, '今天视图接口是什么？', route).violations, []);
   const userPath = bundle.audit('按你提供的 /custom/probe 只读核当前请求。', '我抓到 /custom/probe，怎么判断？', { matched: true, answerFacts: ['只核当前请求'] });
   assert.deepEqual(userPath.violations, [], '用户本轮原文路径可照实引用');
