@@ -1889,6 +1889,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const malformedMarkdown = [...consultMalformedMarkdownTokens(text), ...consultMalformedProseTokens(text)];
   const requiredPrimaryPath = consultRequiredPrimaryPath(question, route, text);
   const missingPrimaryPath = requiredPrimaryPath && !consultConcretePaths(text).includes(requiredPrimaryPath.path) ? requiredPrimaryPath : null;
+  const focusedFactOverreach = consultFocusedFactOverreach(text, question);
   const violations = [];
   if (likelihoodTerms.length || causalPriorityTerms.length) violations.push('unsupported_likelihood');
   if (unsupportedComponentClaims.length) violations.push('unsupported_component_fault');
@@ -1896,8 +1897,9 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (unexpectedPaths.length) violations.push('unexpected_concrete_path');
   if (unexpectedScopeTerms.length) violations.push('out_of_scope_entity');
   if (missingPrimaryPath) violations.push('missing_primary_path');
+  if (focusedFactOverreach.length) violations.push('focused_fact_overreach');
   if (malformedMarkdown.length) violations.push('malformed_markdown');
-  return { checked: true, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, malformedMarkdown, violations };
+  return { checked: true, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -1921,6 +1923,9 @@ function consultAnswerRevisionPrompt(draft, audit) {
       : '',
     audit.violations.includes('missing_primary_path')
       ? `当前答案正在核对请求/响应，而当前 route 只有一个已核主接口。必须逐字写出 ${audit.missingPrimaryPath.display}，不得用 path、today 接口、该接口、省略号或裸相对路径代替。若 route 有多个合法接口则不得强塞其中一个。`
+      : '',
+    audit.violations.includes('focused_fact_overreach')
+      ? '用户本轮只是问单个接口、路径、状态码、字段属性或一个是非事实。保留 current route answerFacts/primary section 的直接答案和回答它所必需的 mustNotConfuse 限定；删除现场排查、无当前观察的失败原因、诊断优先级、操作建议、截图/日志邀约及其它未问扩写。用户明确问“为什么/排查/现场/怎么验证/接下来”或提出多个子问题时才可给对应步骤。'
       : '',
     audit.violations.includes('malformed_markdown')
       ? '草稿含未闭合的 Markdown 粗体、行内代码、代码围栏、中文/英文括号或书名式括号。修订时必须输出语法完整的自然句并闭合成对标记；无法自然恢复就删除整句，禁止保留半截列表项、孤立标点或残缺括号。'
@@ -1953,6 +1958,7 @@ function consultAnswerSafeFallback(draft, audit) {
     if (audit.violations.includes('cross_actor_side_effect') && Array.from(part.matchAll(CONSULT_DIRECT_RISKY_ACTION_RE))
       .some(match => !negatedActorPrefix.test(part.slice(0, match.index)))) return false;
     if (audit.violations.includes('unsupported_component_fault') && (audit.unsupportedComponentClaims || []).includes(part.trim())) return false;
+    if (audit.violations.includes('focused_fact_overreach') && (audit.focusedFactOverreach || []).includes(part.trim())) return false;
     if (audit.violations.includes('out_of_scope_entity') && (audit.unexpectedEntityTerms || []).some(term => part.toLowerCase().includes(String(term).toLowerCase()))) return false;
     if (audit.violations.includes('unexpected_concrete_path')) {
       const partPaths = new Set(consultConcretePaths(part));
@@ -2064,15 +2070,24 @@ function consultCurrentRulingGuard(question, route) {
 function consultFocusedFactGuard(question) {
   const q = String(question || '').trim();
   if (!q || q.length > 180) return '';
-  const focused = /(?:字段|列|column|类型|type|是不是|是否|是.*吗|分别是什么|值是什么|长度(?:多少|是什么)|varchar|uuid|integer|bigint)/i.test(q);
-  const operational = /(?:为什么|怎么|如何|排查|复现|留证|下一步|接下来|请求|响应|接口|页面|列表|业务流程|保存|提交|查询)/i.test(q);
-  if (!focused || operational) return '';
+  const focused = /(?:字段|列(?!表)|column|类型|type|是不是|是否|能否|能不能|会不会|是.*吗|分别是什么|值是什么|长度(?:多少|是什么)|状态码(?:是|为|什么|多少)|(?:调用|使用|走|用|是)(?:的|哪|哪个|什么)?接口|哪个接口|接口(?:是|为|叫|地址|路径)?什么|路径(?:是|为)?什么|varchar|uuid|integer|bigint)/i.test(q);
+  const operational = /(?:为什么|怎么(?:排查|判断|验证|处理|解决|核对|看)|如何|排查|复现|留证|下一步|接下来|现场|转开发|抓包|请求和响应|请求.*抓到|响应.*抓到|业务流程|保存|提交|查询.*不到)/i.test(q);
+  const multiQuestion = (q.match(/[？?；;]/g) || []).length > 1 || /(?:另外|同时|还要|以及).*(?:什么|哪个|是否|怎么|如何)/i.test(q);
+  if (!focused || operational || multiQuestion) return '';
   return [
     '【单一事实题止答边界】',
-    '用户只问一个字段/列的类型、长度、取值或一个是非事实。先直接回答该属性，并只补一句回答这个属性所必需的限定；答到这里就停止。',
-    '不得主动扩写同表其它列、本地身份元组、联合键、索引、唯一约束、数据库迁移、SQL 用法、相邻模块事实或实施步骤。只有用户在本轮明确问到这些内容，且当前有效证据直接覆盖时，才逐项回答。',
+    '用户只问一个接口、路径、状态码、字段/列的类型/长度/取值或一个是非事实。先从 current route 的 answerFacts/primary section 给直接答案，只补回答该事实所必需的限定与 mustNotConfuse 边界；答到这里就停止。',
+    '不得主动扩写同表其它列、本地身份元组、联合键、索引、唯一约束、数据库迁移、SQL 用法、相邻模块事实、实施步骤、现场排查、原因假设、动作建议或“把截图发来”等继续邀约。只有用户在本轮明确问到这些内容，且当前有效证据直接覆盖时，才逐项回答。',
     '即使相邻事实本身真实，只要不改变本问答案，也不要作为“顺便提醒”加入；显式切题后不得带入上一主题事实。',
   ].join('\n');
+}
+
+function consultFocusedFactOverreach(answer, question) {
+  if (!consultFocusedFactGuard(question)) return [];
+  return String(answer || '').split(/(?<=[。！？；\n])/u).map(x => x.trim()).filter(statement => {
+    if (!statement) return false;
+    return /(?:现场(?:怎么|如何|快速|排查|核对)|排查步骤|下一步|接下来|开发者工具|\bNetwork\b|抓包|复现|留证|优先查|建议(?:先|再|去|让)|(?:打开|点击|刷新)[^。！？；\n]{0,24}(?:页面|工作台|网络|请求|接口)|如果[^。！？；\n]{0,36}(?:失败|异常|报错|没调到|没有请求)|把[^。！？；\n]{0,30}(?:截图|日志|请求|响应)[^。！？；\n]{0,16}(?:发来|贴出|提供)|需要更细|再一起看)/i.test(statement);
+  });
 }
 
 // 患者相关功能的请求身份边界是全局安全裁决，不能依赖某条业务 route 是否刚好重复列全。

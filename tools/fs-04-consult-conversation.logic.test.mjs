@@ -363,14 +363,30 @@ test('当前裁决优先守卫：废止历史、遗留接口和账号差异不�
   assert.match(SRC, /consultCurrentRulingGuard\(qtext, route\)/);
 });
 
-test('单一事实止答守卫：字段类型题不扩写相邻列、tuple、索引或步骤', () => {
+test('单一事实止答守卫：接口/路径/状态码/字段/是否题只答直接事实', () => {
   const fn = new Function(extractFn(SRC, 'consultFocusedFactGuard') + '\nreturn consultFocusedFactGuard;')();
-  for (const q of ['pwrs_patient.p_id 是 PostgreSQL 原生 uuid 吗？', 'patient_id 字段是什么类型？', 'status 的值分别是什么？']) {
+  for (const q of [
+    '工作台今天日期和星期调用哪个接口？',
+    '这个接口路径是什么？',
+    '成功状态码是什么？',
+    'pwrs_patient.p_id 是 PostgreSQL 原生 uuid 吗？',
+    'patient_id 字段是什么类型？',
+    'status 的值分别是什么？',
+    '这个按钮是否支持只读查看？',
+  ]) {
     const text = fn(q);
     assert.match(text, /单一事实题止答边界/);
+    assert.match(text, /current route 的 answerFacts\/primary section/);
     assert.match(text, /不得主动扩写同表其它列、本地身份元组、联合键、索引、唯一约束/);
+    assert.match(text, /现场排查、原因假设、动作建议/);
   }
-  assert.equal(fn('患者请求和响应抓到了，下一步怎么排查？'), '');
+  for (const q of [
+    '患者请求和响应抓到了，下一步怎么排查？',
+    '今天接口为什么和浏览器不一致？',
+    '现场怎么验证这个接口？',
+    '这个接口是什么，接下来怎么查？',
+    '接口是什么？状态码不对怎么处理？',
+  ]) assert.equal(fn(q), '', q);
   assert.match(SRC, /consultFocusedFactGuard\(qtext\)/);
 });
 
@@ -546,10 +562,30 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
     + extractFn(SRC, 'consultMalformedMarkdownTokens') + '\n'
     + extractFn(SRC, 'consultMalformedProseTokens') + '\n'
     + extractFn(SRC, 'consultRequiredPrimaryPath') + '\n'
+    + extractFn(SRC, 'consultFocusedFactGuard') + '\n'
+    + extractFn(SRC, 'consultFocusedFactOverreach') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + 'return consultAnswerSemanticAudit;',
   )();
   const route = { matched: true, route: { title: '工作台今天视图' }, answerFacts: ['日期来自服务端 JVM 当前时区'] };
+  const atomicRoute = {
+    matched: true,
+    route: { title: '工作台今天视图' },
+    answerFacts: ['GET /pwrsapi/month/view/today 返回 year/week，日期来自服务端 JVM 当前时区'],
+    mustNotConfuse: ['不得答已废止的 GET /month/view'],
+  };
+  const atomicDraft = [
+    '结论：调用 GET /pwrsapi/month/view/today，返回 year/week。',
+    '不要混淆已废止的 GET /month/view。',
+    '现场怎么快速核对：打开工作台，在 Network 里查看请求。',
+    '如果接口没调到或鉴权失败，页面就会异常——优先查 token。',
+    '需要更细的话，把截图发来再一起看。',
+  ].join('\n');
+  const atomicAudit = audit(atomicDraft, '工作台今天日期和星期调用哪个接口？', atomicRoute);
+  assert.deepEqual(atomicAudit.violations, ['focused_fact_overreach']);
+  assert.equal(atomicAudit.focusedFactOverreach.length, 3);
+  assert.deepEqual(audit('调用 GET /pwrsapi/month/view/today，返回 year/week；不得混淆已废止的 GET /month/view。', '工作台今天日期和星期调用哪个接口？', atomicRoute).violations, []);
+  assert.ok(!audit('调用 GET /pwrsapi/month/view/today 后现场怎么核对？', '工作台接口为什么不一致，现场怎么验证？', atomicRoute).violations.includes('focused_fact_overreach'), '显式诊断题不触发原子止答审计');
   const failed = audit('页面等于接口但与浏览器不同，多半是服务端时区差。', '今天视图对不上，怎么排查？', route);
   assert.deepEqual(failed.violations, ['unsupported_likelihood']);
   assert.deepEqual(failed.likelihoodTerms, ['多半']);
@@ -621,6 +657,8 @@ test('发布前确定性语义校验：跨主体副作用触发，否定句和�
     + extractFn(SRC, 'consultMalformedMarkdownTokens') + '\n'
     + extractFn(SRC, 'consultMalformedProseTokens') + '\n'
     + extractFn(SRC, 'consultRequiredPrimaryPath') + '\n'
+    + extractFn(SRC, 'consultFocusedFactGuard') + '\n'
+    + extractFn(SRC, 'consultFocusedFactOverreach') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + 'return consultAnswerSemanticAudit;',
   )();
@@ -669,6 +707,8 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     + extractFn(SRC, 'consultMalformedMarkdownTokens') + '\n'
     + extractFn(SRC, 'consultMalformedProseTokens') + '\n'
     + extractFn(SRC, 'consultRequiredPrimaryPath') + '\n'
+    + extractFn(SRC, 'consultFocusedFactGuard') + '\n'
+    + extractFn(SRC, 'consultFocusedFactOverreach') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + extractFn(SRC, 'consultAnswerRevisionPrompt') + '\n'
     + extractFn(SRC, 'consultReplaceUnexpectedPath') + '\n'
@@ -703,6 +743,28 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   const normalized = bundle.fallback(malformed, malformedAudit);
   assert.equal(normalized, '只有截图不够。\n请只读核已有响应。');
   assert.deepEqual(bundle.audit(normalized, '只有截图够不够？', route).violations, []);
+
+  const atomicRoute = {
+    matched: true,
+    route: { title: '工作台今天视图' },
+    answerFacts: ['GET /pwrsapi/month/view/today 返回 year/week，日期来自服务端 JVM 当前时区'],
+    mustNotConfuse: ['不得答已废止的 GET /month/view'],
+  };
+  const atomicDraft = [
+    '调用 GET /pwrsapi/month/view/today，返回 year/week。',
+    '不得混淆已废止的 GET /month/view。',
+    '现场怎么快速核对：打开工作台，在 Network 里查看请求。',
+    '如果接口没调到，页面就会异常——优先查 token。',
+    '需要更细的话，把截图发来再一起看。',
+  ].join('\n');
+  const atomicAudit = bundle.audit(atomicDraft, '工作台今天日期和星期调用哪个接口？', atomicRoute);
+  assert.deepEqual(atomicAudit.violations, ['focused_fact_overreach']);
+  assert.match(bundle.revision(atomicDraft, atomicAudit), /保留 current route answerFacts\/primary section 的直接答案/);
+  const atomicFallback = bundle.fallback(atomicDraft, atomicAudit);
+  assert.match(atomicFallback, /GET \/pwrsapi\/month\/view\/today/);
+  assert.match(atomicFallback, /GET \/month\/view/);
+  assert.doesNotMatch(atomicFallback, /现场怎么|打开工作台|优先查|截图发来|再一起看/);
+  assert.deepEqual(bundle.audit(atomicFallback, '工作台今天日期和星期调用哪个接口？', atomicRoute).violations, []);
 
   const brokenProse = '核对请求方法。是否不该有多余业务参数（这条接口不依赖患者入参；';
   const brokenAudit = bundle.audit(brokenProse, '今天视图请求和响应抓到了，重点核什么？', {
@@ -742,6 +804,8 @@ test('发布前确定性语义校验：路径必须来自用户或route并逐字
     + extractFn(SRC, 'consultMalformedMarkdownTokens') + '\n'
     + extractFn(SRC, 'consultMalformedProseTokens') + '\n'
     + extractFn(SRC, 'consultRequiredPrimaryPath') + '\n'
+    + extractFn(SRC, 'consultFocusedFactGuard') + '\n'
+    + extractFn(SRC, 'consultFocusedFactOverreach') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + extractFn(SRC, 'consultAnswerRevisionPrompt') + '\n'
     + extractFn(SRC, 'consultReplaceUnexpectedPath') + '\n'
@@ -775,7 +839,7 @@ test('发布前确定性语义校验：路径必须来自用户或route并逐字
     '也可以看 /pwrsapi/month/view/today/。',
   ]) {
     const audit = bundle.audit(bad, '今天视图接口是什么？', route);
-    assert.deepEqual(audit.violations, ['unexpected_concrete_path'], bad);
+    assert.ok(audit.violations.includes('unexpected_concrete_path'), bad);
     assert.ok(audit.unexpectedPaths.length > 0, bad);
     const revision = bundle.revision(bad, audit);
     assert.match(revision, /省略号、缩写、去前缀\/尾斜杠/);
@@ -821,6 +885,8 @@ test('发布前事实作用域审计：相邻模块、通配路径不串入，�
     + extractFn(SRC, 'consultMalformedMarkdownTokens') + '\n'
     + extractFn(SRC, 'consultMalformedProseTokens') + '\n'
     + extractFn(SRC, 'consultRequiredPrimaryPath') + '\n'
+    + extractFn(SRC, 'consultFocusedFactGuard') + '\n'
+    + extractFn(SRC, 'consultFocusedFactOverreach') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + extractFn(SRC, 'consultAnswerRevisionPrompt') + '\n'
     + extractFn(SRC, 'consultReplaceUnexpectedPath') + '\n'
