@@ -1907,6 +1907,88 @@ function consultNormalizeSafeMarkdown(text) {
   }).filter(line => !/^\s*(?:\*\*|__|`{1,3})\s*$/.test(line)).join('\n').trim();
 }
 
+// 模型草稿必须先完整生成并通过发布前审计；这里只接收已经安全的最终稿，
+// 再按自然文本/Markdown 结构边界拆成 SSE 小块。拆分不得改变任何字符，
+// 也不能把围栏代码、Markdown 表格、行内代码或链接拆成浏览器会误解析的半截。
+function consultFinalAnswerChunks(answer, options = {}) {
+  const text = String(answer == null ? '' : answer);
+  if (!text) return [];
+  const firstTarget = Math.max(48, Number(options.firstTarget) || 120);
+  const target = Math.max(firstTarget, Number(options.target) || 220);
+  const lines = text.match(/[^\n]*\n|[^\n]+$/g) || [text];
+  const atoms = [];
+  const isFence = line => /^\s*```/.test(String(line || ''));
+  const isTableSeparator = line => /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(String(line || '').replace(/\n$/, ''));
+  const isTableLine = line => {
+    const value = String(line || '').replace(/\n$/, '');
+    return (value.match(/\|/g) || []).length >= 2;
+  };
+  const protectedRanges = value => {
+    const ranges = [];
+    for (const re of [/`[^`\n]*`/g, /\*\*[^*\n]+\*\*/g, /__[^_\n]+__/g, /!?\[[^\]\n]*\]\([^\n)]*(?:\([^\n)]*\)[^\n)]*)*\)/g]) {
+      for (const match of String(value || '').matchAll(re)) ranges.push([match.index, match.index + match[0].length]);
+    }
+    return ranges;
+  };
+  const splitProse = value => {
+    const ranges = protectedRanges(value);
+    const insideProtected = index => ranges.some(([start, end]) => index >= start && index < end);
+    let start = 0;
+    for (let index = 0; index < value.length; index++) {
+      if (insideProtected(index)) continue;
+      const char = value[index];
+      const length = index - start + 1;
+      const sentenceEnd = /[。！？；\n]/u.test(char);
+      const softEnd = /[，,:：]/u.test(char) && length >= 72;
+      if (sentenceEnd || softEnd) { atoms.push(value.slice(start, index + 1)); start = index + 1; }
+    }
+    if (start < value.length) atoms.push(value.slice(start));
+  };
+
+  for (let index = 0; index < lines.length;) {
+    if (isFence(lines[index])) {
+      let end = index + 1;
+      while (end < lines.length) { const closing = isFence(lines[end]); end++; if (closing) break; }
+      atoms.push(lines.slice(index, end).join('')); index = end; continue;
+    }
+    if (index + 1 < lines.length && isTableLine(lines[index]) && isTableSeparator(lines[index + 1])) {
+      let end = index + 2;
+      while (end < lines.length && isTableLine(lines[end]) && !isFence(lines[end])) end++;
+      atoms.push(lines.slice(index, end).join('')); index = end; continue;
+    }
+    splitProse(lines[index]); index++;
+  }
+
+  const chunks = [];
+  let current = '';
+  for (const atom of atoms) {
+    const limit = chunks.length ? target : firstTarget;
+    if (current && current.length + atom.length > limit) { chunks.push(current); current = ''; }
+    current += atom;
+  }
+  if (current) chunks.push(current);
+  return chunks.length ? chunks : [text];
+}
+
+async function consultStreamFinalAnswer(answer, writeChunk, options = {}) {
+  const chunks = consultFinalAnswerChunks(answer, options);
+  const signal = options.signal;
+  const isClosed = typeof options.isClosed === 'function' ? options.isClosed : () => false;
+  const delayMs = Math.max(0, Number(options.delayMs == null ? 45 : options.delayMs));
+  let sentText = '', sentChunks = 0, stopped = false;
+  for (let index = 0; index < chunks.length; index++) {
+    if ((signal && signal.aborted) || isClosed()) { stopped = true; break; }
+    try {
+      const accepted = writeChunk(chunks[index], index, chunks.length);
+      if (accepted === false) { stopped = true; break; }
+    } catch { stopped = true; break; }
+    sentText += chunks[index]; sentChunks++;
+    if (index + 1 < chunks.length && delayMs) await new Promise(resolve => setTimeout(resolve, delayMs));
+  }
+  if ((signal && signal.aborted) || isClosed()) stopped = true;
+  return { mode: 'safe-final', totalChunks: chunks.length, sentChunks, sentText, stopped };
+}
+
 function consultAnswerSemanticAudit(answer, question, route) {
   const text = String(answer || '').trim();
   const likelihoodClaims = text.split(/(?<=[。！？；\n])/u).map(x => x.trim()).filter(statement => {
@@ -3816,7 +3898,10 @@ const server = http.createServer((req, res) => {
       const msgs = (Array.isArray(b.messages) ? b.messages : []).filter(m => m && m.content).slice(-24).map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content).slice(0, 4000) }));
       if (!msgs.length) return send(res, 400, JSON.stringify({ ok: false, error: 'empty' }));
       res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' });   // SSE 流式
-      const sse = o => { try { res.write('data: ' + JSON.stringify(o) + '\n\n'); } catch {} };
+      const sse = o => {
+        if (res.destroyed || res.writableEnded) return false;
+        try { res.write('data: ' + JSON.stringify(o) + '\n\n'); return true; } catch { return false; }
+      };
       const ac = new AbortController(); res.on('close', () => { if (!res.writableEnded) ac.abort(); });   // 客户端断连/点"停止"（响应未正常结束）→ 中止上游模型调用
       const cfg = readModelCfg();
       try { refreshRepos(proj, false); } catch {}
@@ -3874,10 +3959,25 @@ const server = http.createServer((req, res) => {
       const kbRefs = consultKbRefs(proj.id, hits);
       // 只有模型已收到含 kbBlock 的 system prompt 且真正返回首个有效片段，才对前端声明“已参考经验”。
       // 未配模型、上游在首 token 前失败、检索失败/无命中都不发 kb 事件，避免把“检索到”误报为“模型已参考”。
-      let reply = '', stopped = false, kbInjected = false;
+      let reply = '', stopped = false, kbInjected = false, answerStream = null;
+      // 只允许“完成审计后的安全终稿”进入这个发布口。草稿与一次修订稿始终留在服务端内存；
+      // 用户在终稿流式阶段停止时，只持久化已经送达的安全终稿前缀，不把未显示全文写进会话。
+      const publishSafeFinal = async (text, extra = {}) => {
+        const finalText = String(text == null ? '' : text).trim();
+        if (!finalText) return '';
+        const streamed = await consultStreamFinalAnswer(finalText, chunk => sse({ ...extra, v: chunk }), {
+          signal: ac.signal,
+          isClosed: () => res.destroyed || res.writableEnded,
+          delayMs: 45,
+        });
+        answerStream = { mode: streamed.mode, totalChunks: streamed.totalChunks, sentChunks: streamed.sentChunks, completed: !streamed.stopped && streamed.sentChunks === streamed.totalChunks };
+        if (retrieval) retrieval.answerStream = answerStream;
+        if (streamed.stopped) stopped = true;
+        return streamed.sentText;
+      };
       if (noAnswer) {   // PD-04 miss：不调模型答实质内容，直接返回固定话术（正常收尾、可落库该轮）。
-        reply = '该问题在《' + proj.name + '》说明书里没有找到相关描述，建议转成工单或联系开发确认。'; sse({ v: reply });
-      } else if (!cfg.apiKey) { reply = '（管理员还没配置模型 API，暂时不能答疑。）'; sse({ v: reply }); }
+        reply = await publishSafeFinal('该问题在《' + proj.name + '》说明书里没有找到相关描述，建议转成工单或联系开发确认。');
+      } else if (!cfg.apiKey) { reply = await publishSafeFinal('（管理员还没配置模型 API，暂时不能答疑。）'); }
       else {
         // PD-04：命中 mustNotConfuse → 作负向提示注入 system（易混淆项，勿臆造）。answerFacts 已在 specHits 顶段（consultSystem 走 specExcerpts）。
         const mncNote = routeMnc.length ? '\n【以下为该问题的易混淆项，请勿臆造、勿张冠李戴】' + routeMnc.map(x => '\n· ' + x).join('') : '';
@@ -3959,9 +4059,9 @@ const server = http.createServer((req, res) => {
           if (retrieval) retrieval.answerAudit = answerAudit;
           sse({ answerAudit });
           if (!kbInjected && kbRefs.length) { kbInjected = true; sse({ kb: kbRefs, kbInjected: true }); }
-          sse({ v: reply });
-        } else if (firstError) {
-          const m = '（AI 暂时连不上：' + String((firstError && firstError.message) || firstError) + '，稍后再试。）'; reply = m; sse({ v: m, err: true });
+          reply = await publishSafeFinal(reply);
+        } else if (firstError && !stopped) {
+          const m = '（AI 暂时连不上：' + String((firstError && firstError.message) || firstError) + '，稍后再试。）'; reply = await publishSafeFinal(m, { err: true });
         }
       }
       reply = reply.trim();
@@ -4011,7 +4111,7 @@ const server = http.createServer((req, res) => {
         const rec = { id: convId, type: 'consult', project: proj.id, version: String(b.version || '').trim() || (link ? link.ver : ''), site: String(b.site || '').trim() || (link ? link.site : ''), subsystem: sub, module: '', title, priority: '', reporter, role: user ? user.role : 'field', contact: '', media, status: '沟通中', lifecycle: '已答复', assignee: '', analysis: null, resolution: {}, chat, submittedAt: (prev && prev.submittedAt) || nowStamp(), updatedAt: nowStamp() };
         await saveIntake(proj, rec);
       } catch (e) { convId = ''; }
-      sse({ done: true, convId, kbHits: kbInjected ? kbRefs.length : 0, stopped });
+      sse({ done: true, convId, kbHits: kbInjected ? kbRefs.length : 0, stopped, answerStream });
       try { res.end(); } catch {}
     });
   }

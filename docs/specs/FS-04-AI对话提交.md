@@ -156,8 +156,9 @@ depends_on: [FS-01]
 - **AC-70【原子事实题直接止答】** Given 用户本轮只问一个接口、路径、状态码、字段/列的类型/长度/取值或一个是非事实，且没有“为什么/排查/现场/怎么验证/接下来”等诊断意图，也没有多个子问题 When `/api/consult` 生成最终答案 Then 只从 current route 的 `answerFacts` / primary section 给直接答案，并保留回答该事实所必需的 `mustNotConfuse` 限定；答到这里即停止，不追加现场排查、无当前观察的失败原因、诊断优先级、操作建议、截图/日志邀约或相邻模块事实。Given 用户明确提出原因、排查、验证、下一步或多个子问题 Then 不触发该止答门，仍按已核事实与安全诊断守卫逐项回答。Given 初稿或一次修订稿仍对原子问题扩写 Then 发布前语义审计须触发一次不新增事实的全文修订；失败时删除完整扩写句，保留直接事实和必要反事实边界，不得产生残句。
 - **AC-71【结构化答案按整行/整块安全降级】** Given 初稿或一次修订稿含 Markdown 表格、列表或普通段落，且某个内容因概率、作用域或副作用动作门需要删除 When 服务端执行安全降级 Then 普通段落可按完整自然句处理，Markdown 表格必须按完整数据行处理，不得把单元格内的中文分号、句号或换行当成跨行切分点；任一违规单元格所在数据行整体删除。最终表格必须有完整表头、分隔行、列数一致且至少两个非空单元格的数据行；列数不齐、孤立单元格、空列残行或无有效数据行时删除整张表。最终语义审计须把上述结构错误记为 `malformed_markdown` 并触发一次全文修订，失败时按整块降级，不得发布破碎表格或半截列表。
 - **AC-72【连续证据追问保持主题 route，路径族不得冒充唯一主接口】** Given 同一会话已由专用 route 确认主题事实，之后连续两轮以上以“只有截图/请求响应已抓到/关于该主题重点核什么”等方式补充证据或继续诊断 When 当前短句被宽泛诊断 route 直接命中 Then 系统须递归使用该轮之前的历史还原最近已裁决 route，并继续继承其 `answerFacts/refs`；“关于/针对”只打开上下文裁决，若本轮显式点名新实体仍以新 route 覆盖。发布前“唯一主接口”补全只适用于一个可逐字核对的具体端点，`/x/*` 等路径族或 allowlist 前缀不得被强塞为某次请求的精确接口；今天视图连续诊断不得因此串入 `/comm/*`。
+- **AC-73【只流式发布安全终稿】** Given 咨询模型会先生成完整草稿，且发布前可能进行一次全文修订或安全降级 When `POST /api/consult` 向浏览器返回 SSE Then 草稿、修订稿及其任何未审计片段都不得进入 `data:{v}`；只有最终语义审计通过的安全终稿可按自然句/结构块分成多个 `v` 事件渐进输出，事件拼接必须与终稿逐字一致。分块不得拆开 Markdown 围栏代码、管道表格、行内代码或链接；首块须为可读自然单元，后续以短间隔输出。Given 客户端在终稿流式阶段停止或断连 Then 服务端停止后续写块，`stopped=true`，且只持久化已发送的安全终稿前缀；若在终稿首块前停止，不持久化部分草稿。非 consult 端点不改变。
 
-> **AC 编号**：现编号至 **AC-72**（保留既有历史编号与 AC-19-KB）。AC-44/AC-45/AC-46/AC-47/AC-48/AC-49/AC-50/AC-51/AC-52/AC-53/AC-54/AC-55/AC-56/AC-57/AC-58/AC-59/AC-60/AC-61/AC-62/AC-63/AC-64/AC-65/AC-66/AC-67/AC-68/AC-69/AC-70/AC-71/AC-72 为 P1。
+> **AC 编号**：现编号至 **AC-73**（保留既有历史编号与 AC-19-KB）。AC-44/AC-45/AC-46/AC-47/AC-48/AC-49/AC-50/AC-51/AC-52/AC-53/AC-54/AC-55/AC-56/AC-57/AC-58/AC-59/AC-60/AC-61/AC-62/AC-63/AC-64/AC-65/AC-66/AC-67/AC-68/AC-69/AC-70/AC-71/AC-72/AC-73 为 P1。
 
 ## 4. 接口契约
 > 统一前缀 `/api`；除 `consult`（SSE）外返回 `{...}` JSON。**本条 100% 复用现有端点，不新增端点**；提交人 `reporter`、归档医院 `site` 服务端按当前登录用户收敛（忽略越权传参）。契约锚点见 `docs/specs/00-实施端-spec清单.md §4` 对照表。
@@ -167,7 +168,7 @@ depends_on: [FS-01]
 |---|---|---|---|---|---|
 | POST | `/api/intake-chat` | **对话式建单（核心）**：AI 边聊边补，够了输出 `intake-record` → 自动建单 | `project`（产品 id）、`type`（`intake`=合并让 AI 判 / `requirement` / `bug`）、`version`、`site`、`subsystem`、`messages:[{role,content}]`、`images?` | `{ok:true, reply, savedId}`（`savedId` 非空=已建单）；AI 未配 → `{ok:true, reply:'（未配模型…）'}` | 在 `FIELD_OK`；`site`/`version`/`subsystem` 取自入参（🔧 见 4.3） |
 | POST | `/api/intake-submit` | **表单直提（兜底/人工路径）**：建需求/BUG 工单 + AI 首轮沟通 | `project`、`type`（→ `bug` 或 `requirement`）、`version`（BUG 必填）、`site`、`subsystem`、`title`、`desc`、`errorInfo`、`steps`、`expectResult`、`bg`、`reqDesc`、`accept`、`priority`、`images?` | `{ok:true, id, no, reply, configured, status}`；BUG 缺版本 → 400 | 在 `FIELD_OK`；`reporter` 服务端取登录用户（L884）；`site` 缺省取 link（🔧 见 4.3） |
-| POST | `/api/consult` | **咨询答疑（SSE 流式）**：Spec 两阶段召回 + 经验库检索直接答、不进批次 | `project`、`version`、`site`、`subsystem`、`messages:[{role,content}]`、`convId?`、`deep?`；Spec/KB/源码检索以最后一条 user `content` 为主，短代词追问仅补上一条 user 问题中的实体，历史消息仍随模型请求保留 | SSE：`data:{v:片段}` … `data:{done:true, convId, kbHits, stopped}`；落 `type='consult'`（`lifecycle='已答复'`）。Spec 证据仅来自候选文件正文 Top5，目录索引不作证据 | 在 `FIELD_OK`；`reporter` 服务端取登录用户（L963） |
+| POST | `/api/consult` | **咨询答疑（SSE 流式）**：Spec 两阶段召回 + 经验库检索直接答、不进批次 | `project`、`version`、`site`、`subsystem`、`messages:[{role,content}]`、`convId?`、`deep?`；Spec/KB/源码检索以最后一条 user `content` 为主，短代词追问仅补上一条 user 问题中的实体，历史消息仍随模型请求保留 | SSE：草稿先在服务端完整审计/修订/降级，仅安全终稿分成多个 `data:{v:片段}`，拼接等于终稿；末事件 `data:{done:true, convId, kbHits, stopped, answerStream}`；落 `type='consult'`（`lifecycle='已答复'`）。Spec 证据仅来自候选文件正文 Top5，目录索引不作证据 | 在 `FIELD_OK`；`reporter` 服务端取登录用户（L963） |
 | POST | `/api/intake-analyze` | **版本感知初判**（对**已建工单**做 AI 分类/结论/建议） | `project`、`id`（**已存在的工单 id**） | `{ok:true, analysis:{category:'非bug\|bug\|该版本已修\|需求', verdict, suggestion:'reply\|file', detail}, lifecycle}`；工单转「分析中」 | ⚠️ **需已建单**（先 `intake-submit`/`intake-chat` 拿到 id 再 analyze）；未在 `FIELD_OK`（当前仅管理员/后台调用，见 §4.4 NEEDS-HUMAN） |
 | POST | `/api/kb-from-consult` | 咨询"解决了"→沉淀经验库（带 `convId` 时取整段 chat 经 AI 整理成核心问题 Q + 全脉络 A；`subsystem` 取 src） | `project`、`convId`（兼容旧 `q`/`a`） | `{ok:true}`；条目 `from='consult'`。convId 无效/非 consult→400；越权 site→403 | 在 `FIELD_OK`；按 `user.sites` 收敛 |
 | GET | `/api/me` | 当前用户 + role + `sites`（归档医院边界数据源） | — | `{me:{role, name, sites, projects, …}}` | 公开自身 |
@@ -311,11 +312,12 @@ depends_on: [FS-01]
   - 同一真逻辑套件与 normal/deep 精确基线锁定原子事实题止答：接口/路径/状态码/字段/类型/是否题只保留 current route 直接事实与必要 `mustNotConfuse`，现场步骤、原因、动作和继续邀约触发修订或完整删句；明确诊断和多子问题不误触发（AC-70）。
   - 同一真逻辑套件与 normal/deep 精确基线锁定结构化答案安全降级：表格行内分号不拆行，违规单元格删除完整数据行，列数不齐/孤立单元格/空表触发修订并按整块删除；普通自然句清理行为不回归（AC-71）。
   - `tools/pd-04-route.logic.test.mjs` 以 PWRS 真实地图锁定连续两轮弱证据追问仍递归继承最近专用 route，`关于/针对` 显式新实体仍切题；`tools/fs-04-consult-conversation.logic.test.mjs` 锁定具体唯一端点继续精确保留，而 `/comm/*` 等通配路径族不触发 `missing_primary_path` 或安全降级强塞（AC-72）。
+  - `tools/fs-04-consult-safe-final-stream.logic.test.mjs` 直接执行终稿分块/发布真逻辑：长答案产生多个 SSE 块且拼接逐字等于终稿，围栏代码/表格/行内代码/链接不拆，审计失败时草稿与修订稿不进 `v`，停止/断连后不再写块且只保留已发送安全前缀，两套咨询客户端可累计多个 `v`，非 consult 路径不接入（AC-73）。
   - `tools/spec-retrieval-two-stage.logic.test.mjs` 直接执行生产纯逻辑，覆盖目录路由真实生效、第 61 份以后可达、后部接口/字段进入 Top5、精确 API/`snake_case`/`camelCase`/状态强匹配、word≠Word、SQL 连接≠WebSocket、监护/反馈不串、显式 subsystem、本轮事实边界、短代词追问和自然问法概念归一，以及普通事实问答不向模型注入全量目录；并以 PWRS 真实 86 份 Spec 回归 git 目录第 79 份 `PWRS-SYS-07a`、第 82 份 `PWRS-SYS-10`、Pad 反馈对象接口、异常检验近 5 天和跨院区复合身份正文 Top5（AC-44）。
 - **接口（B 组 · 连真库冒烟）**：
   - `POST /api/intake-chat`（真实现场账号会话，`type='intake'` + `project=hlyy` + `messages`）→ 断言 `{ok:true}` 且（AI 配置时）产出 record 建单后 `savedId` 非空、`SELECT type,lifecycle,site,reporter FROM intakes WHERE id=savedId` 为 `requirement|bug` / `待处理` / `reporter`=登录用户；AI 未配时 `savedId` 空、返回降级文案不 500（AC-9/11/14）。
   - `POST /api/intake-submit`（`type=bug` 缺 version）→ 400「请填/选产品版本」（AC-15）；带 version → `{ok:true,id}`，`SELECT` 断言 `type=bug`/`lifecycle=待处理`/`reporter`=登录用户/`site` ∈ 账号 sites（AC-16/21）。
-  - `POST /api/consult`（SSE）→ 收到 `data:{v:…}` 流 + `data:{done:true,convId}`；`SELECT type,lifecycle FROM intakes WHERE id=convId` = `consult`/`已答复`；`GET /api/intake-list?project=hlyy`（默认 withConsult=false）**不含**该 consult（AC-17/18）。
+  - `POST /api/consult`（SSE）→ 长答案收到多个 `data:{v:…}`，拼接逐字等于持久化终稿，且未出现草稿/修订稿；末尾收到 `data:{done:true,convId,answerStream}`；`SELECT type,lifecycle FROM intakes WHERE id=convId` = `consult`/`已答复`；`GET /api/intake-list?project=hlyy`（默认 withConsult=false）**不含**该 consult（AC-17/18/73）。
   - `POST /api/kb-from-consult`（`project`/`q`/`a`）→ `{ok:true}`，`kb_entries` 新增 `from_ref='consult'` 一条（AC-19-KB）。
   - **越权收敛**（AC-21）：现场账号 A 提交 `site=<不在 sites 的医院>` → 落库 `site` 不为该越权医院（收敛为合法医院 / 或 400）。🔧 依 §4.3 收敛实现。
   - **未登录**（AC-24）：无会话调 `intake-chat` → 依 authGate（工作空间被登录门遮罩；端点在 FIELD_OK 需登录态），断言非匿名放行。
@@ -357,4 +359,5 @@ depends_on: [FS-01]
 - [x] AC-70 原子事实题止答专项通过：接口/路径/状态码/字段/类型/是否题、明确诊断/多子问题反例、最终修订与安全降级均有确定性自动化证据；待生产可见浏览器验收。
 - [x] AC-71 结构化答案安全降级专项通过：表格行内分号、完整行保留、违规整行删除、稀疏残行与空表清理均有确定性自动化证据；待生产可见浏览器验收。
 - [x] AC-72 连续证据追问与路径族专项通过：真实地图连续追问、显式新实体切题、具体唯一主接口正例及通配路径族反例均有确定性自动化证据；待生产可见浏览器验收。
+- [x] AC-73 安全终稿渐进流式专项通过：草稿先完整审计，只流式终稿；多块拼接、Markdown 结构、审计降级、停止/断连和非 consult 隔离均有确定性自动化证据；待生产可见浏览器验收。
 - [ ] 人类验收通过。
