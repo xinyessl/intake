@@ -954,6 +954,23 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.equal(normalized, '只有截图不够。\n请只读核已有响应。');
   assert.deepEqual(bundle.audit(normalized, '只有截图够不够？', route).violations, []);
 
+  const formRoute = { matched: true, route: { title: '自定义表单关联' }, answerFacts: ['form_id 关联模板和结果，element_id 关联字段与选项，content 保存结果快照'] };
+  const cleanupResidualDraft = [
+    '第二步只读核对 form_id 和 element_id 的已有关系。',
+    '列表/统计挂主表的可能空。',
+    '第二步对不上就先停，修/核结构，别先查结果。',
+    '只读核结构关系，不保存、不删除。',
+  ].join('\n');
+  const cleanupResidualAudit = bundle.audit(cleanupResidualDraft, '自定义表单第二步对不上，后面先停还是继续？', formRoute);
+  assert.ok(cleanupResidualAudit.violations.includes('malformed_markdown'), '字段清理后“的可能空”属于缺少中心语的残句');
+  assert.ok(cleanupResidualAudit.violations.includes('cross_actor_side_effect'), '“修/核结构”中的修结构仍是副作用动作，不能与只读核对混写');
+  const cleanupResidualFallback = bundle.fallback(cleanupResidualDraft, cleanupResidualAudit);
+  assert.match(cleanupResidualFallback, /只读核对 form_id 和 element_id/);
+  assert.match(cleanupResidualFallback, /只读核结构关系/);
+  assert.doesNotMatch(cleanupResidualFallback, /的可能空|修\/核结构/);
+  assert.deepEqual(bundle.audit(cleanupResidualFallback, '自定义表单第二步对不上，后面先停还是继续？', formRoute).violations, []);
+  assert.deepEqual(bundle.audit('字段的值可能为空，先只读核已有记录。', '表单字段怎么排查？', formRoute).violations, [], '有明确中心语“值”的条件分支不应被句法门误判');
+
   const atomicRoute = {
     matched: true,
     route: { title: '工作台今天视图' },
