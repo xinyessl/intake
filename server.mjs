@@ -1674,7 +1674,7 @@ function consultEvidenceLikelihoodGuard(question, route) {
   ].join('\n');
 }
 
-const CONSULT_LIKELIHOOD_WORD_RE = /(?:最高频|最常见|(?:很|较|比较)?常见(?:原因|问题|场景)?|经常|通常|一般|大概率|多半|往往|多发|高发|首要原因|主要原因(?:之一)?|典型原因|常见于)/g;
+const CONSULT_LIKELIHOOD_WORD_RE = /(?:最高频|最常见|(?:很|较|比较)?常见(?:原因|问题|场景)?|经常|通常|一般|大概率|多半|往往|多发|高发|首要原因|主要原因(?:之一)?|典型原因|常见于|可能是|(?:很|更|比较)?像(?=[“"'A-Za-z\u4e00-\u9fff])|看起来(?:很|更)?像|疑似|倾向于)/g;
 
 function consultHasLikelihoodEvidence(question, route) {
   const q = String(question || '').trim();
@@ -1727,10 +1727,11 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const likelihoodAllowed = consultHasLikelihoodEvidence(question, route);
   const likelihoodTerms = likelihoodAllowed ? [] : Array.from(new Set(text.match(CONSULT_LIKELIHOOD_WORD_RE) || []));
   const controlled = consultHasControlledActionBundle(question);
-  const actorAction = /(?:让|请|交给|通知|要求|转)?\s*(?:实施|用户|患者|对接方|第三方|运维|开发)[^。！？；\n]{0,42}(?:(?:改|修改|调整|切换)(?:参数|报文(?:类型)?|类型|映射|配置|时区|系统时间|环境|服务配置)|重试|复测|重跑|补跑|重新触发|再次触发|再点|点一次|提交|保存|发送|完成|签名|审批|星标)/i;
-  const negativeOrConditional = /(?:不得|不能|不要|禁止|不可|不应|先别|停止|未确认|任一项没有|仅当|只有[^。！？；\n]{0,30}(?:才|之后|后))/i;
+  const actorAction = /(?:让|请|交给|通知|要求|转)?\s*(?:实施|用户|患者|对接方|第三方|运维|开发)[^。！？；\n]{0,42}(?:(?:改|修改|调整|切换)[^。！？；\n]{0,12}(?:参数|报文(?:类型)?|类型|映射|配置|时区|系统时间|环境|服务配置)|对时|重试|复测|重跑|补跑|重新触发|再次触发|再点|点一次|提交|保存|发送|完成|签名|审批|星标)/ig;
+  const negatedActorPrefix = /(?:不得|不能|不要|禁止|不可|不应|先别|停止|未确认)\s*$/i;
   const unsafeActorActions = controlled ? [] : text.split(/(?<=[。！？；\n])/u)
-    .map(x => x.trim()).filter(x => x && actorAction.test(x) && !negativeOrConditional.test(x));
+    .map(x => x.trim()).filter(statement => statement && Array.from(statement.matchAll(actorAction))
+      .some(match => !negatedActorPrefix.test(statement.slice(0, match.index))));
   const routeText = consultRouteScopeText(route);
   const scopeText = `${question || ''}\n${routeText}`;
   const allowedPaths = new Set(consultConcretePaths(`${question || ''}\n${routeText}`));
@@ -1754,7 +1755,7 @@ function consultAnswerRevisionPrompt(draft, audit) {
     '【发布前确定性语义校验未通过：只允许修订一次】',
     '下面是尚未发送给用户的草稿。请只输出修订后的完整答案，不要解释修订过程，不要增加任何新业务事实、接口、字段、按钮、原因或示例。',
     audit.violations.includes('unsupported_likelihood')
-      ? '草稿含无直接证据的概率/频率词。删除整句中的“最高频/最常见/常见/经常/通常/一般/大概率/多半/往往/多发/高发/首要原因/主要原因/典型原因/常见于”等概率定性及隐含排序；原因只能改成不排序的“待验证假设/可能分支”，步骤先后只能按本轮已有证据差异。'
+      ? '草稿含无直接证据的概率/频率或成因定性。删除整句中的“最高频/最常见/常见/经常/通常/一般/大概率/多半/往往/多发/高发/首要原因/主要原因/典型原因/常见于/可能是/很像/更像/疑似/倾向于”等定性及隐含排序；原因只能改成不排序的“待验证假设/可能分支”，步骤先后只能按本轮已有证据差异。'
       : '',
     audit.violations.includes('cross_actor_side_effect')
       ? '草稿把副作用动作交给实施、患者、对接方、运维或开发执行。删除改参、改映射/配置、复测、重试、重跑、补跑、重新触发等指令；改成只读检查已有报文、映射、请求响应、日志或审计。'
@@ -1780,12 +1781,13 @@ function consultReplaceUnexpectedPath(text, pathValue) {
 }
 
 function consultAnswerSafeFallback(draft, audit) {
-  const actorAction = /(?:让|请|交给|通知|要求|转)?\s*(?:实施|用户|患者|对接方|第三方|运维|开发)[^。！？；\n]{0,42}(?:(?:改|修改|调整|切换)(?:参数|报文(?:类型)?|类型|映射|配置|时区|系统时间|环境|服务配置)|重试|复测|重跑|补跑|重新触发|再次触发|再点|点一次|提交|保存|发送|完成|签名|审批|星标)/i;
-  const negativeOrConditional = /(?:不得|不能|不要|禁止|不可|不应|先别|停止|未确认|任一项没有|仅当|只有[^。！？；\n]{0,30}(?:才|之后|后))/i;
+  const actorAction = /(?:让|请|交给|通知|要求|转)?\s*(?:实施|用户|患者|对接方|第三方|运维|开发)[^。！？；\n]{0,42}(?:(?:改|修改|调整|切换)[^。！？；\n]{0,12}(?:参数|报文(?:类型)?|类型|映射|配置|时区|系统时间|环境|服务配置)|对时|重试|复测|重跑|补跑|重新触发|再次触发|再点|点一次|提交|保存|发送|完成|签名|审批|星标)/ig;
+  const negatedActorPrefix = /(?:不得|不能|不要|禁止|不可|不应|先别|停止|未确认)\s*$/i;
   const kept = String(draft || '').split(/(?<=[。！？；\n])/u).filter(part => {
     if (audit.violations.includes('unsupported_likelihood') && CONSULT_LIKELIHOOD_WORD_RE.test(part)) { CONSULT_LIKELIHOOD_WORD_RE.lastIndex = 0; return false; }
     CONSULT_LIKELIHOOD_WORD_RE.lastIndex = 0;
-    if (audit.violations.includes('cross_actor_side_effect') && actorAction.test(part) && !negativeOrConditional.test(part)) return false;
+    if (audit.violations.includes('cross_actor_side_effect') && Array.from(part.matchAll(actorAction))
+      .some(match => !negatedActorPrefix.test(part.slice(0, match.index)))) return false;
     if (audit.violations.includes('out_of_scope_entity') && (audit.unexpectedEntityTerms || []).some(term => part.toLowerCase().includes(String(term).toLowerCase()))) return false;
     return true;
   }).join('').trim();

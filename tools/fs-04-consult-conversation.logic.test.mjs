@@ -544,9 +544,10 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
   const failed = audit('页面等于接口但与浏览器不同，多半是服务端时区差。', '今天视图对不上，怎么排查？', route);
   assert.deepEqual(failed.violations, ['unsupported_likelihood']);
   assert.deepEqual(failed.likelihoodTerms, ['多半']);
-  for (const phrase of ['很常见', '较常见', '比较常见', '常见原因', '经常发生', '多发', '高发', '首要原因', '主要原因之一']) {
+  for (const phrase of ['很常见', '较常见', '比较常见', '常见原因', '经常发生', '多发', '高发', '首要原因', '主要原因之一', '很像服务端缓存', '更像前端取错字段', '可能是异常兜底', '疑似配置问题', '倾向于时区问题']) {
     assert.deepEqual(audit(`接口和浏览器不一致${phrase}。`, '今天视图为什么不一致？', route).violations, ['unsupported_likelihood'], phrase);
   }
+  assert.deepEqual(audit('待验证假设：服务端时区和现场约定不一致；可能分支：页面没有照接口响应展示。', '今天视图为什么不一致？', route).violations, [], '明确标为不排序待验证分支时应放行');
 
   const userSample = audit('基于你给的样本，最常见的是服务端时区差。', '最近统计100次，其中80次确认是服务端时区差。', route);
   assert.deepEqual(userSample.violations, []);
@@ -583,6 +584,7 @@ test('发布前确定性语义校验：跨主体副作用触发，否定句和�
   assert.deepEqual(failed.violations, ['cross_actor_side_effect']);
   assert.equal(failed.unsafeActorActionCount, 1);
   assert.deepEqual(audit('确认服务器时区不对后，转运维/开发按部署规范改时区。', '今天视图和浏览器不一致，怎么处理？', route).violations, ['cross_actor_side_effect']);
+  assert.deepEqual(audit('JVM 时区错了，或服务器时间漂移，由运维按规范改服务端时区/对时（不在实施侧乱改前端）。改完后再看接口。', '今天视图和浏览器不一致，怎么处理？', route).violations, ['cross_actor_side_effect'], '句尾否定别的动作不能抵消前面的运维修改');
   assert.deepEqual(audit('不得让运维重跑，也不能让开发重试。', '同步中断，能不能让运维重跑或开发重试？', route).violations, []);
   assert.deepEqual(audit(
     '在已确认条件下，可让对接方受控改参数后单次复测。',
@@ -619,6 +621,14 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(fallback, /不支持对原因作频率排序/);
   assert.match(fallback, /未满足完整受控条件/);
   assert.deepEqual(bundle.audit(fallback, '患者号丢位怎么查？', route).violations, []);
+
+  const todayDraft = '今天视图由已核接口返回。页面日期可能是旧缓存或异常兜底。页面与接口不同，更像前端展示/取错字段。JVM 时区错了，由运维按规范改服务端时区（不在实施侧乱改前端）。';
+  const todayAudit = bundle.audit(todayDraft, '今天视图和浏览器不一致，怎么处理？', { matched: true, route: { title: '工作台今天视图' }, answerFacts: ['日期来自服务端 JVM 当前时区'] });
+  assert.deepEqual(todayAudit.violations, ['unsupported_likelihood', 'cross_actor_side_effect']);
+  const todayFallback = bundle.fallback(todayDraft, todayAudit);
+  assert.match(todayFallback, /今天视图由已核接口返回/);
+  assert.doesNotMatch(todayFallback, /可能是|更像|由运维.*改/);
+  assert.deepEqual(bundle.audit(todayFallback, '今天视图和浏览器不一致，怎么处理？', { matched: true, route: { title: '工作台今天视图' }, answerFacts: ['日期来自服务端 JVM 当前时区'] }).violations, []);
 });
 
 test('发布前确定性语义校验：路径必须来自用户或route并逐字保留', () => {
