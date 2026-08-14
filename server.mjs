@@ -1700,7 +1700,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const likelihoodAllowed = consultHasLikelihoodEvidence(question, route);
   const likelihoodTerms = likelihoodAllowed ? [] : Array.from(new Set(text.match(CONSULT_LIKELIHOOD_WORD_RE) || []));
   const controlled = consultHasControlledActionBundle(question);
-  const actorAction = /(?:让|请|交给|通知|要求)?\s*(?:实施|用户|患者|对接方|第三方|运维|开发)[^。！？；\n]{0,42}(?:改(?:参数|报文(?:类型)?|类型|映射|配置)|重试|复测|重跑|补跑|重新触发|再次触发|再点|点一次|提交|保存|发送|完成|签名|审批|星标)/i;
+  const actorAction = /(?:让|请|交给|通知|要求|转)?\s*(?:实施|用户|患者|对接方|第三方|运维|开发)[^。！？；\n]{0,42}(?:(?:改|修改|调整|切换)(?:参数|报文(?:类型)?|类型|映射|配置|时区|系统时间|环境|服务配置)|重试|复测|重跑|补跑|重新触发|再次触发|再点|点一次|提交|保存|发送|完成|签名|审批|星标)/i;
   const negativeOrConditional = /(?:不得|不能|不要|禁止|不可|不应|先别|停止|未确认|任一项没有|仅当|只有[^。！？；\n]{0,30}(?:才|之后|后))/i;
   const unsafeActorActions = controlled ? [] : text.split(/(?<=[。！？；\n])/u)
     .map(x => x.trim()).filter(x => x && actorAction.test(x) && !negativeOrConditional.test(x));
@@ -1726,7 +1726,7 @@ function consultAnswerRevisionPrompt(draft, audit) {
 }
 
 function consultAnswerSafeFallback(draft, audit) {
-  const actorAction = /(?:让|请|交给|通知|要求)?\s*(?:实施|用户|患者|对接方|第三方|运维|开发)[^。！？；\n]{0,42}(?:改(?:参数|报文(?:类型)?|类型|映射|配置)|重试|复测|重跑|补跑|重新触发|再次触发|再点|点一次|提交|保存|发送|完成|签名|审批|星标)/i;
+  const actorAction = /(?:让|请|交给|通知|要求|转)?\s*(?:实施|用户|患者|对接方|第三方|运维|开发)[^。！？；\n]{0,42}(?:(?:改|修改|调整|切换)(?:参数|报文(?:类型)?|类型|映射|配置|时区|系统时间|环境|服务配置)|重试|复测|重跑|补跑|重新触发|再次触发|再点|点一次|提交|保存|发送|完成|签名|审批|星标)/i;
   const negativeOrConditional = /(?:不得|不能|不要|禁止|不可|不应|先别|停止|未确认|任一项没有|仅当|只有[^。！？；\n]{0,30}(?:才|之后|后))/i;
   const kept = String(draft || '').split(/(?<=[。！？；\n])/u).filter(part => {
     if (audit.violations.includes('unsupported_likelihood') && CONSULT_LIKELIHOOD_WORD_RE.test(part)) { CONSULT_LIKELIHOOD_WORD_RE.lastIndex = 0; return false; }

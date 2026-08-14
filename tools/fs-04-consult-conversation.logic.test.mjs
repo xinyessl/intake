@@ -565,6 +565,7 @@ test('发布前确定性语义校验：跨主体副作用触发，否定句和�
   const failed = audit('让对接方把参数改成字符串，再用同一患者复测一次。', '患者号丢位，下一步呢？', route);
   assert.deepEqual(failed.violations, ['cross_actor_side_effect']);
   assert.equal(failed.unsafeActorActionCount, 1);
+  assert.deepEqual(audit('确认服务器时区不对后，转运维/开发按部署规范改时区。', '今天视图和浏览器不一致，怎么处理？', route).violations, ['cross_actor_side_effect']);
   assert.deepEqual(audit('不得让运维重跑，也不能让开发重试。', '同步中断怎么办？', route).violations, []);
   assert.deepEqual(audit(
     '在已确认条件下，可让对接方受控改参数后单次复测。',
