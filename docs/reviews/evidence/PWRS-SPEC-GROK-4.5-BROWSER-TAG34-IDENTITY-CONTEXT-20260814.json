@@ -1,0 +1,157 @@
+{
+  "schemaVersion": 1,
+  "evidenceId": "PWRS-SPEC-GROK-4.5-BROWSER-TAG34-IDENTITY-CONTEXT-20260814",
+  "testedAt": "2026-08-14T09:25:00+08:00",
+  "browser": {
+    "surface": "official Chrome Browser Plugin",
+    "visibleUi": true,
+    "page": "http://intake.lcpharmacy.cn/?mode=chat&site=安吉县人民医院",
+    "version": "2.7.260814-34",
+    "sessionPolicy": "4个真实新对话；每个会话2题；首轮选择tag34；逐题等待完整DOM；技术超时只读检查且未重复发送",
+    "images": "none"
+  },
+  "release": {
+    "intakeInitialCommit": "f2dbd0e",
+    "intakeFinalCommit": "cf69d8b",
+    "pwrsInitialCommit": "c63df7b7",
+    "pwrsFinalCommit": "5e6e6527",
+    "tag": "2.7.260814-34",
+    "backupInitial": "/opt/intake/backups/tag34-20260814T0128",
+    "backupFinal": "/opt/intake/backups/tag34-r2-20260814T0145",
+    "health": {
+      "httpStatus": 200,
+      "body": {
+        "ok": true,
+        "projects": 3,
+        "intakes": 672,
+        "kb": 7
+      }
+    },
+    "externalPrompt": {
+      "consultNormal": true,
+      "consultDeep": true,
+      "runtimeGuard": true
+    }
+  },
+  "automatedTests": {
+    "targetedPromptConversation": {
+      "passed": 42,
+      "failed": 0
+    },
+    "realMap": {
+      "passed": 50,
+      "failed": 0
+    },
+    "detachedLogic": {
+      "passed": 398,
+      "failed": 0,
+      "skipped": 6,
+      "skipReason": "本机MySQL不可用"
+    },
+    "mixedSuiteEnvironmentNote": "首轮混合套件431个失败均由127.0.0.1:3306 ECONNREFUSED引发服务启动连锁失败，非本次断言回归"
+  },
+  "preFixAttempt": {
+    "question": "跨院区时一名患者靠哪几个字段才算唯一？",
+    "convId": "ZX-20260814-03",
+    "route": "unavailable",
+    "inherited": "unavailable",
+    "verdict": "FAIL",
+    "reason": "主结论正确，但无证据追加本地(patient_id, visit_id, district_code)唯一约束；据此补A06 AC-T9及历史方案覆盖与省略实现细节守卫。",
+    "rawAnswer": "unavailable"
+  },
+  "summary": {
+    "passed": 8,
+    "failed": 0,
+    "excludedPreFixFailures": 1
+  },
+  "cases": [
+    {
+      "id": "Q1",
+      "conversation": "C1",
+      "convId": "ZX-20260814-04",
+      "question": "跨院区时一名患者靠哪几个字段才算唯一？",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "PASS",
+      "reason": "固定hospitalId+patientId+visitId；缺hospitalId拒绝；不再补本地tuple或历史兼容。",
+      "rawAnswer": "结论：跨院区时，一名患者（一次住院/就诊）的正式唯一身份键固定是 hospitalId + patientId + visitId 这三个字段。\n\n即使两个院区的 patientId 和 visitId 完全一样，也必须靠 hospitalId 区分开，不能当成同一个人/同一次就诊。\n\n现场怎么理解、怎么用\n产品页面定位、详情跳转、列表去重、客户端缓存，一律用这三个字段当正式身份键。\n任何患者请求如果缺了 hospitalId，系统必须直接拒绝，提示重新选择医院/院区上下文，或者从患者列表重新进入。不能自动补、不能用 token 当前院区/默认院区/districtCode 兜底。\ndistrictCode 只是内部从可信患者记录解析真实院区后，给 Proxy/ETL 上游路由用的，不是身份键的第四个字段，也不能拿它在页面上替代 hospitalId。\n技术依据（研发参考）\n\n经确认事实（最高优先）：\n\n产品页面、详情定位、列表去重和客户端缓存的正式患者身份键必须固定使用 hospitalId + patientId + visitId；两个院区 patientId 与 visitId 相同时仍按 hospitalId 区分。\n列表查询（含 HIS 代理分支）也是按 hospitalId + patientId + visitId 去重后统一分页。\ndistrictCode 仅限内部上游路由，不得进入产品身份键。"
+    },
+    {
+      "id": "Q2",
+      "conversation": "C1",
+      "convId": "ZX-20260814-04",
+      "question": "如果是以前收藏的旧链接，只有 patientId 和 visitId，系统会自动补院区吗？",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "PASS",
+      "reason": "明确旧链接不兼容、不自动补齐，回可信入口重选。",
+      "rawAnswer": "结论：不会。 以前收藏的旧链接如果只有 patientId 和 visitId（缺 hospitalId），系统不会自动补院区，也不会兼容放行。\n\n现场会怎样\n请求会直接被拒绝。\n页面会提示：重新选择医院/院区上下文，或者从患者列表重新进入。\n不会从 token 当前院区、默认院区、districtCode 或其它地方自动补齐。\n历史深链、旧链接、收藏链接全部按同样规则处理，没有“历史兼容”例外。\n正确做法（实施可直接告诉用户/现场）\n让用户先切到正确的医院/院区上下文。\n从患者列表重新点进该患者（这样会带上完整的 hospitalId + patientId + visitId）。\n需要的话，让用户用新的完整链接重新收藏。\n\n跨院区时两个院区可能出现相同的 patientId + visitId，所以必须靠 hospitalId 区分，系统绝不会猜或自动补。"
+    },
+    {
+      "id": "Q3",
+      "conversation": "C2",
+      "convId": "ZX-20260814-05",
+      "question": "患者详情请求少了 hospitalId，现场应该继续打开还是回患者列表重新选？",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "PASS",
+      "reason": "先给直接结论回列表重选，动作非破坏且不建议硬拼参数。",
+      "rawAnswer": "结论：别硬继续打开，回患者列表重新选。\n\n患者详情请求少了 hospitalId，系统必须拒绝，并提示重新选择医院/院区上下文，或从患者列表重新进入。\n历史深链、旧链接、收藏链接一样不兼容、不能自动补齐，也不能拿 token 当前院区、默认院区或 districtCode 回退。\n\n现场怎么处理：\n\n停掉当前详情页/链接，不要反复刷新或手动补参硬开。\n回到「全部患者 / 关注患者」等正规患者列表入口。\n重新筛选并点选目标患者（列表行会带上完整的 hospitalId + patientId + visitId）。\n从列表正常进入详情后再操作。\n\n这样才不会出现跨院区同号患者串线。\n如果按上面从列表重新进入后仍报缺 hospitalId，再把实际请求 URL、参数、响应码和账号/院区截图留一下，转开发核对。"
+    },
+    {
+      "id": "Q4",
+      "conversation": "C2",
+      "convId": "ZX-20260814-05",
+      "question": "少了 hospitalId，直接拿 token 当前院区补上行不行？",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "PASS",
+      "reason": "明确禁止token/default/districtCode回退并保持同会话事实。",
+      "rawAnswer": "结论：不行，绝对不能拿 token 当前院区补。\n\n患者请求少了 hospitalId 时，系统必须拒绝，并提示重新选择医院/院区上下文，或从患者列表重新进入。\n禁止回退 token 当前院区、默认院区，也禁止用 districtCode 顶替。历史深链、旧链接、收藏链接同样不自动补齐、不兼容放行。\n\n原因很直接：产品身份键固定是 hospitalId + patientId + visitId。两个院区可能有相同的患者号+住院号，用 token 院区去补很容易串患者、串缓存、串关注或写错业务记录。districtCode 只在从可信患者记录解析出真实院区并完成校验后，给 Proxy/ETL 内部上游路由用，不能当页面/缓存身份键，也不能替代 hospitalId。\n\n现场正确做法：\n\n不要手动改参、不要用当前登录院区去拼 hospitalId 硬开。\n关掉当前详情/链接。\n回「全部患者」或「关注患者」正规列表，重新筛选并点选该患者（列表会带上完整复合身份）。\n从列表正常进详情再继续业务。\n\n如果从列表重新进入后仍缺 hospitalId，把实际请求 URL、参数、响应和账号/入口截图留好，再转开发核对。"
+    },
+    {
+      "id": "Q5",
+      "conversation": "C3",
+      "convId": "ZX-20260814-06",
+      "question": "页面手上只有 districtCode，能不能把它当 hospitalId 拼进患者身份？",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "PASS",
+      "reason": "districtCode仅限可信记录解析后的内部路由，不能替代hospitalId。",
+      "rawAnswer": "不能。 页面上只有 districtCode 时，绝不能拿它当 hospitalId 去拼患者身份。\n\n直接结论\n产品页面、详情定位、列表去重、客户端缓存的正式患者身份键必须固定是：\n\nhospitalId + patientId + visitId\n\ndistrictCode 不是身份键的一部分，也不能替代 hospitalId。\n缺 hospitalId 时，系统必须拒绝，并提示用户：重新选择医院/院区上下文，或从患者列表重新进入。\n历史深链、旧链接、收藏链接同样不得自动补齐或兼容放行，也不得回退 token 当前院区、默认院区或 districtCode。\n现场怎么处理\n页面/请求里发现只有 districtCode、没有 hospitalId → 直接当无效请求处理，弹提示让用户重新选院区或从列表进。\n不要自己在前端或中间层把 districtCode 填进 hospitalId 字段。\n只有已经从可信患者记录解析出真实院区、并完成授权校验后，districtCode 才允许用于 Proxy/ETL 的内部上游路由（这是内部路由用的，跟页面身份键无关）。\n易混淆点（别踩）\n病区名称/编码不一定全局唯一，不能靠它们反推 hospitalId。\n两个院区 patientId + visitId 相同，也必须靠 hospitalId 区分，不能合并。\n产品身份键只能写 hospitalId + patientId + visitId，绝不能写成 districtCode + patientId + visitId。\n\n按这个规则执行就行。如果现场还有具体页面/接口把 districtCode 当成 hospitalId 在用，那就是违规实现，需要按上面拒绝边界改回来。"
+    },
+    {
+      "id": "Q6",
+      "conversation": "C3",
+      "convId": "ZX-20260814-06",
+      "question": "旧入口为了兼容，默认补当前院区可以吗？",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "PASS",
+      "reason": "历史/旧入口无例外，缺参拒绝并回可信入口。",
+      "rawAnswer": "不可以。 旧入口、历史深链、旧链接、收藏链接都不能为了兼容而默认补当前院区（token 当前院区、默认院区都不行）。\n\n直接结论\n患者请求/页面定位缺少 hospitalId 时必须直接拒绝，并提示用户：重新选择医院/院区上下文，或从患者列表重新进入。\n禁止任何自动补齐或兼容放行，包括：\n回退 token 当前院区\n回退默认院区\n用 districtCode 顶替\n这个边界对历史深链、旧链接、收藏链接同等生效，没有“旧入口特殊兼容”例外。\n现场怎么处理\n遇到只有旧参数、没有 hospitalId 的入口 → 按无效处理，给用户明确提示让他重新选院区或从列表进。\n不要在前端/中间层偷偷补当前院区再往下传。\n真正业务读写时，必须继承并校验患者/记录的真实所属院区，身份键固定用 hospitalId + patientId + visitId。\n为什么这样定\n\n不同院区可能存在相同的 patientId + visitId，一旦默认补当前院区，就会串患者、查错写错。规格明确要求绝不自动补，必须回到可信入口重新选。\n\n如果现场旧入口还在偷偷补，就是违规实现，需要改成拒绝 + 提示。需要我帮你整理成给开发的改动说明或验收点，直接说。"
+    },
+    {
+      "id": "Q7",
+      "conversation": "C4",
+      "convId": "ZX-20260814-07",
+      "question": "如果系统说明书已经明确 tenantId 是安全必填项，老链接没带时能不能自行默认补当前租户？",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "PASS",
+      "reason": "严格按问题的条件前提回答安全必填租户键不得默认补齐，未声称PWRS现实存在tenantId契约。",
+      "rawAnswer": "不能。\n如果系统说明书已经明确 tenantId 是安全必填项，老链接（历史深链、旧链接、收藏链接）没带时，绝不能自行默认补当前租户，也不得从 token 当前租户、默认租户或任何看似等价的字段回退/自动补齐后放行。\n\n直接结论（照着做）\n必须拒绝该请求。\n提示用户重新选择正确的租户/医院上下文，或从患者列表等可信入口重新进入。\n不要做任何兼容处理：不要静默补当前登录租户、不要猜默认值、不要为了“老链接能打开”而放宽边界。\n\n这和规格里对 hospitalId 的处理完全一致：缺少安全必填上下文时，一律拒绝 + 提示重选，历史链接同样不自动补齐、不兼容放行。\n\n为什么这样（避免现场踩坑）\n安全必填上下文（租户键、医院/院区身份键等）缺失时，只能按契约拒绝，不能为了体验或兼容去猜/补。\n自行默认补当前租户会带来串租户、串院区、同号患者混淆、越权访问等风险。\n规格明确禁止“历史兼容”“系统自动补齐”“token/默认回退”这类放宽做法。\ndistrictCode 等内部路由字段更不能拿来替代或补齐产品层的必填身份键。\n现场怎么处理\n用户打开老链接报错/无数据 → 直接引导：回患者列表 / 重新选医院/租户上下文后进入。\n不要自己改链接补参数，也不要让开发做“兼容默认补齐”。\n如果现场已经出现“老链接没带 tenantId 却被放行了”的现象，那就是和当前规格冲突，需要整理实际请求参数 + 响应，升级确认是否有未对齐的实现。\n\n一句话总结：说明书说了必填，就严格执行拒绝；老链接缺了就提示重进，绝不默认补当前租户。"
+    },
+    {
+      "id": "Q8",
+      "conversation": "C4",
+      "convId": "ZX-20260814-07",
+      "question": "患者院区和 tenantId 先放下，这个系统登录后的 token 到底是谁签发的？",
+      "route": "unavailable",
+      "inherited": "unavailable",
+      "verdict": "PASS",
+      "reason": "显式切到登录实体后正确回答usercenter签发、PWRS只验签，未沿用旧身份键结论。",
+      "rawAnswer": "结论：登录后用的 Web token 是「统一用户中心（usercenter）」签发的，PWRS 自己不签发。\n\n直接说明\nPWRS 不提供业务登录，也不自己生成 / 签发 token。\n用户登录成功后，token 由统一用户中心下发。\nPWRS 这边只做校验：通过 JwtRealm 调 usercenter 的 Dubbo 接口 verifyToken(token) 验证这个 token 是否有效。\n菜单和角色也是分别从 usercenter 用 getUserMenu(userCode)、getUserRole(userCode) 拿过来的。\n现场注意（别踩坑）\n不要说「PWRS 登录时自己生成 token」或「token 存在 PWRS 会话里」——规格明确禁止这样理解。\ntoken 有效 ≠ 所有业务接口都能随便成功。即使 token 校验通过，业务 owner 校验、院区作用域等仍可能拒绝或过滤数据。\n当前 Controller 基本没有方法级权限注解，所以菜单看不见 ≠ 接口就一定拦；但反过来，有 token 也不代表一定能改别人的业务单。\n一句话给实施\n\n登录 token = 统一用户中心签发 → PWRS 只负责远程验证，不负责签发。\n如果现场遇到「token 验了还是权限不对」，继续查业务侧的 owner / 院区作用域，而不是怀疑 PWRS 自己有没有签发 token。"
+    }
+  ]
+}
