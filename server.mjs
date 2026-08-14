@@ -1674,6 +1674,72 @@ function consultEvidenceLikelihoodGuard(question, route) {
   ].join('\n');
 }
 
+const CONSULT_LIKELIHOOD_WORD_RE = /(?:最高频|最常见|通常|一般|大概率|多半|往往|典型原因|常见于)/g;
+
+function consultHasLikelihoodEvidence(question, route) {
+  const q = String(question || '').trim();
+  const routeText = route && route.matched
+    ? [route.route && route.route.title, ...(route.answerFacts || []), ...(route.mustNotConfuse || [])].filter(Boolean).join(' ')
+    : '';
+  const userSample = /(?:统计|样本|抽样|最近|近)\s*(?:了|的)?\s*\d+\s*(?:次|条|例|份)[^。；\n]{0,30}(?:其中|有|占)\s*\d+|(?:占比|比例|频率)\s*(?:为|是|达到)?\s*\d+(?:\.\d+)?\s*%|百分之\s*[零一二三四五六七八九十百\d]+/i.test(q);
+  const routedFrequency = /(?:统计样本|抽样结果|发生频率|占比|百分之|\d+(?:\.\d+)?\s*%|明确(?:规定|定义|写明)[^。；\n]{0,24}(?:最高频|最常见|通常|一般|大概率|多半|往往|典型原因|常见于)|(?:最高频|最常见|通常|一般|大概率|多半|往往|典型原因|常见于)[^。；\n]{0,24}(?:规则|结论|定义))/i.test(routeText);
+  return userSample || routedFrequency;
+}
+
+function consultHasControlledActionBundle(question) {
+  const q = String(question || '').trim();
+  return /(?:隔离测试环境|专用测试数据)/i.test(q)
+    && /(?:授权|批准)/i.test(q)
+    && /(?:回滚|清理)/i.test(q)
+    && /(?:幂等|补偿)/i.test(q)
+    && /(?:影响范围|数据范围|执行范围)/i.test(q);
+}
+
+function consultAnswerSemanticAudit(answer, question, route) {
+  const text = String(answer || '').trim();
+  const likelihoodAllowed = consultHasLikelihoodEvidence(question, route);
+  const likelihoodTerms = likelihoodAllowed ? [] : Array.from(new Set(text.match(CONSULT_LIKELIHOOD_WORD_RE) || []));
+  const controlled = consultHasControlledActionBundle(question);
+  const actorAction = /(?:让|请|交给|通知|要求)?\s*(?:实施|用户|患者|对接方|第三方|运维|开发)[^。！？；\n]{0,42}(?:改(?:参数|报文(?:类型)?|类型|映射|配置)|重试|复测|重跑|补跑|重新触发|再次触发|再点|点一次|提交|保存|发送|完成|签名|审批|星标)/i;
+  const negativeOrConditional = /(?:不得|不能|不要|禁止|不可|不应|先别|停止|未确认|任一项没有|仅当|只有[^。！？；\n]{0,30}(?:才|之后|后))/i;
+  const unsafeActorActions = controlled ? [] : text.split(/(?<=[。！？；\n])/u)
+    .map(x => x.trim()).filter(x => x && actorAction.test(x) && !negativeOrConditional.test(x));
+  const violations = [];
+  if (likelihoodTerms.length) violations.push('unsupported_likelihood');
+  if (unsafeActorActions.length) violations.push('cross_actor_side_effect');
+  return { checked: true, likelihoodAllowed, likelihoodTerms, unsafeActorActionCount: unsafeActorActions.length, violations };
+}
+
+function consultAnswerRevisionPrompt(draft, audit) {
+  return [
+    '【发布前确定性语义校验未通过：只允许修订一次】',
+    '下面是尚未发送给用户的草稿。请只输出修订后的完整答案，不要解释修订过程，不要增加任何新业务事实、接口、字段、按钮、原因或示例。',
+    audit.violations.includes('unsupported_likelihood')
+      ? '草稿含无直接证据的概率/频率词。删除所有“最高频/最常见/通常/一般/大概率/多半/往往/典型原因/常见于”及隐含排序；原因只能改成不排序的“待验证假设/可能分支”，步骤先后只能按本轮已有证据差异。'
+      : '',
+    audit.violations.includes('cross_actor_side_effect')
+      ? '草稿把副作用动作交给实施、患者、对接方、运维或开发执行。删除改参、改映射/配置、复测、重试、重跑、补跑、重新触发等指令；改成只读检查已有报文、映射、请求响应、日志或审计。'
+      : '',
+    '保留草稿中已经由 Spec/route/源码确认的事实和局部未知边界；不得把当前主题整体降级为“说明书未覆盖”。',
+    '<draft>', String(draft || ''), '</draft>',
+  ].filter(Boolean).join('\n');
+}
+
+function consultAnswerSafeFallback(draft, audit) {
+  const actorAction = /(?:让|请|交给|通知|要求)?\s*(?:实施|用户|患者|对接方|第三方|运维|开发)[^。！？；\n]{0,42}(?:改(?:参数|报文(?:类型)?|类型|映射|配置)|重试|复测|重跑|补跑|重新触发|再次触发|再点|点一次|提交|保存|发送|完成|签名|审批|星标)/i;
+  const negativeOrConditional = /(?:不得|不能|不要|禁止|不可|不应|先别|停止|未确认|任一项没有|仅当|只有[^。！？；\n]{0,30}(?:才|之后|后))/i;
+  const kept = String(draft || '').split(/(?<=[。！？；\n])/u).filter(part => {
+    if (audit.violations.includes('unsupported_likelihood') && CONSULT_LIKELIHOOD_WORD_RE.test(part)) { CONSULT_LIKELIHOOD_WORD_RE.lastIndex = 0; return false; }
+    CONSULT_LIKELIHOOD_WORD_RE.lastIndex = 0;
+    if (audit.violations.includes('cross_actor_side_effect') && actorAction.test(part) && !negativeOrConditional.test(part)) return false;
+    return true;
+  }).join('').trim();
+  const notes = [];
+  if (audit.violations.includes('unsupported_likelihood')) notes.push('当前证据不支持对原因作频率排序；未确认的原因只能作为不排序的待验证分支。');
+  if (audit.violations.includes('cross_actor_side_effect')) notes.push('未满足完整受控条件时，不执行改参、复测、重试、重跑或重新触发；只核已有报文、映射、请求响应、日志和审计。');
+  return [kept || '当前草稿未通过发布前证据与动作安全校验，已停止发布其中未经证实的判断和操作指令。', ...notes].filter(Boolean).join('\n\n');
+}
+
 // 只给出“隔离/授权/回滚/幂等/范围”而未点名实际业务动作时，不能由检索命中反向替用户选一个任务。
 // 这些条件只够回答通用准入原则，不够生成任何实体专属执行步骤。
 function consultGenericControlledActionGuard(question) {
@@ -3505,14 +3571,59 @@ const server = http.createServer((req, res) => {
       else {
         // PD-04：命中 mustNotConfuse → 作负向提示注入 system（易混淆项，勿臆造）。answerFacts 已在 specHits 顶段（consultSystem 走 specExcerpts）。
         const mncNote = routeMnc.length ? '\n【以下为该问题的易混淆项，请勿臆造、勿张冠李戴】' + routeMnc.map(x => '\n· ' + x).join('') : '';
-        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationMode) + '\n' + consultEvidenceLedgerGuard(qtext, route) + '\n' + consultCurrentRulingGuard(qtext, route) + '\n' + consultRuleApplicationGuard(qtext, route) + '\n' + consultPatientIdentityGuard(qtext, route) + '\n' + consultCriticalContextGuard(qtext, route) + '\n' + consultFocusedFactGuard(qtext) + '\n' + consultExactPathBoundaryGuard(qtext, route) + '\n' + consultGenericControlledActionGuard(qtext) + '\n' + consultOperationalSafetyGuard(qtext, route) + '\n' + consultFileArtifactGuard(qtext, route) + '\n' + consultDiagnosticGuard(qtext, route) + '\n' + consultNonDestructiveDiagnosticGuard(qtext, route) + '\n' + consultFinalActionConsistencyGuard(qtext, route) + '\n' + consultEvidenceLikelihoodGuard(qtext, route) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
-          piece = String(piece == null ? '' : piece); if (!piece) return;
+        const consultPrompt = consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationMode) + '\n' + consultEvidenceLedgerGuard(qtext, route) + '\n' + consultCurrentRulingGuard(qtext, route) + '\n' + consultRuleApplicationGuard(qtext, route) + '\n' + consultPatientIdentityGuard(qtext, route) + '\n' + consultCriticalContextGuard(qtext, route) + '\n' + consultFocusedFactGuard(qtext) + '\n' + consultExactPathBoundaryGuard(qtext, route) + '\n' + consultGenericControlledActionGuard(qtext) + '\n' + consultOperationalSafetyGuard(qtext, route) + '\n' + consultFileArtifactGuard(qtext, route) + '\n' + consultDiagnosticGuard(qtext, route) + '\n' + consultNonDestructiveDiagnosticGuard(qtext, route) + '\n' + consultFinalActionConsistencyGuard(qtext, route) + '\n' + consultEvidenceLikelihoodGuard(qtext, route) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : '');
+        let draft = '', firstError = null;
+        try {
+          // 先完整生成到服务端内存，发布前做确定性语义校验；未通过的草稿绝不先流给浏览器。
+          await callModelStream(cfg, { system: consultPrompt, messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
+            piece = String(piece == null ? '' : piece); if (piece) draft += piece;
+          }, ac.signal);
+        } catch (e) {
+          if (ac.signal.aborted) stopped = true;
+          else firstError = e;
+        }
+
+        if (draft.trim()) {
+          const initialAudit = consultAnswerSemanticAudit(draft, qtext, route);
+          let finalAudit = initialAudit;
+          let revisionAttempted = false, revisionAccepted = false, fallbackUsed = false;
+          reply = draft;
+          if (initialAudit.violations.length && !stopped) {
+            revisionAttempted = true;
+            let revised = '';
+            try {
+              await callModelStream(cfg, {
+                system: consultPrompt + '\n' + consultAnswerRevisionPrompt(draft, initialAudit),
+                messages: msgs,
+                images: imgs,
+                maxTokens: b.deep ? 1100 : 800,
+              }, piece => { piece = String(piece == null ? '' : piece); if (piece) revised += piece; }, ac.signal);
+            } catch {}
+            if (revised.trim()) {
+              const revisedAudit = consultAnswerSemanticAudit(revised, qtext, route);
+              finalAudit = revisedAudit;
+              if (!revisedAudit.violations.length) { reply = revised; revisionAccepted = true; }
+            }
+            if (!revisionAccepted) { reply = consultAnswerSafeFallback(draft, initialAudit); finalAudit = consultAnswerSemanticAudit(reply, qtext, route); fallbackUsed = true; }
+          } else if (initialAudit.violations.length) {
+            reply = consultAnswerSafeFallback(draft, initialAudit); finalAudit = consultAnswerSemanticAudit(reply, qtext, route); fallbackUsed = true;
+          }
+          const answerAudit = {
+            version: 1,
+            checked: true,
+            initialViolations: initialAudit.violations,
+            revisionAttempted,
+            revisionAccepted,
+            fallbackUsed,
+            finalViolations: finalAudit.violations,
+            likelihoodEvidence: initialAudit.likelihoodAllowed,
+          };
+          if (retrieval) retrieval.answerAudit = answerAudit;
+          sse({ answerAudit });
           if (!kbInjected && kbRefs.length) { kbInjected = true; sse({ kb: kbRefs, kbInjected: true }); }
-          reply += piece; sse({ v: piece });
-        }, ac.signal); }
-        catch (e) {
-          if (ac.signal.aborted) stopped = true;   // 用户主动停止：保留已生成的部分
-          else { const m = (reply ? '\n\n' : '') + '（AI 暂时连不上：' + String((e && e.message) || e) + '，稍后再试。）'; reply += m; sse({ v: m, err: true }); }
+          sse({ v: reply });
+        } else if (firstError) {
+          const m = '（AI 暂时连不上：' + String((firstError && firstError.message) || firstError) + '，稍后再试。）'; reply = m; sse({ v: m, err: true });
         }
       }
       reply = reply.trim();

@@ -526,6 +526,78 @@ test('最终证据概率守卫禁止无依据成因排序，并让核心事实�
   }
 });
 
+test('发布前确定性语义校验：无证据概率词触发一次修订，有直接样本时不误拦', () => {
+  const likelihoodConst = SRC.match(/const CONSULT_LIKELIHOOD_WORD_RE = [^;]+;/)?.[0] || '';
+  assert.ok(likelihoodConst, '应找到概率词检测常量');
+  const audit = new Function(
+    likelihoodConst + '\n'
+    + extractFn(SRC, 'consultHasLikelihoodEvidence') + '\n'
+    + extractFn(SRC, 'consultHasControlledActionBundle') + '\n'
+    + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
+    + 'return consultAnswerSemanticAudit;',
+  )();
+  const route = { matched: true, route: { title: '工作台今天视图' }, answerFacts: ['日期来自服务端 JVM 当前时区'] };
+  const failed = audit('页面等于接口但与浏览器不同，多半是服务端时区差。', '今天视图对不上，怎么排查？', route);
+  assert.deepEqual(failed.violations, ['unsupported_likelihood']);
+  assert.deepEqual(failed.likelihoodTerms, ['多半']);
+
+  const userSample = audit('基于你给的样本，最常见的是服务端时区差。', '最近统计100次，其中80次确认是服务端时区差。', route);
+  assert.deepEqual(userSample.violations, []);
+  assert.equal(userSample.likelihoodAllowed, true);
+  const routedSample = audit('最常见的是服务端时区差。', '按权威统计怎么说？', {
+    matched: true,
+    route: { title: '时区统计' },
+    answerFacts: ['统计样本明确写明：服务端时区差是最常见原因'],
+  });
+  assert.deepEqual(routedSample.violations, []);
+});
+
+test('发布前确定性语义校验：跨主体副作用触发，否定句和完整受控条件不误拦', () => {
+  const likelihoodConst = SRC.match(/const CONSULT_LIKELIHOOD_WORD_RE = [^;]+;/)?.[0] || '';
+  const audit = new Function(
+    likelihoodConst + '\n'
+    + extractFn(SRC, 'consultHasLikelihoodEvidence') + '\n'
+    + extractFn(SRC, 'consultHasControlledActionBundle') + '\n'
+    + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
+    + 'return consultAnswerSemanticAudit;',
+  )();
+  const route = { matched: true, route: { title: '患者号字段' }, answerFacts: ['patient_id 是 varchar(50)'] };
+  const failed = audit('让对接方把参数改成字符串，再用同一患者复测一次。', '患者号丢位，下一步呢？', route);
+  assert.deepEqual(failed.violations, ['cross_actor_side_effect']);
+  assert.equal(failed.unsafeActorActionCount, 1);
+  assert.deepEqual(audit('不得让运维重跑，也不能让开发重试。', '同步中断怎么办？', route).violations, []);
+  assert.deepEqual(audit(
+    '在已确认条件下，可让对接方受控改参数后单次复测。',
+    '隔离测试环境、专用测试数据、明确授权、回滚清理、幂等性和影响范围都已确认。',
+    route,
+  ).violations, []);
+});
+
+test('二次修订失败时安全降级：删违规句、保留已核事实并追加边界', () => {
+  const likelihoodConst = SRC.match(/const CONSULT_LIKELIHOOD_WORD_RE = [^;]+;/)?.[0] || '';
+  const bundle = new Function(
+    likelihoodConst + '\n'
+    + extractFn(SRC, 'consultHasLikelihoodEvidence') + '\n'
+    + extractFn(SRC, 'consultHasControlledActionBundle') + '\n'
+    + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
+    + extractFn(SRC, 'consultAnswerRevisionPrompt') + '\n'
+    + extractFn(SRC, 'consultAnswerSafeFallback') + '\n'
+    + 'return { audit:consultAnswerSemanticAudit, revision:consultAnswerRevisionPrompt, fallback:consultAnswerSafeFallback };',
+  )();
+  const route = { matched: true, route: { title: '患者号字段' }, answerFacts: ['patient_id 是 varchar(50)'] };
+  const draft = 'patient_id 是 varchar(50)。长号丢位多半是对接方按数字传。让对接方改成字符串后复测。';
+  const first = bundle.audit(draft, '患者号丢位怎么查？', route);
+  const prompt = bundle.revision(draft, first);
+  assert.match(prompt, /只允许修订一次/);
+  assert.match(prompt, /不要增加任何新业务事实/);
+  const fallback = bundle.fallback(draft, first);
+  assert.match(fallback, /patient_id 是 varchar\(50\)/);
+  assert.doesNotMatch(fallback, /多半|让对接方改成字符串后复测/);
+  assert.match(fallback, /不支持对原因作频率排序/);
+  assert.match(fallback, /未满足完整受控条件/);
+  assert.deepEqual(bundle.audit(fallback, '患者号丢位怎么查？', route).violations, []);
+});
+
 test('跨主体副作用动作不能通过对接方、运维或开发外包绕过', () => {
   const safeIntent = new Function(extractFn(SRC, 'consultSafeDiagnosticIntent') + '\nreturn consultSafeDiagnosticIntent;')();
   const fn = new Function('consultSafeDiagnosticIntent', extractFn(SRC, 'consultFinalActionConsistencyGuard') + '\nreturn consultFinalActionConsistencyGuard;')(safeIntent);
@@ -553,6 +625,13 @@ test('consult 接线在非破坏守卫之后追加最终动作与证据概率审
   assert.ok(nonDestructive >= 0, '应接入非破坏守卫');
   assert.ok(finalAudit > nonDestructive, '最终动作一致性审计应在其它动作守卫之后，作为发布前最后检查');
   assert.ok(likelihoodAudit > finalAudit, '最终证据概率审计应在动作一致性之后，删除无依据概率和经验成因');
+  assert.match(route, /先完整生成到服务端内存，发布前做确定性语义校验/);
+  assert.match(route, /const initialAudit = consultAnswerSemanticAudit\(draft, qtext, route\)/);
+  assert.match(route, /consultAnswerRevisionPrompt\(draft, initialAudit\)/);
+  assert.match(route, /if \(!revisionAccepted\).*consultAnswerSafeFallback\(draft, initialAudit\)/s);
+  assert.match(route, /retrieval\.answerAudit = answerAudit/);
+  assert.match(route, /sse\(\{ answerAudit \}\)/);
+  assert.doesNotMatch(route, /reply \+= piece; sse\(\{ v: piece \}\)/, '未校验草稿不得先流给浏览器');
 });
 
 test('通用受控条件齐备但未点名动作时，不得由检索命中替用户选择业务实体', () => {
