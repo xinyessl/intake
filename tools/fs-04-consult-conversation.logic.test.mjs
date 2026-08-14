@@ -513,6 +513,7 @@ test('发布前动作一致性审计覆盖整份答案，禁止同答先劝停�
     assert.match(text, /声明数量 → 实际内容/);
     assert.match(text, /不得用一行表格冒充“三边对照”/);
     assert.match(text, /“例如：\/如下：\/包括：\/分别为：”后必须有实际内容/);
+    assert.match(text, /不得留下孤立的“还是页面…\/或者接口…”等后半分支/);
     assert.match(text, /只问“先做哪个验证\/第一步先做什么”时，只给一个最小只读验证/);
   });
 
@@ -1032,6 +1033,24 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   ].join('\n'), '已有证据怎么对照？', route).violations, [], '横向三列表不按数据行数误判');
   assert.deepEqual(bundle.audit('重点看：\n- 已有请求原文\n- 已有响应原文', '下一步看什么？', route).violations, [], '冒号后有真实列表内容时不得误判为空引导');
   assert.deepEqual(bundle.audit('**1. 只读核对**\n比较已有请求与已有响应原文。', '第一步先做什么？', route).violations, [], '单步问题只给一个顶层步骤时应放行');
+
+  const orphanedAlternativeDraft = [
+    '写清「第二步对不上」的原文现象',
+    '',
+    '还是页面上有字段标题但无选项。',
+    '记下模板和已有字段标识。',
+  ].join('\n');
+  const orphanedAlternativeAudit = bundle.audit(orphanedAlternativeDraft, '第二步对不上，先停还是继续？', route);
+  assert.ok(orphanedAlternativeAudit.violations.includes('orphaned_alternative_fragment'), '前项已丢失时不得发布孤立“还是…”后半分支');
+  assert.deepEqual(orphanedAlternativeAudit.orphanedAlternativeLines.map(item => item.line), ['还是页面上有字段标题但无选项。']);
+  assert.match(bundle.revision(orphanedAlternativeDraft, orphanedAlternativeAudit), /不得猜测或补造被删掉的前项/);
+  const orphanedAlternativeFallback = bundle.fallback(orphanedAlternativeDraft, orphanedAlternativeAudit);
+  assert.doesNotMatch(orphanedAlternativeFallback, /还是页面上有字段标题/);
+  assert.match(orphanedAlternativeFallback, /记下模板和已有字段标识/);
+  assert.deepEqual(bundle.audit(orphanedAlternativeFallback, '第二步对不上，先停还是继续？', route).violations, []);
+  assert.deepEqual(bundle.audit('是接口返回不同，还是页面显示不同？', '这两种情况怎么分？', route).violations, [], '完整二选一问句不得误伤');
+  assert.deepEqual(bundle.audit('先停还是继续\n还是先停，不要继续。', '第二步断了怎么处理？', route).violations, [], '还是先停式直接结论不得误伤');
+  assert.deepEqual(bundle.audit('两种分支：\n或者接口没有返回，先只读留证。', '还有什么分支？', route).violations, [], '明确冒号引出的或者分支不得误伤');
 
   const explicitLayerRuleRoute = {
     matched: true,
