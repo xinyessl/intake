@@ -1635,6 +1635,28 @@ function consultNonDestructiveDiagnosticGuard(question, route) {
   ].join('\n');
 }
 
+// 发布前动作一致性审计：模型常会在同一答案前半段说“不要操作”，后半段又把点击写操作加回来。
+// 该守卫要求对最终答案的所有段落/表格/分支做一次整体动作分类，删除与只读边界冲突的指令；
+// 不向纯事实题强塞排查步骤，也不改变已有 route/Spec 事实。
+function consultFinalActionConsistencyGuard(question, route) {
+  const q = String(question || '').trim();
+  const routeText = route && route.matched
+    ? [route.route && route.route.title, ...(route.answerFacts || []), ...(route.mustNotConfuse || [])].filter(Boolean).join(' ')
+    : '';
+  const topic = `${q} ${routeText}`;
+  const actionOrDiagnostic = consultSafeDiagnosticIntent(q)
+    || /(?:按钮.*(?:请求|抓包|发出)|是否发请求|有没有请求|验证|复测|排查|留证|下一步|怎么判断|如何判断|怎么确认|检查|观察|点击|点开|打开|编辑|删除|新建|保存|提交|发送|完成|签名|审批|星标|已读|重试|复现|补跑|重跑|刷新|页签|详情)/i.test(topic);
+  if (!actionOrDiagnostic) return '';
+  return [
+    '【发布前动作一致性审计：必须在输出最终答案前完成】',
+    '先在内部逐条扫描准备输出的整份答案，包括开头结论、正文、Markdown 表格每个单元格、编号步骤、条件分支、补充说明、示例和结尾追问；找出每一条让实施去执行、点击、打开、重做或观察的动作。不要向用户展示审计过程，只输出审计后的答案。',
+    '每个动作只能归入三类后保留：A. 读取当前已显示页面、已有请求/响应、截图、历史记录、日志或审计；B. route/Spec/源码已经明确证明无副作用的刷新、列表/只读页签切换或查看；C. 隔离环境或专用数据、明确授权、回滚/清理、幂等性与影响范围全部齐全后的条件式单次受控动作。',
+    '编辑、删除、新建、保存、提交、发送、完成、签名、审批、星标、可能标记已读的打开、重试、复现、补跑或重跑，只要不能归入 B 或 C，就必须从最终答案所有位置删除，改成检查已有页面、请求、响应、截图、日志或审计。不能因为同一答案别处写了“不要操作”“只读”“别重复”，就保留这里的正向点击或重做指令；否定提醒不能抵消冲突动作。',
+    '若最终答案任何一处说“不要操作/不要重复/只读”，则其它任何一处都不得再建议点击编辑、删除、发送、完成等未知动作来观察是否发请求，也不得用“点了是否被拦住”“试一下看看”之类问句变相放行。用户只问“这个按钮是否发请求”时，只能查已有请求、日志、审计、代码或契约；没有既有证据就局部说明当前无法安全确认，不能让现场点击未知按钮补抓。',
+    '该审计只删除不安全或互相矛盾的动作，不新增业务事实，也不给纯事实回答强加诊断步骤。若用户只问事实且现有证据已经足够，直接回答后停止；若已明确动作只读，可保留相应只读观察；若受控条件全部齐全，可条件式说明单次受控验证。',
+  ].join('\n');
+}
+
 // 只给出“隔离/授权/回滚/幂等/范围”而未点名实际业务动作时，不能由检索命中反向替用户选一个任务。
 // 这些条件只够回答通用准入原则，不够生成任何实体专属执行步骤。
 function consultGenericControlledActionGuard(question) {
@@ -3466,7 +3488,7 @@ const server = http.createServer((req, res) => {
       else {
         // PD-04：命中 mustNotConfuse → 作负向提示注入 system（易混淆项，勿臆造）。answerFacts 已在 specHits 顶段（consultSystem 走 specExcerpts）。
         const mncNote = routeMnc.length ? '\n【以下为该问题的易混淆项，请勿臆造、勿张冠李戴】' + routeMnc.map(x => '\n· ' + x).join('') : '';
-        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationMode) + '\n' + consultEvidenceLedgerGuard(qtext, route) + '\n' + consultCurrentRulingGuard(qtext, route) + '\n' + consultRuleApplicationGuard(qtext, route) + '\n' + consultPatientIdentityGuard(qtext, route) + '\n' + consultCriticalContextGuard(qtext, route) + '\n' + consultFocusedFactGuard(qtext) + '\n' + consultExactPathBoundaryGuard(qtext, route) + '\n' + consultGenericControlledActionGuard(qtext) + '\n' + consultOperationalSafetyGuard(qtext, route) + '\n' + consultFileArtifactGuard(qtext, route) + '\n' + consultDiagnosticGuard(qtext, route) + '\n' + consultNonDestructiveDiagnosticGuard(qtext, route) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
+        try { await callModelStream(cfg, { system: consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationMode) + '\n' + consultEvidenceLedgerGuard(qtext, route) + '\n' + consultCurrentRulingGuard(qtext, route) + '\n' + consultRuleApplicationGuard(qtext, route) + '\n' + consultPatientIdentityGuard(qtext, route) + '\n' + consultCriticalContextGuard(qtext, route) + '\n' + consultFocusedFactGuard(qtext) + '\n' + consultExactPathBoundaryGuard(qtext, route) + '\n' + consultGenericControlledActionGuard(qtext) + '\n' + consultOperationalSafetyGuard(qtext, route) + '\n' + consultFileArtifactGuard(qtext, route) + '\n' + consultDiagnosticGuard(qtext, route) + '\n' + consultNonDestructiveDiagnosticGuard(qtext, route) + '\n' + consultFinalActionConsistencyGuard(qtext, route) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : ''), messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
           piece = String(piece == null ? '' : piece); if (!piece) return;
           if (!kbInjected && kbRefs.length) { kbInjected = true; sse({ kb: kbRefs, kbInjected: true }); }
           reply += piece; sse({ v: piece });

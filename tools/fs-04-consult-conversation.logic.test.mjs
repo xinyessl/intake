@@ -463,6 +463,50 @@ test('未知动作不得为抓包重做，事实正确也不得委婉追加真�
   assert.match(controlled, /明确执行授权/);
 });
 
+test('发布前动作一致性审计覆盖整份答案，禁止同答先劝停又让点未知按钮', () => {
+  const safeIntent = new Function(extractFn(SRC, 'consultSafeDiagnosticIntent') + '\nreturn consultSafeDiagnosticIntent;')();
+  const fn = new Function('consultSafeDiagnosticIntent', extractFn(SRC, 'consultFinalActionConsistencyGuard') + '\nreturn consultFinalActionConsistencyGuard;')(safeIntent);
+  const routes = [
+    { matched: true, route: { title: '药师反馈发送后锁定' }, answerFacts: ['发送后不能编辑或删除'] },
+    { matched: true, route: { title: '患教完成权限' }, answerFacts: ['只有创建人可以完成'] },
+    { matched: true, route: { title: '收费结果核对' }, answerFacts: ['结果未知时禁止重复收费'] },
+    { matched: true, route: { title: '记录删除 owner' }, answerFacts: ['删除校验创建人'] },
+  ];
+  const questions = [
+    '上午反馈发送后锁定，我只有截图没有日志，够不够？',
+    '编辑和删除按钮到底会不会发请求，能点一下看吗？',
+    '患教完成按钮怎么抓包验证？',
+    '收费结果不确定，下一步怎么留证？',
+  ];
+  questions.forEach((q, i) => {
+    const text = fn(q, routes[i]);
+    assert.match(text, /发布前动作一致性审计/);
+    assert.match(text, /Markdown 表格每个单元格、编号步骤、条件分支/);
+    assert.match(text, /A\. 读取当前已显示页面、已有请求\/响应、截图、历史记录、日志或审计/);
+    assert.match(text, /不能因为同一答案别处写了“不要操作”“只读”“别重复”/);
+    assert.match(text, /否定提醒不能抵消冲突动作/);
+    assert.match(text, /不得再建议点击编辑、删除、发送、完成等未知动作来观察是否发请求/);
+    assert.match(text, /只问“这个按钮是否发请求”.*不能让现场点击未知按钮补抓/);
+    assert.match(text, /不给纯事实回答强加诊断步骤/);
+  });
+
+  const readOnly = fn('这个列表刷新已确认纯只读，可以刷新后看现有数量吗？', { matched: true });
+  assert.match(readOnly, /route\/Spec\/源码已经明确证明无副作用的刷新/);
+  const controlled = fn('隔离环境、专用数据、授权、回滚清理、幂等和影响范围都齐全，能受控提交一次吗？', { matched: true });
+  assert.match(controlled, /隔离环境或专用数据、明确授权、回滚\/清理、幂等性与影响范围全部齐全/);
+  assert.equal(fn('p_id 列类型是什么？', { matched: true, route: { title: '字段类型' } }), '', '显式新实体的原子事实题不强塞诊断审计');
+});
+
+test('consult 接线在非破坏守卫之后追加最终动作一致性审计', () => {
+  const start = SRC.indexOf("if (url.pathname === '/api/consult'");
+  const end = SRC.indexOf("if (url.pathname === '/api/consult-to-intake'", start);
+  const route = SRC.slice(start, end);
+  const nonDestructive = route.indexOf('consultNonDestructiveDiagnosticGuard(qtext, route)');
+  const finalAudit = route.indexOf('consultFinalActionConsistencyGuard(qtext, route)');
+  assert.ok(nonDestructive >= 0, '应接入非破坏守卫');
+  assert.ok(finalAudit > nonDestructive, '最终动作一致性审计应在其它动作守卫之后，作为发布前最后检查');
+});
+
 test('通用受控条件齐备但未点名动作时，不得由检索命中替用户选择业务实体', () => {
   const fn = new Function(extractFn(SRC, 'consultGenericControlledActionGuard') + '\nreturn consultGenericControlledActionGuard;')();
   const generic = fn('隔离测试环境、专用测试数据、执行授权、回滚清理、幂等性和影响范围都确认了，可以受控验证吗？');

@@ -464,6 +464,11 @@ test('真实PWRS地图回归：业务规则正反例能召回“预期行为→�
     assert.equal(hit.route.id, id, `${q} topN=${JSON.stringify(hit.topN)}`);
     assert.match(hit.answerFacts.join('\n'), fact);
   }
+  const feedbackSafety = S.routeQuestion(map, '不点编辑删除，怎么判断反馈锁定和按钮有没有发请求？', '');
+  assert.equal(feedbackSafety.route.id, 'QR-FEEDBACK-SEND-DEDUP');
+  assert.match(feedbackSafety.answerFacts.join('\n'), /只能读取当前已显示状态、已有截图与已经发生的请求响应/);
+  assert.match(feedbackSafety.answerFacts.join('\n'), /不能让实施点击编辑或删除补抓请求/);
+  assert.match(feedbackSafety.mustNotConfuse.join('\n'), /不得一处说不要操作.*另一处又建议点击编辑\/删除/);
   const switched = S.contextualRouteQuestion(map, [
     { role: 'user', content: '药师反馈发出去还能改吗？' },
     { role: 'assistant', content: '旧自由文本不是证据。' },
