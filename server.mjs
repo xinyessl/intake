@@ -1696,7 +1696,7 @@ function consultHasControlledActionBundle(question) {
 }
 
 function consultConcretePaths(text) {
-  return Array.from(new Set((String(text || '').match(/(?<![\p{L}\p{N}_.{}<>:-])\/(?:[A-Za-z0-9_.{}<>:-]+\/)*[A-Za-z0-9_.{}<>:-]+\/?(?:\?[A-Za-z0-9_./?={}&<>:%+-]*)?/gu) || [])
+  return Array.from(new Set((String(text || '').match(/(?<![\p{L}\p{N}_.{}<>:-])(?:(?:…|\.{2,})\s*)?\/(?:[A-Za-z0-9_.{}<>:-]+\/)*[A-Za-z0-9_.{}<>:-]+\/?(?:\?[A-Za-z0-9_./?={}&<>:%+-]*)?/gu) || [])
     .map(x => x.replace(/[),.;，。；：]+$/g, '')).filter(Boolean)));
 }
 
@@ -1760,7 +1760,7 @@ function consultAnswerSafeFallback(draft, audit) {
   let safeKept = kept;
   if (audit.violations.includes('unexpected_concrete_path')) {
     for (const p of audit.unexpectedPaths || []) safeKept = consultReplaceUnexpectedPath(safeKept, p);
-    safeKept = safeKept.replace(/…\s*该已核接口/g, '该已核接口');
+    safeKept = safeKept.replace(/(?:…|\.{2,})\s*该已核接口/g, '该已核接口');
   }
   const notes = [];
   if (audit.violations.includes('unsupported_likelihood')) notes.push('当前证据不支持对原因作频率排序；未确认的原因只能作为不排序的待验证分支。');

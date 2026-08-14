@@ -626,6 +626,8 @@ test('发布前确定性语义校验：路径必须来自用户或route并逐字
   for (const bad of [
     '调用 GET /month/view/today。',
     '抓包筛选 …/month/view/today。',
+    '升级材料不要写 GET .../month/view/today。',
+    '也不要写 GET .. /month/view/today。',
     '也可以看 /pwrsapi/month/view/today/。',
   ]) {
     const audit = bundle.audit(bad, '今天视图接口是什么？', route);
