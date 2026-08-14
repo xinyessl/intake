@@ -1049,6 +1049,23 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(q128SideEffectFallback, /已有源值与出站请求的只读对照/);
   assert.doesNotMatch(q128SideEffectFallback, /交给对接方改|传参\/序列化口径/);
   assert.deepEqual(bundle.audit(q128SideEffectFallback, '患者号字段第二步对不上，后面先停还是继续？', focusedPatientIdRoute).violations, []);
+  for (const wording of [
+    '接口失败时先修接口可用性与响应契约，再继续排查。',
+    '请开发修复服务可用性后复测。',
+    '字段缺失时需要调整接口响应格式。',
+    '返回不符时先修改返回格式。',
+  ]) {
+    const actionRoute = { matched: true, route: { title: '今天视图' }, answerFacts: ['已核今天接口契约'] };
+    const actionQuestion = '今天视图对不上，给我排查顺序。';
+    const actionAudit = bundle.audit(wording, actionQuestion, actionRoute);
+    assert.ok(actionAudit.violations.includes('cross_actor_side_effect'), wording);
+    const safe = bundle.fallback(wording, actionAudit);
+    assert.doesNotMatch(safe, /修接口|修复服务|调整接口|修改返回/);
+    assert.deepEqual(bundle.audit(safe, actionQuestion, actionRoute).violations, []);
+  }
+  assert.deepEqual(bundle.audit('不要修接口契约，只读保留已有状态码和响应。', '今天视图怎么排查？', { matched: true, route: { title: '今天视图' }, answerFacts: ['已核今天接口契约'] }).violations, [], '否定修复与只读留证不应误拦');
+  assert.deepEqual(bundle.audit('只读核对已有接口契约和响应原文。', '今天视图怎么排查？', { matched: true, route: { title: '今天视图' }, answerFacts: ['已核今天接口契约'] }).violations, [], '核对契约是只读动作');
+  assert.deepEqual(bundle.audit('修订这份答复的措辞。', '这个说法怎么表达？', { matched: false }).violations, [], '修订文本不是业务副作用动作');
   assert.deepEqual(bundle.audit('只读核对已有序列化日志和协议字段，不修改配置。', '患者号怎么继续排查？', focusedPatientIdRoute).violations, [], '只读查看已有机制证据不得误判为修改动作');
   assert.deepEqual(bundle.audit('不要让对接按数字传；只读核对已有报文。', '患者号怎么继续排查？', focusedPatientIdRoute).violations, [], '否定动作与既有报文只读核对不得误判');
   assert.deepEqual(bundle.audit(
