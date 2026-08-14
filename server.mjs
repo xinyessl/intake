@@ -1693,7 +1693,7 @@ function consultFinalActionConsistencyGuard(question, route) {
     '编辑、删除、新建、保存、提交、发送、完成、签名、审批、星标、可能标记已读的打开、改参数、改报文类型、改映射、改配置、重试、复现、补跑或重跑，只要不能归入 B 或 C，就必须从最终答案所有位置删除，改成检查已有页面、请求、响应、报文、映射、截图、日志或审计。动作换成由第三方执行也不改变副作用：不得写成“让对接方改字符串/参数/映射/配置后用同一患者复测”“让运维重跑”或“让开发重试”来绕过守卫。不能因为同一答案别处写了“不要操作”“只读”“别重复”，就保留这里的正向点击或重做指令；否定提醒不能抵消冲突动作。',
     '若最终答案任何一处说“不要操作/不要重复/只读”，则其它任何一处都不得再建议点击编辑、删除、发送、完成等未知动作来观察是否发请求，也不得用“点了是否被拦住”“试一下看看”之类问句变相放行。用户只问“这个按钮是否发请求”时，只能查已有请求、日志、审计、代码或契约；没有既有证据就局部说明当前无法安全确认，不能让现场点击未知按钮补抓。',
     '发布前还要核对步骤和对照项的编号引用：后文引用①②③④等序号时，每个序号都必须在本答案前文有明确对应项；不得出现“共三项”却引用④、表格只定义①②③却在判断或小结写③/④等未定义引用。发现后必须删除含未定义序号的完整句/完整表格行，或在不新增事实的前提下改回已经定义的序号。',
-    '结构化答案还必须逐项核对“声明数量 → 实际内容”：声称二/三/四边、项、份、件、条、处或个对照时，紧随其后的对照表或 Markdown 清单必须确实给出相同数量的完整项；不得用一行表格冒充“三边对照”，也不得说“核两件事”却只列一项。同一小节里“确认/回复/补充/核对 N 件/项/点/条”等结构数量不得从 1 漂成 2；统一数量或删除不必要的数量承诺。“例如：/如下：/包括：/分别为：”后必须有实际内容，不能直接跳到下一步骤；清理并列项后不得留下孤立的“还是页面…/或者接口…”等后半分支，也不得留下以“还是/或者/或是/或”结尾却没有后一项的前半分支；不得在答案开头或“结论/判断”等纯标题后直接留下没有前述主张的“但/但是/不过/然而”转折残句。删除示例或引用正文时必须连同整句引号一起删除，不得留下单独一行的「/」/“/”/『/』等孤立引号。明确要求对照/比较/分支判断时，若使用“一致/不一致、是/否、有/无、成功/失败、存在/不存在、命中/未命中”等成对标签，必须给齐两边，或改写成不承诺另一边的单一直接结论；不得只列“一致”后直接跳到未标注的另一种判断。“不要做/禁止/避免/切勿”等否定标题下不得只剩“可以/建议/请/应该/优先/最好/即可/帮你”等正向建议；正向替代动作必须移到独立的“可以做/下一步”标题下。用户明确只问“先做哪个验证/第一步先做什么”时，只给一个最小只读验证，不追加第二、第三步或可转发的修改指令。',
+    '结构化答案还必须逐项核对“声明数量 → 实际内容”：声称二/三/四边、项、份、件、条、处或个对照时，紧随其后的对照表或 Markdown 清单必须确实给出相同数量的完整项；不得用一行表格冒充“三边对照”，也不得说“核两件事”却只列一项。同一小节里“确认/回复/补充/核对 N 件/项/点/条”等结构数量不得从 1 漂成 2；统一数量或删除不必要的数量承诺。“例如：/如下：/包括：/分别为：”后必须有实际内容，不能直接跳到下一步骤；任何以冒号结尾的标题/提示语都不得出现在正文末尾而没有子内容。清理并列项后不得留下孤立的“还是页面…/或者接口…”等后半分支，也不得留下以“还是/或者/或是/或”结尾却没有后一项的前半分支；不得在答案开头或“结论/判断”等纯标题后直接留下没有前述主张的“但/但是/不过/然而”转折残句。删除示例或引用正文时必须连同整句引号一起删除，不得留下单独一行的「/」/“/”/『/』等孤立引号。明确要求对照/比较/分支判断时，若使用“一致/不一致、是/否、有/无、成功/失败、存在/不存在、命中/未命中”等成对标签，必须给齐两边，或改写成不承诺另一边的单一直接结论；不得只列“一致”后直接跳到未标注的另一种判断。“不要做/禁止/避免/切勿”等否定标题下不得只剩“可以/建议/请/应该/优先/最好/即可/帮你”等正向建议；正向替代动作必须移到独立的“可以做/下一步”标题下。用户明确只问“先做哪个验证/第一步做什么”时，只给一个最小只读验证，不追加第二、第三步或可转发的修改指令。',
     '该审计只删除不安全或互相矛盾的动作，不新增业务事实，也不给纯事实回答强加诊断步骤。若用户只问事实且现有证据已经足够，直接回答后停止；若已明确动作只读，可保留相应只读观察；若受控条件全部齐全，可条件式说明单次受控验证。',
   ].join('\n');
 }
@@ -1946,14 +1946,17 @@ function consultRequiredPrimaryPath(question, route, answer = '') {
 }
 
 function consultNormalizeSafeMarkdown(text) {
-  return String(text || '').split('\n').map(line => {
+  const lines = String(text || '').split('\n').map(line => {
     let out = line;
     if (((out.match(/\*\*/g) || []).length % 2) !== 0) out = out.replace(/\*\*/g, '');
     if (((out.match(/```/g) || []).length % 2) !== 0) out = out.replace(/```/g, '');
     const withoutFences = out.replace(/```/g, '');
     if (((withoutFences.match(/`/g) || []).length % 2) !== 0) out = out.replace(/`/g, '');
     return out;
-  }).filter(line => !/^\s*(?:\*\*|__|`{1,3})\s*$/.test(line)).join('\n').trim();
+  }).filter(line => !/^\s*(?:\*\*|__|`{1,3})\s*$/.test(line));
+  while (lines.length && !lines.at(-1).trim()) lines.pop();
+  while (lines.length && /[：:]\s*(?:\*\*|__)?\s*$/u.test(lines.at(-1))) lines.pop();
+  return lines.join('\n').trim();
 }
 
 // 模型草稿必须先完整生成并通过发布前审计；这里只接收已经安全的最终稿，
@@ -2173,11 +2176,16 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const incompleteLeadIns = [];
   const topLevelStepRe = /^\s*(?:\*\*|__)?\s*([1-9]\d*)[.、．]\s+/u;
   for (let index = 0; index < documentLines.length; index++) {
-    if (!/(?:例如|如下|包括|分别为|具体为|可见|重点看)\s*[：:]\s*(?:\*\*|__)?\s*$/u.test(documentLines[index])) continue;
+    const explicitLead = /(?:例如|如下|包括|分别为|具体为|可见|重点看)\s*[：:]\s*(?:\*\*|__)?\s*$/u.test(documentLines[index]);
+    const genericColonLead = /[：:]\s*(?:\*\*|__)?\s*$/u.test(documentLines[index]);
+    if (!explicitLead && !genericColonLead) continue;
     let next = index + 1;
     while (next < documentLines.length && !documentLines[next].trim()) next++;
     const nextLine = documentLines[next] || '';
-    if (next < documentLines.length && !topLevelStepRe.test(nextLine) && !/^\s*#{1,6}\s+/.test(nextLine)) continue;
+    // 一般冒号标题只在正文已经结束时判空；“例如/如下”等强引导语还要拦截
+    // 直接跳到下一步骤/标题的情况。
+    if (!explicitLead && next < documentLines.length) continue;
+    if (explicitLead && next < documentLines.length && !topLevelStepRe.test(nextLine) && !/^\s*#{1,6}\s+/.test(nextLine)) continue;
     const affectedLines = [documentLines[index]];
     let previous = index - 1;
     while (previous >= 0 && !documentLines[previous].trim()) previous--;
@@ -2445,7 +2453,7 @@ function consultAnswerRevisionPrompt(draft, audit) {
       ? `草稿同一局部结构的数量声明互相冲突：${(audit.conflictingCountDeclarations || []).map(item => `“${item.first}”=${item.firstCount}，但“${item.second}”=${item.secondCount}`).join('；')}。统一为实际已有清单项数，或删除不必要的数量承诺；不得为了凑数新增问题、字段或动作。`
       : '',
     audit.violations.includes('incomplete_structured_lead_in')
-      ? '草稿含“例如：/如下：/包括：/分别为：”后直接跳到下一步骤或结束的空引导句。删除该完整引导句及其孤立步骤标题，或只用草稿中已经存在的内容补成完整自然句；禁止补造示例。'
+      ? '草稿含“例如：/如下：/包括：/分别为：”后直接跳到下一步骤/结束的空引导句，或文末以冒号结尾却没有任何子内容的空标题/提示语。删除该完整引导句及其孤立步骤标题，或只用草稿中已经存在的内容补成完整自然句；禁止补造示例或注意事项。'
       : '',
     audit.violations.includes('orphaned_alternative_fragment')
       ? `草稿在前一并列项被删除后留下孤立后半分支：${(audit.orphanedAlternativeLines || []).map(item => item.line).join('；')}。删除这些以“还是/或者”开头、却没有可对应前项的完整行；不得猜测或补造被删掉的前项。完整“是 A 还是 B？”问句和“还是先停”式直接结论应保持。`

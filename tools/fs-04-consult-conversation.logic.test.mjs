@@ -552,7 +552,7 @@ test('发布前动作一致性审计覆盖整份答案，禁止同答先劝停�
     assert.match(text, /没有前述主张的“但\/但是\/不过\/然而”转折残句/);
     assert.match(text, /一致\/不一致、是\/否、有\/无、成功\/失败/);
     assert.match(text, /“不要做\/禁止\/避免\/切勿”等否定标题下不得只剩/);
-    assert.match(text, /只问“先做哪个验证\/第一步先做什么”时，只给一个最小只读验证/);
+    assert.match(text, /只问“先做哪个验证\/第一步做什么”时，只给一个最小只读验证/);
   });
 
   const readOnly = fn('这个列表刷新已确认纯只读，可以刷新后看现有数量吗？', { matched: true });
@@ -1070,6 +1070,16 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     '| 原文A | 原文A | 原文A |',
   ].join('\n'), '已有证据怎么对照？', route).violations, [], '横向三列表不按数据行数误判');
   assert.deepEqual(bundle.audit('重点看：\n- 已有请求原文\n- 已有响应原文', '下一步看什么？', route).violations, [], '冒号后有真实列表内容时不得误判为空引导');
+  const emptyTrailingHeadingDraft = 'patient_id 是 character varying(50)。\n特别注意（别搞混）：';
+  const emptyTrailingHeadingAudit = bundle.audit(emptyTrailingHeadingDraft, 'patient_id是什么类型和长度？', route);
+  assert.ok(emptyTrailingHeadingAudit.violations.includes('incomplete_structured_lead_in'), '文末任意冒号标题没有子内容必须命中');
+  assert.deepEqual(emptyTrailingHeadingAudit.incompleteLeadIns.map(item => item.line), ['特别注意（别搞混）：']);
+  assert.match(bundle.revision(emptyTrailingHeadingDraft, emptyTrailingHeadingAudit), /文末以冒号结尾/);
+  const emptyTrailingHeadingFallback = bundle.fallback(emptyTrailingHeadingDraft, emptyTrailingHeadingAudit);
+  assert.doesNotMatch(emptyTrailingHeadingFallback, /特别注意/);
+  assert.match(emptyTrailingHeadingFallback, /patient_id 是 character varying\(50\)/);
+  assert.deepEqual(bundle.audit(emptyTrailingHeadingFallback, 'patient_id是什么类型和长度？', route).violations, []);
+  assert.deepEqual(bundle.audit('特别注意：\n不要把 patient_id 当成 bigint。', 'patient_id是什么类型？', route).violations, [], '冒号标题后有真实内容时不得误伤');
   assert.deepEqual(bundle.audit('**1. 只读核对**\n比较已有请求与已有响应原文。', '第一步先做什么？', route).violations, [], '单步问题只给一个顶层步骤时应放行');
 
   const twoSourcesOneRowDraft = [
