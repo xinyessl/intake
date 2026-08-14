@@ -1709,7 +1709,17 @@ function consultRouteScopeText(route) {
 }
 
 function consultScopeEntityTerms() {
-  return ['外部调度', '调度', '补跑', '重跑', '同步任务', 'ETL', '批处理', '患教', '收费', '药师反馈', '反馈', '监护', '药物重整', '医嘱干预', '患者列表'];
+  return ['外部调度', '调度', '补跑', '重跑', '同步任务', 'ETL', '批处理', '患教', '患者教育', '收费', '退费', '药师反馈', '反馈', '监护', '药物重整', '医嘱干预', '患者列表', '患者三元身份', '患者身份', '用药咨询', 'AI 状态', 'AI状态'];
+}
+
+function consultScopeTechnicalTokens(text) {
+  const source = String(text || '');
+  const tokens = [
+    ...(source.match(/\b[A-Za-z][A-Za-z0-9]*(?:Id|ID|Code|Status|No|Type)\b/g) || []),
+    ...(source.match(/\b[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+\b/g) || []),
+  ];
+  const shared = new Set(['id', 'code', 'status', 'type', 'user', 'patient', 'http', 'https', 'url', 'uri', 'api', 'json', 'jwt', 'get', 'post', 'put', 'delete', 'year', 'week']);
+  return Array.from(new Set(tokens.filter(token => token.length > 2 && !shared.has(token.toLowerCase()))));
 }
 
 function consultAnswerSemanticAudit(answer, question, route) {
@@ -1728,12 +1738,15 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const unexpectedEntityTerms = consultScopeEntityTerms()
     .filter(term => text.toLowerCase().includes(term.toLowerCase()) && !scopeText.toLowerCase().includes(term.toLowerCase()))
     .filter((term, index, terms) => !terms.slice(0, index).some(parent => parent.includes(term)));
+  const scopeTechnicalTokens = new Set(consultScopeTechnicalTokens(scopeText).map(token => token.toLowerCase()));
+  const unexpectedTechnicalTokens = consultScopeTechnicalTokens(text).filter(token => !scopeTechnicalTokens.has(token.toLowerCase()));
+  const unexpectedScopeTerms = Array.from(new Set([...unexpectedEntityTerms, ...unexpectedTechnicalTokens]));
   const violations = [];
   if (likelihoodTerms.length) violations.push('unsupported_likelihood');
   if (unsafeActorActions.length) violations.push('cross_actor_side_effect');
   if (unexpectedPaths.length) violations.push('unexpected_concrete_path');
-  if (unexpectedEntityTerms.length) violations.push('out_of_scope_entity');
-  return { checked: true, likelihoodAllowed, likelihoodTerms, unsafeActorActionCount: unsafeActorActions.length, unexpectedPaths, unexpectedEntityTerms, violations };
+  if (unexpectedScopeTerms.length) violations.push('out_of_scope_entity');
+  return { checked: true, likelihoodAllowed, likelihoodTerms, unsafeActorActionCount: unsafeActorActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
