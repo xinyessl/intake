@@ -1674,7 +1674,8 @@ function consultEvidenceLikelihoodGuard(question, route) {
   ].join('\n');
 }
 
-const CONSULT_LIKELIHOOD_WORD_RE = /(?:最高频|最常见|(?:很|较|比较)?常见(?:原因|问题|场景)?|经常|通常|一般|大概率|多半|往往|多发|高发|首要原因|主要原因(?:之一)?|典型原因|常见于|可能是|(?:很|更|比较)?像(?=[“"'A-Za-z\u4e00-\u9fff])|看起来(?:很|更)?像|疑似|倾向于)/g;
+const CONSULT_LIKELIHOOD_WORD_RE = /(?:最高频|最常见|(?:很|较|比较)?常见(?:原因|问题|场景)?|经常|通常|一般|大概率|多半|往往|多发|高发|首要原因|主要原因(?:之一)?|典型原因|常见于|可能是|(?:很|更|比较)?像(?=[“"'A-Za-z\u4e00-\u9fff])|看起来(?:很|更)?像|疑似|倾向于|(?:最|更|较|比较|尤其)?容易(?:出现|发生|对不上|出错|导致|造成)|易(?:发|出现|发生|错))/g;
+const CONSULT_CAUSAL_PRIORITY_RE = /(?:优先|首先|先)(?:去)?(?:查|看|排查|核对)(?:服务端|服务器|JVM|前端|缓存|错误兜底|网关|登录态|权限|调度|数据库|配置)[^。！？；\n]{0,18}/g;
 
 function consultHasLikelihoodEvidence(question, route) {
   const q = String(question || '').trim();
@@ -1684,6 +1685,14 @@ function consultHasLikelihoodEvidence(question, route) {
   const userSample = /(?:统计|样本|抽样|最近|近)\s*(?:了|的)?\s*\d+\s*(?:次|条|例|份)[^。；\n]{0,30}(?:其中|有|占)\s*\d+|(?:占比|比例|频率)\s*(?:为|是|达到)?\s*\d+(?:\.\d+)?\s*%|百分之\s*[零一二三四五六七八九十百\d]+/i.test(q);
   const routedFrequency = /(?:统计样本|抽样结果|发生频率|占比|百分之|\d+(?:\.\d+)?\s*%|明确(?:规定|定义|写明)[^。；\n]{0,24}(?:最高频|最常见|(?:很|较|比较)?常见|经常|通常|一般|大概率|多半|往往|多发|高发|首要原因|主要原因|典型原因|常见于)|(?:最高频|最常见|(?:很|较|比较)?常见|经常|通常|一般|大概率|多半|往往|多发|高发|首要原因|主要原因|典型原因|常见于)[^。；\n]{0,24}(?:规则|结论|定义))/i.test(routeText);
   return userSample || routedFrequency;
+}
+
+function consultHasCausalPriorityEvidence(question, route) {
+  const q = String(question || '').trim();
+  const routeText = consultRouteScopeText(route);
+  const observedDifference = /(?:页面|接口|响应|请求|本机|服务器|JVM)[^。；\n]{0,24}(?:=|≠|一致|不一致|不同|只差|缺失|没有|未发出|失败|4\d\d|5\d\d|业务码)[^。；\n]{0,24}/i.test(q);
+  const routedOrder = /(?:明确|规定|已核|说明书)[^。；\n]{0,32}(?:排查顺序|优先(?:查|看|排查|核对)|先[^。；\n]{0,16}再)/i.test(routeText);
+  return observedDifference || routedOrder;
 }
 
 function consultHasControlledActionBundle(question) {
@@ -1747,6 +1756,8 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const text = String(answer || '').trim();
   const likelihoodAllowed = consultHasLikelihoodEvidence(question, route);
   const likelihoodTerms = likelihoodAllowed ? [] : Array.from(new Set(text.match(CONSULT_LIKELIHOOD_WORD_RE) || []));
+  const causalPriorityAllowed = consultHasCausalPriorityEvidence(question, route);
+  const causalPriorityTerms = causalPriorityAllowed ? [] : Array.from(new Set(text.match(CONSULT_CAUSAL_PRIORITY_RE) || []));
   const controlled = consultHasControlledActionBundle(question);
   const actorAction = /(?:让|请|交给|通知|要求|转)?\s*(?:实施|用户|患者|对接方|第三方|运维|开发)[^。！？；\n]{0,42}(?:(?:改|修改|调整|切换)[^。！？；\n]{0,12}(?:参数|报文(?:类型)?|类型|映射|配置|时区|系统时间|环境|服务配置)|对时|重试|复测|重跑|补跑|重新触发|再次触发|再点|点一次|提交|保存|发送|完成|签名|审批|星标)/ig;
   const negatedActorPrefix = /(?:不得|不能|不要|禁止|不可|不应|先别|停止|未确认)\s*$/i;
@@ -1765,12 +1776,12 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const unexpectedScopeTerms = Array.from(new Set([...unexpectedEntityTerms, ...unexpectedTechnicalTokens]));
   const malformedMarkdown = consultMalformedMarkdownTokens(text);
   const violations = [];
-  if (likelihoodTerms.length) violations.push('unsupported_likelihood');
+  if (likelihoodTerms.length || causalPriorityTerms.length) violations.push('unsupported_likelihood');
   if (unsafeActorActions.length) violations.push('cross_actor_side_effect');
   if (unexpectedPaths.length) violations.push('unexpected_concrete_path');
   if (unexpectedScopeTerms.length) violations.push('out_of_scope_entity');
   if (malformedMarkdown.length) violations.push('malformed_markdown');
-  return { checked: true, likelihoodAllowed, likelihoodTerms, unsafeActorActionCount: unsafeActorActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, malformedMarkdown, violations };
+  return { checked: true, likelihoodAllowed, likelihoodTerms, causalPriorityAllowed, causalPriorityTerms, unsafeActorActionCount: unsafeActorActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -1778,7 +1789,7 @@ function consultAnswerRevisionPrompt(draft, audit) {
     '【发布前确定性语义校验未通过：只允许修订一次】',
     '下面是尚未发送给用户的草稿。请只输出修订后的完整答案，不要解释修订过程，不要增加任何新业务事实、接口、字段、按钮、原因或示例。',
     audit.violations.includes('unsupported_likelihood')
-      ? '草稿含无直接证据的概率/频率或成因定性。删除整句中的“最高频/最常见/常见/经常/通常/一般/大概率/多半/往往/多发/高发/首要原因/主要原因/典型原因/常见于/可能是/很像/更像/疑似/倾向于”等定性及隐含排序；原因只能改成不排序的“待验证假设/可能分支”，步骤先后只能按本轮已有证据差异。'
+      ? '草稿含无直接证据的概率/频率或成因定性。删除整句中的“最高频/最常见/常见/经常/通常/一般/大概率/多半/往往/多发/高发/首要原因/主要原因/典型原因/常见于/可能是/很像/更像/疑似/倾向于/最容易出现”等定性；若本轮没有已观察到的页面、请求或响应差异，也删除“优先查服务端/前端/缓存/配置”等成因排序。原因只能改成不排序的“待验证假设/可能分支”，证据收集步骤仍可按只读顺序说明。'
       : '',
     audit.violations.includes('cross_actor_side_effect')
       ? '草稿把副作用动作交给实施、患者、对接方、运维或开发执行。删除改参、改映射/配置、复测、重试、重跑、补跑、重新触发等指令；改成只读检查已有报文、映射、请求响应、日志或审计。'
@@ -1810,8 +1821,11 @@ function consultAnswerSafeFallback(draft, audit) {
   const actorAction = /(?:让|请|交给|通知|要求|转)?\s*(?:实施|用户|患者|对接方|第三方|运维|开发)[^。！？；\n]{0,42}(?:(?:改|修改|调整|切换)[^。！？；\n]{0,12}(?:参数|报文(?:类型)?|类型|映射|配置|时区|系统时间|环境|服务配置)|对时|重试|复测|重跑|补跑|重新触发|再次触发|再点|点一次|提交|保存|发送|完成|签名|审批|星标)/ig;
   const negatedActorPrefix = /(?:不得|不能|不要|禁止|不可|不应|先别|停止|未确认)\s*$/i;
   const kept = String(draft || '').split(/(?<=[。！？；\n])/u).filter(part => {
-    if (audit.violations.includes('unsupported_likelihood') && CONSULT_LIKELIHOOD_WORD_RE.test(part)) { CONSULT_LIKELIHOOD_WORD_RE.lastIndex = 0; return false; }
+    if (audit.violations.includes('unsupported_likelihood') && (CONSULT_LIKELIHOOD_WORD_RE.test(part) || CONSULT_CAUSAL_PRIORITY_RE.test(part))) {
+      CONSULT_LIKELIHOOD_WORD_RE.lastIndex = 0; CONSULT_CAUSAL_PRIORITY_RE.lastIndex = 0; return false;
+    }
     CONSULT_LIKELIHOOD_WORD_RE.lastIndex = 0;
+    CONSULT_CAUSAL_PRIORITY_RE.lastIndex = 0;
     if (audit.violations.includes('cross_actor_side_effect') && Array.from(part.matchAll(actorAction))
       .some(match => !negatedActorPrefix.test(part.slice(0, match.index)))) return false;
     if (audit.violations.includes('out_of_scope_entity') && (audit.unexpectedEntityTerms || []).some(term => part.toLowerCase().includes(String(term).toLowerCase()))) return false;

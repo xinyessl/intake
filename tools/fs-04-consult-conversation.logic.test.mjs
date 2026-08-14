@@ -528,13 +528,15 @@ test('最终证据概率守卫禁止无依据成因排序，并让核心事实�
 
 test('发布前确定性语义校验：无证据概率词触发一次修订，有直接样本时不误拦', () => {
   const likelihoodConst = SRC.match(/const CONSULT_LIKELIHOOD_WORD_RE = [^;]+;/)?.[0] || '';
+  const priorityConst = SRC.match(/const CONSULT_CAUSAL_PRIORITY_RE = [^;]+;/)?.[0] || '';
   assert.ok(likelihoodConst, '应找到概率词检测常量');
   const audit = new Function(
-    likelihoodConst + '\n'
+    likelihoodConst + '\n' + priorityConst + '\n'
     + extractFn(SRC, 'consultHasLikelihoodEvidence') + '\n'
+    + extractFn(SRC, 'consultRouteScopeText') + '\n'
+    + extractFn(SRC, 'consultHasCausalPriorityEvidence') + '\n'
     + extractFn(SRC, 'consultHasControlledActionBundle') + '\n'
     + extractFn(SRC, 'consultConcretePaths') + '\n'
-    + extractFn(SRC, 'consultRouteScopeText') + '\n'
     + extractFn(SRC, 'consultScopeEntityTerms') + '\n'
     + extractFn(SRC, 'consultScopeTechnicalTokens') + '\n'
     + extractFn(SRC, 'consultMalformedMarkdownTokens') + '\n'
@@ -545,10 +547,13 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
   const failed = audit('页面等于接口但与浏览器不同，多半是服务端时区差。', '今天视图对不上，怎么排查？', route);
   assert.deepEqual(failed.violations, ['unsupported_likelihood']);
   assert.deepEqual(failed.likelihoodTerms, ['多半']);
-  for (const phrase of ['很常见', '较常见', '比较常见', '常见原因', '经常发生', '多发', '高发', '首要原因', '主要原因之一', '很像服务端缓存', '更像前端取错字段', '可能是异常兜底', '疑似配置问题', '倾向于时区问题']) {
+  for (const phrase of ['很常见', '较常见', '比较常见', '常见原因', '经常发生', '多发', '高发', '首要原因', '主要原因之一', '很像服务端缓存', '更像前端取错字段', '可能是异常兜底', '疑似配置问题', '倾向于时区问题', '最容易出现', '尤其容易对不上', '易发生']) {
     assert.deepEqual(audit(`接口和浏览器不一致${phrase}。`, '今天视图为什么不一致？', route).violations, ['unsupported_likelihood'], phrase);
   }
   assert.deepEqual(audit('待验证假设：服务端时区和现场约定不一致；可能分支：页面没有照接口响应展示。', '今天视图为什么不一致？', route).violations, [], '明确标为不排序待验证分支时应放行');
+  assert.deepEqual(audit('优先查服务端时区。', '今天视图为什么不一致？', route).violations, ['unsupported_likelihood'], '没有当前差异证据不得排序成因');
+  assert.deepEqual(audit('页面=接口但与本机不一致，优先查服务端时区。', '现场已确认页面=接口，但与本机不一致。', route).violations, [], '用户已给出直接差异时可据此排查对应层');
+  assert.deepEqual(audit('按已核顺序优先查前端展示。', '页面为什么不一致？', { matched: true, route: { title: '展示排查' }, answerFacts: ['说明书明确排查顺序：页面与接口不一致时优先查前端展示'] }).violations, [], 'route明确顺序时放行');
 
   const userSample = audit('基于你给的样本，最常见的是服务端时区差。', '最近统计100次，其中80次确认是服务端时区差。', route);
   assert.deepEqual(userSample.violations, []);
@@ -569,12 +574,14 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
 
 test('发布前确定性语义校验：跨主体副作用触发，否定句和完整受控条件不误拦', () => {
   const likelihoodConst = SRC.match(/const CONSULT_LIKELIHOOD_WORD_RE = [^;]+;/)?.[0] || '';
+  const priorityConst = SRC.match(/const CONSULT_CAUSAL_PRIORITY_RE = [^;]+;/)?.[0] || '';
   const audit = new Function(
-    likelihoodConst + '\n'
+    likelihoodConst + '\n' + priorityConst + '\n'
     + extractFn(SRC, 'consultHasLikelihoodEvidence') + '\n'
+    + extractFn(SRC, 'consultRouteScopeText') + '\n'
+    + extractFn(SRC, 'consultHasCausalPriorityEvidence') + '\n'
     + extractFn(SRC, 'consultHasControlledActionBundle') + '\n'
     + extractFn(SRC, 'consultConcretePaths') + '\n'
-    + extractFn(SRC, 'consultRouteScopeText') + '\n'
     + extractFn(SRC, 'consultScopeEntityTerms') + '\n'
     + extractFn(SRC, 'consultScopeTechnicalTokens') + '\n'
     + extractFn(SRC, 'consultMalformedMarkdownTokens') + '\n'
@@ -597,12 +604,14 @@ test('发布前确定性语义校验：跨主体副作用触发，否定句和�
 
 test('二次修订失败时安全降级：删违规句、保留已核事实并追加边界', () => {
   const likelihoodConst = SRC.match(/const CONSULT_LIKELIHOOD_WORD_RE = [^;]+;/)?.[0] || '';
+  const priorityConst = SRC.match(/const CONSULT_CAUSAL_PRIORITY_RE = [^;]+;/)?.[0] || '';
   const bundle = new Function(
-    likelihoodConst + '\n'
+    likelihoodConst + '\n' + priorityConst + '\n'
     + extractFn(SRC, 'consultHasLikelihoodEvidence') + '\n'
+    + extractFn(SRC, 'consultRouteScopeText') + '\n'
+    + extractFn(SRC, 'consultHasCausalPriorityEvidence') + '\n'
     + extractFn(SRC, 'consultHasControlledActionBundle') + '\n'
     + extractFn(SRC, 'consultConcretePaths') + '\n'
-    + extractFn(SRC, 'consultRouteScopeText') + '\n'
     + extractFn(SRC, 'consultScopeEntityTerms') + '\n'
     + extractFn(SRC, 'consultScopeTechnicalTokens') + '\n'
     + extractFn(SRC, 'consultMalformedMarkdownTokens') + '\n'
@@ -644,12 +653,14 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
 
 test('发布前确定性语义校验：路径必须来自用户或route并逐字保留', () => {
   const likelihoodConst = SRC.match(/const CONSULT_LIKELIHOOD_WORD_RE = [^;]+;/)?.[0] || '';
+  const priorityConst = SRC.match(/const CONSULT_CAUSAL_PRIORITY_RE = [^;]+;/)?.[0] || '';
   const bundle = new Function(
-    likelihoodConst + '\n'
+    likelihoodConst + '\n' + priorityConst + '\n'
     + extractFn(SRC, 'consultHasLikelihoodEvidence') + '\n'
+    + extractFn(SRC, 'consultRouteScopeText') + '\n'
+    + extractFn(SRC, 'consultHasCausalPriorityEvidence') + '\n'
     + extractFn(SRC, 'consultHasControlledActionBundle') + '\n'
     + extractFn(SRC, 'consultConcretePaths') + '\n'
-    + extractFn(SRC, 'consultRouteScopeText') + '\n'
     + extractFn(SRC, 'consultScopeEntityTerms') + '\n'
     + extractFn(SRC, 'consultScopeTechnicalTokens') + '\n'
     + extractFn(SRC, 'consultMalformedMarkdownTokens') + '\n'
@@ -700,12 +711,14 @@ test('发布前确定性语义校验：路径必须来自用户或route并逐字
 
 test('发布前事实作用域审计：相邻模块、通配路径不串入，显式切题放行', () => {
   const likelihoodConst = SRC.match(/const CONSULT_LIKELIHOOD_WORD_RE = [^;]+;/)?.[0] || '';
+  const priorityConst = SRC.match(/const CONSULT_CAUSAL_PRIORITY_RE = [^;]+;/)?.[0] || '';
   const bundle = new Function(
-    likelihoodConst + '\n'
+    likelihoodConst + '\n' + priorityConst + '\n'
     + extractFn(SRC, 'consultHasLikelihoodEvidence') + '\n'
+    + extractFn(SRC, 'consultRouteScopeText') + '\n'
+    + extractFn(SRC, 'consultHasCausalPriorityEvidence') + '\n'
     + extractFn(SRC, 'consultHasControlledActionBundle') + '\n'
     + extractFn(SRC, 'consultConcretePaths') + '\n'
-    + extractFn(SRC, 'consultRouteScopeText') + '\n'
     + extractFn(SRC, 'consultScopeEntityTerms') + '\n'
     + extractFn(SRC, 'consultScopeTechnicalTokens') + '\n'
     + extractFn(SRC, 'consultMalformedMarkdownTokens') + '\n'
