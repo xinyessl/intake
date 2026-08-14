@@ -592,7 +592,7 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
   const failed = audit('页面等于接口但与浏览器不同，多半是服务端时区差。', '今天视图对不上，怎么排查？', route);
   assert.deepEqual(failed.violations, ['unsupported_likelihood']);
   assert.deepEqual(failed.likelihoodTerms, ['多半']);
-  for (const phrase of ['很常见', '较常见', '比较常见', '常见原因', '经常发生', '多发', '高发', '很多是规则内预期', '不少属于时区差', '多数是预期', '大多不是BUG', '绝大多数无需处理', '少数会异常', '极少出错', '大部分符合预期', '小部分对不上', '几乎全部正常', '频繁出现', '偶尔失败', '有时不同', '首要原因', '主要原因之一', '很像服务端缓存', '更像前端取错字段', '可能是异常兜底', '疑似配置问题', '倾向于时区问题', '最容易出现', '尤其容易对不上', '易发生']) {
+  for (const phrase of ['很常见', '较常见', '比较常见', '常见原因', '经常发生', '多发', '高发', '很多是规则内预期', '不少属于时区差', '多数是预期', '大多不是BUG', '绝大多数无需处理', '少数会异常', '极少出错', '大部分符合预期', '小部分对不上', '几乎全部正常', '频繁出现', '偶尔失败', '有时不同', '首要原因', '主要原因之一', '很像服务端缓存', '更像前端取错字段', '可能是异常兜底', '疑似配置问题', '倾向于时区问题', '最容易出现', '很容易丢精度', '尤其容易对不上', '易发生', '很可能就发生在序列化时']) {
     assert.ok(audit(`接口和浏览器不一致${phrase}。`, '今天视图为什么不一致？', route).violations.includes('unsupported_likelihood'), phrase);
   }
   assert.deepEqual(audit('待验证假设：服务端时区和现场约定不一致；可能分支：页面没有照接口响应展示。', '今天视图为什么不一致？', route).violations, [], '明确标为不排序待验证分支时应放行');
@@ -639,6 +639,8 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
     answerFacts: ['字段正文明确写明：patient_id 是常见字段名'],
   });
   assert.deepEqual(namedField.violations, [], '正文明确命名时允许照实引用“常见字段名”');
+  assert.deepEqual(audit('这是一个可能分支，尚待验证。', '今天视图为什么不一致？', route).violations, [], '不排序的“可能分支”标签本身不是概率定论');
+  assert.deepEqual(audit('这段说明很容易理解。', '请解释这段说明。', route).violations, [], '非故障结果的日常“容易理解”不应误拦');
 });
 
 test('发布前确定性语义校验：跨主体副作用触发，否定句和完整受控条件不误拦', () => {
@@ -737,6 +739,21 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(fallback, /不支持对原因作频率排序/);
   assert.match(fallback, /未满足完整受控条件/);
   assert.deepEqual(bundle.audit(fallback, '患者号丢位怎么查？', route).violations, []);
+
+  const q127Draft = [
+    'patient_id 是 varchar(50)，按字符串存。',
+    '对接方如果当数字传，长号在 JSON/中间层/语言数值类型里很容易丢精度或少位。',
+    '如果看到纯数字且值已经变化，丢位很可能就发生在他们发出前或序列化时。',
+    '只读对比原始号、已有报文和现有记录。',
+  ].join('\n');
+  const q127Audit = bundle.audit(q127Draft, '对接方把患者号当数字传，长号码开始丢位，先验证什么？', route);
+  assert.ok(q127Audit.violations.includes('unsupported_likelihood'));
+  assert.deepEqual(q127Audit.likelihoodTerms.sort(), ['很可能就发生', '很容易丢精度'].sort());
+  const q127Fallback = bundle.fallback(q127Draft, q127Audit);
+  assert.match(q127Fallback, /patient_id 是 varchar\(50\)/);
+  assert.match(q127Fallback, /只读对比原始号、已有报文和现有记录/);
+  assert.doesNotMatch(q127Fallback, /很容易|很可能|JSON\/中间层\/语言数值类型|序列化时/);
+  assert.deepEqual(bundle.audit(q127Fallback, '对接方把患者号当数字传，长号码开始丢位，先验证什么？', route).violations, []);
 
   const todayDraft = '今天视图由已核接口返回。页面日期可能是旧缓存或异常兜底。页面与接口不同，更像前端展示/取错字段。JVM 时区错了，由运维按规范改服务端时区（不在实施侧乱改前端）。';
   const todayAudit = bundle.audit(todayDraft, '今天视图和浏览器不一致，怎么处理？', { matched: true, route: { title: '工作台今天视图' }, answerFacts: ['日期来自服务端 JVM 当前时区'] });
