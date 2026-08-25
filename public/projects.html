@@ -83,7 +83,8 @@
   .ref-trigger .rt-txt.ph{color:var(--color-text-tertiary)}
   .ref-trigger .rt-n{flex:0 0 auto;font-weight:600;color:var(--color-primary);font-family:var(--font-num);font-size:11px;background:var(--color-primary-light);border-radius:var(--radius);padding:0 6px}
   .ref-trigger .ti-chevron-down{flex:0 0 auto;font-size:13px;color:var(--color-text-tertiary)}
-  .ref-panel{position:absolute;z-index:60;top:calc(100% + 3px);left:0;right:0;min-width:180px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius);box-shadow:0 6px 22px rgba(0,0,0,.14);padding:6px;display:none;max-height:240px;box-sizing:border-box}
+  /* z-index:9999 盖过抽屉/遮罩(theme.css .drawer/.drawer-mask=310)——open 时 JS 改 position:fixed 逃 .subslist overflow 裁剪，静态 absolute 值留作兜底 */
+  .ref-panel{position:absolute;z-index:9999;top:calc(100% + 3px);left:0;right:0;min-width:180px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius);box-shadow:0 6px 22px rgba(0,0,0,.14);padding:6px;display:none;max-height:240px;box-sizing:border-box}
   .ref-panel.open{display:flex;flex-direction:column}
   .ref-search{width:100%;box-sizing:border-box;font-size:11.5px;padding:3px 7px;border:1px solid var(--color-border);border-radius:var(--radius);margin-bottom:5px;font-family:var(--font-num)}
   .ref-opts{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:1px}
@@ -517,29 +518,73 @@ function renderRefField(k){
 }
 function cssq(s){ return String(s).replace(/["\\]/g,'\\$&'); }
 
+// ── PD-01 面板逃 overflow：.ref-panel 嵌在 .subslist(overflow:auto,max-height:220px) 里，
+//    普通 position:absolute 会被裁进那个小滚动框（选项名看不全）。照 assets/ui.js 的 .ui-sel-pop 老招：
+//    打开时改 position:fixed，按触发器 getBoundingClientRect 浮到 viewport 层、下方不够则上翻、z-index 抬到抽屉之上。
+// 按触发器矩形把 fixed 面板定位（下方空间不足→上翻）；max-height 取可用空间与 240 的较小值
+function placeRefPanel(panel){
+  if(!panel||!panel.classList.contains('open'))return;
+  const field=panel.closest('.ref-field'); const trig=field&&field.querySelector('.ref-trigger'); if(!trig)return;
+  const r=trig.getBoundingClientRect();
+  panel.style.position='fixed';
+  panel.style.right='auto';
+  panel.style.left=r.left+'px';
+  panel.style.width=Math.max(r.width,180)+'px';
+  const gap=3, vh=window.innerHeight;
+  const below=vh-r.bottom-gap, above=r.top-gap;             // 上下各自可用高度
+  const openUp=below<160 && above>below;                    // 下方太挤且上方更宽 → 上翻
+  const avail=Math.max(60,(openUp?above:below));
+  panel.style.maxHeight=Math.min(avail,240)+'px';
+  if(openUp){ panel.style.bottom=(vh-r.top+gap)+'px'; panel.style.top='auto'; }
+  else { panel.style.top=(r.bottom+gap)+'px'; panel.style.bottom='auto'; }
+}
+// 打开面板：加 .open + fixed 定位 + 挂滚动/缩放监听（照 ui.js「一滚动就关」的简单策略）
+function openRefPanel(panel){
+  if(!panel)return;
+  panel.classList.add('open');
+  placeRefPanel(panel);
+  if(!panel._refWinBound){ panel._refWinBound=true;
+    panel._onScroll=()=>closeRefPanel(panel);              // 内滚(.subslist/.drawer-body)或页面滚 → 收起
+    panel._onResize=()=>placeRefPanel(panel);
+    window.addEventListener('scroll',panel._onScroll,true); // capture：捕获祖先容器的滚动
+    window.addEventListener('resize',panel._onResize);
+  }
+}
+// 关闭面板：去 .open + 清临时 fixed 内联样式（恢复 CSS 兜底态）+ 摘监听
+function closeRefPanel(panel){
+  if(!panel)return;
+  panel.classList.remove('open');
+  panel.style.position=panel.style.left=panel.style.right=panel.style.width=panel.style.top=panel.style.bottom=panel.style.maxHeight='';
+  if(panel._refWinBound){ panel._refWinBound=false;
+    window.removeEventListener('scroll',panel._onScroll,true);
+    window.removeEventListener('resize',panel._onResize);
+  }
+}
+function closeAllRefPanels(){ $$('#subsList .ref-panel.open').forEach(closeRefPanel); }
+
 // 事件委托：触发器开关面板 / 勾选 / 搜索（挂在子系统列表容器上，一次绑定）
 function bindRefEvents(){
   const host=$('#subsList'); if(!host||host._refBound) return; host._refBound=true;
   host.addEventListener('click',e=>{
     const trig=e.target.closest('.ref-trigger');
-    if(trig){ const panel=trig.parentElement.querySelector('.ref-panel'); const open=panel.classList.contains('open');
-      $$('#subsList .ref-panel.open').forEach(p=>{ p.classList.remove('open'); p.parentElement.querySelector('.ref-trigger').classList.remove('on-open'); });
-      if(!open){ panel.classList.add('open'); const s=panel.querySelector('.ref-search'); if(s){ s.value=''; renderFieldOpts(trig.closest('.ref-field')); setTimeout(()=>s.focus(),0); } }
+    if(trig){ const panel=trig.parentElement.querySelector('.ref-panel'); const wasOpen=panel.classList.contains('open');
+      $$('#subsList .ref-panel.open').forEach(p=>{ closeRefPanel(p); p.parentElement.querySelector('.ref-trigger').classList.remove('on-open'); });
+      if(!wasOpen){ const s=panel.querySelector('.ref-search'); if(s) s.value=''; renderFieldOpts(trig.closest('.ref-field')); openRefPanel(panel); if(s) setTimeout(()=>s.focus(),0); }
       return; }
     const opt=e.target.closest('.ref-opt input');
     if(opt){ const field=opt.closest('.ref-field'), k=field.getAttribute('data-sub'), kind=field.getAttribute('data-kind'), v=opt.getAttribute('data-ref');
       const st=subsRefs[k]; if(!st) return; const sel=kind==='branch'?st.selBranches:st.selTags;
       if(opt.checked) sel.add(v); else sel.delete(v);
       renderRefField(k);   // 刷新触发器摘要 + 面板勾选态
-      const p=field.querySelector('.ref-panel'); if(p) p.classList.add('open');   // 勾选后保持面板打开
+      const p=field.querySelector('.ref-panel'); if(p){ openRefPanel(p); }   // 勾选后保持面板打开（重定位，触发器摘要变化可能改高度）
       return; }
   });
   host.addEventListener('input',e=>{ const s=e.target.closest('.ref-search'); if(s) renderFieldOpts(s.closest('.ref-field')); });
 }
 // 只重渲染某控件面板选项（搜索用，不动触发器）
-function renderFieldOpts(field){ if(!field) return; const k=field.getAttribute('data-sub'); renderRefField(k); const p=field.querySelector('.ref-panel'); if(p) p.classList.add('open'); }
-// 点面板外 → 关所有面板
-document.addEventListener('click',e=>{ if(!e.target.closest('.ref-field')) $$('#subsList .ref-panel.open').forEach(p=>p.classList.remove('open')); });
+function renderFieldOpts(field){ if(!field) return; const k=field.getAttribute('data-sub'); renderRefField(k); const p=field.querySelector('.ref-panel'); if(p&&p.classList.contains('open')) placeRefPanel(p); }
+// 点面板外 → 关所有面板（面板仍是 .ref-field 的 DOM 子节点，只是视觉 fixed，故 closest('.ref-field') 判断依然成立）
+document.addEventListener('click',e=>{ if(!e.target.closest('.ref-field')) closeAllRefPanels(); });
 
 function openAdd(){
   editingId=null; inspected=null; subsRefs={};

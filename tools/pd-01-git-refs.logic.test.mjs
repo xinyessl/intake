@@ -178,6 +178,16 @@ test('D6 前端：编辑抽屉每子系统各有分支/tag 多选控件 + 打 /a
   assert.match(HTML, /return \{\.\.\.s, branches, tags\}/, '保存 payload 各子系统带 branches/tags');
   assert.match(HTML, /可搜索|ref-search/, 'tag 面板可搜索过滤');
   assert.match(HTML, /已失效/, '已选但 remote 已无的 ref 标「已失效」不静默丢');
+  // 面板逃 .subslist(overflow:auto) 裁剪：打开时用 getBoundingClientRect + position:fixed 浮到 viewport 层（照 ui.js .ui-sel-pop）
+  const place = extractFn(HTML, 'placeRefPanel');
+  assert.match(place, /getBoundingClientRect\(\)/, 'placeRefPanel 按触发器 getBoundingClientRect 定位');
+  assert.match(place, /position\s*=\s*'fixed'/, 'placeRefPanel 把面板改 position:fixed（逃 overflow 裁剪）');
+  assert.match(place, /innerHeight/, 'placeRefPanel 依 innerHeight 判下方空间/上翻');
+  assert.match(place, /\.bottom\s*=/, 'placeRefPanel 下方不够时用 bottom 上翻开');
+  assert.match(HTML, /function openRefPanel\(panel\)/, '有 openRefPanel（加 open + fixed 定位 + 滚动/缩放监听）');
+  assert.match(HTML, /function closeRefPanel\(panel\)/, '有 closeRefPanel（清 fixed 内联样式 + 摘监听恢复兜底态）');
+  assert.match(HTML, /addEventListener\('scroll',panel\._onScroll,true\)/, '打开期间监听滚动(capture)跟随/收起面板');
+  assert.match(HTML, /z-index:9999/, '.ref-panel z-index 抬到抽屉(310)之上');
 });
 
 /* ================= E. 连真库冒烟（MySQL 起得来才跑，否则整组 skip） ================= */
