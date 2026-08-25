@@ -153,7 +153,8 @@ test('D2 server：/api/git-refs 是 admin 域 —— 不进 FIELD_OK / FS08_FIEL
 test('D3 server：lsRemoteRefs 用 git ls-remote --heads --tags（只读，不 clone）+ token 注入 + 超时', () => {
   const fn = extractFn(SRC, 'lsRemoteRefs');
   assert.match(fn, /ls-remote', '--heads', '--tags'/, 'ls-remote --heads --tags');
-  assert.match(fn, /oauth2:' \+ c\.token \+ '@'/, 'token 注入同 cloneRepo');
+  // 2026-08-25 Gitee 支持：token 注入抽到共享 authGitUrl(provider 化)，cloneRepo/lsRemoteRefs 复用同一函数（原内联 oauth2:'+c.token+'@ 语义在 authGitUrl 内，逐字不变见 git-provider.logic.test C/D）
+  assert.match(fn, /authGitUrl\(repoUrl, c\)/, 'token 注入走共享 authGitUrl（同 cloneRepo）');
   assert.match(fn, /timeout: 20000/, '20s 超时');
   assert.match(fn, /未配置 Git token/, '无 token 明确提示');
   assert.doesNotMatch(fn, /\bclone\b/, '绝不 clone（只读 ls-remote）');

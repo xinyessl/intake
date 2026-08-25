@@ -596,7 +596,7 @@ function lsRemoteRefs(repoUrl) {
   const c = readGitCfg();
   if (!repoUrl) return { branches: [], tags: [], error: '缺少仓库地址' };
   if (!c.token) return { branches: [], tags: [], error: '未配置 Git token' };
-  const authUrl = String(repoUrl).replace(/^(https?:\/\/)/, (m) => m + 'oauth2:' + c.token + '@');
+  const authUrl = authGitUrl(repoUrl, c);   // provider 化 token 注入（同 cloneRepo，别各写各的）
   try {
     const r = spawnSync('git', ['ls-remote', '--heads', '--tags', authUrl], { encoding: 'utf8', timeout: 20000 });
     if (r.status !== 0) { const msg = String((r.stderr || '') || (r.error && r.error.message) || '').replace(/oauth2:[^@]*@/g, 'oauth2:***@').trim().slice(0, 200); return { branches: [], tags: [], error: msg || ('ls-remote 失败（状态 ' + r.status + '）') }; }
@@ -1320,19 +1320,63 @@ function buildRetrieval({ query, deep, ver, subsystem }, specScored, kbScored, c
   };
 }
 
-// ===== Git 集成（GitLab）：贴 组/仓 地址 → 自动 id/名称/子系统；服务器 clone 到缓存供读 spec/版本 =====
+// ===== Git 集成（GitLab / Gitee）：贴 组/仓 地址 → 自动 id/名称/子系统；服务器 clone 到缓存供读 spec/版本 =====
+//   provider 分流：GitLab REST v4（PRIVATE-TOKEN 头，baseUrl+/api/v4）｜Gitee REST v5（access_token 查询参数，恒 https://gitee.com/api/v5）。
+//   provider 由 gitProvider(cfg) 判定：cfg.provider 显式优先，否则按 baseUrl host 推断（含 gitee.com → gitee，否则 gitlab）。用户无感（贴 gitee 地址即走 gitee）。
 const GIT_CFG_FILE = path.join(DATA_DIR, 'git-config.json');
 const REPOS_CACHE = path.join(DATA_DIR, 'repos');
+const GITEE_API_BASE = 'https://gitee.com/api/v5';   // Gitee REST base 恒定，不随 baseUrl 配的路径变
 function readGitCfg() { try { return JSON.parse(fs.readFileSync(GIT_CFG_FILE, 'utf8')) || {}; } catch { return {}; } }
 function writeGitCfg(c) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(GIT_CFG_FILE, JSON.stringify(c)); } catch {} }
 function maskTok(t) { t = String(t || ''); return t.length > 10 ? (t.slice(0, 6) + '……' + t.slice(-4)) : (t ? '已配置' : ''); }
 function gitBase() { return (readGitCfg().baseUrl || '').replace(/\/$/, ''); }
 function sanId(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'proj'; }
+// provider 判定：cfg.provider 显式优先（'gitlab'|'gitee'）；否则按 baseUrl host 推断（含 gitee.com → gitee，其余 gitlab）。缺省 gitlab（向后兼容）。
+function gitProvider(cfg) { const c = cfg || readGitCfg(); const p = String(c.provider || '').trim().toLowerCase(); if (p === 'gitee' || p === 'gitlab') return p; const base = String(c.baseUrl || ''); let host = ''; try { host = new URL(base).host.toLowerCase(); } catch { host = base.toLowerCase(); } return host.includes('gitee.com') ? 'gitee' : 'gitlab'; }
+// Gitee REST v5：GET https://gitee.com/api/v5<pathq>，access_token 查询参数认证；!ok 抛 message||HTTP status。
+async function giteeApi(pathq) { const c = readGitCfg(); if (!c.token) throw new Error('未配置 Git 集成（host + token）'); const p = String(pathq || ''); const sep = p.includes('?') ? '&' : '?'; const r = await fetch(GITEE_API_BASE + p + sep + 'access_token=' + encodeURIComponent(c.token)); const j = await r.json().catch(() => null); if (!r.ok) throw new Error((j && j.message) || ('HTTP ' + r.status)); return j; }
 async function glApi(pathq) { const c = readGitCfg(); if (!c.baseUrl || !c.token) throw new Error('未配置 Git 集成（host + token）'); const r = await fetch(gitBase() + '/api/v4' + pathq, { headers: { 'PRIVATE-TOKEN': c.token } }); const j = await r.json().catch(() => null); if (!r.ok) throw new Error((j && j.message) || ('HTTP ' + r.status)); return j; }
 function gitUrlPath(u) { try { u = String(u || '').trim().replace(/\.git$/, '').replace(/\/-\/.*$/, ''); const m = u.match(/^https?:\/\/[^/]+\/(.+)$/); return m ? m[1].replace(/\/$/, '') : String(u).replace(/^\/+|\/+$/g, ''); } catch { return ''; } }
 // 顶层 gitUrl 缺失时，从子系统仓地址反推「组/命名空间」地址（去掉末段 <repo>.git），保证卡片/编辑能显示 Git 已接
 function deriveGitUrl(proj) { if (proj && proj.gitUrl) return proj.gitUrl; const sub = ((proj && proj.subsystems) || []).find(s => s && s.repoUrl); return sub ? String(sub.repoUrl).replace(/\.git$/, '').replace(/\/[^/]+$/, '') : ''; }
-async function gitInspect(u) {   // 解析 URL → {id,name,gitUrl,subsystems:[{key,name,repoUrl}]}
+// token 注入到 https 克隆地址（供 cloneRepo / lsRemoteRefs 复用，别各写各的）。
+//   gitlab: https://oauth2:{token}@host/...（原逻辑，逐字不变）｜gitee: gitee.com 也用 oauth2:{token}@（Gitee 支持 oauth2 用户名 + token 密码；真仓 clone/ls-remote 已验）。
+function authGitUrl(repoUrl, cfg) {
+  const c = cfg || readGitCfg(); const tok = c.token; if (!repoUrl || !tok) return String(repoUrl || '');
+  // 两 provider 目前注入形式一致（oauth2:{token}@）；保留分支点便于 Gitee 若不支持时退回 https://{token}@。
+  return String(repoUrl).replace(/^(https?:\/\/)([^@/]*@)?/, (m, proto) => proto + 'oauth2:' + tok + '@');
+}
+// Gitee 单仓/owner 两分支解析。path 含 '/' → 单仓 /repos/{owner}/{repo}；无 '/' → owner，三级兜底列全部仓当子系统。
+async function gitInspectGitee(u) {
+  const p = gitUrlPath(u); if (!p) throw new Error('Git 地址无法解析');
+  // Gitee 反直觉：无 clone_url 字段，且 html_url 已自带 .git（如 …wzh2.0.git）。归一——先剥尾部 .git 和 / 再补一个 .git，避免 .git.git。
+  const cloneOf = (r) => { const base = String(r.clone_url || r.html_url || '').replace(/\.git$/, '').replace(/\/+$/, ''); return base ? base + '.git' : ''; };
+  const subOf = (r) => ({ key: r.path || r.name, name: r.full_name || r.name || r.path, desc: (r.description || '').trim(), repoUrl: cloneOf(r) });
+  if (p.includes('/')) {   // owner/repo → 单仓
+    const parts = p.split('/'); const owner = parts[0], repo = parts.slice(1).join('/');
+    const r = await giteeApi('/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(repo));
+    // 顶层 gitUrl 是「命名空间/仓」展示地址，不带 .git（Gitee html_url 自带 .git，需去掉）。
+    return { id: sanId(r.path || r.name || repo), name: r.full_name || r.name || repo, gitUrl: String(r.html_url || u).replace(/\.git$/, ''), subsystems: [subOf(r)] };
+  }
+  // 只 owner → 列该 owner 全部仓当子系统。三级兜底，任一非空即用：
+  //   ① /orgs（组织）→ ② /users（该用户公开仓）→ ③ /user/repos 再按 owner 过滤（当前 token 名下全部仓，含私有；覆盖个人号私有仓）。
+  const owner = p;
+  let repos = null;
+  try { repos = await giteeApi('/orgs/' + encodeURIComponent(owner) + '/repos?type=all&per_page=100'); } catch { repos = null; }
+  if (!Array.isArray(repos) || repos.length === 0) {
+    try { repos = await giteeApi('/users/' + encodeURIComponent(owner) + '/repos?type=all&per_page=100'); } catch { repos = null; }
+  }
+  if (!Array.isArray(repos) || repos.length === 0) {
+    // 当前 token 名下全部仓（含私有，跨多 owner），按 owner 过滤。per_page=100 为上限，>100 仓暂不翻页。
+    let all = null;
+    try { all = await giteeApi('/user/repos?type=all&per_page=100'); } catch { all = null; }
+    repos = (Array.isArray(all) ? all : []).filter(r => (r && r.namespace && r.namespace.path === owner) || String((r && r.full_name) || '').startsWith(owner + '/'));
+  }
+  const subs = (Array.isArray(repos) ? repos : []).map(subOf);
+  return { id: sanId(owner), name: owner, gitUrl: 'https://gitee.com/' + owner, subsystems: subs };
+}
+async function gitInspect(u) {   // 解析 URL → {id,name,gitUrl,subsystems:[{key,name,desc,repoUrl}]}；按 provider 分流
+  if (gitProvider() === 'gitee') return gitInspectGitee(u);
   const p = gitUrlPath(u); if (!p) throw new Error('Git 地址无法解析');
   let group = null;
   try { group = await glApi('/groups/' + encodeURIComponent(p)); } catch {}
@@ -1348,7 +1392,7 @@ async function gitInspect(u) {   // 解析 URL → {id,name,gitUrl,subsystems:[{
 function cloneRepo(projectId, key, repoUrl) {   // clone/pull 到缓存，返回本地路径（失败返回空）
   const c = readGitCfg(); if (!c.token || !repoUrl) return '';
   const dir = path.join(REPOS_CACHE, sanId(projectId), sanId(key) || 'main');
-  const authUrl = String(repoUrl).replace(/^(https?:\/\/)/, (m) => m + 'oauth2:' + c.token + '@');
+  const authUrl = authGitUrl(repoUrl, c);   // provider 化 token 注入（gitlab/gitee 统一走 authGitUrl）
   try {
     if (fs.existsSync(path.join(dir, '.git'))) { spawnSync('git', ['-C', dir, 'remote', 'set-url', 'origin', authUrl], { timeout: 20000 }); const r = spawnSync('git', ['-C', dir, 'fetch', '--all', '--tags', '--prune'], { timeout: 90000 }); return r.status === 0 ? dir : dir; }
     fs.mkdirSync(path.dirname(dir), { recursive: true });
@@ -1367,7 +1411,7 @@ function refreshRepos(proj, force) {
   for (const { dir, name } of repoDirsOf(proj)) {
     if (!fs.existsSync(path.join(dir, '.git'))) continue;
     try {
-      if (c.token) { const cur = gitOut(dir, ['remote', 'get-url', 'origin']).trim(); const clean = cur.replace(/^(https?:\/\/)([^@/]*@)?/, '$1'); const auth = clean.replace(/^(https?:\/\/)/, (m) => m + 'oauth2:' + c.token + '@'); spawnSync('git', ['-C', dir, 'remote', 'set-url', 'origin', auth], { timeout: 15000 }); }   // 重嵌当前 token，防轮换后拉不动
+      if (c.token) { const cur = gitOut(dir, ['remote', 'get-url', 'origin']).trim(); const clean = cur.replace(/^(https?:\/\/)([^@/]*@)?/, '$1'); const auth = authGitUrl(clean, c); spawnSync('git', ['-C', dir, 'remote', 'set-url', 'origin', auth], { timeout: 15000 }); }   // 重嵌当前 token（provider 化，同 cloneRepo），防轮换后拉不动
       const f = spawnSync('git', ['-C', dir, 'fetch', '--all', '--tags', '--prune', '--force'], { timeout: 90000 });
       spawnSync('git', ['-C', dir, 'reset', '--hard', '@{u}'], { timeout: 30000 });   // 工作树对齐远端默认分支（spec 无版本时读这里）
       const head = gitOut(dir, ['log', '-1', '--format=%h｜%ci｜%s']).trim();
@@ -6952,14 +6996,16 @@ const server = http.createServer((req, res) => {
       send(res, 200, JSON.stringify({ ok: true, syncedAt: fmtSyncAt(r.at), repos: r.repos || [], versions: listVersions(proj) }));
     });
   }
-  if (url.pathname === '/api/git-config') { const c = readGitCfg(); return send(res, 200, JSON.stringify({ baseUrl: c.baseUrl || '', tokenMask: maskTok(c.token), configured: !!(c.baseUrl && c.token) })); }
+  if (url.pathname === '/api/git-config') { const c = readGitCfg(); return send(res, 200, JSON.stringify({ baseUrl: c.baseUrl || '', tokenMask: maskTok(c.token), configured: !!(c.baseUrl && c.token), provider: gitProvider(c) })); }
   if (url.pathname === '/api/git-config-save' && req.method === 'POST') {
     return readBody(req, (b, err) => {
       if (!b) return send(res, 400, JSON.stringify({ ok: false, error: err }));
       const cur = readGitCfg();
       const c = { baseUrl: String(b.baseUrl || cur.baseUrl || '').trim().replace(/\/$/, ''), token: (b.token && String(b.token).trim()) ? String(b.token).trim() : cur.token };
+      // provider 可选显式覆盖（'gitlab'|'gitee'）；不传/非法则按 host 自动判（用户无感），不落无效值。
+      const pv = String(b.provider || '').trim().toLowerCase(); if (pv === 'gitlab' || pv === 'gitee') c.provider = pv; else if (cur.provider) c.provider = cur.provider;
       writeGitCfg(c);
-      send(res, 200, JSON.stringify({ ok: true, tokenMask: maskTok(c.token), configured: !!(c.baseUrl && c.token) }));
+      send(res, 200, JSON.stringify({ ok: true, tokenMask: maskTok(c.token), configured: !!(c.baseUrl && c.token), provider: gitProvider(c) }));
     });
   }
   if (url.pathname === '/api/git-inspect' && req.method === 'POST') {   // 解析 git 地址 → 自动 id/名称/子系统
