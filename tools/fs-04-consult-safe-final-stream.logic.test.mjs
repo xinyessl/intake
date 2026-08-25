@@ -24,6 +24,19 @@ const { startConsultSseHeartbeat } = new Function(
   SRC.slice(heartbeatStart, heartbeatEnd) + '\nreturn { startConsultSseHeartbeat };',
 )();
 
+const compactStart = SRC.indexOf('function consultHistoryMessages');
+const compactEnd = SRC.indexOf('// 咨询会在服务端收齐草稿', compactStart);
+assert.ok(compactStart >= 0 && compactEnd > compactStart);
+const errorLogs = [];
+const { consultHistoryMessages, compactConsultModelMessages, finishConsultSseError } = new Function(
+  'crypto',
+  'console',
+  SRC.slice(compactStart, compactEnd) + '\nreturn { consultHistoryMessages, compactConsultModelMessages, finishConsultSseError };',
+)(
+  { randomBytes: () => ({ toString: () => 'generated-id' }) },
+  { error: value => errorLogs.push(String(value)) },
+);
+
 const completionStart = FIELD.indexOf('function consultCompletionText');
 const completionEnd = FIELD.indexOf('// aborted=true', completionStart);
 assert.ok(completionStart >= 0 && completionEnd > completionStart);
@@ -151,6 +164,67 @@ test('安全终稿生成期间发送 SSE 注释心跳并在结束后停止', asy
   const consult = SRC.slice(consultStart, consultEnd);
   assert.match(consult, /res\.writeHead\([\s\S]*?startConsultSseHeartbeat\(res\)/);
   assert.match(consult, /sse\(\{ done: true[\s\S]*?stopSseHeartbeat\(\)[\s\S]*?res\.end\(\)/);
+});
+
+test('Q0010 长会话只压缩模型 payload，最近追问与 route 历史继续保留', () => {
+  const raw = [];
+  for (let round = 1; round <= 18; round++) {
+    raw.push({ role: 'user', content: `第${round}轮医嘱标记问题：` + '问题'.repeat(900) });
+    raw.push({ role: 'assistant', content: `第${round}轮已核回答：` + '回答'.repeat(1600) });
+  }
+  const currentQuestion = '我没完全听懂医嘱标记的排查建议，换成实施可以逐项照做的只读清单。' + '补充'.repeat(800);
+  raw.push({ role: 'user', content: currentQuestion });
+
+  const history = consultHistoryMessages(raw);
+  const compact = compactConsultModelMessages(history);
+  assert.equal(history.length, 24, '路由/持久化历史保持最近 24 条，连续 followup 有足够主题账本');
+  assert.ok(compact.length <= 12, '模型上下文最多保留 12 条最近消息');
+  assert.ok(compact.reduce((sum, message) => sum + message.content.length, 0) <= 16000, '模型历史正文受 16k 字符总预算约束');
+  assert.equal(compact.at(-1).content, currentQuestion, '当前 Q0010 问句在既有 4000 字上限内必须逐字保留');
+  assert.match(compact.at(-2).content, /第18轮已核回答/, '上一轮答复保留，支持“换成实施清单”的重述意图');
+
+  const consultStart = SRC.indexOf("if (url.pathname === '/api/consult'");
+  const consultEnd = SRC.indexOf("if (url.pathname === '/api/consult-to-intake'", consultStart);
+  const consult = SRC.slice(consultStart, consultEnd);
+  assert.match(consult, /const historyMsgs = consultHistoryMessages\(b\.messages\)/);
+  assert.match(consult, /const msgs = compactConsultModelMessages\(historyMsgs\)/);
+  assert.match(consult, /contextualRouteQuestion\(map, historyMsgs, qtext, sub\)/, 'route 继承使用较完整历史，不被模型 payload 裁剪削弱');
+  assert.match(consult, /callModelStream\(cfg, \{ system: consultPrompt, messages: msgs/, '只有模型 payload 使用紧凑历史');
+});
+
+test('consult 未预期异常发送可见 err + terminal done，并记录请求阶段', () => {
+  errorLogs.length = 0;
+  const writes = [];
+  const fakeRes = {
+    destroyed: false,
+    writableEnded: false,
+    headersSent: false,
+    writeHead(code, headers) { this.headersSent = true; this.code = code; this.headers = headers; },
+    write(chunk) { writes.push(String(chunk)); return true; },
+    end() { this.writableEnded = true; },
+  };
+  assert.equal(finishConsultSseError(fakeRes, new Error('audit exploded\nsecret body omitted'), { requestId: 'q0010-test', stage: 'answer_audit' }), true);
+  assert.equal(fakeRes.code, 200);
+  assert.match(fakeRes.headers['Content-Type'], /text\/event-stream/);
+  const events = writes.map(chunk => JSON.parse(chunk.replace(/^data:\s*/, '').trim()));
+  assert.equal(events.length, 2);
+  assert.deepEqual(events[0], {
+    err: true,
+    code: 'consult_internal_error',
+    requestId: 'q0010-test',
+    stage: 'answer_audit',
+    v: '（本次答疑处理异常，未能返回可发布内容，请稍后重试。错误编号：q0010-test。）',
+  });
+  assert.deepEqual(events[1], { done: true, error: true, requestId: 'q0010-test', stage: 'answer_audit' });
+  assert.equal(fakeRes.writableEnded, true);
+  assert.match(errorLogs[0], /\[consult-error\] request=q0010-test stage=answer_audit message=audit exploded secret body omitted/);
+
+  const consultStart = SRC.indexOf("if (url.pathname === '/api/consult'");
+  const consultEnd = SRC.indexOf("if (url.pathname === '/api/consult-to-intake'", consultStart);
+  const consult = SRC.slice(consultStart, consultEnd);
+  assert.match(consult, /void \(async \(\) => \{[\s\S]*?\}\)\(\)\.catch\(error => \{/,
+    'readBody 的 async consult 处理必须由端点自身接住 Promise rejection');
+  assert.match(consult, /stopSseHeartbeat\(\);[\s\S]*?finishConsultSseError\(res, error, \{ requestId: consultRequestId, stage: consultStage \}\)/);
 });
 
 test('实施端正常 EOF 无正文时显示明确错误而不是空气泡', () => {

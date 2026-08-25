@@ -912,7 +912,11 @@ function consultContextFollowupIntent(question) {
   // 这里只让它进入上下文裁决；后续显式新实体和直达 route 仍优先，单独开启的新会话也没有历史可继承。
   const reportedIssueFollowup = /^(?:医院|现场|实施|产品|开发|运维|对接方)[\s\S]{1,220}(?:先|下一步|怎么|如何|哪个验证|排查|检查|核对)/i.test(q);
   const subjectAnchoredProgress = /^(?=[^。！？；\n]{1,100}(?:这(?:一段|一步|个问题)|按这个顺序))[^。！？；\n]{1,180}(?:后面|下一步|先停|继续|怎么|如何)/i.test(q);
-  return anaphoric || progress || partialEvidence || topicAnchoredFollowup || reportedIssueFollowup || subjectAnchoredProgress;
+  // 题库/真实现场会把承接写成“我没完全听懂 X 的排查建议，换成实施清单”。
+  // 这不是新主题；既要保留上一答复供重述，也要继续继承 X 的 current route 事实。
+  const rephraseFollowup = /^(?:我)?(?:还|没|没有|不)?(?:完全)?(?:听懂|看懂|理解)[^。！？；\n]{0,120}(?:换成|改成|整理成|说成|再说|重新说|逐项|清单|步骤)/i.test(q)
+    || /^(?:把|请把)[^。！？；\n]{0,120}(?:排查建议|上次建议|刚才建议)[^。！？；\n]{0,80}(?:换成|改成|整理成)(?:实施|产品|研发)?/i.test(q);
+  return anaphoric || progress || partialEvidence || topicAnchoredFollowup || reportedIssueFollowup || subjectAnchoredProgress || rephraseFollowup;
 }
 
 function contextualRouteQuestion(map, messages, currentQuestion, subKey = '', contextDepth = 0) {
@@ -1644,7 +1648,7 @@ function consultConversationMode(question) {
   const identity = /^(?:(?:你好|您好|嗨|哈喽|hello|hi)[，,\s]*)?(?:请问)?(?:你是谁|你是(?:做什么|干嘛|干什么)的?|你能(?:帮我)?(?:做什么|干嘛|什么)|你可以帮我什么|你能帮什么|怎么称呼你|你叫什么(?:名字)?)(?:呀|啊|呢|吗)?$/i.test(q);
   if (identity) return 'identity';
   // 对话提示词可以带“行/好/那/你”等口头前后缀，不再逐句 exact 匹配；但同句出现事实实体/操作追问时必须退出对话模式。
-  const conversationalCue = /(?:冷漠|冷冰冰|生硬|机械|像机器人|没感情|不耐烦|温柔一点|友好一点|自然一点|耐心一点|口语一点|简单(?:一)?点(?:说)?|说简单(?:一)?点|简短(?:一)?点|直白(?:一)?点|别(?:这么|那么)?官方|换(?:个|一种)说法|换句话说|再解释(?:一下|一遍)?|再说(?:清楚)?(?:一下|一遍)|重说(?:一下|一遍)|说人话|讲简单(?:一)?点|我没听懂|我没看懂|没听懂|没看懂|你刚才是什么意思)/i.test(q);
+  const conversationalCue = /(?:冷漠|冷冰冰|生硬|机械|像机器人|没感情|不耐烦|温柔一点|友好一点|自然一点|耐心一点|口语一点|简单(?:一)?点(?:说)?|说简单(?:一)?点|简短(?:一)?点|直白(?:一)?点|别(?:这么|那么)?官方|换(?:个|一种)说法|换句话说|再解释(?:一下|一遍)?|再说(?:清楚)?(?:一下|一遍)|重说(?:一下|一遍)|说人话|讲简单(?:一)?点|我没(?:完全)?听懂|我没(?:完全)?看懂|没(?:完全)?听懂|没(?:完全)?看懂|你刚才是什么意思)/i.test(q);
   if (!conversationalCue) return '';
   const factEntity = /(?:按钮|菜单|页面|入口|接口|字段|哪张表|表名|数据库|配置|开关|权限|角色|状态|规则|业务|步骤|路径|地址|缓存|日志|源码|代码|服务|controller|service|proxy|etl|interfacecode|v_[a-z0-9_]+|pwrsapi|患者|医嘱|药品|收费|监护|患教|反馈)/i.test(q);
   const contextualFactRequest = /(?:这个|那个|它|该功能|该接口|该按钮|那)[^，。；]{0,20}(?:到底|具体|应该|该|怎么|如何|哪个|哪儿|能不能用|可不可以)/i.test(q);
@@ -2070,6 +2074,69 @@ function consultNormalizeSafeMarkdown(text) {
   while (lines.length && !lines.at(-1).trim()) lines.pop();
   while (lines.length && /[：:]\s*(?:\*\*|__)?\s*$/u.test(lines.at(-1))) lines.pop();
   return lines.join('\n').trim();
+}
+
+// 浏览器会把整段咨询历史回传；路由继承仍需要最近若干轮用户问题，但模型不需要
+// 每轮都携带 4k 全文。先保留一个有界的“事实/路由历史”，再为模型做更紧凑的
+// 二次裁剪：最近消息优先，当前问题必保留，上一轮回答仍足够支持“换成实施清单”
+// 这类 context_followup。裁剪只影响模型 payload，不改变 current route 的独立事实注入。
+function consultHistoryMessages(messages, options = {}) {
+  const maxMessages = Math.max(2, Number(options.maxMessages) || 24);
+  const perMessageChars = Math.max(200, Number(options.perMessageChars) || 4000);
+  return (Array.isArray(messages) ? messages : [])
+    .filter(message => message && message.content)
+    .slice(-maxMessages)
+    .map(message => ({
+      role: message.role === 'assistant' ? 'assistant' : 'user',
+      content: String(message.content).slice(0, perMessageChars),
+    }));
+}
+
+function compactConsultModelMessages(messages, options = {}) {
+  const rows = consultHistoryMessages(messages, {
+    maxMessages: Number(options.maxMessages) || 12,
+    perMessageChars: Math.max(Number(options.userChars) || 1800, Number(options.assistantChars) || 2400),
+  });
+  const maxChars = Math.max(1000, Number(options.maxChars) || 16000);
+  const userChars = Math.max(200, Number(options.userChars) || 1800);
+  const assistantChars = Math.max(200, Number(options.assistantChars) || 2400);
+  const currentUserChars = Math.max(userChars, Number(options.currentUserChars) || 4000);
+  const kept = [];
+  let used = 0;
+  for (let index = rows.length - 1; index >= 0; index--) {
+    const row = rows[index];
+    const limit = row.role === 'assistant' ? assistantChars : (index === rows.length - 1 ? currentUserChars : userChars);
+    let content = String(row.content || '').slice(0, limit);
+    const remaining = maxChars - used;
+    if (remaining <= 0) break;
+    if (content.length > remaining) content = content.slice(0, remaining);
+    if (!content.trim()) continue;
+    kept.push({ role: row.role, content });
+    used += content.length;
+  }
+  return kept.reverse();
+}
+
+// /api/consult 一旦已经建立 SSE，任何未预期异常都必须在同一连接上留下可见错误
+// 和 terminal done；不能依赖全局 unhandledRejection 日志，更不能让浏览器只收到 EOF。
+// 只回传请求编号和安全阶段名，不把 prompt、历史正文或密钥写进日志/响应。
+function finishConsultSseError(res, error, options = {}) {
+  const requestId = String(options.requestId || '').trim() || crypto.randomBytes(5).toString('hex');
+  const stage = String(options.stage || 'unknown').trim().slice(0, 48) || 'unknown';
+  const message = String((error && error.message) || error || 'unknown error').replace(/[\r\n]+/g, ' ').slice(0, 500);
+  console.error(`[consult-error] request=${requestId} stage=${stage} message=${message}`);
+  if (!res || res.destroyed || res.writableEnded) return false;
+  try {
+    if (!res.headersSent) res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' });
+    const visible = `（本次答疑处理异常，未能返回可发布内容，请稍后重试。错误编号：${requestId}。）`;
+    res.write('data: ' + JSON.stringify({ err: true, code: 'consult_internal_error', requestId, stage, v: visible }) + '\n\n');
+    res.write('data: ' + JSON.stringify({ done: true, error: true, requestId, stage }) + '\n\n');
+    res.end();
+    return true;
+  } catch {
+    try { res.end(); } catch {}
+    return false;
+  }
 }
 
 // 咨询会在服务端收齐草稿并完成发布前审计，首个正文块可能晚于反向代理的
@@ -5748,28 +5815,35 @@ const server = http.createServer((req, res) => {
     });
   }
   if (url.pathname === '/api/consult' && req.method === 'POST') {   // 答疑：直连 spec + 经验库直接回答 + 给解决思路
-    return readBody(req, async (b, err) => {
+    return readBody(req, (b, err) => {
+      const consultRequestId = crypto.randomBytes(5).toString('hex');
+      let consultStage = 'preflight';
+      let stopSseHeartbeat = () => {};
+      void (async () => {
       if (!b) return send(res, 400, JSON.stringify({ ok: false, error: err }));
       const proj = projById(link ? link.project : b.project); if (!proj) return send(res, 400, JSON.stringify({ ok: false, error: '请先选择所属系统' }));   // FS-06 AC-C3/C4：访客咨询归属强制取 link.project（前端 project 被忽略，与 intake-submit/chat 一致）；登录用户 link 为空、取 b.project 不变
-      const msgs = (Array.isArray(b.messages) ? b.messages : []).filter(m => m && m.content).slice(-24).map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content).slice(0, 4000) }));
-      if (!msgs.length) return send(res, 400, JSON.stringify({ ok: false, error: 'empty' }));
+      const historyMsgs = consultHistoryMessages(b.messages);
+      const msgs = compactConsultModelMessages(historyMsgs);
+      if (!historyMsgs.length || !msgs.length) return send(res, 400, JSON.stringify({ ok: false, error: 'empty' }));
       res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' });   // SSE 流式
-      const stopSseHeartbeat = startConsultSseHeartbeat(res);   // 审计前无正文期间保活，避免代理空闲超时截断成前端空气泡
+      stopSseHeartbeat = startConsultSseHeartbeat(res);   // 审计前无正文期间保活，避免代理空闲超时截断成前端空气泡
       const sse = o => {
         if (res.destroyed || res.writableEnded) return false;
         try { res.write('data: ' + JSON.stringify(o) + '\n\n'); return true; } catch { return false; }
       };
       const ac = new AbortController(); res.on('close', () => { if (!res.writableEnded) ac.abort(); });   // 客户端断连/点"停止"（响应未正常结束）→ 中止上游模型调用
       const cfg = readModelCfg();
+      consultStage = 'refresh';
       try { refreshRepos(proj, false); } catch {}
-      const lastUser = [...msgs].reverse().find(m => m.role === 'user'); const qtext = lastUser ? lastUser.content : '';
+      const lastUser = [...historyMsgs].reverse().find(m => m.role === 'user'); const qtext = lastUser ? lastUser.content : '';
       const conversationMode = consultConversationMode(qtext);   // pure=纯对话；mixed=表达诉求+事实题；二者都不走机械miss，mixed仍由证据守卫约束事实
       const conversationalTurn = conversationMode === 'pure';
-      const retrievalQuery = expandRetrievalQuery(msgs, qtext);   // “它/这个/那…”短追问用上一条 user 问题补实体；只影响检索，不把旧答案当事实
+      const retrievalQuery = expandRetrievalQuery(historyMsgs, qtext);   // “它/这个/那…”短追问用上一条 user 问题补实体；只影响检索，不把旧答案当事实
       const sub = String(b.subsystem || '').trim();   // 用户指定的子系统（空=全部）
       const imgs = (Array.isArray(b.images) ? b.images : []).slice(0, 6);   // 本轮附的截图（data URL，≤6）→ 多模态并进末条 user，让 AI 结合图答疑；落库见下方 convId 已知处
       // PD-03：改用带分变体 kbRetrieveScored 一次性拿「带分结果」——hits（喂模型 + kbRefs）由它 .map(x=>x.e) 派生（同 kbRetrieve 召回口径：同 _kbScored/同排序/同 slice/同 minScore=2），
       //   避免为「检索捕获」再对 query 多做一次 embedding 调用（复用同一次计算）。检索异常不阻断咨询：失败即按无命中。
+      consultStage = 'retrieval';
       let hits = [], kbScored = [];
       try { kbScored = await kbRetrieveScored(proj.id, retrievalQuery, 5, 2); hits = kbScored.map(x => x.e); } catch { hits = []; kbScored = []; }
       // consult 专用二次门槛：全局 SEM_GATE(0.42) 召回口径下 sim=0.42 的边缘条目也会进 kbScored（与提问相关度很弱、易误引）。
@@ -5778,7 +5852,8 @@ const server = http.createServer((req, res) => {
       hits = consultKbFilter(kbScored).map(x => x.e);
       const cver = String(b.version || '').trim();
       // PD-04：先按提问路由到功能模块（仅对有「功能模块地图」的产品生效）。无地图 → map=null → 完全走原 specSearch（向后兼容）。
-      let route = null; try { const map = loadModuleMap(proj, cver); if (map) route = contextualRouteQuestion(map, msgs, qtext, sub); } catch { route = null; }
+      consultStage = 'routing';
+      let route = null; try { const map = loadModuleMap(proj, cver); if (map) route = contextualRouteQuestion(map, historyMsgs, qtext, sub); } catch { route = null; }
       const hasMap = !!route;   // 有地图且已跑路由
       const routeMiss = hasMap && !route.matched;   // 路由未命中任何功能模块
       // PD-04 修复：specSearch 始终作底座（有地图也跑）——用带分变体 specSearchScored（同 specSearch 召回口径 + 额外带 score），
@@ -5843,10 +5918,12 @@ const server = http.createServer((req, res) => {
       else {
         // PD-04：命中 mustNotConfuse → 作负向提示注入 system（易混淆项，勿臆造）。answerFacts 已在 specHits 顶段（consultSystem 走 specExcerpts）。
         const mncNote = routeMnc.length ? '\n【以下为该问题的易混淆项，请勿臆造、勿张冠李戴】' + routeMnc.map(x => '\n· ' + x).join('') : '';
+        consultStage = 'prompt';
         const consultPrompt = consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + consultAudienceGuard(qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationMode) + '\n' + consultEvidenceLedgerGuard(qtext, route) + '\n' + consultCurrentRulingGuard(qtext, route) + '\n' + consultRuleApplicationGuard(qtext, route) + '\n' + consultPatientIdentityGuard(qtext, route) + '\n' + consultCriticalContextGuard(qtext, route) + '\n' + consultFocusedFactGuard(qtext) + '\n' + consultExactPathBoundaryGuard(qtext, route) + '\n' + consultGenericControlledActionGuard(qtext) + '\n' + consultOperationalSafetyGuard(qtext, route) + '\n' + consultFileArtifactGuard(qtext, route) + '\n' + consultDiagnosticGuard(qtext, route) + '\n' + consultNonDestructiveDiagnosticGuard(qtext, route) + '\n' + consultFinalActionConsistencyGuard(qtext, route) + '\n' + consultEvidenceLikelihoodGuard(qtext, route) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : '');
         let draft = '', firstError = null;
         try {
           // 先完整生成到服务端内存，发布前做确定性语义校验；未通过的草稿绝不先流给浏览器。
+          consultStage = 'model_draft';
           await callModelStream(cfg, { system: consultPrompt, messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
             piece = String(piece == null ? '' : piece); if (piece) draft += piece;
           }, ac.signal);
@@ -5856,6 +5933,7 @@ const server = http.createServer((req, res) => {
         }
 
         if (draft.trim()) {
+          consultStage = 'answer_audit';
           const initialAudit = consultAnswerSemanticAudit(draft, qtext, route);
           let finalAudit = initialAudit;
           let revisionAudit = null;
@@ -5937,11 +6015,13 @@ const server = http.createServer((req, res) => {
           if (!kbInjected && kbRefs.length) { kbInjected = true; sse({ kb: kbRefs, kbInjected: true }); }
           reply = await publishSafeFinal(reply);
         } else if (firstError && !stopped) {
-          const m = '（AI 暂时连不上：' + String((firstError && firstError.message) || firstError) + '，稍后再试。）'; reply = await publishSafeFinal(m, { err: true });
+          console.error(`[consult-error] request=${consultRequestId} stage=model_draft message=${String((firstError && firstError.message) || firstError).replace(/[\r\n]+/g, ' ').slice(0, 500)}`);
+          const m = `（AI 暂时连不上，请稍后重试。错误编号：${consultRequestId}。）`; reply = await publishSafeFinal(m, { err: true, code: 'consult_model_error', requestId: consultRequestId, stage: 'model_draft' });
         }
       }
       reply = reply.trim();
       // 持久化答疑会话（含部分/停止的内容），随聊随存、可在「我的提交」找回（type=consult，默认不进开发工单收件箱）
+      consultStage = 'persist';
       let convId = String(b.convId || '').trim();
       if (reply) try {
         const store = CACHE.intakes[proj.id] || {};
@@ -5958,9 +6038,9 @@ const server = http.createServer((req, res) => {
         } catch {}
         const reporter = user ? (user.name || user.username) : (link ? link.name : '现场');
         // 标题取「第一句问话」（会话原始问题），续聊保留原标题 —— 避免被后续消息（如手打「转工单」）覆盖成无意义标题。
-        const firstUser = msgs.find(m => m.role === 'user');
-        const title = (prev && String(prev.title || '').trim()) ? prev.title : (((firstUser && firstUser.content) || (msgs[0] && msgs[0].content) || '系统咨询').replace(/\s+/g, ' ').trim().slice(0, 60));
-        const chat = [...msgs.map(x => ({ role: x.role, text: x.content })), { role: 'assistant', text: reply, ts: Date.now() }];
+        const firstUser = historyMsgs.find(m => m.role === 'user');
+        const title = (prev && String(prev.title || '').trim()) ? prev.title : (((firstUser && firstUser.content) || (historyMsgs[0] && historyMsgs[0].content) || '系统咨询').replace(/\s+/g, ' ').trim().slice(0, 60));
+        const chat = [...historyMsgs.map(x => ({ role: x.role, text: x.content })), { role: 'assistant', text: reply, ts: Date.now() }];
         // Part B（per-message media · consult）：consult 每轮用整段 msgs 重建 chat（会丢前几轮消息级 media）——
         //   ① 先把上一版 prev.chat 里 user 消息带的 media 按「第 K 条 user」顺序回贴到重建后的 chat；② 再把本轮新增图挂到「最后一条 user」（=本轮发言）。
         //   前端 msgs 只有 {role,content} 无 media，故必须从 prev.chat 补齐历史轮，避免 reopen 时旧轮图丢失。
@@ -5986,10 +6066,15 @@ const server = http.createServer((req, res) => {
         } catch {}
         const rec = { id: convId, type: 'consult', project: proj.id, version: String(b.version || '').trim() || (link ? link.ver : ''), site: String(b.site || '').trim() || (link ? link.site : ''), subsystem: sub, module: '', title, priority: '', reporter, role: user ? user.role : 'field', contact: '', media, status: '沟通中', lifecycle: '已答复', assignee: '', analysis: null, resolution: {}, chat, submittedAt: (prev && prev.submittedAt) || nowStamp(), updatedAt: nowStamp() };
         await saveIntake(proj, rec);
-      } catch (e) { convId = ''; }
+      } catch (e) { convId = ''; throw e; }
+      consultStage = 'done';
       sse({ done: true, convId, kbHits: kbInjected ? kbRefs.length : 0, stopped, answerStream });
       stopSseHeartbeat();
       try { res.end(); } catch {}
+      })().catch(error => {
+        stopSseHeartbeat();
+        finishConsultSseError(res, error, { requestId: consultRequestId, stage: consultStage });
+      });
     });
   }
   if (url.pathname === '/api/consult-to-intake' && req.method === 'POST') {   // FS-04：咨询答疑「转工单」——把一条 consult 记录建成真实工单（待处理），交运营端评审。不跑 AI（咨询里已讨论过）。现场+管理员可调（已进 FIELD_OK/FS08_FIELD_API）。

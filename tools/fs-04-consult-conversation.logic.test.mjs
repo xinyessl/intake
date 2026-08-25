@@ -37,7 +37,7 @@ test('答疑受众按问句意图分层：普通业务默认产品，现场诊�
   for (const q of ['医嘱标记现在是怎么实现的？', '这个功能是什么？', '支持哪些业务场景？', '业务规则和状态边界是什么？']) {
     assert.equal(audienceMode(q), 'product', q);
   }
-  for (const q of ['现场怎么排查？', '复测到这里下一步怎么查？', '转开发前给我一份只读清单', '只有截图，怎么判断到哪一层？', '今天视图请求和响应抓到了，重点核什么？', '怎么只读核对时间？', '怎么只读核时间？']) {
+  for (const q of ['现场怎么排查？', '复测到这里下一步怎么查？', '转开发前给我一份只读清单', '只有截图，怎么判断到哪一层？', '今天视图请求和响应抓到了，重点核什么？', '怎么只读核对时间？', '怎么只读核时间？', '我没完全听懂医嘱标记的排查建议，换成实施可以逐项照做的只读清单。']) {
     assert.equal(audienceMode(q), 'implementation', q);
   }
   for (const q of ['具体接口路径和字段是什么？', '从 Controller 到 Mapper 的开发链路在哪？', 'SQL 查哪张表？', '这段代码在哪个 Java 类实现？']) {
@@ -135,6 +135,7 @@ test('系统事实题或情绪夹带事实追问仍走证据门', () => {
 test('三态分流：纯对话、混合意图、纯事实严格区分', () => {
   assert.equal(mode('行，那你简单点说'), 'pure');
   assert.equal(mode('别这么冷漠，直白点告诉我这个按钮到底点哪个'), 'mixed');
+  assert.equal(mode('我没完全听懂医嘱标记的排查建议，换成实施可以逐项照做的只读清单。'), 'mixed');
   assert.equal(mode('简单点说，最终 ETL 就是 V_IPT_PATIENT 吗？'), 'mixed');
   assert.equal(mode('这个红色按钮到底点哪个？'), '');
 });
@@ -2848,7 +2849,7 @@ test('模糊的“第二步对不上”仍须先给规则条件分支，不能�
 });
 
 test('consult prompt 同时注入规则应用、运行安全、文件验收与现场诊断，顺序固定', () => {
-  const call = SRC.match(/consultSystem\(proj, cver, hits, specHits, codeHits, qtext\)[\s\S]{0,1100}?messages: msgs/);
+  const call = SRC.match(/consultSystem\(proj, cver, hits, specHits, codeHits, qtext\)[\s\S]{0,1800}?messages: msgs/);
   assert.ok(call, '应定位 consult 模型调用');
   assert.ok(call[0].indexOf('consultAudienceGuard(qtext)') > call[0].indexOf('consultSystem('));
   assert.ok(call[0].indexOf('consultAudienceGuard(qtext)') < call[0].indexOf('currentTurnEvidenceGuard'));

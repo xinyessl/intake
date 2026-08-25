@@ -230,6 +230,35 @@ test('承接型诊断追问衰减继承上一轮专用QR；显式新实体覆盖
   assert.equal(progressRoute.contextOverride, true);
 });
 
+test('Q0010 换成实施只读清单继续继承上一轮业务 route，不把重述当新主题', () => {
+  const S = buildRoutingSandbox(makeDeps());
+  const map = {
+    questionRoutes: [{
+      id: 'AUD-QR-MK-02',
+      title: '医嘱标记完整链路',
+      aliases: ['医嘱标记现在是怎么实现的', '医嘱标记排查建议', '把医嘱标记从入口、接口或数据到外部依赖的链路串起来'],
+      keywords: ['医嘱标记', '住院药师', '标记列表', '只读清单'],
+      answerFacts: ['住院医嘱标记供药师查看、添加、取消和导出。', '已确认主接口与数据状态。'],
+      searchText: '医嘱标记 住院药师 标记列表 排查建议 只读清单',
+    }],
+    specs: [], indexes: {},
+  };
+  const messages = [
+    { role: 'user', content: '医嘱标记现在是怎么实现的？' },
+    { role: 'assistant', content: '上一轮业务回答。' },
+    { role: 'user', content: '住院药师复测时发现医嘱标记结果与预期不一致，第一步先核什么？' },
+    { role: 'assistant', content: '上一轮排查建议。' },
+    { role: 'user', content: '把医嘱标记从入口、接口或数据到外部依赖的链路串起来。' },
+    { role: 'assistant', content: '上一轮链路回答。' },
+    { role: 'user', content: '我没完全听懂医嘱标记的排查建议，换成实施可以逐项照做的只读清单。' },
+  ];
+  const hit = S.contextualRouteQuestion(map, messages, messages.at(-1).content, '');
+  assert.equal(hit.route.id, 'AUD-QR-MK-02');
+  assert.equal(hit.inherited, true);
+  assert.equal(hit.factLedger, true);
+  assert.match(hit.answerFacts.join('\n'), /已确认主接口与数据状态/);
+});
+
 test('接口权限自然问法族优先专用QR，并同时保留功能授权缺口与业务数据边界', () => {
   const S = buildRoutingSandbox(makeDeps());
   const map = {
@@ -1172,7 +1201,7 @@ test('AC-6 无地图产品：loadModuleMap 返 null（consult 回落 specSearch�
 
 test('AC-6 无地图产品：consult 源码分支——map=null 才走 specSearch（源码级断言）', () => {
   // 有地图 → route 命中/miss 走新分支；无地图（map falsy）→ specHits = specSearch(...)（原行为）
-  assert.match(SRC, /const map = loadModuleMap\(proj, cver\); if \(map\) route = contextualRouteQuestion\(map, msgs, qtext, sub\)/, 'consult 先加载地图，再结合当前对话做可审计路由');
+  assert.match(SRC, /const map = loadModuleMap\(proj, cver\); if \(map\) route = contextualRouteQuestion\(map, historyMsgs, qtext, sub\)/, 'consult 先加载地图，再结合较完整历史做可审计路由');
   assert.match(SRC, /specHits = specSearch\(proj, cver, retrievalQuery, 5, sub\);\s+\/\/ 无地图产品/, '无地图分支仍用 specSearch');
   // PD-04 修复：miss 固定话术条件多了 specNoSpec（specSearch 底座也弱/空）——specSearch 强匹配时即便路由 miss 也不再走固定话术。
   assert.match(SRC, /const noAnswer = !conversationMode && !safeDiagnostic && routeMiss && specNoSpec && !\(b\.deep && codeHits && codeHits\.length\)/, '纯事实题 miss 且 specSearch 弱/空→noAnswer；纯对话/混合表达与安全诊断不走机械短路');
