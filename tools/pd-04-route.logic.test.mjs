@@ -60,12 +60,13 @@ function buildRoutingSandbox(deps) {
     extractFn(SRC, 'consultScopeTechnicalTokens') + '\n' +
     extractFn(SRC, 'contextualRouteQuestion') + '\n' +
     extractFn(SRC, 'extractSection') + '\n' +
+    extractFn(SRC, 'routeEvidenceExcerpt') + '\n' +
     extractFn(SRC, 'loadModuleMap') + '\n' +
     extractFn(SRC, 'moduleMapRepo') + '\n' +
     extractFn(SRC, 'loadRouteContext') + '\n' +
     extractFn(SRC, 'assembleConsultSpecHits') + '\n' +
     extractFn(SRC, 'routingDiag') + '\n' +
-    'return { routeScorer, routeQuestion, contextualRouteQuestion, extractSection, loadModuleMap, moduleMapRepo, loadRouteContext, assembleConsultSpecHits, routingDiag, ROUTE_MATCH_MIN, SPEC_MIN_RELEVANT };';
+    'return { routeScorer, routeQuestion, contextualRouteQuestion, extractSection, routeEvidenceExcerpt, loadModuleMap, moduleMapRepo, loadRouteContext, assembleConsultSpecHits, routingDiag, ROUTE_MATCH_MIN, SPEC_MIN_RELEVANT };';
   return new Function('kbTokenize', 'safeRef', 'specSources', 'specFileText', body)(
     kbTokenize, deps.safeRef, deps.specSources, deps.specFileText,
   );
@@ -1104,6 +1105,22 @@ test('AC-3 extractSection：anchor 定位不到 → 退回该 spec 前段（不�
   const sec = S.extractSection(full, { section: '不存在的章节标题xyz', anchor: '不存在xyz' });
   assert.ok(sec.length > 0, '退回前段而非空');
   assert.doesNotMatch(sec, /^---/, '去掉 front-matter');
+});
+
+test('Q0009 长接口章节：800字紧凑节选保留全部接口签名与状态/数据边界，不只留下第一个接口', () => {
+  const S = buildRoutingSandbox(makeDeps());
+  const filler = '普通字段说明'.repeat(90);
+  const full = `## 接口契约\n### 4.1 列表\nGET /auditapi/audit/ipt/collects\n${filler}\n### 4.2 新增\nPOST /auditapi/audit/ipt/task/collect\n${filler}\n### 4.3 取消\nDELETE /auditapi/audit/ipt/collect\n${filler}\n### 4.4 导出\nGET /auditapi/comm/ipt/collects/excel\n${filler}\n软删除写 audit_ipt_collect.deleted=1，不物理删除。\n## 下一节\n不应进入。`;
+  const section = S.extractSection(full, { section: '接口契约', anchor: '接口契约' });
+  assert.ok(section.length > 900, '精确章节定位不再在 900 字静默截断');
+  assert.doesNotMatch(section, /不应进入/);
+  const excerpt = S.routeEvidenceExcerpt(section, 800);
+  assert.ok(excerpt.length <= 800, '实际 route hit 保持紧凑');
+  assert.match(excerpt, /GET \/auditapi\/audit\/ipt\/collects/);
+  assert.match(excerpt, /POST \/auditapi\/audit\/ipt\/task\/collect/);
+  assert.match(excerpt, /DELETE \/auditapi\/audit\/ipt\/collect/);
+  assert.match(excerpt, /GET \/auditapi\/comm\/ipt\/collects\/excel/);
+  assert.match(excerpt, /audit_ipt_collect\.deleted=1/);
 });
 
 test('AC-1/AC-5 loadModuleMap 读产品仓地图；loadRouteContext 读被引章节 + answerFacts 置顶', () => {

@@ -1017,7 +1017,8 @@ function contextualRouteQuestion(map, messages, currentQuestion, subKey = '', co
     directCandidate: direct.matched ? { id: directId, title: direct.route && direct.route.title, score: direct.score } : null,
   };
 }
-// 从 spec 正文按标题/锚点定位截取「指定章节」；定位不到 → 退回该 spec 前段。返回截取文本（≤900）。
+// 从 spec 正文按标题/锚点定位截取「指定章节」；定位不到 → 退回该 spec 前段。
+// 精确命中的章节先完整保留，再由 routeEvidenceExcerpt 做可验证紧凑节选；不能在固定前缀静默截掉后续接口。
 function extractSection(fullText, ref) {
   const body = String(fullText || '');
   if (!body) return '';
@@ -1043,9 +1044,40 @@ function extractSection(fullText, ref) {
     const hm = lines[i].match(/^(#{1,6})\s+/);
     if (hm && hm[1].length <= startLevel) break;   // 遇到同级/更高级标题 → 章节结束
     out.push(lines[i]);
-    if (out.join('\n').length > 1200) break;
   }
-  return out.join('\n').trim().slice(0, 900);
+  return out.join('\n').trim();
+}
+// 人工 route 的长章节紧凑节选：逐字保留所有 HTTP 方法/路径，再按标题、状态/权限/数据/依赖等契约行补齐。
+// 只做抽取与重排，不改写业务事实；输出仍≤max，避免单一长章节挤占整个模型上下文。
+function routeEvidenceExcerpt(sectionText, max = 800) {
+  const raw = String(sectionText || '').trim();
+  if (!raw || raw.length <= max) return raw;
+  const lines = raw.split('\n').map((text, index) => ({ text: text.trim(), index })).filter(x => x.text);
+  const signatures = [...new Set(Array.from(raw.matchAll(/\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/[A-Za-z0-9_?&=./:{}*\-]+/g), m => m[0]))];
+  const prefix = '【长章节精确证据节选】';
+  const signatureLine = signatures.length ? `接口签名：${signatures.join('；')}` : '';
+  const chosen = new Set();
+  const charLen = () => prefix.length + (signatureLine ? signatureLine.length + 1 : 0) + [...chosen].reduce((n, i) => n + lines[i].text.length + 1, 0);
+  const tryAdd = i => {
+    if (chosen.has(i)) return;
+    const next = charLen() + lines[i].text.length + 1;
+    if (next <= max) chosen.add(i);
+  };
+  const ranked = lines.map((line, i) => {
+    const s = line.text;
+    let score = 0;
+    if (/^#{1,6}\s+/.test(s)) score += 80;
+    if (/\b(?:GET|POST|PUT|PATCH|DELETE)\s+\//.test(s)) score += 100;
+    if (/(?:NEEDS-HUMAN|软删除|deleted\s*=\s*[01]|不物理删除|权限|认证|安全|入口|外部|依赖|数据源|持久|表\b|写入|只读)/iu.test(s)) score += 70;
+    if (/`[^`]+`|\b[a-z][a-z0-9]*_[a-z0-9_]+\b/.test(s)) score += 35;
+    return { i, score, index: line.index };
+  });
+  // 先锁定章节标题与高价值契约行；同分保持原文顺序。
+  for (const item of ranked.sort((a, b) => b.score - a.score || a.index - b.index)) if (item.score > 0) tryAdd(item.i);
+  // 有余量再按原文顺序补普通说明，使节选仍可读。
+  for (let i = 0; i < lines.length; i++) tryAdd(i);
+  const body = [...chosen].sort((a, b) => lines[a].index - lines[b].index).map(i => lines[i].text);
+  return [prefix, signatureLine, ...body].filter(Boolean).join('\n').slice(0, max);
 }
 // 命中后取内容：读 primaryRefs(+contextRefs) 指定章节组装 specHits；answerFacts 作最高优段注入、mustNotConfuse 作负向提示。
 //   返回 { specHits:[{subsystem,module,title,section,text}], mustNotConfuse:[...] }。specHits 结构与 specSearch 输出兼容（喂 consultSystem）。
@@ -1074,9 +1106,9 @@ function loadRouteContext(proj, ver, routeResult) {
     if (seen.has(dk)) continue; seen.add(dk);
     let full = repoPath ? specFileText(repoPath, ref, rel) : '';
     if (!full || !full.trim()) continue;   // 读不到该 spec 文件 → 跳过（不臆造）
-    const sec = extractSection(full, r);
+    const sec = routeEvidenceExcerpt(extractSection(full, r), 800);
     if (!sec) continue;
-    specHits.push({ subsystem: '', module: String((r && r.specId) || ''), title: String((r && (r.section || r.title)) || ''), section: String((r && r.section) || ''), text: sec.slice(0, 800), routeRefKind: tagged.routeRefKind });
+    specHits.push({ subsystem: '', module: String((r && r.specId) || ''), title: String((r && (r.section || r.title)) || ''), section: String((r && r.section) || ''), text: sec, routeRefKind: tagged.routeRefKind });
   }
   return { specHits, mustNotConfuse: (routeResult && routeResult.mustNotConfuse) || [] };
 }
