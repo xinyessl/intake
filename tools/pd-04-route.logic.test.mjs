@@ -259,6 +259,51 @@ test('Q0010 换成实施只读清单继续继承上一轮业务 route，不把�
   assert.match(hit.answerFacts.join('\n'), /已确认主接口与数据状态/);
 });
 
+test('Q0014 当前问句完整命中唯一 route title 时强制显式切题，不被 FAQ 或相邻实体盖掉', () => {
+  const S = buildRoutingSandbox(makeDeps());
+  const map = {
+    questionRoutes: [
+      {
+        id: 'AUD-QR-FAQ-01', title: '审方关键接口与边界 FAQ',
+        aliases: ['HIS 审方入口是哪个接口？'], keywords: ['关键接口', '边界', '入口', '处理链', '当前实现'],
+        answerFacts: ['宽泛 FAQ。'], searchText: '审方关键接口与边界 FAQ 关键入口 接口 边界 处理链 当前实现',
+      },
+      {
+        id: 'AUD-QR-MK-02', title: '医嘱标记',
+        aliases: ['医嘱标记现在是怎么实现的？'], keywords: ['标记质控', '入口', '处理链'],
+        answerFacts: ['住院医嘱标记。'], searchText: '医嘱标记 标记质控 入口 处理链 当前实现',
+      },
+      {
+        id: 'AUD-QR-MK-01', title: '处方标记',
+        aliases: ['处方标记现在是怎么实现的？'], keywords: ['处方标记', '标记质控'],
+        answerFacts: ['处方标记 As-built。'], searchText: '处方标记 标记质控',
+      },
+    ],
+    specs: [], indexes: {},
+  };
+  const q0014 = '先切到另一个问题：“处方标记”当前实现的关键入口或处理链是什么？';
+  const history = [
+    { role: 'user', content: '医嘱标记怎么排查？' },
+    { role: 'assistant', content: '上一轮回答不能作为事实。' },
+    { role: 'user', content: q0014 },
+  ];
+  const hit = S.contextualRouteQuestion(map, history, q0014, '');
+  assert.equal(hit.route.id, 'AUD-QR-MK-01');
+  assert.equal(hit.exactRouteTitle, true);
+  assert.equal(hit.inherited, undefined);
+  assert.equal(hit.topN[0].id, 'AUD-QR-MK-01', '诊断 topN 应把强制的显式 title 候选置首');
+  assert.match(hit.answerFacts.join('\n'), /处方标记 As-built/);
+  assert.equal(S.routingDiag(true, hit).exactRouteTitle, true);
+
+  const partial = S.routeQuestion(map, '处方当前实现的关键入口是什么？', '');
+  assert.equal(partial.exactRouteTitle, false, '只出现 route title 的部分词不得触发强制候选');
+  const comparison = S.routeQuestion(map, '比较处方标记和医嘱标记的入口差异。', '');
+  assert.notEqual(comparison.exactRouteTitle, true, '同一问句完整出现多个 route title 时不得武断强制其中一个');
+  const faq = S.routeQuestion(map, '审方关键接口与边界 FAQ 里有哪些问题？', '');
+  assert.equal(faq.route.id, 'AUD-QR-FAQ-01');
+  assert.equal(faq.exactRouteTitle, true, '普通 FAQ 完整 title 正例仍应直达 FAQ');
+});
+
 test('接口权限自然问法族优先专用QR，并同时保留功能授权缺口与业务数据边界', () => {
   const S = buildRoutingSandbox(makeDeps());
   const map = {

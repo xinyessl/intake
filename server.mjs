@@ -832,11 +832,25 @@ function routeQuestion(map, query, subKey = '') {
       }
       return b.sc - a.sc;
     });
+    // 当前问句完整出现唯一人工 route title 时，它比宽泛 searchText 的词频分
+    // 更能表达用户显式切题（如“处方标记”vs FAQ/“医嘱标记”）。必须完整
+    // title 命中且只能命中一个；部分词、多 title 比较题均不强制。
+    const exactTitleHits = scored.filter(item => {
+      const title = String(item.r && item.r.title || '').toLowerCase().trim();
+      return title.length >= 4 && qLower.includes(title);
+    });
+    const exactTitle = exactTitleHits.length === 1 ? exactTitleHits[0] : null;
+    if (exactTitle) {
+      const at = scored.indexOf(exactTitle);
+      if (at > 0) scored.splice(at, 1);
+      if (at !== 0) scored.unshift(exactTitle);
+    }
     best = scored[0];
-    if (best && best.sc >= ROUTE_MATCH_MIN) {
+    if (best && (exactTitle || best.sc >= ROUTE_MATCH_MIN)) {
       const r = best.r;
       return {
         matched: true, tier: 1, route: { id: r.id, title: r.title }, score: best.sc,
+        exactRouteTitle: !!exactTitle,
         primaryRefs: Array.isArray(r.primaryRefs) ? r.primaryRefs : [],
         contextRefs: Array.isArray(r.contextRefs) ? r.contextRefs : [],
         answerFacts: Array.isArray(r.answerFacts) ? r.answerFacts : [],
@@ -1174,6 +1188,7 @@ function routingDiag(hasMap, route) {
     score: typeof route.score === 'number' ? route.score : 0,
     routeId: (route.route && route.route.id) || '',
     routeTitle: (route.route && route.route.title) || (route.exactName ? ('精确名:' + route.exactName) : ''),
+    exactRouteTitle: !!route.exactRouteTitle,
     inherited: !!route.inherited,
     inheritedFromQuestion: route.inherited ? String(route.inheritedFromQuestion || '').slice(0, 240) : '',
     contextOverride: !!route.contextOverride,
