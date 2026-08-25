@@ -883,6 +883,8 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
       '操作留痕由 audit_ai_generate 承载，不写操作日志表。',
     ],
     directEvidenceFacts: [
+      '- **AC-7** Given 业务来源为 `ipt`（住院）；When 调用生成接口；Then 后端取 `IptCurrentTaskVO`（当前任务详情）+ `IptOrderCautionVO` 列表，将二者序列化为中文键名 JSON 作为 Dify `inputs.content` 字段传入。',
+      '- **AC-8** Given 业务来源为 `opt`（门诊）；When 调用生成接口；Then 后端取 `OptCurrentTaskVO` + `OptOrderCautionVO` 列表，同样序列化为中文键名 JSON 传入。',
       '生成记录写入 audit_ai_generate；流式开始后写 task_id，结束后回写 content。',
       '操作留痕由 audit_ai_generate 承载，不写操作日志表。',
     ],
@@ -909,6 +911,28 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.ok(bundle.audit('本次没有成功写入 audit_ai_generate。', limitedEvidenceQuestion, auditGenerationRoute).violations.includes('unsupported_evidence_negation'), '无数据库权限时不得断言本次写入失败');
   assert.ok(bundle.audit('本次未落库，但实际是否成功仍未知。', limitedEvidenceQuestion, auditGenerationRoute).violations.includes('unsupported_evidence_negation'), '先否定、再补未知不能洗白同句里的无证据结论');
   assert.ok(!bundle.audit('响应明确显示没有创建任务状态记录。', '现有响应明确显示没有创建任务状态记录。', auditGenerationRoute).violations.includes('unsupported_evidence_negation'), '用户已给出同一否定事实时允许照实承接');
+
+  const missingExcerptDraft = '住院场景说明书写了 IptCurrentTaskVO + IptOrderCautionVO；门诊只确认读当前门诊任务上下文，具体拼哪些字段现有摘录没写明。';
+  const missingExcerptAudit = bundle.audit(missingExcerptDraft, limitedEvidenceQuestion, auditGenerationRoute);
+  assert.ok(missingExcerptAudit.violations.includes('unsupported_evidence_absence'), 'Top-N 片段缺失不得被写成 Spec 未写或只确认');
+  assert.deepEqual(missingExcerptAudit.unsupportedEvidenceAbsenceClaims, ['门诊只确认读当前门诊任务上下文，具体拼哪些字段现有摘录没写明。']);
+  assert.deepEqual(missingExcerptAudit.evidenceAbsenceCorrectionFacts, [
+    'Given 业务来源为 `opt`（门诊）；When 调用生成接口；Then 后端取 `OptCurrentTaskVO` + `OptOrderCautionVO` 列表，同样序列化为中文键名 JSON 传入。',
+  ]);
+  assert.match(bundle.revision(missingExcerptDraft, missingExcerptAudit), /检索截断、Top-N 未带到某行不能作为缺失证据/);
+  const missingExcerptFallback = bundle.fallback(missingExcerptDraft, missingExcerptAudit);
+  assert.doesNotMatch(missingExcerptFallback, /摘录没写明|门诊只确认/);
+  assert.match(missingExcerptFallback, /OptCurrentTaskVO.*OptOrderCautionVO/);
+  assert.match(missingExcerptFallback, /本次实例是否准确执行仍需对应日志或记录确认/);
+  assert.deepEqual(bundle.audit(missingExcerptFallback, limitedEvidenceQuestion, auditGenerationRoute).violations, [], 'fallback 必须恢复 current route 已核门诊契约并再次终审全绿');
+
+  const explicitGapRoute = {
+    matched: true,
+    route: { title: '门诊回退规则' },
+    answerFacts: ['门诊生成读取当前任务上下文。'],
+    directEvidenceFacts: ['NEEDS-HUMAN：门诊回退规则未定义，当前正文无法确认具体回退字段。'],
+  };
+  assert.ok(!bundle.audit('门诊回退规则在现有说明书里未定义。', '门诊回退规则怎么处理？', explicitGapRoute).violations.includes('unsupported_evidence_absence'), 'current route 明确 NEEDS-HUMAN/未定义时允许照实标缺失');
 
   const q127Draft = [
     'patient_id 是 varchar(50)，按字符串存。',

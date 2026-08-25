@@ -186,7 +186,7 @@ function sectionBlocks(text) {
   return sections;
 }
 
-function splitSection(section, target = 1000, overlap = 180) {
+function splitSection(section, target = 1400, overlap = 240) {
   const prefix = `### ${section.heading}\n`;
   const lines = section.content.split('\n');
   const blocks = [];
@@ -271,8 +271,10 @@ export function searchSpecDocuments(rawDocs, query, options = {}) {
     return { ...c, score, relevanceScore, exactMatches: exact.count, matched: matchedTerms.length, matchedTerms };
   }).filter(c => c.score > 0).sort((a, b) => b.score - a.score || b.exactMatches - a.exactMatches || a.file.localeCompare(b.file));
 
-  // 小型 MMR：每文件最多 3 段；已入选文件轻微降权，让 Top5 有文件多样性，
-  // 但精确路径/字段的高分片段仍可从同一正确文件占 2~3 个预算。
+  // 小型 MMR：通常每文件最多 3 段；已入选文件轻微降权，让 Top5 有文件多样性。
+  // 但当阶段一的首文件明显压过第二名时，说明当前问题已经稳定路由到这一份 Spec；
+  // 此时允许它占满 Top-N。否则同一长章节的相邻块（例如成对分支/连续 AC）会因
+  // 固定 3 段上限被较弱的目录或系统概览挤掉，把“片段没带到”伪装成“Spec 没写”。
   const topScore = ranked.length ? ranked[0].score : 0;
   const topRelevance = ranked.length ? Math.max(...ranked.map(c => c.relevanceScore || 0)) : 0;
   const topHasExact = !!(ranked[0] && ranked[0].exactMatches);
@@ -284,11 +286,18 @@ export function searchSpecDocuments(rawDocs, query, options = {}) {
     && (routeByFile.get(c.file) || 0) >= maxRoute * (topHasExact ? 0.12 : 0.18)
   ));
   const pool = relevant.slice(), hits = [], perFile = new Map();
+  const firstCandidate = candidates[0] || null, secondCandidate = candidates[1] || null;
+  const firstRouteScore = Number(firstCandidate && firstCandidate.routeScore) || 0;
+  const secondRouteScore = Number(secondCandidate && secondCandidate.routeScore) || 0;
+  const dominantFile = firstCandidate && firstRouteScore > 0
+    && (!secondCandidate || secondRouteScore <= 0 || firstRouteScore >= secondRouteScore * 1.35)
+    ? firstCandidate.file : '';
   while (pool.length && hits.length < n) {
     let best = -1, bestAdjusted = -Infinity;
     for (let i = 0; i < pool.length; i++) {
       const used = perFile.get(pool[i].file) || 0;
-      if (used >= 3) continue;
+      const fileLimit = dominantFile && pool[i].file === dominantFile ? n : 3;
+      if (used >= fileLimit) continue;
       const adjusted = pool[i].score * (used ? 0.78 : 1);
       if (adjusted > bestAdjusted) { bestAdjusted = adjusted; best = i; }
     }

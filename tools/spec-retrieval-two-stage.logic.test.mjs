@@ -19,6 +19,7 @@ import {
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PWRS = '/Users/lsy/lc-work/psp/pwrs';
 const PWRS_SPECS = path.join(PWRS, 'docs/specs');
+const AUDIT_SPECS = '/Users/lsy/lc-work/psp/audit/docs/specs';
 
 function doc(file, text, subsystem = '') {
   return buildSpecDocument({ file, subsystem, text });
@@ -112,6 +113,19 @@ test('相邻模块不串：当前问题实体“药师反馈”压过历史/通�
   const result = searchSpecDocuments(specs, '药师反馈完成后怎么删除记录？', { n: 3 });
   assert.equal(path.basename(result.candidates[0].file), '反馈.md');
   assert.equal(path.basename(result.hits[0].file), '反馈.md');
+});
+
+test('强路由长章节保留相邻契约块，不能把后半分支挤成“Spec 没写”', () => {
+  const longAc = Array.from({ length: 7 }, (_, i) => `- **AC-${i + 1}** Given AI 生成；When 执行阶段 ${i + 1}；Then 保留阶段规则 ${'说明'.repeat(18)}。`).join('\n');
+  const specs = [
+    doc('docs/specs/AI-01.md', `---\nid: AI-01\ntitle: AI 生成\nmodule: AI\n---\n## 验收标准\n${longAc}\n- **AC-8** Given source=opt（门诊）；When 调用生成；Then 取 OptCurrentTaskVO + OptOrderCautionVO 列表并序列化为中文 JSON。\n- **AC-9** Given source=ipt（住院）；When 调用生成；Then 取 IptCurrentTaskVO + IptOrderCautionVO 列表并序列化为中文 JSON。\n## 接口\nPOST /comm/ai/generate。`),
+    doc('docs/specs/SYS.md', `---\ntitle: 系统概览\nmodule: 系统\n---\n## AI\nAI 生成属于系统能力，现场只读核请求响应。`),
+    doc('docs/specs/MAP.md', `---\ntitle: 功能地图\nmodule: 导航\n---\n## AI\nAI 生成对应 AI-01。`),
+  ];
+  const result = searchSpecDocuments(specs, '关于 AI 生成，我只有一次请求响应，现有证据最多判断到哪？', { n: 5 });
+  assert.equal(path.basename(result.candidates[0].file), 'AI-01.md');
+  assert.match(hitText(result.hits), /OptCurrentTaskVO.*OptOrderCautionVO/s, '强命中 Spec 的后半门诊分支必须进入 Top5');
+  assert.match(hitText(result.hits), /IptCurrentTaskVO.*IptOrderCautionVO/s, '同章节相邻住院分支必须一起保留');
 });
 
 test('显式 subsystem 优先收窄，并支持 API 路径、snake_case、camelCase、状态值强匹配', () => {
@@ -247,4 +261,15 @@ test('PWRS 真实 86 份 Spec 全量可达：git 目录第 79 份 SYS-07a 与第
   const identityQuestion = '跨医院判断同一次患者就诊，最少要用哪些身份字段？';
   const identityResult = searchSpecDocuments(specs, expandRetrievalQuery([{ role: 'user', content: identityQuestion }], identityQuestion), { n: 5 });
   assert.ok(identityResult.hits.some(h => /PWRS-(?:CARE-01a|ACC-06)-/.test(h.file) && /hospitalId(?:\/districtCode)?\s*\+\s*patientId\s*\+\s*visitId/.test(h.text)), '自然问法经概念归一后，答案字段必须来自 CARE-01a/ACC-06 正文');
+});
+
+test('AUDIT 真实 AI-01：受限证据问法仍同时召回门住院成对契约', { skip: !fs.existsSync(AUDIT_SPECS) }, () => {
+  const specs = fs.readdirSync(AUDIT_SPECS)
+    .filter(f => f.endsWith('.md') && !f.startsWith('_') && f.toLowerCase() !== 'readme.md')
+    .sort((a, b) => a.localeCompare(b, 'zh-CN'))
+    .map(f => doc(`docs/specs/${f}`, fs.readFileSync(path.join(AUDIT_SPECS, f), 'utf8'), 'audit'));
+  const result = searchSpecDocuments(specs, '关于AI 审方生成，我现在只有一次既有请求和响应，没有数据库权限。现有证据最多能判断到哪？', { n: 5, subKey: 'audit' });
+  const evidence = hitText(result.hits.filter(hit => /AI-01-AI审方生成/.test(hit.file)));
+  assert.match(evidence, /IptCurrentTaskVO.*IptOrderCautionVO/s);
+  assert.match(evidence, /OptCurrentTaskVO.*OptOrderCautionVO/s, 'Top5 不能在 AC-7 后截断而丢掉相邻 AC-8');
 });
