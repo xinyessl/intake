@@ -3613,13 +3613,15 @@ button.f-ov-card { width: 100%; appearance: none; }
 
   // 「正在思考中…」等待期动效：AI 气泡在收到首个 token 前显三点跳动 + 文字（consult 空气泡 + intake 等待期）。
   //   on=true 挂动效（气泡加 .thinking，内容替为占位）；on=false 清动效（去 .thinking，清空占位 innerHTML 交回逐字/整体渲染）。幂等：重复调用安全。
-  function setThinking(bub, on) {
+  function setThinking(bub, on, label) {
     if (!bub) return;
     if (on) {
-      if (bub._thinking) return;
-      bub.classList.add('thinking');
-      bub.innerHTML = '<span class="f-thinking"><span class="dots"><i></i><i></i><i></i></span><span class="txt">正在思考中…</span></span>';
-      bub._thinking = true;
+      if (!bub._thinking) {
+        bub.classList.add('thinking');
+        bub.innerHTML = '<span class="f-thinking"><span class="dots"><i></i><i></i><i></i></span><span class="txt">正在思考中…</span></span>';
+        bub._thinking = true;
+      }
+      var txt = bub.querySelector('.f-thinking .txt'); if (txt) txt.textContent = String(label || '正在思考中…').slice(0, 80);
     } else {
       if (!bub._thinking) return;
       bub.classList.remove('thinking');
@@ -4088,6 +4090,7 @@ button.f-ov-card { width: 100%; appearance: none; }
             while ((idx = buf.indexOf('\n\n')) >= 0) {
               var chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
               parseSSEChunk(chunk + '\n\n', function (o) {
+                var phase = consultProgressLabel(o); if (phase && !acc) setThinking(bub, true, phase);   // 阶段事件只更新等待占位，不进入 acc/chat
                 var refs = consultKbFromEvent(o); if (refs.length) { usedKb = refs; renderKbCite(bub, refs); }   // 仅接受 server 首 token 后确认已注入的引用事件
                 if (o.v != null) { setThinking(bub, false); acc += o.v; bub.innerHTML = md(acc); scrollChatBottom(); }   // 首个流式字符到达 → 清思考动效，转正常逐字渲染
                 if (o.done) { chat.convId = o.convId || chat.convId; }
@@ -4116,12 +4119,18 @@ button.f-ov-card { width: 100%; appearance: none; }
       if (o) onObj(o);
     });
   }
+  function consultProgressLabel(o) {
+    if (!o || o.type !== 'progress') return '';
+    var known = { preparing: 1, generating: 1, auditing: 1, revising: 1, publishing: 1 };
+    if (!known[String(o.stage || '')]) return '';
+    return String(o.label || '正在处理…').slice(0, 80);
+  }
   function normalizeKbRefs(kb) {
     if (!Array.isArray(kb)) return [];
     return kb.slice(0, 5).map(function (h) { return { q: String((h && h.q) || ''), a: String((h && h.a) || ''), subsystem: String((h && h.subsystem) || ''), module: String((h && h.module) || ''), subsystemLabel: String((h && h.subsystemLabel) || '') }; }).filter(function (h) { return h.q || h.a; });
   }
   function consultKbFromEvent(o) { return o && o.kbInjected === true ? normalizeKbRefs(o.kb) : []; }
-  function onConsultEvent(o, bub, addAcc, onKb) { var refs = consultKbFromEvent(o); if (refs.length) { renderKbCite(bub, refs); if (onKb) onKb(refs); } if (o.v != null) { setThinking(bub, false); addAcc(o.v); bub.innerHTML = md((bub._acc = (bub._acc || '') + o.v)); } if (o.done) chat.convId = o.convId || chat.convId; }
+  function onConsultEvent(o, bub, addAcc, onKb) { var phase = consultProgressLabel(o); if (phase && !(bub && bub._acc)) setThinking(bub, true, phase); var refs = consultKbFromEvent(o); if (refs.length) { renderKbCite(bub, refs); if (onKb) onKb(refs); } if (o.v != null) { setThinking(bub, false); addAcc(o.v); bub.innerHTML = md((bub._acc = (bub._acc || '') + o.v)); } if (o.done) chat.convId = o.convId || chat.convId; }
 
   // FS-06：在答复气泡所在消息下方插入一个紧凑的「已参考经验(N条)」引用区（默认折叠，点开看每条真实「问→答」；答案用 md() 渲染）。
   //   幂等：同一 bub 只渲染一次（kb 事件只发一次，但流式重入/退化路径均可能触发，故用 bub._kbCite 兜底）；kb 空则不渲染。

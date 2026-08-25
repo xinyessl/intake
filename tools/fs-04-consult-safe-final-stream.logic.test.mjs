@@ -24,6 +24,31 @@ const { startConsultSseHeartbeat } = new Function(
   SRC.slice(heartbeatStart, heartbeatEnd) + '\nreturn { startConsultSseHeartbeat };',
 )();
 
+const progressStart = SRC.indexOf('function consultProgressEvent');
+const progressEnd = SRC.indexOf('// 模型草稿必须先完整生成', progressStart);
+assert.ok(progressStart >= 0 && progressEnd > progressStart);
+const { consultProgressEvent, consultModelDeadlineSignal } = new Function(
+  SRC.slice(progressStart, progressEnd) + '\nreturn { consultProgressEvent, consultModelDeadlineSignal };',
+)();
+
+const modelStreamStart = SRC.indexOf('const MODEL_STREAM_FIRST_TOKEN_TIMEOUT_MS');
+const modelStreamEnd = SRC.indexOf('// ===== 项目登记', modelStreamStart);
+assert.ok(modelStreamStart >= 0 && modelStreamEnd > modelStreamStart);
+function modelStreamFactory(fetchImpl, candidates) {
+  return new Function(
+    'fetch',
+    'modelCandidates',
+    'withImages',
+    'console',
+    SRC.slice(modelStreamStart, modelStreamEnd) + '\nreturn { callModelStream, callModelStreamOnce };',
+  )(
+    fetchImpl,
+    () => candidates,
+    messages => messages,
+    { warn() {} },
+  );
+}
+
 const compactStart = SRC.indexOf('function consultHistoryMessages');
 const compactEnd = SRC.indexOf('// 咨询会在服务端收齐草稿', compactStart);
 assert.ok(compactStart >= 0 && compactEnd > compactStart);
@@ -164,6 +189,98 @@ test('安全终稿生成期间发送 SSE 注释心跳并在结束后停止', asy
   const consult = SRC.slice(consultStart, consultEnd);
   assert.match(consult, /res\.writeHead\([\s\S]*?startConsultSseHeartbeat\(res\)/);
   assert.match(consult, /sse\(\{ done: true[\s\S]*?stopSseHeartbeat\(\)[\s\S]*?res\.end\(\)/);
+});
+
+test('等待安全终稿时阶段事件可见但与 v 正文严格分离', () => {
+  assert.deepEqual(consultProgressEvent('preparing'), {
+    type: 'progress', stage: 'preparing', label: '正在读取说明书与会话上下文…',
+  });
+  assert.deepEqual(consultProgressEvent('generating', { attempt: 2, total: 2 }), {
+    type: 'progress', stage: 'generating', label: '首个模型未及时返回，正在尝试备用模型…', attempt: 2, total: 2,
+  });
+  assert.equal(consultProgressEvent('prompt-body'), null, '未知阶段不得把任意内部文案透给客户端');
+  assert.equal(Object.prototype.hasOwnProperty.call(consultProgressEvent('auditing'), 'v'), false, 'progress 绝不能伪装正文');
+
+  const consultStart = SRC.indexOf("if (url.pathname === '/api/consult'");
+  const consultEnd = SRC.indexOf("if (url.pathname === '/api/consult-to-intake'", consultStart);
+  const consult = SRC.slice(consultStart, consultEnd);
+  assert.match(consult, /progress\('preparing'\)/);
+  assert.match(consult, /progress\('auditing'\)/);
+  assert.match(consult, /progress\('revising'/);
+  assert.match(consult, /progress\('publishing'\)/);
+  assert.doesNotMatch(consult, /reply\s*\+=?\s*consultProgressEvent|chat[^\n]*consultProgressEvent/,
+    '阶段事件不得进入正式回答或会话持久化');
+
+  assert.match(FIELD, /var phase = consultProgressLabel\(o\); if \(phase && !acc\) setThinking\(bub, true, phase\)/);
+  assert.match(FIELD, /阶段事件只更新等待占位，不进入 acc\/chat/);
+  assert.match(SUBMIT, /const phase=consultProgressLabel\(o\); if\(phase&&!full\)/);
+  assert.doesNotMatch(SUBMIT, /full\+=phase|messages\.push\([^\n]*phase/);
+});
+
+test('模型无首字时按独立短预算终止并给出可观测错误', async () => {
+  const cfg = { provider: 'openai', apiKey: 'test', baseUrl: 'https://model.test', model: 'test-model' };
+  const fetchImpl = (_url, options) => new Promise((_resolve, reject) => {
+    const hold = setInterval(() => {}, 1000);
+    options.signal.addEventListener('abort', () => {
+      clearInterval(hold);
+      const error = new Error('aborted'); error.name = 'AbortError'; reject(error);
+    }, { once: true });
+  });
+  const { callModelStreamOnce } = modelStreamFactory(fetchImpl, [cfg]);
+  const started = Date.now();
+  await assert.rejects(
+    callModelStreamOnce(cfg, { system: '', messages: [{ role: 'user', content: 'Q0017' }], firstTokenTimeoutMs: 15, candidateTimeoutMs: 80 }, () => {}, null),
+    /模型首字等待超时/,
+  );
+  assert.ok(Date.now() - started < 200, '专项首字预算不得退回旧 90 秒总超时');
+});
+
+test('模型候选最多尝试两个，正常首字后仍能完成流式正文', async () => {
+  const candidates = Array.from({ length: 4 }, (_, index) => ({ provider: 'openai', apiKey: 'test', baseUrl: 'https://model.test', model: `m${index + 1}` }));
+  let calls = 0;
+  const emptyFetch = async () => {
+    calls++;
+    return { ok: true, body: { async *[Symbol.asyncIterator]() { yield new TextEncoder().encode('data: [DONE]\n\n'); } } };
+  };
+  const empty = modelStreamFactory(emptyFetch, candidates);
+  const attempts = [];
+  await assert.rejects(
+    empty.callModelStream({ apiKey: 'test' }, { system: '', messages: [], onAttempt: value => attempts.push(value) }, () => {}, null),
+    /模型返回空内容/,
+  );
+  assert.equal(calls, 2);
+  assert.deepEqual(attempts, [{ attempt: 1, total: 2 }, { attempt: 2, total: 2 }]);
+
+  const normalFetch = async () => ({
+    ok: true,
+    body: { async *[Symbol.asyncIterator]() { yield new TextEncoder().encode('data: {"choices":[{"delta":{"content":"安全终稿"}}]}\n\ndata: [DONE]\n\n'); } },
+  });
+  const normal = modelStreamFactory(normalFetch, [candidates[0]]);
+  const pieces = [];
+  const answer = await normal.callModelStreamOnce(candidates[0], { system: '', messages: [], firstTokenTimeoutMs: 30, candidateTimeoutMs: 100 }, piece => pieces.push(piece), null);
+  assert.equal(answer, '安全终稿');
+  assert.deepEqual(pieces, ['安全终稿']);
+});
+
+test('consult 草稿与修订共享整轮完成上限，超时失败仍走安全正文和 done 收口', async () => {
+  const deadline = consultModelDeadlineSignal(null, { timeoutMs: 15 });
+  await new Promise(resolve => deadline.addEventListener('abort', resolve, { once: true }));
+  assert.equal(deadline.aborted, true, '整轮 deadline 必须真实触发 abort');
+  const userStop = new AbortController();
+  const combined = consultModelDeadlineSignal(userStop.signal, { timeoutMs: 1000 });
+  userStop.abort('user-stop');
+  assert.equal(combined.aborted, true);
+  assert.equal(combined.reason, 'user-stop', '用户停止原因必须优先透传');
+
+  const consultStart = SRC.indexOf("if (url.pathname === '/api/consult'");
+  const consultEnd = SRC.indexOf("if (url.pathname === '/api/consult-to-intake'", consultStart);
+  const consult = SRC.slice(consultStart, consultEnd);
+  assert.match(consult, /const consultModelSignal = consultModelDeadlineSignal\(ac\.signal\)/);
+  assert.equal((consult.match(/\}, consultModelSignal\);/g) || []).length, 2, '草稿与最多一次修订必须共用同一 deadline');
+  assert.match(consult, /else if \(firstError && !stopped\)[\s\S]*?publishSafeFinal\(m, \{ err: true, code: 'consult_model_error'/);
+  assert.match(consult, /sse\(\{ done: true, convId, kbHits:[\s\S]*?stopSseHeartbeat\(\)[\s\S]*?res\.end\(\)/);
+  assert.match(consult, /if \(ac\.signal\.aborted\) stopped = true;\s*else firstError = e;/,
+    '用户停止必须优先于共享超时错误文案');
 });
 
 test('Q0010 长会话只压缩模型 payload，最近追问与 route 历史继续保留', () => {

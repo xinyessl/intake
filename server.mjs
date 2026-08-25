@@ -151,13 +151,20 @@ async function callModelOnce(cfg, { system, messages, maxTokens = 1024, images }
   const j = await r.json(); if (!r.ok) throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
   return (((j.choices || [])[0] || {}).message || {}).content || '';
 }
-// 流式：主/备按序 failover——只在"还没吐出任何内容、且非用户主动停止"时才切备用（避免重复输出）
+const MODEL_STREAM_FIRST_TOKEN_TIMEOUT_MS = 25000;
+const MODEL_STREAM_CANDIDATE_TIMEOUT_MS = 60000;
+const CONSULT_MODEL_ROUND_TIMEOUT_MS = 90000;
+
+// 流式：主/备按序 failover——只在"还没吐出任何内容、且非用户主动停止"时才切备用（避免重复输出）。
+// 候选数量有硬上限；consult 会另外给草稿+修订共用一个整轮 deadline，避免两个阶段分别叠加完整 failover 预算。
 async function callModelStream(cfg, opts, onDelta, signal) {
-  const cands = modelCandidates(cfg); if (!cands.length) throw new Error('未配置 API Key');
+  const cands = modelCandidates(cfg).slice(0, 2); if (!cands.length) throw new Error('未配置 API Key');
+  const onAttempt = opts && typeof opts.onAttempt === 'function' ? opts.onAttempt : null;
   let lastErr;
   for (let i = 0; i < cands.length; i++) {
     let got = false;
     try {
+      if (onAttempt) onAttempt({ attempt: i + 1, total: cands.length });
       const result = await callModelStreamOnce(cands[i], opts, p => {
         if (String(p == null ? '' : p).trim()) got = true;
         if (onDelta) onDelta(p);
@@ -172,8 +179,9 @@ async function callModelStream(cfg, opts, onDelta, signal) {
   }
   throw lastErr;
 }
-// 单次流式调用某一个模型，逐段回调 onDelta，返回完整文本。signal 支持中止；内置 90s 超时防挂死。
-async function callModelStreamOnce(cfg, { system, messages, maxTokens = 1024, images }, onDelta, signal) {
+// 单次流式调用某一个模型，逐段回调 onDelta，返回完整文本。signal 支持中止；
+// “首个有效文本”和“候选完整生成”分别计时，避免上游连接已建立但长期零 token 占满整个候选预算。
+async function callModelStreamOnce(cfg, { system, messages, maxTokens = 1024, images, firstTokenTimeoutMs = MODEL_STREAM_FIRST_TOKEN_TIMEOUT_MS, candidateTimeoutMs = MODEL_STREAM_CANDIDATE_TIMEOUT_MS }, onDelta, signal) {
   const provider = cfg.provider || 'anthropic';
   const key = cfg.apiKey; if (!key) throw new Error('未配置 API Key');
   const model = cfg.model || (provider === 'openai' ? 'gpt-4o' : 'claude-sonnet-4-6');
@@ -182,25 +190,45 @@ async function callModelStreamOnce(cfg, { system, messages, maxTokens = 1024, im
   const headers = isA ? { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' } : { 'content-type': 'application/json', authorization: 'Bearer ' + key };
   const mm = withImages(messages, images, isA);   // 有图→末条 user 变多模态块（两家格式）；无图→原样字符串（向后兼容）
   const body = isA ? { model, max_tokens: maxTokens, stream: true, ...(system ? { system } : {}), messages: mm } : { model, stream: true, max_tokens: maxTokens, messages: system ? [{ role: 'system', content: system }, ...mm] : mm };
-  const sig = signal ? AbortSignal.any([signal, AbortSignal.timeout(90000)]) : AbortSignal.timeout(90000);
-  const r = await fetch(base + (isA ? '/v1/messages' : '/v1/chat/completions'), { method: 'POST', headers, body: JSON.stringify(body), signal: sig });
-  if (!r.ok || !r.body) { let e = ''; try { e = ((await r.json()).error || {}).message || ''; } catch {} throw new Error(e || ('HTTP ' + r.status)); }
-  let full = '', buf = ''; const dec = new TextDecoder();
-  for await (const chunk of r.body) {
-    buf += dec.decode(chunk, { stream: true });
-    let i;
-    while ((i = buf.indexOf('\n')) >= 0) {
-      const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
-      if (!line.startsWith('data:')) continue;
-      const data = line.slice(5).trim(); if (!data || data === '[DONE]') continue;
-      let j; try { j = JSON.parse(data); } catch { continue; }
-      let piece = '';
-      if (isA) { if (j.type === 'content_block_delta' && j.delta && typeof j.delta.text === 'string') piece = j.delta.text; }
-      else piece = (((j.choices || [])[0] || {}).delta || {}).content || '';
-      if (piece) { full += piece; if (onDelta) onDelta(piece); }
+  const firstMs = Math.max(1, Number(firstTokenTimeoutMs) || MODEL_STREAM_FIRST_TOKEN_TIMEOUT_MS);
+  const candidateMs = Math.max(firstMs, Number(candidateTimeoutMs) || MODEL_STREAM_CANDIDATE_TIMEOUT_MS);
+  const firstAc = new AbortController(), candidateAc = new AbortController();
+  let firstTimedOut = false, candidateTimedOut = false, gotFirstToken = false;
+  const firstTimer = setTimeout(() => { firstTimedOut = true; firstAc.abort(); }, firstMs);
+  const candidateTimer = setTimeout(() => { candidateTimedOut = true; candidateAc.abort(); }, candidateMs);
+  if (firstTimer && typeof firstTimer.unref === 'function') firstTimer.unref();
+  if (candidateTimer && typeof candidateTimer.unref === 'function') candidateTimer.unref();
+  const sig = signal ? AbortSignal.any([signal, firstAc.signal, candidateAc.signal]) : AbortSignal.any([firstAc.signal, candidateAc.signal]);
+  try {
+    const r = await fetch(base + (isA ? '/v1/messages' : '/v1/chat/completions'), { method: 'POST', headers, body: JSON.stringify(body), signal: sig });
+    if (!r.ok || !r.body) { let e = ''; try { e = ((await r.json()).error || {}).message || ''; } catch {} throw new Error(e || ('HTTP ' + r.status)); }
+    let full = '', buf = ''; const dec = new TextDecoder();
+    for await (const chunk of r.body) {
+      buf += dec.decode(chunk, { stream: true });
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+        if (!line.startsWith('data:')) continue;
+        const data = line.slice(5).trim(); if (!data || data === '[DONE]') continue;
+        let j; try { j = JSON.parse(data); } catch { continue; }
+        let piece = '';
+        if (isA) { if (j.type === 'content_block_delta' && j.delta && typeof j.delta.text === 'string') piece = j.delta.text; }
+        else piece = (((j.choices || [])[0] || {}).delta || {}).content || '';
+        if (piece) {
+          if (!gotFirstToken) { gotFirstToken = true; clearTimeout(firstTimer); }
+          full += piece; if (onDelta) onDelta(piece);
+        }
+      }
     }
+    return full;
+  } catch (error) {
+    if (signal && signal.aborted) throw error;   // 用户停止/连接关闭优先，不改写成模型超时。
+    if (firstTimedOut && !gotFirstToken) throw new Error('模型首字等待超时');
+    if (candidateTimedOut) throw new Error('模型候选生成超时');
+    throw error;
+  } finally {
+    clearTimeout(firstTimer); clearTimeout(candidateTimer);
   }
-  return full;
 }
 
 // ===== 项目登记（收件自己的，不读 steward 的 ~/.steward/projects.json） =====
@@ -2174,6 +2202,37 @@ function startConsultSseHeartbeat(res, options = {}) {
   if (res && typeof res.once === 'function') { res.once('close', stop); res.once('finish', stop); }
   write();   // 立即冲出响应头和首个注释帧；后续正文仍只由安全终稿发布器发送。
   return stop;
+}
+
+// 等待安全终稿期间的可见进度。它与正文 `v` 是互斥字段：客户端只更新等待占位，
+// 服务端也不会把这类事件拼进 reply/chat/经验库。文案由服务端白名单生成，避免把模型名、prompt 或异常正文带到页面。
+function consultProgressEvent(stage, options = {}) {
+  const labels = {
+    preparing: '正在读取说明书与会话上下文…',
+    generating: '已找到相关资料，正在生成回答…',
+    auditing: '回答已生成，正在做发布前安全校验…',
+    revising: '初稿未通过校验，正在安全修订…',
+    publishing: '安全校验完成，正在输出回答…',
+  };
+  const key = String(stage || '').trim();
+  if (!Object.prototype.hasOwnProperty.call(labels, key)) return null;
+  const attempt = Math.max(0, parseInt(options.attempt, 10) || 0);
+  const total = Math.max(0, parseInt(options.total, 10) || 0);
+  let label = labels[key];
+  if (key === 'generating' && attempt > 1) label = '首个模型未及时返回，正在尝试备用模型…';
+  return {
+    type: 'progress',
+    stage: key,
+    label,
+    ...(attempt ? { attempt } : {}),
+    ...(total ? { total } : {}),
+  };
+}
+
+function consultModelDeadlineSignal(signal, options = {}) {
+  const timeoutMs = Math.max(1, Number(options.timeoutMs) || CONSULT_MODEL_ROUND_TIMEOUT_MS);
+  const deadline = AbortSignal.timeout(timeoutMs);
+  return signal ? AbortSignal.any([signal, deadline]) : deadline;
 }
 
 // 模型草稿必须先完整生成并通过发布前审计；这里只接收已经安全的最终稿，
@@ -5863,6 +5922,11 @@ const server = http.createServer((req, res) => {
         if (res.destroyed || res.writableEnded) return false;
         try { res.write('data: ' + JSON.stringify(o) + '\n\n'); return true; } catch { return false; }
       };
+      const progress = (stage, options = {}) => {
+        const event = consultProgressEvent(stage, options);
+        return event ? sse(event) : false;
+      };
+      progress('preparing');
       const ac = new AbortController(); res.on('close', () => { if (!res.writableEnded) ac.abort(); });   // 客户端断连/点"停止"（响应未正常结束）→ 中止上游模型调用
       const cfg = readModelCfg();
       consultStage = 'refresh';
@@ -5934,6 +5998,7 @@ const server = http.createServer((req, res) => {
       const publishSafeFinal = async (text, extra = {}) => {
         const finalText = String(text == null ? '' : text).trim();
         if (!finalText) return '';
+        progress('publishing');
         const streamed = await consultStreamFinalAnswer(finalText, chunk => sse({ ...extra, v: chunk }), {
           signal: ac.signal,
           isClosed: () => res.destroyed || res.writableEnded,
@@ -5953,12 +6018,14 @@ const server = http.createServer((req, res) => {
         consultStage = 'prompt';
         const consultPrompt = consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + consultAudienceGuard(qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationMode) + '\n' + consultEvidenceLedgerGuard(qtext, route) + '\n' + consultCurrentRulingGuard(qtext, route) + '\n' + consultRuleApplicationGuard(qtext, route) + '\n' + consultPatientIdentityGuard(qtext, route) + '\n' + consultCriticalContextGuard(qtext, route) + '\n' + consultFocusedFactGuard(qtext) + '\n' + consultExactPathBoundaryGuard(qtext, route) + '\n' + consultGenericControlledActionGuard(qtext) + '\n' + consultOperationalSafetyGuard(qtext, route) + '\n' + consultFileArtifactGuard(qtext, route) + '\n' + consultDiagnosticGuard(qtext, route) + '\n' + consultNonDestructiveDiagnosticGuard(qtext, route) + '\n' + consultFinalActionConsistencyGuard(qtext, route) + '\n' + consultEvidenceLikelihoodGuard(qtext, route) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : '');
         let draft = '', firstError = null;
+        // 草稿和必要修订共用同一个 deadline；用户停止信号排在同一组合信号中，且错误映射时仍以用户停止优先。
+        const consultModelSignal = consultModelDeadlineSignal(ac.signal);
         try {
           // 先完整生成到服务端内存，发布前做确定性语义校验；未通过的草稿绝不先流给浏览器。
           consultStage = 'model_draft';
-          await callModelStream(cfg, { system: consultPrompt, messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800 }, piece => {
+          await callModelStream(cfg, { system: consultPrompt, messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800, onAttempt: attempt => progress('generating', attempt) }, piece => {
             piece = String(piece == null ? '' : piece); if (piece) draft += piece;
-          }, ac.signal);
+          }, consultModelSignal);
         } catch (e) {
           if (ac.signal.aborted) stopped = true;
           else firstError = e;
@@ -5966,6 +6033,7 @@ const server = http.createServer((req, res) => {
 
         if (draft.trim()) {
           consultStage = 'answer_audit';
+          progress('auditing');
           const initialAudit = consultAnswerSemanticAudit(draft, qtext, route);
           let finalAudit = initialAudit;
           let revisionAudit = null;
@@ -5975,12 +6043,14 @@ const server = http.createServer((req, res) => {
             revisionAttempted = true;
             let revised = '';
             try {
+              progress('revising');
               await callModelStream(cfg, {
                 system: consultPrompt + '\n' + consultAnswerRevisionPrompt(draft, initialAudit),
                 messages: msgs,
                 images: imgs,
                 maxTokens: b.deep ? 1100 : 800,
-              }, piece => { piece = String(piece == null ? '' : piece); if (piece) revised += piece; }, ac.signal);
+                onAttempt: attempt => progress('revising', attempt),
+              }, piece => { piece = String(piece == null ? '' : piece); if (piece) revised += piece; }, consultModelSignal);
             } catch {}
             if (revised.trim()) {
               const revisedAudit = consultAnswerSemanticAudit(revised, qtext, route);

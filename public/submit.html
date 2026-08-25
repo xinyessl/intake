@@ -310,20 +310,29 @@ async function runChat(t,opt){ if(sending)return; if(!$('#mProject').value)retur
 }
 $('#deepBtn').addEventListener('click',deepDive);
 // 答疑：SSE 流式，边收边渲染 markdown；停止=保留已生成的部分
+function consultProgressLabel(o){
+  if(!o||o.type!=='progress')return '';
+  const known={preparing:1,generating:1,auditing:1,revising:1,publishing:1};
+  if(!known[String(o.stage||'')])return '';
+  return String(o.label||'正在处理…').slice(0,80);
+}
 async function streamConsult(payload){
   const r=await fetch('/api/consult',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),signal:chatAbort.signal});
-  $('#typing')&&$('#typing').remove();
-  const d=document.createElement('div'); d.className='msg ai'; d.innerHTML='<div class="av">AI</div><div class="bubble md"></div>'; $('#chatBody').appendChild(d); const bub=d.querySelector('.bubble');
-  const reader=r.body.getReader(), dec=new TextDecoder(); let buf='', full='';
+  let d=$('#typing'); if(!d){ d=document.createElement('div'); d.className='msg ai'; d.id='typing'; d.innerHTML='<div class="av">AI</div><div class="bubble"></div>'; $('#chatBody').appendChild(d); }
+  const bub=d.querySelector('.bubble');
+  const reader=r.body.getReader(), dec=new TextDecoder(); let buf='', full='', stopped=false;
   try{ for(;;){ const {done,value}=await reader.read(); if(done)break; buf+=dec.decode(value,{stream:true});
       let i; while((i=buf.indexOf('\n\n'))>=0){ const dl=buf.slice(0,i).split('\n').find(l=>l.startsWith('data:')); buf=buf.slice(i+2);
         if(!dl)continue; let o; try{o=JSON.parse(dl.slice(5).trim());}catch{continue;}
-        if(o.v){ full+=o.v; bub.innerHTML=mdToHtml(full); $('#chatBody').scrollTop=$('#chatBody').scrollHeight; }
+        const phase=consultProgressLabel(o); if(phase&&!full) bub.innerHTML='<span class="typing-dots"><i></i><i></i><i></i></span><span style="color:var(--t3);font-size:12.5px;margin-left:8px">'+esc(phase)+'</span>';
+        if(o.v){ full+=o.v; bub.classList.add('md'); bub.innerHTML=mdToHtml(full); $('#chatBody').scrollTop=$('#chatBody').scrollHeight; }
         if(o.convId) convId=o.convId;
       } } }
-  catch(e){ if(e.name!=='AbortError') throw e; }
-  if(!full) bub.innerHTML='<span style="color:var(--t3)">（无回复）</span>';
-  messages.push({role:'assistant',content:full||'（无回复）'});
+  catch(e){ if(e.name!=='AbortError') throw e; stopped=true; }
+  const visible=full+(stopped&&full?'\n\n（已停止）':'');
+  bub.classList.add('md'); bub.innerHTML=visible?mdToHtml(visible):'<span style="color:var(--t3)">'+(stopped?'（已停止）':'（连接提前结束，AI 未返回可显示内容，请稍后重试。）')+'</span>';
+  d.removeAttribute('id');
+  messages.push({role:'assistant',content:visible||(stopped?'（已停止）':'（连接提前结束，AI 未返回可显示内容，请稍后重试。）')});
   $('#consultBar').style.display= full ? 'flex' : 'none';
 }
 // 进件（需求/BUG）：非流式（末尾有归档块要处理）
