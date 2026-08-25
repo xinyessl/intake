@@ -1076,3 +1076,10 @@
 - 解法：把 route facts 与 response-shape contract 分开。事实可从有界用户历史继承；链路维度、字段清单、输出格式和受众层级只按当前 user 问句计算。完整研发链路门再以 developer 当前意图作不变量，产品/实施重述只走各自终稿模板。
 - 防复发：连续会话测试必须同时携带“上一轮链路问句 + 当前轮换种说法”，断言 route inherited 仍为真、当前 `chainRequested` 为假、确定性实施 fallback 可再次审计全绿；另保留当前轮显式链路正例，防止简单关闭完整性门。
 - 通用性提示：适用于所有 RAG 多轮承接；事实继承与答案格式继承应使用不同状态。当前环境 `$STEWARD_LESSONS` 未配置，先记项目经验库，待全局库可用时再分流。
+
+### L-110 派生缺失项必须由其父契约统一门控
+- 现象（2026-08-25）：产品事实题明确 `chainRequested=false`，却因 route 存在 NEEDS-HUMAN 得到 `missingChainDimensions=[资料明确的未知停点]`，最终被当作不完整链路拒答。
+- 根因：入口、接口、数据、依赖四类缺失都通过 `chainDimensions` 间接受父契约控制，新增未知停点时只检查了 gap 内容，漏掉 `chainRequested` 父门；返回对象因此出现布尔状态与派生列表互相矛盾。
+- 解法：所有派生缺失集合先检查父契约是否启用，再计算成员；父契约关闭时集合必须为空。恢复层可以防御旧数据，但不能替代产生源头的不变量。
+- 防复发：测试不仅断言最终 violation，还要同时断言 `chainRequested=false => missingChainDimensions=[]`；为父契约开启时保留缺失项正例，避免用无条件清空掩盖。
+- 通用性提示：适用于权限、校验、工作流步骤、表单必填和任意“enabled + missingItems”结构。当前环境 `$STEWARD_LESSONS` 未配置，先记项目经验库，待全局库可用时再分流。

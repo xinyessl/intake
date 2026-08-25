@@ -198,8 +198,9 @@ depends_on: [FS-01]
 - **AC-132【点名链路维度必须完整、紧凑且可发布】** Given 用户要求把一个功能按“入口/接口/API/路径/数据/状态/权限/外部依赖/留痕”中两个以上维度串起来 When current route `answerFacts` 含已确认 HTTP METHOD + path 主签名 Then 发布前终审必须按业务结论优先的顺序逐项覆盖用户点名维度；显式点名接口/API/路径时，同一 route answerFacts 中每个已确认主签名的 METHOD 与精确 path 均必须出现，不得用同名标题冒充正文。接口只列方法+路径与必要用途，数据只列对象+关键状态，外部依赖只列系统+已核边界；用户未问字段时，product/implementation 模式下任一段连续堆叠超过 8 个 snake_case/camelCase 技术 token 必须记为 `audience_technical_dump`，链路题中的完整字段表/Java 实现同样删除或收缩。current route 正文明确标记的 `NEEDS-HUMAN`/待确认/局部未知须以业务语言列成“当前停点”，不得由检索缺片臆造。Given 终稿留下“除 A”却无“之外/其余……”主句或其它半截句 Then 记为 `malformed_markdown` 并禁止发布。修订仍失败时，fallback 只能从 current route 重建上述紧凑链路并再审全绿。Given 用户明确索要字段名/类型或代码链 Then 对应已核技术内容放行，不受未点名 dump 收缩。
 - **AC-133【长会话承接须有界且任何服务端异常可见】** Given 同一咨询会话已积累多轮长回答 When 用户用“我没完全听懂/换成实施清单/重新说”等方式承接上一主题 Then 本轮按 `mixed` 对话意图和 implementation 受众处理，current route 仍使用最近 24 条有界历史做主题继承与事实账本，不把历史 assistant 自由文本升级成事实；发给模型的历史另行收敛为最近最多 12 条、合计不超过 16000 字符，当前 user 问句与紧邻 assistant 答复必须保留，route answerFacts/contextRefs 仍独立注入，不因模型 payload 裁剪丢失。Given `/api/consult` 已建立 SSE 后在检索、路由、prompt、模型、发布前 audit、fallback 或持久化前后发生未预期异常 When 当前连接仍可写 Then 服务端必须记录不含正文/密钥的 `requestId + stage + error`，并在同一 SSE 依次发送带可见 `v` 的 `err:true/code=consult_internal_error` 和 terminal `done:true/error:true` 后结束；不得仅依赖全局 Promise rejection、不得裸 EOF。已正常捕获的模型首片段前失败同样须写请求编号/阶段日志并发布可见错误；连接已由客户端主动关闭时至少留服务端阶段日志，不承诺向已断开的连接补帧。
 - **AC-134【承接 route 只继承事实，不继承上一轮回答形态】** Given 当前轮是产品或实施重述，且通过 `context_followup` 继承上一轮人工 route When 上一轮曾要求入口/接口/数据/外部依赖等完整研发链路，而当前轮只要求换成业务说明或实施只读清单 Then 发布前 `incomplete_requested_chain` 只能依据当前 user 问句生效，不得读取 `route.inheritedFromQuestion`、expanded retrieval query 或更早用户问句来继承链路维度；完整链路门仅对当前轮明确提出接口/路径/开发链路的 developer 问法启用。实施终稿仍须保留 current route 已核事实、2~4 个只读步骤、每步判断边界与未知停点，不得因链路维度污染退成机械安全停止；`retrieval.answerAudit` 应记录首审/终审的 `chainRequested` 与缺失维度供生产回放。Given 当前轮确实明确索要接口或开发链路 Then AC-132 的主签名与逐维完整性继续生效，不得被本条放松。
+- **AC-135【链路缺失账本须与当前链路契约同生同灭】** Given 当前问句是普通产品事实题或实施清单题，current route 的直接证据含 `NEEDS-HUMAN`、待确认或局部未知 When 发布前审计计算链路缺失维度 Then 若 `chainRequested=false`，`missingChainDimensions` 必须为空，不得仅因 route 存在明确 gap 就制造“资料明确的未知停点”并触发 `incomplete_requested_chain`；产品 fallback 只保留已核 As-built 业务事实并删除相邻越界实体，不主动追加未知/Target。Given 当前 developer 问句明确要求把入口、接口、数据到依赖串起来并要求资料未定义处停住 When route 含明确 gap Then “资料明确的未知停点”仍是必答维度，遗漏须阻止发布。本约束须在首审产生缺失账本的源头成立，不依赖诊断型恢复兜底。
 
-> **AC 编号**：现编号至 **AC-134**（保留既有历史编号与 AC-19-KB）。AC-44 至 AC-134 为 P1。
+> **AC 编号**：现编号至 **AC-135**（保留既有历史编号与 AC-19-KB）。AC-44 至 AC-135 为 P1。
 
 ## 4. 接口契约
 > 统一前缀 `/api`；除 `consult`（SSE）外返回 `{...}` JSON。**本条 100% 复用现有端点，不新增端点**；提交人 `reporter`、归档医院 `site` 服务端按当前登录用户收敛（忽略越权传参）。契约锚点见 `docs/specs/00-实施端-spec清单.md §4` 对照表。
@@ -326,6 +327,7 @@ depends_on: [FS-01]
   - 生产 Q0009 形态回归锁定点名链路完整性：4 个 route answerFacts 主接口方法+路径全部保留，数据对象/软删除/外部系统边界/明确未知停点完整；未问字段的长 token 枚举与“除……”残句被拦，显式字段/代码题放行（AC-132）。
   - 生产 Q0010 形态回归构造超过 24 条、单条接近 4000 字的长会话，断言路由历史保留最近 24 条、模型 payload ≤12 条且总正文 ≤16000 字、当前问句与上一答复保留，同主题 route 继续 inherited；异常注入断言同一 SSE 有可见 `err`、terminal `done` 和请求阶段日志（AC-133）。
   - Q0010 发布前终审回归使用 implementation 当前问句、MK-02 route 与上一轮链路型 `inheritedFromQuestion`，断言不产生 `incomplete_requested_chain`，不安全草稿的确定性兜底为 2~4 步只读清单且二次审计全绿；Q0009 当前轮显式研发链路仍逐项完整（AC-134）。
+  - Q0011 产品事实回归使用 WB-03 As-built、明确 gap 与越界医生句，断言 `chainRequested=false` 时 `missingChainDimensions=[]`，fallback 只保留读取当前/待审任务及通过、打回、签名、移交、挂起、收藏、历史查询；显式 developer 链路遗漏未知停点仍触发（AC-135）。
   - `public/field.html` 存在 `.f-right`（`.f-rtool` 内 `#fCtx.f-ctx` + `.f-toggle` 两按钮 + `.newc`）+ `.f-chat-b` + `.f-chat-f`（input + `.send`）（AC-1/2/3）。
   - 归档上下文 `updateCtx` 版本感知：医院视图 chip 为 `🏥 …现场版本…`（只读、无下拉），系统视图 chip 有 `.f-ver`/`.f-ver-menu` 版本下拉、首项标「最新」（AC-4/5/6/7）。
   - 类型切换 `.f-toggle` 默认「咨询答疑」`.on`（居左，走 consult）；切「提需求/报BUG」改走 intake（AC-2）。

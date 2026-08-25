@@ -3238,7 +3238,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (missingChainInterfaces.length) missingChainDimensions.push('接口');
   if (missingChainDataMarkers.length) missingChainDimensions.push('数据/状态');
   if (missingChainDependencyMarkers.length) missingChainDimensions.push('外部依赖');
-  if (compactChainGapFacts.length && !/(?:待确认|未定义|局部未知|当前停点|尚未确认)/u.test(text)) missingChainDimensions.push('资料明确的未知停点');
+  if (chainRequested && compactChainGapFacts.length && !/(?:待确认|未定义|局部未知|当前停点|尚未确认)/u.test(text)) missingChainDimensions.push('资料明确的未知停点');
   const chainFieldQuestion = /(?:字段(?:名|类型|长度|取值|清单|全部|完整)?|入参|出参|返回字段)/iu.test(questionText);
   const chainCodeQuestion = /(?:源码|代码|Java\s*类|类名|方法名|Controller|Service|Mapper|Repository|DAO|DTO|VO)/iu.test(questionText);
   const chainTechnicalDetailParts = [];

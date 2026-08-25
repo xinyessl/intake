@@ -964,6 +964,41 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.doesNotMatch(q0010Initial.safeDiagnosticFallback, /重做|新增或取消一次/);
   assert.deepEqual(bundle.audit(q0010Initial.safeDiagnosticFallback, q0010Question, q0010Route).violations, [], 'Q0010 确定性兜底必须是可发布的实施只读清单，不能退成安全停止');
 
+  const q0011Question = '住院医嘱审核现在是怎么实现的？';
+  const q0011Fact = '住院审核工作台读取当前或待审医嘱任务，并提供通过、打回、签名、移交、挂起、收藏和历史查询操作。';
+  const q0011Route = {
+    matched: true,
+    route: { id: 'AUD-QR-WB-03', title: '住院医嘱审核' },
+    answerFacts: [q0011Fact],
+    directEvidenceFacts: ['NEEDS-HUMAN：其它终端是否提供同组操作仍待确认。'],
+    mustNotConfuse: ['正文中的 NEEDS-HUMAN、未实现 Target、菜单标签或 Java Model 推测不得写成当前已确认行为。'],
+  };
+  const q0011Audit = bundle.audit(`${q0011Fact}\n医生也可以完成同样操作。`, q0011Question, q0011Route);
+  assert.equal(q0011Audit.audienceMode, 'product');
+  assert.equal(q0011Audit.chainRequested, false);
+  assert.deepEqual(q0011Audit.missingChainDimensions, [], '非链路产品题即使 route 含明确 gap，也不得制造未知停点完整性要求');
+  assert.ok(!q0011Audit.violations.includes('incomplete_requested_chain'));
+  assert.ok(q0011Audit.violations.includes('out_of_scope_entity'), '相邻医生端事实仍须由作用域门清理');
+  const q0011Fallback = bundle.fallback(`${q0011Fact}\n医生也可以完成同样操作。`, q0011Audit);
+  assert.equal(q0011Fallback, q0011Fact, 'Q0011 fallback 只保留产品 As-built，不追加未知停点或技术说明');
+  assert.deepEqual(bundle.audit(q0011Fallback, q0011Question, q0011Route).violations, []);
+
+  const explicitUnknownChainQuestion = '把住院医嘱审核从入口、接口和数据到外部依赖串起来，资料未定义的部分明确停住。';
+  const explicitUnknownChainRoute = {
+    ...q0011Route,
+    answerFacts: [
+      q0011Fact,
+      '主接口是 GET /auditapi/audit/ipt/tasks。',
+      '审核任务记录写 audit_ipt_task；状态为 current。',
+      '用户信息读取用户中心，当前链路未直接调用 HIS。',
+    ],
+  };
+  const explicitUnknownChainAudit = bundle.audit('业务上读取当前待审任务。', explicitUnknownChainQuestion, explicitUnknownChainRoute);
+  assert.equal(explicitUnknownChainAudit.audienceMode, 'developer');
+  assert.equal(explicitUnknownChainAudit.chainRequested, true);
+  assert.ok(explicitUnknownChainAudit.missingChainDimensions.includes('资料明确的未知停点'), '当前轮显式研发链路仍须保留 route 已明确的未知停点');
+  assert.ok(explicitUnknownChainAudit.violations.includes('incomplete_requested_chain'));
+
   const developerAnswer = 'OrderMarkService 通过 IptCollectMapper 读取字段 iptTaskId。';
   const developerAudit = bundle.audit(developerAnswer, '接口字段和 Mapper 开发链路是什么？', implementationRoute);
   assert.ok(!developerAudit.violations.some(item => item.startsWith('audience_')), '明确研发问法允许完整技术展开');
