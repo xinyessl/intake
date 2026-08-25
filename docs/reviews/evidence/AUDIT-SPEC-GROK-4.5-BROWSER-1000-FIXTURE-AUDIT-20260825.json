@@ -1,0 +1,626 @@
+{
+  "schema": 1,
+  "fixture": "tools/fixtures/audit-browser-1000.questions.json",
+  "product": "audit",
+  "version": "2.7.260825-1",
+  "sourceCommit": "542bc16d394669827cb76108b66aa89ac0ad4244",
+  "questions": 1000,
+  "uniqueQuestions": 1000,
+  "goldMappings": 1000,
+  "conversations": 200,
+  "routeCount": 41,
+  "minRouteTurns": 20,
+  "maxRouteTurns": 27,
+  "turnTypes": {
+    "fact": 200,
+    "field_diagnostic": 200,
+    "partial_evidence": 200,
+    "topic_switch": 100,
+    "switched_followup": 100,
+    "implementation_chain": 100,
+    "context_followup": 100
+  },
+  "errors": [],
+  "sample100": [
+    {
+      "id": "Q0001",
+      "conversationId": "C001",
+      "turn": 1,
+      "question": "AI 审方生成现在是怎么实现的？"
+    },
+    {
+      "id": "Q0002",
+      "conversationId": "C001",
+      "turn": 2,
+      "question": "今天门诊现场反馈“AI 审方生成结果与预期不一致”。第一步先核对前端、接口、任务状态还是数据？"
+    },
+    {
+      "id": "Q0003",
+      "conversationId": "C001",
+      "turn": 3,
+      "question": "关于AI 审方生成，我现在只有一次既有请求和响应，没有数据库权限。现有证据最多能判断到哪？"
+    },
+    {
+      "id": "Q0004",
+      "conversationId": "C001",
+      "turn": 4,
+      "question": "先切到另一个问题：“Redis消费主控与错误流水”当前实现的关键入口或处理链是什么？"
+    },
+    {
+      "id": "Q0005",
+      "conversationId": "C001",
+      "turn": 5,
+      "question": "关于Redis消费主控与错误流水，如果接口返回有数据而页面没呈现，转开发前要整理哪些最小证据？"
+    },
+    {
+      "id": "Q0006",
+      "conversationId": "C002",
+      "turn": 1,
+      "question": "医嘱标记现在是怎么实现的？"
+    },
+    {
+      "id": "Q0007",
+      "conversationId": "C002",
+      "turn": 2,
+      "question": "住院药师复测时发现“医嘱标记结果与预期不一致”。第一步先核对前端、接口、任务状态还是数据？"
+    },
+    {
+      "id": "Q0008",
+      "conversationId": "C002",
+      "turn": 3,
+      "question": "医嘱标记这条链路只确认前端发出了请求，服务端后续日志还没拿到。先说能确定的，未知项请单独标出来。"
+    },
+    {
+      "id": "Q0009",
+      "conversationId": "C002",
+      "turn": 4,
+      "question": "把医嘱标记从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。"
+    },
+    {
+      "id": "Q0010",
+      "conversationId": "C002",
+      "turn": 5,
+      "question": "我没完全听懂医嘱标记的排查建议，换成实施可以逐项照做的只读清单。"
+    },
+    {
+      "id": "Q0011",
+      "conversationId": "C003",
+      "turn": 1,
+      "question": "住院医嘱审核现在是怎么实现的？"
+    },
+    {
+      "id": "Q0012",
+      "conversationId": "C003",
+      "turn": 2,
+      "question": "实施在测试环境核对时碰到“住院医嘱审核结果与预期不一致”。第一步先核对前端、接口、任务状态还是数据？"
+    },
+    {
+      "id": "Q0013",
+      "conversationId": "C003",
+      "turn": 3,
+      "question": "复测住院医嘱审核时只有页面现象和 requestId，暂时没有原始日志。下一步最少还要补哪类只读证据？"
+    },
+    {
+      "id": "Q0014",
+      "conversationId": "C003",
+      "turn": 4,
+      "question": "先切到另一个问题：“处方标记”当前实现的关键入口或处理链是什么？"
+    },
+    {
+      "id": "Q0015",
+      "conversationId": "C003",
+      "turn": 5,
+      "question": "我没完全听懂处方标记的排查建议，换成实施可以逐项照做的只读清单。"
+    },
+    {
+      "id": "Q0016",
+      "conversationId": "C004",
+      "turn": 1,
+      "question": "采集异常处理现在是怎么实现的？"
+    },
+    {
+      "id": "Q0017",
+      "conversationId": "C004",
+      "turn": 2,
+      "question": "医院电话里只描述“采集异常处理结果与预期不一致”。第一步先核对前端、接口、任务状态还是数据？"
+    },
+    {
+      "id": "Q0018",
+      "conversationId": "C004",
+      "turn": 3,
+      "question": "采集异常处理现场暂时不能改数据、重放消息或重提任务。仅用已有记录应该怎样缩小范围？"
+    },
+    {
+      "id": "Q0019",
+      "conversationId": "C004",
+      "turn": 4,
+      "question": "把采集异常处理从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。"
+    },
+    {
+      "id": "Q0020",
+      "conversationId": "C004",
+      "turn": 5,
+      "question": "采集异常处理的请求是通的，但业务结果仍不符合预期。接下来重点对照哪一层？"
+    },
+    {
+      "id": "Q0021",
+      "conversationId": "C005",
+      "turn": 1,
+      "question": "机构审核统计现在是怎么实现的？"
+    },
+    {
+      "id": "Q0022",
+      "conversationId": "C005",
+      "turn": 2,
+      "question": "值班药师刚反馈“机构审核统计结果与预期不一致”。第一步先核对前端、接口、任务状态还是数据？"
+    },
+    {
+      "id": "Q0023",
+      "conversationId": "C005",
+      "turn": 3,
+      "question": "先别把机构审核统计的原因说死：当前只有接口状态和业务返回，哪些结论成立，哪些仍需确认？"
+    },
+    {
+      "id": "Q0024",
+      "conversationId": "C005",
+      "turn": 4,
+      "question": "先切到另一个问题：“多数据库方言适配（MySQL/达梦/PostgreSQL 三库同逻辑不同 SQL）”当前实现的关键入口或处理链是什么？"
+    },
+    {
+      "id": "Q0025",
+      "conversationId": "C005",
+      "turn": 5,
+      "question": "多数据库方言适配（MySQL/达梦/PostgreSQL 三库同逻辑不同 SQL）的请求是通的，但业务结果仍不符合预期。接下来重点对照哪一层？"
+    },
+    {
+      "id": "Q0026",
+      "conversationId": "C006",
+      "turn": 1,
+      "question": "药师个人审核方案现在是怎么实现的？"
+    },
+    {
+      "id": "Q0027",
+      "conversationId": "C006",
+      "turn": 2,
+      "question": "另一院区复现了“药师个人审核方案结果与预期不一致”。第一步先核对前端、接口、任务状态还是数据？"
+    },
+    {
+      "id": "Q0028",
+      "conversationId": "C006",
+      "turn": 3,
+      "question": "关于药师个人审核方案，我现在只有一次既有请求和响应，没有数据库权限。现有证据最多能判断到哪？"
+    },
+    {
+      "id": "Q0029",
+      "conversationId": "C006",
+      "turn": 4,
+      "question": "把药师个人审核方案从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。"
+    },
+    {
+      "id": "Q0030",
+      "conversationId": "C006",
+      "turn": 5,
+      "question": "药师个人审核方案这一步只能确认现象稳定复现，不能做写操作。现在应停在哪个边界并交给谁继续？"
+    },
+    {
+      "id": "Q0031",
+      "conversationId": "C007",
+      "turn": 1,
+      "question": "药师-医生即时聊天现在是怎么实现的？"
+    },
+    {
+      "id": "Q0032",
+      "conversationId": "C007",
+      "turn": 2,
+      "question": "上线后首次巡检看到“药师-医生即时聊天结果与预期不一致”。第一步先核对前端、接口、任务状态还是数据？"
+    },
+    {
+      "id": "Q0033",
+      "conversationId": "C007",
+      "turn": 3,
+      "question": "药师-医生即时聊天这条链路只确认前端发出了请求，服务端后续日志还没拿到。先说能确定的，未知项请单独标出来。"
+    },
+    {
+      "id": "Q0034",
+      "conversationId": "C007",
+      "turn": 4,
+      "question": "先切到另一个问题：“药师工作量统计”当前实现的关键入口或处理链是什么？"
+    },
+    {
+      "id": "Q0035",
+      "conversationId": "C007",
+      "turn": 5,
+      "question": "药师工作量统计这一步只能确认现象稳定复现，不能做写操作。现在应停在哪个边界并交给谁继续？"
+    },
+    {
+      "id": "Q0036",
+      "conversationId": "C008",
+      "turn": 1,
+      "question": "HIS 调审方接口失败，现场先拿哪些材料？"
+    },
+    {
+      "id": "Q0037",
+      "conversationId": "C008",
+      "turn": 2,
+      "question": "业务老师现场演示时发现“HIS XML 接入只读排查结果与预期不一致”。第一步先核对前端、接口、任务状态还是数据？"
+    },
+    {
+      "id": "Q0038",
+      "conversationId": "C008",
+      "turn": 3,
+      "question": "复测HIS XML 接入只读排查时只有页面现象和 requestId，暂时没有原始日志。下一步最少还要补哪类只读证据？"
+    },
+    {
+      "id": "Q0039",
+      "conversationId": "C008",
+      "turn": 4,
+      "question": "把HIS XML 接入只读排查从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。"
+    },
+    {
+      "id": "Q0040",
+      "conversationId": "C008",
+      "turn": 5,
+      "question": "回到HIS XML 接入只读排查这里，第一层核过没有异常，下一步按什么顺序继续只读排查？"
+    },
+    {
+      "id": "Q0041",
+      "conversationId": "C009",
+      "turn": 1,
+      "question": "审核业务场景与状态机（通过/自动通过/打回双签/打回修改/医生侧/移交/挂起）现在是怎么实现的？"
+    },
+    {
+      "id": "Q0042",
+      "conversationId": "C009",
+      "turn": 2,
+      "question": "今天门诊现场反馈“审核业务场景与状态机（通过/自动通过/打回双签/打回修改/医生侧/移交/挂起）结果与预期不一致”。第一步先核对前端、接口、任务状态还是数据？"
+    },
+    {
+      "id": "Q0043",
+      "conversationId": "C009",
+      "turn": 3,
+      "question": "审核业务场景与状态机（通过/自动通过/打回双签/打回修改/医生侧/移交/挂起）现场暂时不能改数据、重放消息或重提任务。仅用已有记录应该怎样缩小范围？"
+    },
+    {
+      "id": "Q0044",
+      "conversationId": "C009",
+      "turn": 4,
+      "question": "先切到另一个问题：“HIS XML 接入只读排查”当前实现的关键入口或处理链是什么？"
+    },
+    {
+      "id": "Q0045",
+      "conversationId": "C009",
+      "turn": 5,
+      "question": "另一轮独立复测（45）里，回到HIS XML 接入只读排查这里，第一层核过没有异常，下一步按什么顺序继续只读排查？"
+    },
+    {
+      "id": "Q0046",
+      "conversationId": "C010",
+      "turn": 1,
+      "question": "药师工作量统计现在是怎么实现的？"
+    },
+    {
+      "id": "Q0047",
+      "conversationId": "C010",
+      "turn": 2,
+      "question": "住院药师复测时发现“药师工作量统计结果与预期不一致”。第一步先核对前端、接口、任务状态还是数据？"
+    },
+    {
+      "id": "Q0048",
+      "conversationId": "C010",
+      "turn": 3,
+      "question": "先别把药师工作量统计的原因说死：当前只有接口状态和业务返回，哪些结论成立，哪些仍需确认？"
+    },
+    {
+      "id": "Q0049",
+      "conversationId": "C010",
+      "turn": 4,
+      "question": "把药师工作量统计从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。"
+    },
+    {
+      "id": "Q0050",
+      "conversationId": "C010",
+      "turn": 5,
+      "question": "关于药师工作量统计，如果接口返回有数据而页面没呈现，转开发前要整理哪些最小证据？"
+    },
+    {
+      "id": "Q0051",
+      "conversationId": "C011",
+      "turn": 1,
+      "question": "XML报文解析集成现在是怎么实现的？"
+    },
+    {
+      "id": "Q0052",
+      "conversationId": "C011",
+      "turn": 2,
+      "question": "实施在测试环境核对时碰到“XML报文解析集成结果与预期不一致”。第一步先核对前端、接口、任务状态还是数据？"
+    },
+    {
+      "id": "Q0053",
+      "conversationId": "C011",
+      "turn": 3,
+      "question": "关于XML报文解析集成，我现在只有一次既有请求和响应，没有数据库权限。现有证据最多能判断到哪？"
+    },
+    {
+      "id": "Q0054",
+      "conversationId": "C011",
+      "turn": 4,
+      "question": "先切到另一个问题：“药师个人审核方案”当前实现的关键入口或处理链是什么？"
+    },
+    {
+      "id": "Q0055",
+      "conversationId": "C011",
+      "turn": 5,
+      "question": "关于药师个人审核方案，如果接口返回有数据而页面没呈现，转开发前要整理哪些最小证据？"
+    },
+    {
+      "id": "Q0056",
+      "conversationId": "C012",
+      "turn": 1,
+      "question": "多数据库方言适配（MySQL/达梦/PostgreSQL 三库同逻辑不同 SQL）现在是怎么实现的？"
+    },
+    {
+      "id": "Q0057",
+      "conversationId": "C012",
+      "turn": 2,
+      "question": "医院电话里只描述“多数据库方言适配（MySQL/达梦/PostgreSQL 三库同逻辑不同 SQL）结果与预期不一致”。第一步先核对前端、接口、任务状态还是数据？"
+    },
+    {
+      "id": "Q0058",
+      "conversationId": "C012",
+      "turn": 3,
+      "question": "多数据库方言适配（MySQL/达梦/PostgreSQL 三库同逻辑不同 SQL）这条链路只确认前端发出了请求，服务端后续日志还没拿到。先说能确定的，未知项请单独标出来。"
+    },
+    {
+      "id": "Q0059",
+      "conversationId": "C012",
+      "turn": 4,
+      "question": "把多数据库方言适配（MySQL/达梦/PostgreSQL 三库同逻辑不同 SQL）从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。"
+    },
+    {
+      "id": "Q0060",
+      "conversationId": "C012",
+      "turn": 5,
+      "question": "我没完全听懂多数据库方言适配（MySQL/达梦/PostgreSQL 三库同逻辑不同 SQL）的排查建议，换成实施可以逐项照做的只读清单。"
+    },
+    {
+      "id": "Q0061",
+      "conversationId": "C013",
+      "turn": 1,
+      "question": "HIS 审方入口是哪个接口？"
+    },
+    {
+      "id": "Q0062",
+      "conversationId": "C013",
+      "turn": 2,
+      "question": "值班药师刚反馈“审方关键接口与边界 FAQ结果与预期不一致”。第一步先核对前端、接口、任务状态还是数据？"
+    },
+    {
+      "id": "Q0063",
+      "conversationId": "C013",
+      "turn": 3,
+      "question": "复测审方关键接口与边界 FAQ时只有页面现象和 requestId，暂时没有原始日志。下一步最少还要补哪类只读证据？"
+    },
+    {
+      "id": "Q0064",
+      "conversationId": "C013",
+      "turn": 4,
+      "question": "先切到另一个问题：“采集异常处理”当前实现的关键入口或处理链是什么？"
+    },
+    {
+      "id": "Q0065",
+      "conversationId": "C013",
+      "turn": 5,
+      "question": "我没完全听懂采集异常处理的排查建议，换成实施可以逐项照做的只读清单。"
+    },
+    {
+      "id": "Q0066",
+      "conversationId": "C014",
+      "turn": 1,
+      "question": "处方标记现在是怎么实现的？"
+    },
+    {
+      "id": "Q0067",
+      "conversationId": "C014",
+      "turn": 2,
+      "question": "另一院区复现了“处方标记结果与预期不一致”。第一步先核对前端、接口、任务状态还是数据？"
+    },
+    {
+      "id": "Q0068",
+      "conversationId": "C014",
+      "turn": 3,
+      "question": "处方标记现场暂时不能改数据、重放消息或重提任务。仅用已有记录应该怎样缩小范围？"
+    },
+    {
+      "id": "Q0069",
+      "conversationId": "C014",
+      "turn": 4,
+      "question": "把处方标记从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。"
+    },
+    {
+      "id": "Q0070",
+      "conversationId": "C014",
+      "turn": 5,
+      "question": "处方标记的请求是通的，但业务结果仍不符合预期。接下来重点对照哪一层？"
+    },
+    {
+      "id": "Q0071",
+      "conversationId": "C015",
+      "turn": 1,
+      "question": "门诊处方审核现在是怎么实现的？"
+    },
+    {
+      "id": "Q0072",
+      "conversationId": "C015",
+      "turn": 2,
+      "question": "上线后首次巡检看到“门诊处方审核结果与预期不一致”。第一步先核对前端、接口、任务状态还是数据？"
+    },
+    {
+      "id": "Q0073",
+      "conversationId": "C015",
+      "turn": 3,
+      "question": "先别把门诊处方审核的原因说死：当前只有接口状态和业务返回，哪些结论成立，哪些仍需确认？"
+    },
+    {
+      "id": "Q0074",
+      "conversationId": "C015",
+      "turn": 4,
+      "question": "先切到另一个问题：“医嘱标记”当前实现的关键入口或处理链是什么？"
+    },
+    {
+      "id": "Q0075",
+      "conversationId": "C015",
+      "turn": 5,
+      "question": "医嘱标记的请求是通的，但业务结果仍不符合预期。接下来重点对照哪一层？"
+    },
+    {
+      "id": "Q0076",
+      "conversationId": "C016",
+      "turn": 1,
+      "question": "Redis消费主控与错误流水现在是怎么实现的？"
+    },
+    {
+      "id": "Q0077",
+      "conversationId": "C016",
+      "turn": 2,
+      "question": "业务老师现场演示时发现“Redis消费主控与错误流水结果与预期不一致”。第一步先核对前端、接口、任务状态还是数据？"
+    },
+    {
+      "id": "Q0078",
+      "conversationId": "C016",
+      "turn": 3,
+      "question": "关于Redis消费主控与错误流水，我现在只有一次既有请求和响应，没有数据库权限。现有证据最多能判断到哪？"
+    },
+    {
+      "id": "Q0079",
+      "conversationId": "C016",
+      "turn": 4,
+      "question": "把Redis消费主控与错误流水从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。"
+    },
+    {
+      "id": "Q0080",
+      "conversationId": "C016",
+      "turn": 5,
+      "question": "Redis消费主控与错误流水这一步只能确认现象稳定复现，不能做写操作。现在应停在哪个边界并交给谁继续？"
+    },
+    {
+      "id": "Q0081",
+      "conversationId": "C017",
+      "turn": 1,
+      "question": "用户个人设置现在是怎么实现的？"
+    },
+    {
+      "id": "Q0082",
+      "conversationId": "C017",
+      "turn": 2,
+      "question": "今天门诊现场反馈“用户个人设置结果与预期不一致”。第一步先核对前端、接口、任务状态还是数据？"
+    },
+    {
+      "id": "Q0083",
+      "conversationId": "C017",
+      "turn": 3,
+      "question": "用户个人设置这条链路只确认前端发出了请求，服务端后续日志还没拿到。先说能确定的，未知项请单独标出来。"
+    },
+    {
+      "id": "Q0084",
+      "conversationId": "C017",
+      "turn": 4,
+      "question": "先切到另一个问题：“登录与鉴权”当前实现的关键入口或处理链是什么？"
+    },
+    {
+      "id": "Q0085",
+      "conversationId": "C017",
+      "turn": 5,
+      "question": "登录与鉴权这一步只能确认现象稳定复现，不能做写操作。现在应停在哪个边界并交给谁继续？"
+    },
+    {
+      "id": "Q0086",
+      "conversationId": "C018",
+      "turn": 1,
+      "question": "评语常用语维护现在是怎么实现的？"
+    },
+    {
+      "id": "Q0087",
+      "conversationId": "C018",
+      "turn": 2,
+      "question": "住院药师复测时发现“评语常用语维护结果与预期不一致”。第一步先核对前端、接口、任务状态还是数据？"
+    },
+    {
+      "id": "Q0088",
+      "conversationId": "C018",
+      "turn": 3,
+      "question": "复测评语常用语维护时只有页面现象和 requestId，暂时没有原始日志。下一步最少还要补哪类只读证据？"
+    },
+    {
+      "id": "Q0089",
+      "conversationId": "C018",
+      "turn": 4,
+      "question": "把评语常用语维护从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。"
+    },
+    {
+      "id": "Q0090",
+      "conversationId": "C018",
+      "turn": 5,
+      "question": "回到评语常用语维护这里，第一层核过没有异常，下一步按什么顺序继续只读排查？"
+    },
+    {
+      "id": "Q0091",
+      "conversationId": "C019",
+      "turn": 1,
+      "question": "消息通知中心现在是怎么实现的？"
+    },
+    {
+      "id": "Q0092",
+      "conversationId": "C019",
+      "turn": 2,
+      "question": "实施在测试环境核对时碰到“消息通知中心结果与预期不一致”。第一步先核对前端、接口、任务状态还是数据？"
+    },
+    {
+      "id": "Q0093",
+      "conversationId": "C019",
+      "turn": 3,
+      "question": "消息通知中心现场暂时不能改数据、重放消息或重提任务。仅用已有记录应该怎样缩小范围？"
+    },
+    {
+      "id": "Q0094",
+      "conversationId": "C019",
+      "turn": 4,
+      "question": "先切到另一个问题：“统计报表导出”当前实现的关键入口或处理链是什么？"
+    },
+    {
+      "id": "Q0095",
+      "conversationId": "C019",
+      "turn": 5,
+      "question": "回到统计报表导出这里，第一层核过没有异常，下一步按什么顺序继续只读排查？"
+    },
+    {
+      "id": "Q0096",
+      "conversationId": "C020",
+      "turn": 1,
+      "question": "audit 包含哪些服务，分别负责什么？"
+    },
+    {
+      "id": "Q0097",
+      "conversationId": "C020",
+      "turn": 2,
+      "question": "医院电话里只描述“审方系统边界与权限基线结果与预期不一致”。第一步先核对前端、接口、任务状态还是数据？"
+    },
+    {
+      "id": "Q0098",
+      "conversationId": "C020",
+      "turn": 3,
+      "question": "先别把审方系统边界与权限基线的原因说死：当前只有接口状态和业务返回，哪些结论成立，哪些仍需确认？"
+    },
+    {
+      "id": "Q0099",
+      "conversationId": "C020",
+      "turn": 4,
+      "question": "把审方系统边界与权限基线从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。"
+    },
+    {
+      "id": "Q0100",
+      "conversationId": "C020",
+      "turn": 5,
+      "question": "关于审方系统边界与权限基线，如果接口返回有数据而页面没呈现，转开发前要整理哪些最小证据？"
+    }
+  ]
+}
