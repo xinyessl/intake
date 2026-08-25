@@ -37,7 +37,7 @@ test('答疑受众按问句意图分层：普通业务默认产品，现场诊�
   for (const q of ['医嘱标记现在是怎么实现的？', '这个功能是什么？', '支持哪些业务场景？', '业务规则和状态边界是什么？']) {
     assert.equal(audienceMode(q), 'product', q);
   }
-  for (const q of ['现场怎么排查？', '复测到这里下一步怎么查？', '转开发前给我一份只读清单', '只有截图，怎么判断到哪一层？', '今天视图请求和响应抓到了，重点核什么？']) {
+  for (const q of ['现场怎么排查？', '复测到这里下一步怎么查？', '转开发前给我一份只读清单', '只有截图，怎么判断到哪一层？', '今天视图请求和响应抓到了，重点核什么？', '怎么只读核对时间？', '怎么只读核时间？']) {
     assert.equal(audienceMode(q), 'implementation', q);
   }
   for (const q of ['具体接口路径和字段是什么？', '从 Controller 到 Mapper 的开发链路在哪？', 'SQL 查哪张表？', '这段代码在哪个 Java 类实现？']) {
@@ -50,6 +50,8 @@ test('产品答复首屏业务化且不暴露源码名；实施给只读步骤�
   assert.match(product, /第一屏直接说业务结论、适用对象\/场景、状态边界和用户影响/);
   assert.match(product, /不要输出源码文件名、Java 类\/方法名/);
   assert.match(product, /Controller\/Service\/Mapper\/DTO\/VO/);
+  assert.match(product, /不要主动谈“接口路径、字段、状态值、Java 模型、源码、研发参考、技术依据”/);
+  assert.match(product, /业务结论与对象范围已经答清后立即停止/);
   assert.match(product, /用户下一轮明确追问这些技术契约时再按研发受众展开/);
 
   const implementation = audienceGuard('现场复测失败，怎么排查和留证？');
@@ -1047,6 +1049,24 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.doesNotMatch(q0006Fallback, /说明书没有写成|门诊医嘱标记是否同样实现/);
   assert.deepEqual(bundle.audit(q0006Fallback, q0006Question, orderMarkRoute).violations, [], 'fallback 保留业务结论、删除假缺失和技术堆叠后必须再审全绿');
 
+  const q0006ProductionMissingSentence = '更细的字段、状态，以及门诊医嘱标记是否同样实现，这轮资料没有写成已确认事实。';
+  const q0006ProductionDraft = `${q0006Summary}\n${q0006ProductionMissingSentence}`;
+  const q0006ProductionAudit = bundle.audit(q0006ProductionDraft, q0006Question, orderMarkRoute);
+  assert.ok(q0006ProductionAudit.violations.includes('audience_technical_overreach'), '产品题不得主动谈字段/状态等技术元话题或资料缺失');
+  assert.deepEqual(q0006ProductionAudit.productTechnicalParts, [q0006ProductionMissingSentence]);
+  assert.match(bundle.revision(q0006ProductionDraft, q0006ProductionAudit), /业务结论和对象范围答清后立即停止/);
+  const q0006ProductionFallback = bundle.fallback(q0006ProductionDraft, q0006ProductionAudit);
+  assert.equal(q0006ProductionFallback, q0006Summary, '生产原句 fallback 只能留下住院医嘱业务结论');
+  assert.doesNotMatch(q0006ProductionFallback, /字段|状态|门诊|资料|研发参考|技术依据/);
+  assert.deepEqual(bundle.audit(q0006ProductionFallback, q0006Question, orderMarkRoute).violations, []);
+
+  for (const productMetaDraft of [
+    '业务上支持住院医嘱标记。研发参考：接口路径后续再补。',
+    '业务上支持住院医嘱标记。技术依据和 Java 模型这轮资料未确认。',
+    '业务上支持住院医嘱标记。源码、字段和状态值没有写成已确认事实。',
+  ]) assert.ok(bundle.audit(productMetaDraft, q0006Question, orderMarkRoute).violations.includes('audience_technical_overreach'), productMetaDraft);
+  assert.ok(!bundle.audit('住院医嘱可标记进入药师质控清单，取消后不再作为有效标记展示。', q0006Question, orderMarkRoute).violations.includes('audience_technical_overreach'), '业务状态大白话不得被“状态值”技术元话题守卫误拦');
+
   const q0006DeveloperQuestion = '医嘱标记的接口路径、字段和状态值分别是什么？';
   const q0006DeveloperAudit = bundle.audit(q0006Draft, q0006DeveloperQuestion, orderMarkRoute);
   const q0006DeveloperFallback = bundle.fallback(q0006Draft, q0006DeveloperAudit);
@@ -1054,6 +1074,7 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(q0006DeveloperFallback, /iptTaskId.*collectTitle.*iptCollectId/s);
   assert.match(q0006DeveloperFallback, /deleted=1.*isCollect=true/s);
   assert.deepEqual(bundle.audit(q0006DeveloperFallback, q0006DeveloperQuestion, orderMarkRoute).violations, [], '明确追问技术契约时不得被产品层级误删');
+  assert.ok(!bundle.audit('研发参考：接口路径、字段、状态值和 Java 模型如下。', q0006DeveloperQuestion, orderMarkRoute).violations.includes('audience_technical_overreach'), '研发显式追问不得被产品元话题规则误拦');
 
   for (const unsupportedVariant of [
     '这轮说明书未写成已确认行为。',

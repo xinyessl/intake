@@ -1626,7 +1626,7 @@ function consultAudienceMode(question) {
   const developer = /(?:接口(?:路径|地址|契约|入参|出参|返回)?|字段(?:名|类型|长度|取值)?|哪张表|表名|数据库表|SQL|源码|代码|开发链路|调用链|调用关系|Java\s*类|类名|方法名|Controller|Service|Mapper|Repository|DAO|DTO|VO)(?:[^。！？\n]{0,28}(?:什么|哪些|哪个|哪里|在哪|怎么|如何|实现|定义|调用|读写|保存|返回|排查|看|查))?|(?:什么|哪些|哪个|哪里|在哪|怎么|如何|看|查)[^。！？\n]{0,28}(?:接口|字段|哪张表|表名|SQL|源码|代码|开发链路|调用链|Java\s*类|Controller|Service|Mapper|DTO|VO)/i.test(q);
   if (developer) return 'developer';
   const implementation = consultSafeDiagnosticIntent(q)
-    || /(?:现场|实施|复测|回归|怎么查|如何查|排查|留证|转开发|只读(?:步骤|清单|检查)|抓包|抓到|抓取|重点核|核什么|请求(?:和|与|\/)?响应|日志|截图|怎么判断|如何判断|下一步怎么做)/i.test(q);
+    || /(?:现场|实施|复测|回归|怎么查|如何查|排查|留证|转开发|只读(?:步骤|清单|检查|核)|抓包|抓到|抓取|重点核|核什么|核对|请求(?:和|与|\/)?响应|日志|截图|怎么判断|如何判断|下一步怎么做)/i.test(q);
   return implementation ? 'implementation' : 'product';
 }
 
@@ -1647,7 +1647,8 @@ function consultAudienceGuard(question) {
   ]).join('\n');
   return common.concat([
     '这是普通功能、范围、业务规则或“怎么实现”的业务问法。第一屏直接说业务结论、适用对象/场景、状态边界和用户影响；用产品与实施都能看懂的大白话。',
-    '不要输出源码文件名、Java 类/方法名、Controller/Service/Mapper/DTO/VO、数据库表名或代码目录；也不要为了显得完整主动罗列接口、字段和实现链路。用户下一轮明确追问这些技术契约时再按研发受众展开。',
+    '不要输出源码文件名、Java 类/方法名、Controller/Service/Mapper/DTO/VO、数据库表名或代码目录；也不要主动谈“接口路径、字段、状态值、Java 模型、源码、研发参考、技术依据”，更不要用“这轮资料/说明书未写、未确认”收尾。用户下一轮明确追问这些技术契约时再按研发受众展开。',
+    '业务结论与对象范围已经答清后立即停止。例如只确认住院范围，就说清住院业务如何工作后停止，不主动追问或评价门诊技术实现是否有资料。',
     '必要的业务状态、页面名称和操作范围可以保留；技术事实只作为内部核验依据，不在正文展示。',
   ]).join('\n');
 }
@@ -2797,15 +2798,16 @@ function consultAnswerSemanticAudit(answer, question, route) {
   // 普通“怎么实现”仍是产品问法；只有显式技术契约才进入 developer。
   const audienceDeveloperQuestion = /(?:接口(?:路径|地址|契约|入参|出参|返回)?|字段(?:名|类型|长度|取值)?|哪张表|表名|数据库表|SQL|源码|代码|开发链路|调用链|调用关系|Java\s*类|类名|方法名|Controller|Service|Mapper|Repository|DAO|DTO|VO)(?:[^。！？\n]{0,28}(?:什么|哪些|哪个|哪里|在哪|怎么|如何|实现|定义|调用|读写|保存|返回|排查|看|查))?|(?:什么|哪些|哪个|哪里|在哪|怎么|如何|看|查)[^。！？\n]{0,28}(?:接口|字段|哪张表|表名|SQL|源码|代码|开发链路|调用链|Java\s*类|Controller|Service|Mapper|DTO|VO)/i.test(questionText);
   const audienceImplementationQuestion = !audienceDeveloperQuestion && (diagnosticQuestion
-    || /(?:实施|回归|转开发|只读(?:步骤|清单|检查)|抓包|抓到|抓取|重点核|核什么|请求(?:和|与|\/)?响应|日志|截图|怎么查|如何查|排查|留证)/i.test(questionText));
+    || /(?:实施|回归|转开发|只读(?:步骤|清单|检查|核)|抓包|抓到|抓取|重点核|核什么|核对|请求(?:和|与|\/)?响应|日志|截图|怎么查|如何查|排查|留证)/i.test(questionText));
   const audienceMode = audienceDeveloperQuestion ? 'developer' : audienceImplementationQuestion ? 'implementation' : 'product';
   const sourceTechnicalRe = /(?:[A-Za-z0-9_./-]+\.java\b|(?:^|[\s`/])src\/(?:main|test)\/|\b[A-Z][A-Za-z0-9_$]*(?:Controller|Service|Mapper|Repository|DAO|DTO|VO)\b|(?:Controller|Service|Mapper|Repository|DAO|DTO|VO)\s*[.#：:]|(?:表名|数据库表|写入表|读取表|落到表|查询表)\s*(?:是|为|[:：])?\s*[`'“”]?\s*[a-z][a-z0-9_]{2,}|(?:字段名?|参数名?)\s*(?:是|为|[:：])\s*[`'“”]?\s*[a-z][A-Za-z0-9_]{2,}|\b[a-z][A-Za-z0-9_]{2,}\s*=|`[a-z][A-Za-z0-9_]{2,}`)/i;
   const concreteInterfaceRe = /(?:\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/[A-Za-z0-9_./{}?=&:%-]+|`\/[A-Za-z0-9_./{}?=&:%-]+`)/i;
+  const productTechnicalMetaRe = /(?:接口(?:路径|地址|契约|入参|出参)|(?:请求|响应)?字段(?:名|类型|长度|取值)?|状态值|Java\s*(?:模型|类)|源码|研发参考|技术依据|代码路径|类名|方法名|表名|开发链路|调用链|Controller|Service|Mapper|Repository|DAO|DTO|VO|(?:说明书|spec|规格|资料|摘录|正文|契约|文档)[^。！？；\n]{0,40}(?:没(?:有)?|未|无|不明确|无法确认|只(?:能)?确认))/i;
   const audienceParts = text.split(/\n|(?<=[。！？；])/u).map(part => part.trim()).filter(Boolean);
   const referenceIndex = text.search(/(?:^|\n)\s*(?:#{1,6}\s*)?(?:\*\*)?研发参考(?:\*\*)?\s*[：:]?/mu);
   const textBeforeReference = referenceIndex >= 0 ? text.slice(0, referenceIndex) : text;
   const productTechnicalParts = audienceMode === 'product'
-    ? audienceParts.filter(part => sourceTechnicalRe.test(part) || concreteInterfaceRe.test(part)) : [];
+    ? audienceParts.filter(part => sourceTechnicalRe.test(part) || concreteInterfaceRe.test(part) || productTechnicalMetaRe.test(part)) : [];
   const implementationMisplacedTechnicalParts = audienceMode === 'implementation'
     ? textBeforeReference.split(/\n|(?<=[。！？；])/u).map(part => part.trim()).filter(part => part && sourceTechnicalRe.test(part)) : [];
   const firstAudiencePart = audienceParts.find(part => !/^(?:#{1,6}\s*)?(?:\*\*)?(?:结论|业务结论|当前结论|判断)(?:\*\*)?\s*[：:]?$/u.test(part)) || '';
@@ -3200,7 +3202,7 @@ function consultAnswerRevisionPrompt(draft, audit) {
       ? `草稿把“本轮检索片段没有展示”错误升级成了“说明书/Spec 未写或只确认到这里”：${(audit.unsupportedEvidenceAbsenceClaims || []).join('；')}。删除这些完整自然句。资料缺失结论只有在 current route 的 answerFacts、mustNotConfuse 或本轮正文明确标为 NEEDS-HUMAN、未定义、未覆盖、未写明时才成立；检索截断、Top-N 未带到某行不能作为缺失证据。请恢复下列本轮正文已核事实，并只把本次实例是否按契约执行标为未知：${(audit.evidenceAbsenceCorrectionFacts || []).join('；') || '按本轮 current route 正文逐项恢复，不得自行补造'}。`
       : '',
     audit.violations.includes('audience_technical_overreach')
-      ? `本轮是产品/业务问法，草稿主动展开了源码名、Java 类/方法、Controller/Service/Mapper/DTO/VO、表名、字段或具体接口：${(audit.productTechnicalParts || []).join('；')}。把这些实现标识从正文删除，用业务对象、适用场景、状态边界和用户影响重述；不要加“研发参考”，用户明确追问技术契约时下一轮再展开。`
+      ? `本轮是产品/业务问法，草稿主动展开了源码名、Java 类/方法、Controller/Service/Mapper/DTO/VO、表名、接口路径、字段、状态值或“研发参考/技术依据”，或用“资料/说明书未写、未确认”评价技术资料：${(audit.productTechnicalParts || []).join('；')}。删除这些完整句，用业务对象、适用场景、状态边界和用户影响重述；业务结论和对象范围答清后立即停止，不加“研发参考”，不评价其它范围的技术资料是否缺失。用户明确追问技术契约时下一轮再展开。`
       : '',
     audit.violations.includes('audience_technical_first') || audit.violations.includes('audience_technical_not_last')
       ? `本轮是实施问法，草稿用技术信息开场，或把类/方法/表/字段散落在正文：${(audit.audienceTechnicalParts || []).join('；')}。第一屏先改成大白话业务结论；现场排查用 2~4 个只读步骤，每步写清看什么和不同结果最多判断到哪。完成判断必需的实际请求路径可留在对应步骤，其它研发细节统一移到文末简短“研发参考”，不要删除已核事实。`
@@ -3576,7 +3578,7 @@ function consultAnswerSafeFallback(draft, audit) {
   const notes = [];
   // 原子事实题的审计只负责删掉越界内容；内部违规原因留在 retrieval.answerAudit，
   // 不能再以“安全尾注”形式污染用户正文，否则字段类型/接口题仍然没有真正止答。
-  if (!audit.focusedFactQuestion) {
+  if (!audit.focusedFactQuestion && audit.audienceMode !== 'product') {
     if (audit.violations.includes('unsupported_likelihood')) notes.push('当前证据不支持对原因作频率排序或确定归类；未确认的原因只能作为不排序的待验证分支，具体定位需查看对应的原始日志或异常堆栈。');
     if (audit.violations.includes('unsupported_component_fault')) notes.push('未由当前事实确认的组件原因仅作为待验证分支，不作故障定论。');
     if (audit.violations.includes('unsupported_evidence_negation')) notes.push('本轮未取得的数据库、日志或后续状态证据只能标为无法确认，不能据缺少观测写成未发生或不涉及。');
