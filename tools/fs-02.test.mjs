@@ -245,7 +245,8 @@ test('A2b 问题①子项目下拉双键：value=英文 name（过滤键）/ dis
   // renderProdDD：data-sub=英文 name（过滤值不变）、显示 desc||name（中文优先）
   const renderBody = (FIELD_HTML.match(/function renderProdDD\(\)[\s\S]*?\n  \}/) || [''])[0];
   assert.ok(renderBody, '能截取 renderProdDD 函数体');
-  assert.match(renderBody, /var nm = sub\.name,\s*label = sub\.desc \|\| sub\.name/, 'renderProdDD 取 name（过滤键）+ label=desc||name（显示）');
+  // 2026-08-25：显示改走 subLabel(nm)——单子系统产品→产品名，多子系统→ desc||name（原 sub.desc||sub.name 已改，见 lessons 显示标签教训）
+  assert.match(renderBody, /var nm = sub\.name,\s*label = subLabel\(nm\)/, 'renderProdDD 取 name（过滤键）+ label=subLabel(nm)（显示：单子系统→产品名，否则 desc）');
   assert.match(renderBody, /setAttribute\('data-sub', nm\)/, 'data-sub=英文 name（过滤键不变）');
   assert.match(renderBody, /escapeHtml\(label\)/, '下拉项显示 label（中文 desc 优先）');
   assert.match(renderBody, /selectSub\(nm\)/, 'selectSub 传英文 name（过滤值不变）');

@@ -175,7 +175,8 @@ test('A2 系统下拉来源 = /api/field/systems（非硬编码）；按 product
   // 面板列表渲染函数：按产品分组（组头 productName） + 显中文 desc（label = desc || name）+ data-sys=英文 name
   assert.match(FIELD_HTML, /function renderSysList/, '含面板列表渲染 renderSysList');
   assert.match(FIELD_HTML, /renderSysList[\s\S]{0,1200}productName/, 'renderSysList 按 productName 分组');
-  assert.match(FIELD_HTML, /renderSysList[\s\S]{0,1200}s0\.desc\s*\|\|\s*nm/, '组内显示中文 desc 优先（label = desc || name）');
+  // 2026-08-25：组内显示改走 sysLabel(nm)——单子系统产品→产品名，多子系统→中文 desc||name（原直接 s0.desc||nm 已改，见 lessons 显示标签教训）
+  assert.match(FIELD_HTML, /renderSysList[\s\S]{0,1200}label\s*=\s*sysLabel\(nm\)/, '组内显示走 sysLabel(nm)（单子系统→产品名，否则 desc||name）');
   assert.match(FIELD_HTML, /data-sys/, '子系统项 data-sys=英文 name（值/过滤/&system= 用 name）');
   // 搜索：即输即过滤，按 中文 desc 或 英文 name 匹配（label 与 nm 双路 indexOf）
   assert.match(FIELD_HTML, /state\.sysQuery/, '搜索词进 state.sysQuery（即输即过滤）');

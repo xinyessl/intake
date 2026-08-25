@@ -1424,8 +1424,19 @@ button.f-ov-card { width: 100%; appearance: none; }
     updateScope();
   }
 
-  // 子系统显示名：中文 desc 优先，回退英文 name（值/过滤/curSys/&system= 仍用 name 匹配 intakes.subsystem）
-  function sysLabel(nm){ if(!nm) return nm; for(var i=0;i<state.systems.length;i++){ if(state.systems[i] && state.systems[i].name===nm) return state.systems[i].desc || nm; } return nm; }
+  // 系统显示名：单子系统产品（该产品在 state.systems 中只有 1 个系统）→ 显产品名 productName（尊重运营端设的产品名，避免 Gitee/GitLab 单仓 full_name 丑名）；
+  //   多子系统产品 → 仍中文 desc 优先、回退英文 name。值/过滤/curSys/&system= 仍用 name 匹配 intakes.subsystem（键不动，只改显示这层）。
+  function sysLabel(nm){
+    if(!nm) return nm;
+    for(var i=0;i<state.systems.length;i++){
+      var s=state.systems[i];
+      if(s && s.name===nm){
+        var cnt=0; for(var k=0;k<state.systems.length;k++){ if(state.systems[k] && state.systems[k].project===s.project) cnt++; }
+        return cnt===1 ? (s.productName || s.desc || nm) : (s.desc || nm);
+      }
+    }
+    return nm;
+  }
 
   // ---------- 系统视图下拉（触发器 + 面板：搜索 + 全部系统 + 按产品分组）----------
   // AC-1/2/3/4/5（2026-07-23 裁决）：以下拉替代平铺系统 tab；触发器显当前系统中文名，面板可搜索、按 productName 分组、显中文 desc、值用英文 name。
@@ -1486,18 +1497,21 @@ button.f-ov-card { width: 100%; appearance: none; }
     for (var i = 0; i < state.systems.length; i++) {
       var s0 = state.systems[i]; if (!s0) continue;
       var nm = s0.name || ''; if (!nm || seenSys[nm]) continue; seenSys[nm] = 1;
-      var label = s0.desc || nm;                          // 显示中文优先
-      if (q && (label.toLowerCase().indexOf(q) < 0 && nm.toLowerCase().indexOf(q) < 0)) continue;   // 搜索按 中文 desc 或 英文 name
+      var label = sysLabel(nm);                           // 显示走 sysLabel（单子系统产品→产品名，否则中文 desc||name）
+      if (q && (label.toLowerCase().indexOf(q) < 0 && nm.toLowerCase().indexOf(q) < 0)) continue;   // 搜索按 显示标签 或 英文 name
       var pn = s0.productName || s0.project || '其它';
       if (!byProd[pn]) { byProd[pn] = []; order.push(pn); }
       byProd[pn].push({ name: nm, label: label });
     }
     var anySys = order.length > 0;
     order.forEach(function (pn) {
-      var gh = document.createElement('div');
-      gh.className = 'grp';
-      gh.textContent = pn;
-      list.appendChild(gh);
+      // 单子系统产品：组头（产品名）与唯一 opt（sysLabel=产品名）重复 → 省组头，直接一条 opt。多子系统仍带组头。
+      if (byProd[pn].length > 1) {
+        var gh = document.createElement('div');
+        gh.className = 'grp';
+        gh.textContent = pn;
+        list.appendChild(gh);
+      }
       byProd[pn].forEach(function (it) {
         (function (sys, label) {
           var o = document.createElement('div');
@@ -2121,12 +2135,16 @@ button.f-ov-card { width: 100%; appearance: none; }
     return '';
   }
 
-  // 英文子系统 name → 中文 desc 映射（查当前 subOptions；无则回退原名）。用于选中标签/空态显示中文。
+  // 英文子系统 name → 给人看的中文标签（查当前 subOptions；无则回退原名）。用于选中标签/空态显示中文。
+  //   单子系统产品（该产品组只有 1 个子系统）→ 显示产品名（尊重运营端设的产品名，避免 Gitee/GitLab 单仓的 full_name 丑名）。
+  //   多子系统产品 → 仍显子系统 desc||name。值/过滤/curSub/data-sub 仍用英文 name（键不动，只改显示这层）。
   function subLabel(nm) {
     if (!nm) return nm;
     for (var i = 0; i < state.subOptions.length; i++) {
-      var subs = state.subOptions[i].subs || [];
-      for (var j = 0; j < subs.length; j++) { if (subs[j].name === nm) return subs[j].desc || nm; }
+      var g = state.subOptions[i], subs = g.subs || [];
+      for (var j = 0; j < subs.length; j++) {
+        if (subs[j].name === nm) return subs.length === 1 ? (g.product || subs[j].desc || nm) : (subs[j].desc || nm);
+      }
     }
     return nm;
   }
@@ -2151,12 +2169,16 @@ button.f-ov-card { width: 100%; appearance: none; }
       return;
     }
     state.subOptions.forEach(function (g) {
-      var gh = document.createElement('div');
-      gh.className = 'grp';
-      gh.textContent = g.product;
-      dd.appendChild(gh);
+      // 单子系统产品：不渲染冗余组头（组头=产品名、唯一 opt 又= subLabel=产品名 → 重复），直接一条 opt=产品名。
+      // 多子系统产品：保留组头 g.product + 组内每个子系统 opt。
+      if ((g.subs || []).length > 1) {
+        var gh = document.createElement('div');
+        gh.className = 'grp';
+        gh.textContent = g.product;
+        dd.appendChild(gh);
+      }
       g.subs.forEach(function (sub) {
-        var nm = sub.name, label = sub.desc || sub.name;   // data-sub=英文 name（过滤键不变）、显示中文 desc
+        var nm = sub.name, label = subLabel(nm);   // data-sub=英文 name（过滤键不变）；显示走 subLabel（单子系统→产品名，否则 desc）
         var o = document.createElement('div');
         o.className = 'opt sub' + (state.curSub === nm ? ' on' : '');
         o.setAttribute('data-sub', nm);
