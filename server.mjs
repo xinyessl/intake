@@ -2754,11 +2754,57 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const questionText = String(question || '');
   const fullHandoffMaterialQuestion = /(?:(?:完整|全部|全套|正式)[^。！？\n]{0,16}(?:提单|工单|转开发|交接|材料包|留证包)|(?:提单|工单|转开发|交接)[^。！？\n]{0,16}(?:完整|全部|全套|材料清单|最少补哪些信息))/u.test(questionText);
   const evidenceSufficiencyQuestion = !fullHandoffMaterialQuestion
-    && /(?:只有|仅有|只(?:有|拿得到|拿到|能拿到)|没有|拿不到)[^。！？\n]{0,48}(?:够不够|够吗|是否足够|足不足够|能不能判断|能否判断|可以判断吗)/u.test(questionText);
-  const diagnosticQuestion = /(?:排查|不一致|对不上|异常|故障|现场|验证|复测|下一步|怎么判断|如何判断|怎么确认|检查|留证|只能确认|能确定|不知道|未知|走到哪|还缺什么|够不够|够吗|是否足够|能不能判断|能否判断)/i.test(questionText);
+    && (/(?:只有|仅有|只(?:有|拿得到|拿到|能拿到)|没有|拿不到)[^。！？\n]{0,48}(?:够不够|够吗|是否足够|足不足够|能不能判断|能否判断|可以判断吗)/u.test(questionText)
+      || /(?:现有|当前|已有|这些?)?证据[^。！？\n]{0,24}(?:最多|至多)(?:能|可(?:以)?)?(?:判断|确认|证明)到哪/u.test(questionText));
+  const diagnosticQuestion = /(?:排查|不一致|对不上|异常|故障|现场|验证|复测|下一步|怎么判断|如何判断|怎么确认|检查|留证|只能确认|能确定|能判断到哪|最多(?:能|可)?判断|不知道|未知|走到哪|还缺什么|够不够|够吗|是否足够|能不能判断|能否判断)/i.test(questionText);
   const unsafeDirectActions = controlled || !diagnosticQuestion ? [] : text.split(/(?<=[。！？；\n])/u)
     .map(x => x.trim()).filter(statement => statement && Array.from(statement.matchAll(CONSULT_DIRECT_RISKY_ACTION_RE))
       .some(match => !negatedActorPrefix.test(statement.slice(0, match.index))));
+  // “只有既有请求/响应、无数据库或日志权限”只定义了本轮观测边界，不能被
+  // 模型改写成“未落库/不写日志/不涉及任务状态”等否定事实。此类错误不是
+  // 概率归因，也未必是组件故障，必须单独做确定性终审。若用户原文或 current
+  // route 正文确实逐字支持同一否定规则（例如明确“不写操作日志表”），仍照实放行。
+  const evidenceBoundaryQuestion = evidenceSufficiencyQuestion
+    || /(?:只有|仅有|只(?:有|拿到|能拿到))[^。！？\n]{0,48}(?:请求|响应)|(?:无|没有|拿不到|不能查|无法查看)[^。！？\n]{0,18}(?:数据库|日志)(?:权限|记录|内容)?/u.test(questionText);
+  const requestResponseOnly = /(?:只有|仅有|只(?:有|拿到|能拿到))[^。！？\n]{0,56}(?:请求[^。！？\n]{0,24}响应|响应[^。！？\n]{0,24}请求)/u.test(questionText);
+  const unavailableEvidenceKinds = new Set();
+  if (requestResponseOnly || /(?:无|没有|拿不到|不能查|无法查看)[^。！？\n]{0,18}(?:数据库|库内|表内)(?:权限|记录|内容)?/u.test(questionText)) unavailableEvidenceKinds.add('database');
+  if (requestResponseOnly || /(?:无|没有|拿不到|不能查|无法查看)[^。！？\n]{0,18}(?:服务端|应用|任务|审计|操作)?日志(?:权限|记录|内容)?/u.test(questionText)) unavailableEvidenceKinds.add('logs');
+  if (requestResponseOnly || /(?:无|没有|拿不到|不能查|无法查看)[^。！？\n]{0,18}(?:任务|业务|处理)?状态(?:权限|记录|内容)?/u.test(questionText)) unavailableEvidenceKinds.add('state');
+  const evidenceKindRules = [
+    { id: 'database', re: /(?:数据库|库内|落库|入库|持久化|写入(?:数据|记录|表)|写入\s*[A-Za-z_][\w.]*|表(?:中|内))/iu },
+    { id: 'logs', re: /(?:日志|审计记录|操作记录|留痕记录)/iu },
+    { id: 'state', re: /(?:(?:审核|任务|业务|处理)?状态|生命周期|处理进度|后续处理)/iu },
+  ];
+  const unsupportedNegativeAssertionRe = /(?:不涉及|并未涉及|没有(?:发生|产生|写入|记录|落库|入库|持久化|变化)?|尚未|未(?:发生|产生|写入|记录|落库|入库|持久化|变化)?|不会|不存在|不产生|不写入|不记录|不落库|不入库|无需)/u;
+  const stripEpistemicBoundary = value => String(value || '')
+    .replace(/(?:无法|不能|尚不能|不足以|不(?:能|足以))(?:据此)?(?:确认|判断|证明|断言|认定|排除|说明|说)[^。！？；\n]*/gu, '')
+    .replace(/(?:仍|尚)?(?:未知|待确认|待核实|未核实|未验证)/gu, '')
+    .replace(/(?:没有|缺少|无|未取得)[^。！？；\n]{0,12}(?:权限|证据|材料|观察|观测)/gu, '')
+    .replace(/(?:未观察到|未看到|看不到|拿不到|不代表)[^。！？；\n]*/gu, '');
+  const hasUnsupportedNegativeAssertion = value => unsupportedNegativeAssertionRe.test(stripEpistemicBoundary(value));
+  const normalizeNegativeClaim = value => {
+    const plain = String(value || '').replace(/[*_`\s，,。！？；;：:（）()]/gu, '')
+      .replace(/并未涉及|不涉及|尚未|不会|不存在|不产生|不写入|不记录|不落库|不入库|没有|未|无需/gu, '不');
+    const at = plain.search(/不/u);
+    return at >= 0 ? plain.slice(at) : plain;
+  };
+  const negativeClaimSupported = (statement, kind) => {
+    const candidates = [questionText, ...(route && route.matched ? [...(route.answerFacts || []), ...(route.mustNotConfuse || []), ...(route.directEvidenceFacts || [])] : [])]
+      .flatMap(value => String(value || '').split(/[。！？；;\n]/u)).map(value => value.trim()).filter(Boolean);
+    const claim = normalizeNegativeClaim(statement);
+    return candidates.some(candidate => {
+      if (!kind.re.test(candidate) || !hasUnsupportedNegativeAssertion(candidate)) return false;
+      const known = normalizeNegativeClaim(candidate);
+      return claim && known && (claim.includes(known) || known.includes(claim));
+    });
+  };
+  const unsupportedEvidenceNegations = !evidenceBoundaryQuestion ? [] : text.split(/(?<=[。！？；\n])/u)
+    .map(statement => statement.trim()).filter(statement => {
+      if (!statement || !hasUnsupportedNegativeAssertion(statement)) return false;
+      const affectedKinds = evidenceKindRules.filter(kind => unavailableEvidenceKinds.has(kind.id) && kind.re.test(statement));
+      return affectedKinds.some(kind => !negativeClaimSupported(statement, kind));
+    });
   const unsupportedComponentClaims = consultUnsupportedComponentClaims(text, question, route);
   const routeText = consultRouteScopeText(route);
   const scopeText = `${question || ''}\n${routeText}`;
@@ -2857,7 +2903,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   );
   const firstMeaningfulLine = documentLines.find(line => line.trim())?.replace(/^\s*(?:#{1,6}\s+|[-*+]\s+|[1-9]\d*[.、．]\s+)?/u, '').replace(/[*_`]/g, '').trim() || '';
   const hasEvidenceSufficiencyVerdict = !evidenceSufficiencyQuestion
-    || /(?:只够|足够|够(?:用|判断|固定|完成)|不够|不足|不能单独|尚不能|只能固定|只能证明)/u.test(firstMeaningfulLine);
+    || /(?:只够|足够|够(?:用|判断|固定|完成)|不够|不足|不能单独|尚不能|只能固定|只能证明|只能确认|最多(?:只能|能|可))/u.test(firstMeaningfulLine);
   const currentRouteFacts = route && route.matched ? (route.answerFacts || []).map(String).map(item => item.trim()).filter(Boolean) : [];
   const currentRoutePathFacts = currentRouteFacts.flatMap(fact => {
     const method = fact.match(/\b(GET|POST|PUT|PATCH|DELETE)\b/i)?.[1]?.toUpperCase() || '';
@@ -2987,6 +3033,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (likelihoodTerms.length || causalPriorityTerms.length) violations.push('unsupported_likelihood');
   if (contradictoryObservationOrderClaims.length) violations.push('contradictory_observation_order');
   if (unsupportedComponentClaims.length) violations.push('unsupported_component_fault');
+  if (unsupportedEvidenceNegations.length) violations.push('unsupported_evidence_negation');
   if (unsafeActorActions.length || unsafeDirectActions.length) violations.push('cross_actor_side_effect');
   if (unexpectedPaths.length) violations.push('unexpected_concrete_path');
   if (unexpectedScopeTerms.length) violations.push('out_of_scope_entity');
@@ -3019,7 +3066,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (contradictoryNegativeSections.length) violations.push('contradictory_negative_section');
   if (singleStepOverreach) violations.push('single_step_diagnostic_overreach');
   if (malformedMarkdown.length) violations.push('malformed_markdown');
-  return { checked: true, diagnosticQuestion, evidenceSufficiencyQuestion, fullHandoffMaterialQuestion, hasEvidenceSufficiencyVerdict, minimumRoutePath, missingEvidenceMinimumPath, observationInputContract, undefinedObservationVariables, symbolicDefinitions: Object.fromEntries(symbolicDefinitions), undefinedSymbolicComparisons, focusedFactQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, focusedRelationshipFacts, missingFocusedRelationshipFacts, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, optionCardinalityMismatches, nonSequentialOptionSets, undefinedGroupReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, emptyNumberedSections, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, emptyDiagnosticBranchHeadings, emptyListStepItems, danglingClosingPunctuationLines, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
+  return { checked: true, diagnosticQuestion, evidenceSufficiencyQuestion, fullHandoffMaterialQuestion, hasEvidenceSufficiencyVerdict, minimumRoutePath, missingEvidenceMinimumPath, observationInputContract, undefinedObservationVariables, symbolicDefinitions: Object.fromEntries(symbolicDefinitions), undefinedSymbolicComparisons, focusedFactQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, focusedRelationshipFacts, missingFocusedRelationshipFacts, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsupportedEvidenceNegations, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, optionCardinalityMismatches, nonSequentialOptionSets, undefinedGroupReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, emptyNumberedSections, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, emptyDiagnosticBranchHeadings, emptyListStepItems, danglingClosingPunctuationLines, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -3031,6 +3078,9 @@ function consultAnswerRevisionPrompt(draft, audit) {
       : '',
     audit.violations.includes('unsupported_component_fault')
       ? '草稿把用户或 route 尚未确认的组件故障写成了定论。逐句按“已核事实 / 本轮观察 / 待验证假设 / 安全动作”四类重写；前端、后端、服务端、缓存、网关、鉴权、权限、数据库、配置、调度、部署或环境等未核原因只能明确标成“待验证假设/可能分支”，条件分支、表格和小结也不能绕过。'
+      : '',
+    audit.violations.includes('unsupported_evidence_negation')
+      ? `用户明确只有请求/响应等中间层证据，或没有数据库、日志、状态观测权限；草稿却把未观察到的下游事实写成否定：${(audit.unsupportedEvidenceNegations || []).join('；')}。删除这些完整自然句。系统按 current route/Spec 已确认的一般规则仍须保留，但“规则会写入/记录”不能推出本次已经成功，“本轮看不到”也不能反向写成未落库、不写日志、不涉及任务状态或没有后续处理；本次结果只能局部标为“现有证据无法确认/仍未知”。若 current route 正文明示某类记录确实不写，可逐字保留该已核否定规则。`
       : '',
     audit.violations.includes('contradictory_observation_order')
       ? '草稿违反有序观测点：某个请求/报文/响应/收到值/落库值/页面在该点已经与原始或前一层不同，却又把差异写成发生在该点之后。删除这个完整自然句或完整表格数据行；安全改写只能说“差异在该观测点已经存在/不晚于该点，具体发生层仍待前序证据”。只有前一观测点仍相等、后一观测点才不同，才允许把边界写在两点之间。'
@@ -3207,6 +3257,7 @@ function consultAnswerSafeFallback(draft, audit) {
     if (audit.violations.includes('cross_actor_side_effect') && Array.from(part.matchAll(CONSULT_DIRECT_RISKY_ACTION_RE))
       .some(match => !negatedActorPrefix.test(part.slice(0, match.index)))) return false;
     if (audit.violations.includes('unsupported_component_fault') && (audit.unsupportedComponentClaims || []).includes(part.trim())) return false;
+    if (audit.violations.includes('unsupported_evidence_negation') && (audit.unsupportedEvidenceNegations || []).includes(part.trim())) return false;
     if (audit.violations.includes('focused_fact_overreach') && (audit.focusedFactOverreach || []).includes(part.trim())) return false;
     if (audit.violations.includes('out_of_scope_entity') && (audit.unexpectedEntityTerms || []).some(term => part.toLowerCase().includes(String(term).toLowerCase()))) return false;
     if (audit.violations.includes('undefined_ordinal_reference') && (audit.undefinedOrdinalReferences || []).some(term => part.includes(String(term)))) return false;
@@ -3371,6 +3422,7 @@ function consultAnswerSafeFallback(draft, audit) {
   if (!audit.focusedFactQuestion) {
     if (audit.violations.includes('unsupported_likelihood')) notes.push('当前证据不支持对原因作频率排序；未确认的原因只能作为不排序的待验证分支。');
     if (audit.violations.includes('unsupported_component_fault')) notes.push('未由当前事实确认的组件原因仅作为待验证分支，不作故障定论。');
+    if (audit.violations.includes('unsupported_evidence_negation')) notes.push('本轮未取得的数据库、日志或后续状态证据只能标为无法确认，不能据缺少观测写成未发生或不涉及。');
     if (audit.violations.includes('cross_actor_side_effect')) notes.push('未满足完整受控条件时，不执行这些改动或重复操作；只核已有报文、映射、请求响应、日志和审计。');
   }
   return [safeKept || audit.safeDiagnosticFallback || '当前草稿未通过发布前证据与动作安全校验，已停止发布其中未经证实的判断和操作指令。', ...notes].filter(Boolean).join('\n\n');

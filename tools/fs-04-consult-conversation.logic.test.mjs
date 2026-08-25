@@ -873,6 +873,43 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(fallback, /未满足完整受控条件/);
   assert.deepEqual(bundle.audit(fallback, '患者号丢位怎么查？', route).violations, []);
 
+  const auditGenerationRoute = {
+    matched: true,
+    inherited: true,
+    route: { title: 'AI 审方生成' },
+    answerFacts: [
+      'AI 审方按 audit 场景读取当前任务上下文，经工作流生成辅助建议，结果须由药师主动采纳。',
+      '生成记录写入 audit_ai_generate；流式开始后写 task_id，结束后回写 content。',
+      '操作留痕由 audit_ai_generate 承载，不写操作日志表。',
+    ],
+    directEvidenceFacts: [
+      '生成记录写入 audit_ai_generate；流式开始后写 task_id，结束后回写 content。',
+      '操作留痕由 audit_ai_generate 承载，不写操作日志表。',
+    ],
+  };
+  const limitedEvidenceQuestion = '关于AI 审方生成，我现在只有一次既有请求和响应，没有数据库权限。现有证据最多能判断到哪？';
+  const unsupportedNegationDraft = '现有证据最多只能确认请求已发送并收到响应。本次仅为生成请求，不涉及审核任务状态或日志落库。';
+  const unsupportedNegationAudit = bundle.audit(unsupportedNegationDraft, limitedEvidenceQuestion, auditGenerationRoute);
+  assert.ok(unsupportedNegationAudit.violations.includes('unsupported_evidence_negation'), '不能把没有下游观测权限反写成未发生或不涉及');
+  assert.deepEqual(unsupportedNegationAudit.unsupportedEvidenceNegations, ['本次仅为生成请求，不涉及审核任务状态或日志落库。']);
+  assert.match(bundle.revision(unsupportedNegationDraft, unsupportedNegationAudit), /本轮看不到.*不能反向写成未落库、不写日志、不涉及任务状态/);
+  const unsupportedNegationFallback = bundle.fallback(unsupportedNegationDraft, unsupportedNegationAudit);
+  assert.doesNotMatch(unsupportedNegationFallback, /不涉及审核任务状态或日志落库/);
+  assert.match(unsupportedNegationFallback, /只能标为无法确认，不能据缺少观测写成未发生或不涉及/);
+  assert.deepEqual(bundle.audit(unsupportedNegationFallback, limitedEvidenceQuestion, auditGenerationRoute).violations, [], '确定性降级稿也必须通过同一终审');
+
+  for (const safeStatement of [
+    '系统规则明确：生成记录写入 audit_ai_generate；但本次是否成功写入，现有请求响应无法确认。',
+    '系统不写操作日志表；本次 audit_ai_generate 是否成功写入仍未知。',
+    '现有响应不能证明已落库，实际结果仍未知。',
+    '本次未观察到数据库记录，但这不代表没有落库。',
+  ]) {
+    assert.ok(!bundle.audit(safeStatement, limitedEvidenceQuestion, auditGenerationRoute).violations.includes('unsupported_evidence_negation'), safeStatement);
+  }
+  assert.ok(bundle.audit('本次没有成功写入 audit_ai_generate。', limitedEvidenceQuestion, auditGenerationRoute).violations.includes('unsupported_evidence_negation'), '无数据库权限时不得断言本次写入失败');
+  assert.ok(bundle.audit('本次未落库，但实际是否成功仍未知。', limitedEvidenceQuestion, auditGenerationRoute).violations.includes('unsupported_evidence_negation'), '先否定、再补未知不能洗白同句里的无证据结论');
+  assert.ok(!bundle.audit('响应明确显示没有创建任务状态记录。', '现有响应明确显示没有创建任务状态记录。', auditGenerationRoute).violations.includes('unsupported_evidence_negation'), '用户已给出同一否定事实时允许照实承接');
+
   const q127Draft = [
     'patient_id 是 varchar(50)，按字符串存。',
     '对接方如果当数字传，长号在 JSON/中间层/语言数值类型里很容易丢精度或少位。',
