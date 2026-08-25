@@ -5695,8 +5695,12 @@ function loadSessions() { return CACHE.sessions; }
 function hashPw(pw, salt) { salt = salt || crypto.randomBytes(16).toString('hex'); return { salt, hash: crypto.scryptSync(String(pw), salt, 64).toString('hex') }; }
 function verifyPw(pw, salt, hash) { try { const h = crypto.scryptSync(String(pw), salt, 64).toString('hex'); return h.length === (hash || '').length && crypto.timingSafeEqual(Buffer.from(h, 'hex'), Buffer.from(hash, 'hex')); } catch { return false; } }
 function parseCookies(req) { const out = {}; (req.headers.cookie || '').split(';').forEach(p => { const i = p.indexOf('='); if (i > 0) out[p.slice(0, i).trim()] = decodeURIComponent(p.slice(i + 1).trim()); }); return out; }
+// FS-08：会话 cookie 按域取名——cookie 不区分端口（RFC 6265），同 IP 两端口(5180 admin/5181 field)会共用同一 intake_sess → 一端登录另一端也登录。
+//   按域给 cookie 起不同名字：field 域→intake_sess_field、admin 域→intake_sess_admin、other(单域名/直连 IP/本机)→intake_sess（向后兼容零变化）。
+//   session 存储（sessions 表 token→userId）不变，只改承载 token 的 cookie 名。同 host 两 cookie 都存，但各域只读/写自己那个名 → 两端会话独立。
+function sessCookieName(origin) { return origin === 'field' ? 'intake_sess_field' : origin === 'admin' ? 'intake_sess_admin' : 'intake_sess'; }
 function authEnabled() { return loadAccounts().length > 0; }   // 未建任何账号 = 认证未启用（全开，供首次建管理员）
-function currentUser(req) { const t = parseCookies(req).intake_sess; if (!t) return null; const s = loadSessions()[t]; if (!s || (s.exp && s.exp < Date.now())) return null; return loadAccounts().find(a => a.id === s.userId) || null; }
+function currentUser(req) { const t = parseCookies(req)[sessCookieName(originOf(req))]; if (!t) return null; const s = loadSessions()[t]; if (!s || (s.exp && s.exp < Date.now())) return null; return loadAccounts().find(a => a.id === s.userId) || null; }
 function pubUser(u) { return u ? { id: u.id, username: u.username, role: u.role, name: u.name || u.username, phone: u.phone || '', projects: u.projects || [], sites: u.sites || [], mustChange: !!u.mustChange, enabled: (u.enabled == null ? 1 : (u.enabled ? 1 : 0)), createdAt: u.createdAt || '' } : null; }
 // enabled 归一：接受布尔/0-1/中文「启用/停用」/字符串，最终落 1(启用) 或 0(停用)。默认（未提供）返回 def。
 function normEnabled(v, def) { if (v == null) return def; if (v === 0 || v === false || v === '0' || v === '停用' || v === 'disabled' || v === 'off') return 0; if (v === 1 || v === true || v === '1' || v === '启用' || v === 'enabled' || v === 'on') return 1; return v ? 1 : 0; }
@@ -5860,12 +5864,14 @@ const server = http.createServer((req, res) => {
       // 停用拦截：放在密码校验「通过之后」判，避免向密码错误的尝试泄露账号停用状态。旧行 enabled 为 NULL/undefined → 兜底为启用。
       if ((u.enabled == null ? 1 : (u.enabled ? 1 : 0)) === 0) return send(res, 200, JSON.stringify({ ok: false, error: '账号已停用，请联系管理员' }));
       const t = newSession(u.id);
-      res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': `intake_sess=${t}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_TTL / 1000}` });
+      // FS-08：按当前请求的域给 session cookie 命名（field/admin 各自独立名 → 两域/两端口独立登录；other 回退 intake_sess，单域名零变化）。
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': `${sessCookieName(origin)}=${t}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_TTL / 1000}` });
       return res.end(JSON.stringify({ ok: true, me: pubUser(u) }));
     });
   }
-  if (url.pathname === '/api/logout') { const t = parseCookies(req).intake_sess; if (t) dropSession(t); res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': 'intake_sess=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' }); return res.end(JSON.stringify({ ok: true })); }
-  if (url.pathname === '/logout') { const t = parseCookies(req).intake_sess; if (t) dropSession(t); res.writeHead(302, { 'Set-Cookie': 'intake_sess=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0', Location: '/login.html' }); return res.end(); }
+  // FS-08：登出只清「当前域」那个 session cookie（Max-Age=0），别误清别的域的 cookie（否则登出一端会牵连另一端）。
+  if (url.pathname === '/api/logout') { const cn = sessCookieName(origin); const t = parseCookies(req)[cn]; if (t) dropSession(t); res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': `${cn}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0` }); return res.end(JSON.stringify({ ok: true })); }
+  if (url.pathname === '/logout') { const cn = sessCookieName(origin); const t = parseCookies(req)[cn]; if (t) dropSession(t); res.writeHead(302, { 'Set-Cookie': `${cn}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`, Location: '/login.html' }); return res.end(); }
   if (url.pathname === '/api/me') { const me = user ? pubUser(user) : (link ? { role: 'link', name: link.name, link: true, project: link.project, site: link.site, ver: link.ver, ptype: link.ptype } : null); return send(res, 200, JSON.stringify({ authEnabled: authEnabled(), me, defaultAdmin: loadAccounts().some(a => a.username === 'admin' && a.mustChange) })); }
   if (url.pathname === '/api/submit-link' && req.method === 'POST') {   // 管理员生成现场提交链接（凭链接免登录提交）
     return readBody(req, (b, err) => {

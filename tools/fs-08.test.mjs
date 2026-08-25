@@ -266,12 +266,34 @@ test('R-AC12 未配双域名：Host=field.test 请求 admin 接口 → 不被域
 });
 
 /* ================= D. 同源会话隔离（cookie SameSite=Strict） ================= */
-test('D-AC13/14 登录响应 Set-Cookie 含 SameSite=Strict; Path=/（两域名浏览器天然隔离依据）', async () => {
+test('D-AC13/14 admin 域登录 Set-Cookie 用 intake_sess_admin + SameSite=Strict; Path=/（按域取名 → 两域/两端口独立登录）', async () => {
   const r = await raw(PORT_DUAL, '/api/login', { method: 'POST', host: ADMIN_HOST, body: { username: 'admin', password: 'admin123' } });
   const sc = String((r.setCookie || []).join(';'));
-  assert.match(sc, /intake_sess=/, '含 intake_sess cookie');
-  assert.match(sc, /SameSite=Strict/i, 'cookie 含 SameSite=Strict（天然按域名隔离）');
+  assert.match(sc, /intake_sess_admin=/, 'admin 域 cookie 名为 intake_sess_admin（按域取名，非裸 intake_sess）');
+  assert.ok(!/(^|[;\s])intake_sess=/.test(sc), 'admin 域不下发裸 intake_sess（避免与 field 域共用一个 cookie）');
+  assert.match(sc, /SameSite=Strict/i, 'cookie 含 SameSite=Strict');
   assert.match(sc, /Path=\//, 'cookie 含 Path=/');
+});
+
+test('D-AC13b field 域登录 Set-Cookie 用 intake_sess_field（与 admin 域不同名 → 同 host 两端口独立会话）', async () => {
+  const r = await raw(PORT_DUAL, '/api/login', { method: 'POST', host: FIELD_HOST, body: { username: 'admin', password: 'admin123' } });
+  const sc = String((r.setCookie || []).join(';'));
+  assert.match(sc, /intake_sess_field=/, 'field 域 cookie 名为 intake_sess_field');
+  assert.ok(!/(^|[;\s])intake_sess=/.test(sc) && !/intake_sess_admin=/.test(sc), 'field 域只下发 intake_sess_field，不碰其它域的 cookie');
+});
+
+test('D-AC13c 会话按域独立：admin 域登录拿到的 cookie 拿去 field 域 /api/me → me:null（field 域读不到 admin 的 session cookie 名）', async () => {
+  // adminCookieDual = 前置在 admin 域登录拿到的 intake_sess_admin=<t>。field 域 currentUser 读的是 intake_sess_field → 读不到 → 未登录。
+  const r = await raw(PORT_DUAL, '/api/me', { host: FIELD_HOST, cookie: adminCookieDual });
+  assert.equal(r.status, 200, 'field 域 /api/me 应放行');
+  assert.equal(json(r)?.me, null, '带 admin 域 cookie 打 field 域 → me:null（两端独立登录，会话不串）');
+});
+
+test('D-AC13d 单域名回退（PLAIN 实例，未配 FIELD_ORIGIN/ADMIN_ORIGIN）：登录仍用裸 intake_sess（向后兼容零变化）', async () => {
+  const r = await raw(PORT_PLAIN, '/api/login', { method: 'POST', body: { username: 'admin', password: 'admin123' } });
+  const sc = String((r.setCookie || []).join(';'));
+  assert.match(sc, /(^|[;\s])intake_sess=/, '单域名回退仍是裸 intake_sess（老部署不受影响）');
+  assert.ok(!/intake_sess_field=/.test(sc) && !/intake_sess_admin=/.test(sc), '单域名不下发按域命名的 cookie');
 });
 
 test('D-AC15 服务端无跨域 cookie 逻辑：不带会话 cookie 的 field 域 /api/me → me:null（各域独立登录）', async () => {
