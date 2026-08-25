@@ -1969,6 +1969,28 @@ function consultNormalizeSafeMarkdown(text) {
   return lines.join('\n').trim();
 }
 
+// 咨询会在服务端收齐草稿并完成发布前审计，首个正文块可能晚于反向代理的
+// 空闲超时。期间只发 SSE 注释心跳（浏览器不会当正文渲染），避免连接被代理
+// 当成无数据请求提前结束。stop 可重复调用，close/finish 时也会自动清理定时器。
+function startConsultSseHeartbeat(res, options = {}) {
+  const intervalMs = Math.max(1, Number(options.intervalMs) || 15000);
+  let stopped = false;
+  const write = () => {
+    if (stopped || !res || res.destroyed || res.writableEnded) return false;
+    try { res.write(': keepalive\n\n'); return true; } catch { return false; }
+  };
+  const timer = setInterval(() => { if (!write()) stop(); }, intervalMs);
+  if (timer && typeof timer.unref === 'function') timer.unref();
+  function stop() {
+    if (stopped) return;
+    stopped = true;
+    clearInterval(timer);
+  }
+  if (res && typeof res.once === 'function') { res.once('close', stop); res.once('finish', stop); }
+  write();   // 立即冲出响应头和首个注释帧；后续正文仍只由安全终稿发布器发送。
+  return stop;
+}
+
 // 模型草稿必须先完整生成并通过发布前审计；这里只接收已经安全的最终稿，
 // 再按自然文本/Markdown 结构边界拆成 SSE 小块。拆分不得改变任何字符，
 // 也不能把围栏代码、Markdown 表格、行内代码或链接拆成浏览器会误解析的半截。
@@ -5308,6 +5330,7 @@ const server = http.createServer((req, res) => {
       const msgs = (Array.isArray(b.messages) ? b.messages : []).filter(m => m && m.content).slice(-24).map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content).slice(0, 4000) }));
       if (!msgs.length) return send(res, 400, JSON.stringify({ ok: false, error: 'empty' }));
       res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' });   // SSE 流式
+      const stopSseHeartbeat = startConsultSseHeartbeat(res);   // 审计前无正文期间保活，避免代理空闲超时截断成前端空气泡
       const sse = o => {
         if (res.destroyed || res.writableEnded) return false;
         try { res.write('data: ' + JSON.stringify(o) + '\n\n'); return true; } catch { return false; }
@@ -5540,6 +5563,7 @@ const server = http.createServer((req, res) => {
         await saveIntake(proj, rec);
       } catch (e) { convId = ''; }
       sse({ done: true, convId, kbHits: kbInjected ? kbRefs.length : 0, stopped, answerStream });
+      stopSseHeartbeat();
       try { res.end(); } catch {}
     });
   }

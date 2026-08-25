@@ -17,6 +17,20 @@ const factory = new Function([
 ].join('\n'));
 const { consultFinalAnswerChunks, consultStreamFinalAnswer } = factory();
 
+const heartbeatStart = SRC.indexOf('function startConsultSseHeartbeat');
+const heartbeatEnd = SRC.indexOf('// 模型草稿必须先完整生成', heartbeatStart);
+assert.ok(heartbeatStart >= 0 && heartbeatEnd > heartbeatStart);
+const { startConsultSseHeartbeat } = new Function(
+  SRC.slice(heartbeatStart, heartbeatEnd) + '\nreturn { startConsultSseHeartbeat };',
+)();
+
+const completionStart = FIELD.indexOf('function consultCompletionText');
+const completionEnd = FIELD.indexOf('// aborted=true', completionStart);
+assert.ok(completionStart >= 0 && completionEnd > completionStart);
+const { consultCompletionText } = new Function(
+  FIELD.slice(completionStart, completionEnd) + '\nreturn { consultCompletionText };',
+)();
+
 test('安全终稿按多个自然块输出，拼接逐字等于终稿', () => {
   const final = [
     '已确认：今天视图使用当前已核接口返回的日期与星期。',
@@ -110,4 +124,45 @@ test('两套咨询客户端均累计多个 v 事件重渲染，非 consult 路�
   assert.ok(consultStart >= 0 && consultEnd > consultStart);
   assert.match(SRC.slice(consultStart, consultEnd), /consultStreamFinalAnswer/);
   assert.doesNotMatch(SRC.slice(consultEnd), /consultStreamFinalAnswer|publishSafeFinal/);
+});
+
+test('安全终稿生成期间发送 SSE 注释心跳并在结束后停止', async () => {
+  const writes = [];
+  const handlers = {};
+  const fakeRes = {
+    destroyed: false,
+    writableEnded: false,
+    write(chunk) { writes.push(chunk); return true; },
+    once(name, fn) { handlers[name] = fn; },
+  };
+  const stop = startConsultSseHeartbeat(fakeRes, { intervalMs: 5 });
+  await new Promise(resolve => setTimeout(resolve, 16));
+  assert.ok(writes.length >= 2, `expected periodic heartbeats, got ${writes.length}`);
+  assert.ok(writes.every(chunk => chunk === ': keepalive\n\n'));
+  const beforeStop = writes.length;
+  stop(); stop();
+  await new Promise(resolve => setTimeout(resolve, 12));
+  assert.equal(writes.length, beforeStop, 'stop 后不得继续写心跳');
+  assert.equal(typeof handlers.close, 'function');
+  assert.equal(typeof handlers.finish, 'function');
+
+  const consultStart = SRC.indexOf("if (url.pathname === '/api/consult'");
+  const consultEnd = SRC.indexOf("if (url.pathname === '/api/consult-to-intake'", consultStart);
+  const consult = SRC.slice(consultStart, consultEnd);
+  assert.match(consult, /res\.writeHead\([\s\S]*?startConsultSseHeartbeat\(res\)/);
+  assert.match(consult, /sse\(\{ done: true[\s\S]*?stopSseHeartbeat\(\)[\s\S]*?res\.end\(\)/);
+});
+
+test('实施端正常 EOF 无正文时显示明确错误而不是空气泡', () => {
+  assert.equal(consultCompletionText('', false), '（连接提前结束，AI 未返回可显示内容，请稍后重试。）');
+  assert.equal(consultCompletionText('   ', false), '（连接提前结束，AI 未返回可显示内容，请稍后重试。）');
+  assert.equal(consultCompletionText('', true), '（已停止）');
+  assert.equal(consultCompletionText('已确认正文。', false), '已确认正文。');
+
+  const finishStart = FIELD.indexOf('function finishConsult');
+  const finishEnd = FIELD.indexOf('// AC-19-KB', finishStart);
+  const finish = FIELD.slice(finishStart, finishEnd);
+  assert.match(finish, /acc = consultCompletionText\(acc, aborted\)/);
+  assert.match(FIELD, /未返回可显示内容\|没有覆盖/,
+    '空流错误提示必须按非实质答复处理，不显示沉淀经验入口');
 });

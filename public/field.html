@@ -4153,11 +4153,20 @@ button.f-ov-card { width: 100%; appearance: none; }
   function isNonSubstantiveReply(text) {
     var t = String(text || '').trim();
     if (!t) return true;
-    return /没有覆盖|未覆盖|没有找到相关|没找到相关|没有相关(说明书|描述|规则)|说明书.{0,6}没有(覆盖|相关)/.test(t);
+    return /未返回可显示内容|没有覆盖|未覆盖|没有找到相关|没找到相关|没有相关(说明书|描述|规则)|说明书.{0,6}没有(覆盖|相关)/.test(t);
+  }
+
+  // fetch 的流 reader 可能在代理/网络提前断开时以 done=true 正常结束，不一定抛异常。
+  // 正常收尾若没有任何正文，必须把空气泡替换成明确提示；主动停止仍保留“已停止”语义。
+  function consultCompletionText(acc, aborted) {
+    var text = String(acc || '');
+    if (text.trim()) return text;
+    return aborted ? '（已停止）' : '（连接提前结束，AI 未返回可显示内容，请稍后重试。）';
   }
 
   // aborted=true 表示用户主动「停止」：保留已流式生成的部分文本，但不追加「沉淀经验库 / 转工单」入口（答复不完整，无价值沉淀）。
   function finishConsult(bub, acc, aborted, kbRefs) {
+    acc = consultCompletionText(acc, aborted);
     chat.abortCtrl = null;   // 「停止」：本轮收尾统一复位中断控制器（done/停止/错误都经这里）
     setSending(false);
     if (bub) { setThinking(bub, false); bub.classList.remove('streaming'); if (acc) bub.innerHTML = md(acc); }   // done/停止/错误兜底清思考动效（首个 token 未到就结束时也清）
