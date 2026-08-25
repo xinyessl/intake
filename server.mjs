@@ -3158,7 +3158,11 @@ function consultAnswerSemanticAudit(answer, question, route) {
   // “从入口、接口/数据到外部依赖串起来”是一份显式维度契约：
   // 模型不得用一个同名标题冒充完整答案，也不得用全字段表填充篇幅。
   // 这里只从 current route 已注入的事实提取紧凑合同，不硬编业务答案。
-  const chainRequested = !!(route && route.matched)
+  // 链路完整性是当前轮显式研发契约，不随 inherited route 或上一轮问法继承。
+  // 产品/实施重述（如“换成实施只读清单”）只继承业务事实；即便 route 的
+  // inheritedFromQuestion 曾点名入口/接口/数据，也不得再次要求终稿复述整条
+  // 技术链，否则安全清单会被错误判成 incomplete_requested_chain 并机械拒答。
+  const chainRequested = audienceMode === 'developer' && !!(route && route.matched)
     && /(?:串起来|串联|全链路|完整链路|调用链|实现链路|从[^.。！？\n]{1,80}到[^.。！？\n]{1,40})/u.test(questionText)
     && /(?:入口|接口|数据|状态|权限|外部依赖|依赖|留痕)/u.test(questionText);
   const chainDimensions = chainRequested ? [
@@ -3873,11 +3877,24 @@ function consultAnswerSafeFallback(draft, audit) {
 function consultRecoverSafeDiagnostic(initialAudit, question, route) {
   let reply = String(initialAudit && initialAudit.safeDiagnosticFallback || '').trim();
   if (!reply) return null;
-  let audit = consultAnswerSemanticAudit(reply, question, route);
+  // 防御性发布口：完整链路是 developer 当前轮契约。若较早版本/运行态把
+  // inherited route 的链路维度带进 implementation/product 审计，不能让
+  // 已经通过其它事实与动作门的确定性只读清单因这一个陈旧维度机械拒答。
+  // 只过滤该结构 violation；显式研发问法、其它事实/动作/作用域违规不放松。
+  const currentTurnAudit = value => {
+    if (!value || value.audienceMode === 'developer' || !value.violations.includes('incomplete_requested_chain')) return value;
+    return {
+      ...value,
+      chainRequested: false,
+      missingChainDimensions: [],
+      violations: value.violations.filter(item => item !== 'incomplete_requested_chain'),
+    };
+  };
+  let audit = currentTurnAudit(consultAnswerSemanticAudit(reply, question, route));
   let passes = 0;
   while (audit.violations.length && passes < 2) {
     reply = consultAnswerSafeFallback(reply, audit);
-    audit = consultAnswerSemanticAudit(reply, question, route);
+    audit = currentTurnAudit(consultAnswerSemanticAudit(reply, question, route));
     passes += 1;
   }
   return audit.violations.length ? null : { reply, audit, passes };
@@ -5998,6 +6015,8 @@ const server = http.createServer((req, res) => {
             version: 2,
             checked: true,
             initialViolations: initialAudit.violations,
+            initialChainRequested: !!initialAudit.chainRequested,
+            initialMissingChainDimensions: initialAudit.missingChainDimensions || [],
             initialUnexpectedPaths: initialAudit.unexpectedPaths || [],
             initialUnexpectedEntities: initialAudit.unexpectedEntityTerms || [],
             revisionAttempted,
@@ -6006,6 +6025,8 @@ const server = http.createServer((req, res) => {
             fallbackUsed,
             fallbackPasses,
             finalViolations: finalAudit.violations,
+            finalChainRequested: !!finalAudit.chainRequested,
+            finalMissingChainDimensions: finalAudit.missingChainDimensions || [],
             finalUnexpectedPaths: finalAudit.unexpectedPaths || [],
             finalUnexpectedEntities: finalAudit.unexpectedEntityTerms || [],
             likelihoodEvidence: initialAudit.likelihoodAllowed,

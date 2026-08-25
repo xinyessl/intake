@@ -934,6 +934,36 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   const implementationDump = '现场先看数据。研发参考：ipt_collect_id、collect_title、institute_id、hospital_id、patient_id、event_no、dept_id、ward_id、order_doc_id、pharmacist_id、ipt_task_id。';
   assert.ok(bundle.audit(implementationDump, implementationQuestion, implementationRoute).violations.includes('audience_technical_dump'), '实施题即使将字段表放到研发参考，未点名字段时连续 >8 个技术 token 仍须收缩');
 
+  const q0010Question = '我没完全听懂医嘱标记的排查建议，换成实施可以逐项照做的只读清单。';
+  const q0010Route = {
+    matched: true,
+    inherited: true,
+    route: { id: 'AUD-QR-MK-02', title: '医嘱标记' },
+    answerFacts: [
+      '住院医嘱标记供药师在住院医嘱详情添加或取消标记，并在标记列表查看、筛选和导出；门诊标记归 MK-01，标签标题维护归 MK-03。',
+      '标记链路的四个主接口是列表 GET /auditapi/audit/ipt/collects、新增 POST /auditapi/audit/ipt/task/collect、取消 DELETE /auditapi/audit/ipt/collect、导出 GET /auditapi/comm/ipt/collects/excel。',
+      '标记记录写 audit_ipt_collect；列表只读 deleted=false，取消更新 deleted=1，不物理删除。',
+      '新增标记读取审方服务已有住院任务、患者和医嘱记录；列表通过用户中心 getHospitalInfoByHospitalId 补医院/机构名称，添加标记方法未直接调用 HIS。',
+      '现场排查先读取现有列表、详情、请求、响应和记录；新增与取消会改标记数据，未经授权不得为抓包重做。',
+    ],
+    mustNotConfuse: ['正文中的 NEEDS-HUMAN、未实现 Target、菜单标签或 Java Model 推测不得写成当前已确认行为。'],
+  };
+  const q0010Draft = '这类问题通常是接口或数据库异常。OrderMarkService 通过 IptCollectMapper 处理，让实施再点一次新增后核对。';
+  const q0010Initial = bundle.audit(q0010Draft, q0010Question, {
+    ...q0010Route,
+    inheritedFromQuestion: '把医嘱标记从入口、接口或数据到外部依赖串起来。',
+  });
+  assert.ok(q0010Initial.violations.includes('unsupported_likelihood'));
+  assert.ok(q0010Initial.violations.includes('audience_technical_not_last'));
+  assert.ok(q0010Initial.violations.includes('cross_actor_side_effect'));
+  assert.ok(!q0010Initial.violations.includes('incomplete_requested_chain'), '实施重述只继承 route 事实，不继承上一轮研发链路的回答形态');
+  assert.equal(q0010Initial.chainRequested, false);
+  assert.match(q0010Initial.safeDiagnosticFallback, /最小只读排查/);
+  assert.match(q0010Initial.safeDiagnosticFallback, /1\. 原样记录当前页面/);
+  assert.match(q0010Initial.safeDiagnosticFallback, /4\. 整理上述原文与脱敏截图/);
+  assert.doesNotMatch(q0010Initial.safeDiagnosticFallback, /重做|新增或取消一次/);
+  assert.deepEqual(bundle.audit(q0010Initial.safeDiagnosticFallback, q0010Question, q0010Route).violations, [], 'Q0010 确定性兜底必须是可发布的实施只读清单，不能退成安全停止');
+
   const developerAnswer = 'OrderMarkService 通过 IptCollectMapper 读取字段 iptTaskId。';
   const developerAudit = bundle.audit(developerAnswer, '接口字段和 Mapper 开发链路是什么？', implementationRoute);
   assert.ok(!developerAudit.violations.some(item => item.startsWith('audience_')), '明确研发问法允许完整技术展开');
@@ -2551,6 +2581,27 @@ test('两轮草稿清理仍失败时，优先发布重审通过的确定性安�
     audit: { violations: [] },
     passes: 0,
   });
+  const staleChainRecover = new Function(
+    'consultAnswerSemanticAudit',
+    'consultAnswerSafeFallback',
+    extractFn(SRC, 'consultRecoverSafeDiagnostic') + '\nreturn consultRecoverSafeDiagnostic;',
+  )(
+    () => ({ audienceMode: 'implementation', chainRequested: true, missingChainDimensions: ['接口', '外部依赖'], violations: ['incomplete_requested_chain'] }),
+    answer => answer,
+  );
+  const staleChainRecovered = staleChainRecover({ safeDiagnosticFallback: '已核事实。\n1. 只读核对已有请求与响应。' }, '换成实施只读清单。', { matched: true });
+  assert.equal(staleChainRecovered.reply, '已核事实。\n1. 只读核对已有请求与响应。');
+  assert.deepEqual(staleChainRecovered.audit.violations, [], '发布口须清除 implementation 当前轮被历史 route 污染的陈旧链路维度');
+  assert.equal(staleChainRecovered.audit.chainRequested, false);
+  const developerChainRecover = new Function(
+    'consultAnswerSemanticAudit',
+    'consultAnswerSafeFallback',
+    extractFn(SRC, 'consultRecoverSafeDiagnostic') + '\nreturn consultRecoverSafeDiagnostic;',
+  )(
+    () => ({ audienceMode: 'developer', chainRequested: true, missingChainDimensions: ['接口'], violations: ['incomplete_requested_chain'] }),
+    answer => answer,
+  );
+  assert.equal(developerChainRecover({ safeDiagnosticFallback: '只读清单。' }, '把接口链路串起来。', { matched: true }), null, '当前轮显式研发链路仍须完整，不得被防御性恢复放松');
   const cleanedRecover = new Function(
     'consultAnswerSemanticAudit',
     'consultAnswerSafeFallback',
@@ -2565,6 +2616,8 @@ test('两轮草稿清理仍失败时，优先发布重审通过的确定性安�
   assert.deepEqual(recovered.audit.violations, []);
   assert.equal(directRecover({ safeDiagnosticFallback: '' }, '怎么排查？', { matched: true }), null, '非诊断题没有确定性模板时保持原机械拒答边界');
   assert.equal((SRC.match(/consultRecoverSafeDiagnostic\(initialAudit, qtext, route\)/g) || []).length, 2, '正常生成异常与中止分支都应接入最后安全恢复');
+  assert.match(SRC, /initialChainRequested:\s*!!initialAudit\.chainRequested/);
+  assert.match(SRC, /finalMissingChainDimensions:\s*finalAudit\.missingChainDimensions/);
 });
 
 test('发布前确定性语义校验：路径必须来自用户或route并逐字保留', () => {
