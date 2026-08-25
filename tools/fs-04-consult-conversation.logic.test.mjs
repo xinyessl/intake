@@ -930,6 +930,9 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(implementationFallback, /研发参考[\s\S]*OrderMarkService[\s\S]*IptCollectMapper/);
   assert.deepEqual(bundle.audit(implementationFallback, implementationQuestion, implementationRoute).violations, [], '实施 fallback 必须把技术细节末置后再审全绿');
 
+  const implementationDump = '现场先看数据。研发参考：ipt_collect_id、collect_title、institute_id、hospital_id、patient_id、event_no、dept_id、ward_id、order_doc_id、pharmacist_id、ipt_task_id。';
+  assert.ok(bundle.audit(implementationDump, implementationQuestion, implementationRoute).violations.includes('audience_technical_dump'), '实施题即使将字段表放到研发参考，未点名字段时连续 >8 个技术 token 仍须收缩');
+
   const developerAnswer = 'OrderMarkService 通过 IptCollectMapper 读取字段 iptTaskId。';
   const developerAudit = bundle.audit(developerAnswer, '接口字段和 Mapper 开发链路是什么？', implementationRoute);
   assert.ok(!developerAudit.violations.some(item => item.startsWith('audience_')), '明确研发问法允许完整技术展开');
@@ -1075,6 +1078,67 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(q0006DeveloperFallback, /deleted=1.*isCollect=true/s);
   assert.deepEqual(bundle.audit(q0006DeveloperFallback, q0006DeveloperQuestion, orderMarkRoute).violations, [], '明确追问技术契约时不得被产品层级误删');
   assert.ok(!bundle.audit('研发参考：接口路径、字段、状态值和 Java 模型如下。', q0006DeveloperQuestion, orderMarkRoute).violations.includes('audience_technical_overreach'), '研发显式追问不得被产品元话题规则误拦');
+
+  const q0009Question = '把医嘱标记从入口、接口或数据到外部依赖串起来。';
+  const q0009Route = {
+    matched: true,
+    route: { id: 'GENERIC-CHAIN', title: '业务标记链路' },
+    answerFacts: [
+      '住院医嘱标记供药师在住院医嘱详情添加或取消标记，并在标记列表查看、筛选和导出。',
+      '标记链路的四个主接口是列表 GET /auditapi/audit/ipt/collects、新增 POST /auditapi/audit/ipt/task/collect、取消 DELETE /auditapi/audit/ipt/collect、导出 GET /auditapi/comm/ipt/collects/excel。',
+      '标记记录写 audit_ipt_collect；列表只读 deleted=false，取消更新 deleted=1，不物理删除。',
+      '新增标记读取审方服务已有住院任务、患者和医嘱记录；列表通过用户中心 getHospitalInfoByHospitalId 补医院/机构名称，添加标记方法未直接调用 HIS。',
+    ],
+    directEvidenceFacts: [
+      'NEEDS-HUMAN：各写操作的角色与数据归属规则需由业务负责人确认。',
+      '数据权限：NEEDS-HUMAN（listAuditIptCollect 当前无用户维度过滤，是否按药师隔离待确认）。',
+      '未在已核调用链出现的外部系统或失败归因保持局部未知。',
+    ],
+    mustNotConfuse: [],
+  };
+  const q0009ProductionDraft = [
+    '## 入口 → 接口 → 数据 → 外部依赖',
+    '住院药师可以在医嘱详情添加标记，并在列表查看和导出。',
+    '数据表包含 ipt_collect_id、collect_title、institute_id、hospital_id、patient_id、event_no、dept_id、ward_id、order_doc_id、pharmacist_id、ipt_task_id、create_time，取消时 deleted=1。',
+    '列表会读用户中心补医院名，新增链路未直接调用 HIS。',
+    '除 JwtFilter 明确放行的 /comm',
+  ].join('\n');
+  const q0009Audit = bundle.audit(q0009ProductionDraft, q0009Question, q0009Route);
+  assert.ok(q0009Audit.violations.includes('missing_requested_interfaces'), '点名接口时四个 answerFacts 主签名不得漏答');
+  assert.equal(q0009Audit.missingRequestedInterfaces.length, 4);
+  assert.ok(q0009Audit.violations.includes('incomplete_requested_chain'), '同名标题不能冒充已覆盖用户点名维度');
+  assert.ok(q0009Audit.violations.includes('audience_technical_dump'), '未问字段时不得展开长字段枚举');
+  assert.ok(q0009Audit.violations.includes('malformed_markdown'), '以“除……”结束且没有主句的半截句必须拦截');
+  assert.match(bundle.revision(q0009ProductionDraft, q0009Audit), /接口只列 METHOD \+ path，数据只列对象\+关键状态/);
+  const q0009Fallback = bundle.fallback(q0009ProductionDraft, q0009Audit);
+  for (const signature of [
+    'GET /auditapi/audit/ipt/collects',
+    'POST /auditapi/audit/ipt/task/collect',
+    'DELETE /auditapi/audit/ipt/collect',
+    'GET /auditapi/comm/ipt/collects/excel',
+  ]) assert.match(q0009Fallback, new RegExp(signature.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), signature);
+  assert.match(q0009Fallback, /audit_ipt_collect/);
+  assert.match(q0009Fallback, /deleted=1/);
+  assert.match(q0009Fallback, /用户中心/);
+  assert.match(q0009Fallback, /HIS/);
+  assert.match(q0009Fallback, /当前停点/);
+  assert.match(q0009Fallback, /角色与数据归属规则.*确认/);
+  assert.match(q0009Fallback, /是否按药师隔离待确认/);
+  assert.doesNotMatch(q0009Fallback, /ipt_collect_id|collect_title|institute_id|hospital_id|patient_id|event_no|order_doc_id|pharmacist_id|ipt_task_id|JwtFilter/);
+  assert.doesNotMatch(q0009Fallback, /(?:^|\n)\s*除(?!非)[^。！？\n]*$/u, '终稿不得有“除……”半截句');
+  assert.deepEqual(bundle.audit(q0009Fallback, q0009Question, q0009Route).violations, [], '确定性链路 fallback 必须终审全绿');
+
+  const genericMultiInterfaceRoute = { matched: true, answerFacts: ['两个主接口：列表 GET /api/items；详情 GET /api/items/{id}。'] };
+  const genericMultiInterfaceQuestion = '这个功能有哪些主接口？';
+  const genericMultiInterfaceAudit = bundle.audit('列表调用 GET /api/items。', genericMultiInterfaceQuestion, genericMultiInterfaceRoute);
+  assert.deepEqual(genericMultiInterfaceAudit.missingRequestedInterfaces.map(item => item.display), ['GET /api/items/{id}'], '非链路题同样对 answerFacts 的主签名集合做差');
+  const genericMultiInterfaceFallback = bundle.fallback('列表调用 GET /api/items。', genericMultiInterfaceAudit);
+  assert.match(genericMultiInterfaceFallback, /GET \/api\/items\/\{id\}/);
+  assert.deepEqual(bundle.audit(genericMultiInterfaceFallback, genericMultiInterfaceQuestion, genericMultiInterfaceRoute).violations, []);
+
+  const explicitFieldChainQuestion = '请把这个开发链路的入参字段名、类型和 Mapper 串起来。';
+  const explicitFieldChainDraft = '字段为 ipt_collect_id、collect_title、institute_id、hospital_id、patient_id、event_no、dept_id、ward_id、order_doc_id；IptCollectMapper 负责读写。';
+  assert.ok(!bundle.audit(explicitFieldChainDraft, explicitFieldChainQuestion, q0009Route).violations.includes('audience_technical_dump'), '明确追问字段/代码的研发题不得被 dump 护栏误伤');
 
   for (const unsupportedVariant of [
     '这轮说明书未写成已确认行为。',

@@ -195,8 +195,9 @@ depends_on: [FS-01]
 - **AC-129【回复结构数量声明须与清理后终稿一致】** Given 终稿明确要求实施“请回/回复/提供/补充/核对 N 行、列、组、种或类” When 紧随其后的 Markdown 列表或表格实际数据项不是 N，或其它安全审计删项后数量从 N 变少 Then 记为 `inconsistent_structured_cardinality`，触发一次不新增事实的全文修订；仍失败时删除数量声明、不完整结构及后续“你回这 N 行后”等引用，不得补造缺失项。表格请求“列”按表头列数计，其它单位按列表项或表格数据行计；普通事实“数据表有 4 列”“用户已有 4 行数据”没有请求动作时不触发。
 - **AC-130【关系原子题须在全部清理后恢复完整 direct contract】** Given current route 已确认多个直接关系边、内容表示限定及直接 `mustNotConfuse` When 初稿曾覆盖这些事实，但其它安全/结构审计在修订或 fallback 中删除了相关句子 Then 最终发布前必须基于 current route 的全部 direct edge 和本轮已注入 primary evidence 重新核对并生成紧凑逐句终稿，不得只恢复初稿首审时已缺的边；恢复后只做只读自审，不再进入破坏性删句。对于自定义表单关系，终稿须分别覆盖模板 `form_id` 到字段和填写结果、字段 `element_id` 到选项和表格列、`result.content` 为整份填写内容 JSON 快照，以及共享业务键不是真库外键。`用/通过 <key>：`、`关联键是：`后未在同段给关系且未紧随列表/表格/代码块时记为 `incomplete_structured_lead_in`。
 - **AC-131【答疑按问句意图分层，默认业务优先】** Given 用户发起普通“是什么/怎么实现/功能范围/业务规则”咨询且未明确索要技术契约 When 生成答案 Then 按产品/业务受众组织：第一屏先给业务结论、适用场景、状态边界和用户影响，不输出源码文件名、Java 类/方法、Controller/Service/Mapper/DTO/VO、数据库表名或代码目录，也不主动谈接口路径、字段、状态值、Java 模型、源码、研发参考、技术依据，或用“资料/说明书未写、未确认”评价技术资料；业务结论和对象范围答清后停止。Given 问句含现场、排查、复测、留证、转开发、只读核对或清单意图 When 生成答案 Then 按实施受众组织：第一屏先给业务结论，再给 2~4 个可照做的只读编号步骤，每步同时写清看什么/记录什么及不同结果最多判断到哪；正文只保留本次判断必要的实际请求路径，其它接口/字段/类/表统一在文末简短“研发参考”。Given 用户明确询问接口、字段、SQL、源码、Java 类、Mapper 或开发调用链 When 生成答案 Then 按研发受众完整展开有证据支持的技术契约，不得因业务化规则删掉明确追问内容。三类均不得补造事实，实际分类写入本轮 `retrieval.audienceMode` 供生产回看。
+- **AC-132【点名链路维度必须完整、紧凑且可发布】** Given 用户要求把一个功能按“入口/接口/API/路径/数据/状态/权限/外部依赖/留痕”中两个以上维度串起来 When current route `answerFacts` 含已确认 HTTP METHOD + path 主签名 Then 发布前终审必须按业务结论优先的顺序逐项覆盖用户点名维度；显式点名接口/API/路径时，同一 route answerFacts 中每个已确认主签名的 METHOD 与精确 path 均必须出现，不得用同名标题冒充正文。接口只列方法+路径与必要用途，数据只列对象+关键状态，外部依赖只列系统+已核边界；用户未问字段时，product/implementation 模式下任一段连续堆叠超过 8 个 snake_case/camelCase 技术 token 必须记为 `audience_technical_dump`，链路题中的完整字段表/Java 实现同样删除或收缩。current route 正文明确标记的 `NEEDS-HUMAN`/待确认/局部未知须以业务语言列成“当前停点”，不得由检索缺片臆造。Given 终稿留下“除 A”却无“之外/其余……”主句或其它半截句 Then 记为 `malformed_markdown` 并禁止发布。修订仍失败时，fallback 只能从 current route 重建上述紧凑链路并再审全绿。Given 用户明确索要字段名/类型或代码链 Then 对应已核技术内容放行，不受未点名 dump 收缩。
 
-> **AC 编号**：现编号至 **AC-131**（保留既有历史编号与 AC-19-KB）。AC-44 至 AC-131 为 P1。
+> **AC 编号**：现编号至 **AC-132**（保留既有历史编号与 AC-19-KB）。AC-44 至 AC-132 为 P1。
 
 ## 4. 接口契约
 > 统一前缀 `/api`；除 `consult`（SSE）外返回 `{...}` JSON。**本条 100% 复用现有端点，不新增端点**；提交人 `reporter`、归档医院 `site` 服务端按当前登录用户收敛（忽略越权传参）。契约锚点见 `docs/specs/00-实施端-spec清单.md §4` 对照表。
@@ -320,6 +321,7 @@ depends_on: [FS-01]
 
 - **单元 / 前端静态（A 组）**：
   - 咨询受众分类覆盖产品默认、实施诊断和研发显式技术问法；校验三类 prompt 分别满足产品不暴露源码名、实施只读步骤+判断边界+技术末置、研发完整技术契约，并核 `retrieval.audienceMode` 接线（AC-131）。
+  - 生产 Q0009 形态回归锁定点名链路完整性：4 个 route answerFacts 主接口方法+路径全部保留，数据对象/软删除/外部系统边界/明确未知停点完整；未问字段的长 token 枚举与“除……”残句被拦，显式字段/代码题放行（AC-132）。
   - `public/field.html` 存在 `.f-right`（`.f-rtool` 内 `#fCtx.f-ctx` + `.f-toggle` 两按钮 + `.newc`）+ `.f-chat-b` + `.f-chat-f`（input + `.send`）（AC-1/2/3）。
   - 归档上下文 `updateCtx` 版本感知：医院视图 chip 为 `🏥 …现场版本…`（只读、无下拉），系统视图 chip 有 `.f-ver`/`.f-ver-menu` 版本下拉、首项标「最新」（AC-4/5/6/7）。
   - 类型切换 `.f-toggle` 默认「咨询答疑」`.on`（居左，走 consult）；切「提需求/报BUG」改走 intake（AC-2）。
