@@ -1618,6 +1618,40 @@ function consultSafeDiagnosticIntent(question) {
   return direct || partialEvidence || (symptom && diagnosticAsk);
 }
 
+// 答疑受众按“这句话要解决什么”判断，不依赖账号角色：同一个实施账号也可能
+// 在问产品规则或替研发查调用链。只有明确点名技术契约才展开研发细节；普通
+// “是什么/怎么实现/业务规则”默认按产品问题回答，避免把 Java/表字段堆到首屏。
+function consultAudienceMode(question) {
+  const q = String(question || '').trim();
+  const developer = /(?:接口(?:路径|地址|契约|入参|出参|返回)?|字段(?:名|类型|长度|取值)?|哪张表|表名|数据库表|SQL|源码|代码|开发链路|调用链|调用关系|Java\s*类|类名|方法名|Controller|Service|Mapper|Repository|DAO|DTO|VO)(?:[^。！？\n]{0,28}(?:什么|哪些|哪个|哪里|在哪|怎么|如何|实现|定义|调用|读写|保存|返回|排查|看|查))?|(?:什么|哪些|哪个|哪里|在哪|怎么|如何|看|查)[^。！？\n]{0,28}(?:接口|字段|哪张表|表名|SQL|源码|代码|开发链路|调用链|Java\s*类|Controller|Service|Mapper|DTO|VO)/i.test(q);
+  if (developer) return 'developer';
+  const implementation = consultSafeDiagnosticIntent(q)
+    || /(?:现场|实施|复测|回归|怎么查|如何查|排查|留证|转开发|只读(?:步骤|清单|检查)|抓包|抓到|抓取|重点核|核什么|请求(?:和|与|\/)?响应|日志|截图|怎么判断|如何判断|下一步怎么做)/i.test(q);
+  return implementation ? 'implementation' : 'product';
+}
+
+function consultAudienceGuard(question) {
+  const mode = consultAudienceMode(question);
+  const common = [
+    '【本轮答复受众与信息层级】',
+    `本轮按 ${mode === 'developer' ? '研发' : mode === 'implementation' ? '实施' : '产品/业务'} 受众组织答案。先回答用户真正要做的业务判断，不要把检索过程、文件列表或技术名词当结论。`,
+  ];
+  if (mode === 'developer') return common.concat([
+    '用户明确询问接口、字段、SQL、源码、Java 类或开发调用链；在业务结论之后，可以完整展开有当前证据支持的接口方法与路径、字段、表、类/方法和调用链。不得为了简洁删掉本轮明确追问的技术契约，也不得补造未取证实现。',
+    '技术内容按“入口/契约 → 实现链路 → 数据读写 → 边界”组织；原子技术事实题仍直接回答后停止。',
+  ]).join('\n');
+  if (mode === 'implementation') return common.concat([
+    '第一屏先用大白话给业务结论、影响范围和当前能判断到哪；不要用接口、字段、Java 类、表名或源码路径开场。',
+    '若用户在现场排查/复测/留证，给 2~4 个可照做的只读编号步骤。每步都要同时写清“看什么/记录什么”和“看到不同结果分别能判断到哪”，只描述观测边界，不把现象直接写成根因。',
+    '正文只保留完成这次判断必需的实际请求路径；Java 类、方法、表名、字段及其它研发细节统一压到答案末尾的“研发参考”小节，简短列出。没有必要技术细节时不硬加该小节。',
+  ]).join('\n');
+  return common.concat([
+    '这是普通功能、范围、业务规则或“怎么实现”的业务问法。第一屏直接说业务结论、适用对象/场景、状态边界和用户影响；用产品与实施都能看懂的大白话。',
+    '不要输出源码文件名、Java 类/方法名、Controller/Service/Mapper/DTO/VO、数据库表名或代码目录；也不要为了显得完整主动罗列接口、字段和实现链路。用户下一轮明确追问这些技术契约时再按研发受众展开。',
+    '必要的业务状态、页面名称和操作范围可以保留；技术事实只作为内部核验依据，不在正文展示。',
+  ]).join('\n');
+}
+
 function consultDiagnosticGuard(question, route) {
   const q = String(question || '').trim();
   if (!consultSafeDiagnosticIntent(q)) return '';
@@ -2759,6 +2793,29 @@ function consultAnswerSemanticAudit(answer, question, route) {
     && (/(?:只有|仅有|只(?:有|拿得到|拿到|能拿到)|没有|拿不到)[^。！？\n]{0,48}(?:够不够|够吗|是否足够|足不足够|能不能判断|能否判断|可以判断吗)/u.test(questionText)
       || /(?:现有|当前|已有|这些?)?证据[^。！？\n]{0,24}(?:最多|至多)(?:能|可(?:以)?)?(?:判断|确认|证明)到哪/u.test(questionText));
   const diagnosticQuestion = /(?:排查|不一致|对不上|异常|故障|现场|验证|复测|下一步|怎么判断|如何判断|怎么确认|检查|留证|只能确认|能确定|能判断到哪|最多(?:能|可)?判断|不知道|未知|走到哪|还缺什么|够不够|够吗|是否足够|能不能判断|能否判断)/i.test(questionText);
+  // 受众层级也必须过发布前确定性终审，不能只相信模型遵守 prompt。
+  // 普通“怎么实现”仍是产品问法；只有显式技术契约才进入 developer。
+  const audienceDeveloperQuestion = /(?:接口(?:路径|地址|契约|入参|出参|返回)?|字段(?:名|类型|长度|取值)?|哪张表|表名|数据库表|SQL|源码|代码|开发链路|调用链|调用关系|Java\s*类|类名|方法名|Controller|Service|Mapper|Repository|DAO|DTO|VO)(?:[^。！？\n]{0,28}(?:什么|哪些|哪个|哪里|在哪|怎么|如何|实现|定义|调用|读写|保存|返回|排查|看|查))?|(?:什么|哪些|哪个|哪里|在哪|怎么|如何|看|查)[^。！？\n]{0,28}(?:接口|字段|哪张表|表名|SQL|源码|代码|开发链路|调用链|Java\s*类|Controller|Service|Mapper|DTO|VO)/i.test(questionText);
+  const audienceImplementationQuestion = !audienceDeveloperQuestion && (diagnosticQuestion
+    || /(?:实施|回归|转开发|只读(?:步骤|清单|检查)|抓包|抓到|抓取|重点核|核什么|请求(?:和|与|\/)?响应|日志|截图|怎么查|如何查|排查|留证)/i.test(questionText));
+  const audienceMode = audienceDeveloperQuestion ? 'developer' : audienceImplementationQuestion ? 'implementation' : 'product';
+  const sourceTechnicalRe = /(?:[A-Za-z0-9_./-]+\.java\b|(?:^|[\s`/])src\/(?:main|test)\/|\b[A-Z][A-Za-z0-9_$]*(?:Controller|Service|Mapper|Repository|DAO|DTO|VO)\b|(?:Controller|Service|Mapper|Repository|DAO|DTO|VO)\s*[.#：:]|(?:表名|数据库表|写入表|读取表|落到表|查询表)\s*(?:是|为|[:：])?\s*[`'“”]?\s*[a-z][a-z0-9_]{2,}|(?:字段名?|参数名?)\s*(?:是|为|[:：])\s*[`'“”]?\s*[a-z][A-Za-z0-9_]{2,}|\b[a-z][A-Za-z0-9_]{2,}\s*=|`[a-z][A-Za-z0-9_]{2,}`)/i;
+  const concreteInterfaceRe = /(?:\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/[A-Za-z0-9_./{}?=&:%-]+|`\/[A-Za-z0-9_./{}?=&:%-]+`)/i;
+  const audienceParts = text.split(/\n|(?<=[。！？；])/u).map(part => part.trim()).filter(Boolean);
+  const referenceIndex = text.search(/(?:^|\n)\s*(?:#{1,6}\s*)?(?:\*\*)?研发参考(?:\*\*)?\s*[：:]?/mu);
+  const textBeforeReference = referenceIndex >= 0 ? text.slice(0, referenceIndex) : text;
+  const productTechnicalParts = audienceMode === 'product'
+    ? audienceParts.filter(part => sourceTechnicalRe.test(part) || concreteInterfaceRe.test(part)) : [];
+  const implementationMisplacedTechnicalParts = audienceMode === 'implementation'
+    ? textBeforeReference.split(/\n|(?<=[。！？；])/u).map(part => part.trim()).filter(part => part && sourceTechnicalRe.test(part)) : [];
+  const firstAudiencePart = audienceParts.find(part => !/^(?:#{1,6}\s*)?(?:\*\*)?(?:结论|业务结论|当前结论|判断)(?:\*\*)?\s*[：:]?$/u.test(part)) || '';
+  const implementationTechnicalFirstParts = audienceMode === 'implementation' && (sourceTechnicalRe.test(firstAudiencePart) || concreteInterfaceRe.test(firstAudiencePart))
+    ? [firstAudiencePart] : [];
+  const audienceTechnicalParts = Array.from(new Set([
+    ...productTechnicalParts,
+    ...implementationMisplacedTechnicalParts,
+    ...implementationTechnicalFirstParts,
+  ]));
   const unsafeDirectActions = controlled || !diagnosticQuestion ? [] : text.split(/(?<=[。！？；\n])/u)
     .map(x => x.trim()).filter(statement => statement && Array.from(statement.matchAll(CONSULT_DIRECT_RISKY_ACTION_RE))
       .some(match => !negatedActorPrefix.test(statement.slice(0, match.index))));
@@ -2811,7 +2868,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   // 的 answerFacts、mustNotConfuse 或本轮真正注入的正文明确标成 NEEDS-HUMAN、
   // 未覆盖/未定义时，才允许发布同主题的资料缺失结论。否则确定性终审删除该句，
   // 并从同一 direct evidence 恢复它错误降级的已核契约事实。
-  const evidenceAbsenceClaimRe = /(?:(?:说明书|spec|规格|资料|摘录|正文|契约|文档)[^。！？；\n]{0,40}(?:(?:没(?:有)?|未|无)(?:写明|说明|明确|覆盖|提及|提到|定义|给出|包含|确认)|(?:不|无法)(?:明确|确认|核实|判断))|(?:说明书|spec|规格|资料|摘录|正文|契约|文档)[^。！？；\n]{0,24}(?:只(?:能)?确认)[^。！？；\n]{0,48}(?:具体|其余|其它|其他)[^。！？；\n]{0,24}(?:不明确|未知|无法确认))/iu;
+  const evidenceAbsenceClaimRe = /(?:(?:说明书|spec|规格|资料|摘录|正文|契约|文档)[^。！？；\n]{0,48}(?:(?:没(?:有)?|未|无)(?:(?:将|把|被)[^。！？；\n]{0,20})?(?:写明|说明|明确|覆盖|提及|提到|定义|给出|包含|确认|写成|列为|列入|纳入)(?:[^。！？；\n]{0,16}(?:已|经)?确认(?:事实|行为|规则|范围|契约)?)?|(?:不|无法)(?:明确|确认|核实|判断))|(?:说明书|spec|规格|资料|摘录|正文|契约|文档)[^。！？；\n]{0,24}(?:只(?:能)?确认)[^。！？；\n]{0,48}(?:具体|其余|其它|其他)[^。！？；\n]{0,24}(?:不明确|未知|无法确认))/iu;
   const explicitEvidenceGapRe = /(?:NEEDS-HUMAN|未实现|未定义|未覆盖|未写明|没有(?:写明|说明|定义|覆盖|找到)|无法核验|找不到|未找到|不明确|待确认|局部未知)/iu;
   const contractDetailRe = /(?:\bAC-\d+\b|Given|When|Then|调用|读取|取得|取\s*`?[A-Za-z]|返回|写入|序列化|字段|状态|规则|接口|列表|JSON|content)/iu;
   const evidenceTerms = value => {
@@ -2846,7 +2903,9 @@ function consultAnswerSemanticAudit(answer, question, route) {
     for (const line of routeEvidenceLines) {
       if (explicitEvidenceGapRe.test(line) || !contractDetailRe.test(line) || !evidenceLineMatchesClaim(line, statement)) continue;
       const fact = line.replace(/^[-*+]\s+/u, '').replace(/^\*\*AC-[^*]+\*\*\s*/iu, '').trim();
-      if (fact && !evidenceAbsenceCorrectionFacts.includes(fact)) evidenceAbsenceCorrectionFacts.push(fact);
+      // 只恢复被错误降级、但草稿尚未正确表达的契约。已在草稿中逐字出现的
+      // summary 不占用 3 条恢复预算，否则混合缺失句会把后面真正被遗漏的状态/字段挤掉。
+      if (fact && !text.includes(fact) && !evidenceAbsenceCorrectionFacts.includes(fact)) evidenceAbsenceCorrectionFacts.push(fact);
       if (evidenceAbsenceCorrectionFacts.length >= 3) break;
     }
     if (evidenceAbsenceCorrectionFacts.length >= 3) break;
@@ -3034,12 +3093,17 @@ function consultAnswerSemanticAudit(answer, question, route) {
   ) ? observationInputContract : null;
   let safeDiagnosticFallback = '';
   if (diagnosticQuestion) {
-    const confirmedFacts = route && route.matched
+    const allConfirmedFacts = route && route.matched
       ? [...currentRouteFacts.slice(0, 3), ...(route.mustNotConfuse || []).slice(0, 1)].map(String).map(x => x.trim()).filter(Boolean)
       : [];
+    const confirmedTechnicalFacts = audienceMode === 'implementation'
+      ? allConfirmedFacts.filter(fact => sourceTechnicalRe.test(fact) || concreteInterfaceRe.test(fact)) : [];
+    const confirmedFacts = allConfirmedFacts.filter(fact => !confirmedTechnicalFacts.includes(fact));
     const knownBlock = confirmedFacts.length
       ? ['已知事实（继续作为判断基线）：', ...confirmedFacts.map(fact => `- ${fact}`)].join('\n')
       : '当前没有已核证据确认具体按钮、接口、字段或状态值；下面只给不依赖这些未知事实的只读留证。';
+    const audienceReferenceBlock = confirmedTechnicalFacts.length
+      ? ['研发参考', ...confirmedTechnicalFacts.map(fact => `- ${fact}`)].join('\n') : '';
     const safeSteps = singleStepQuestion
       ? ['1. 先只读对照一份已有页面原文与同一次已有请求/响应原文；没有既有请求时只记录“未取得请求证据”，不要为抓包重复未知业务操作。']
       : [
@@ -3070,9 +3134,9 @@ function consultAnswerSemanticAudit(answer, question, route) {
       } else {
         minimumEvidenceSteps.push(`${minimumEvidenceSteps.length + 1}. 把这份响应与同一时刻的页面现象逐字对照；这一步不必先拿服务器日志。`);
       }
-      safeDiagnosticFallback = [verdict, attachmentBoundary, knownBlock, '最小缺口：', ...minimumEvidenceSteps].filter(Boolean).join('\n\n');
+      safeDiagnosticFallback = [verdict, attachmentBoundary, knownBlock, '最小缺口：', ...minimumEvidenceSteps, audienceReferenceBlock].filter(Boolean).join('\n\n');
     } else {
-      safeDiagnosticFallback = [knownBlock, '最小只读排查：', ...safeSteps].join('\n\n');
+      safeDiagnosticFallback = [knownBlock, '最小只读排查：', ...safeSteps, audienceReferenceBlock].filter(Boolean).join('\n\n');
     }
   }
   const violations = [];
@@ -3081,6 +3145,9 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (unsupportedComponentClaims.length) violations.push('unsupported_component_fault');
   if (unsupportedEvidenceNegations.length) violations.push('unsupported_evidence_negation');
   if (unsupportedEvidenceAbsenceClaims.length) violations.push('unsupported_evidence_absence');
+  if (productTechnicalParts.length) violations.push('audience_technical_overreach');
+  if (implementationMisplacedTechnicalParts.length) violations.push('audience_technical_not_last');
+  if (implementationTechnicalFirstParts.length) violations.push('audience_technical_first');
   if (unsafeActorActions.length || unsafeDirectActions.length) violations.push('cross_actor_side_effect');
   if (unexpectedPaths.length) violations.push('unexpected_concrete_path');
   if (unexpectedScopeTerms.length) violations.push('out_of_scope_entity');
@@ -3113,7 +3180,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (contradictoryNegativeSections.length) violations.push('contradictory_negative_section');
   if (singleStepOverreach) violations.push('single_step_diagnostic_overreach');
   if (malformedMarkdown.length) violations.push('malformed_markdown');
-  return { checked: true, diagnosticQuestion, evidenceSufficiencyQuestion, fullHandoffMaterialQuestion, hasEvidenceSufficiencyVerdict, minimumRoutePath, missingEvidenceMinimumPath, observationInputContract, undefinedObservationVariables, symbolicDefinitions: Object.fromEntries(symbolicDefinitions), undefinedSymbolicComparisons, focusedFactQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, focusedRelationshipFacts, missingFocusedRelationshipFacts, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsupportedEvidenceNegations, unsupportedEvidenceAbsenceClaims, evidenceAbsenceCorrectionFacts, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, optionCardinalityMismatches, nonSequentialOptionSets, undefinedGroupReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, emptyNumberedSections, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, emptyDiagnosticBranchHeadings, emptyListStepItems, danglingClosingPunctuationLines, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
+  return { checked: true, diagnosticQuestion, audienceMode, audienceTechnicalParts, productTechnicalParts, implementationMisplacedTechnicalParts, implementationTechnicalFirstParts, evidenceSufficiencyQuestion, fullHandoffMaterialQuestion, hasEvidenceSufficiencyVerdict, minimumRoutePath, missingEvidenceMinimumPath, observationInputContract, undefinedObservationVariables, symbolicDefinitions: Object.fromEntries(symbolicDefinitions), undefinedSymbolicComparisons, focusedFactQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, focusedRelationshipFacts, missingFocusedRelationshipFacts, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsupportedEvidenceNegations, unsupportedEvidenceAbsenceClaims, evidenceAbsenceCorrectionFacts, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, optionCardinalityMismatches, nonSequentialOptionSets, undefinedGroupReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, emptyNumberedSections, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, emptyDiagnosticBranchHeadings, emptyListStepItems, danglingClosingPunctuationLines, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -3131,6 +3198,12 @@ function consultAnswerRevisionPrompt(draft, audit) {
       : '',
     audit.violations.includes('unsupported_evidence_absence')
       ? `草稿把“本轮检索片段没有展示”错误升级成了“说明书/Spec 未写或只确认到这里”：${(audit.unsupportedEvidenceAbsenceClaims || []).join('；')}。删除这些完整自然句。资料缺失结论只有在 current route 的 answerFacts、mustNotConfuse 或本轮正文明确标为 NEEDS-HUMAN、未定义、未覆盖、未写明时才成立；检索截断、Top-N 未带到某行不能作为缺失证据。请恢复下列本轮正文已核事实，并只把本次实例是否按契约执行标为未知：${(audit.evidenceAbsenceCorrectionFacts || []).join('；') || '按本轮 current route 正文逐项恢复，不得自行补造'}。`
+      : '',
+    audit.violations.includes('audience_technical_overreach')
+      ? `本轮是产品/业务问法，草稿主动展开了源码名、Java 类/方法、Controller/Service/Mapper/DTO/VO、表名、字段或具体接口：${(audit.productTechnicalParts || []).join('；')}。把这些实现标识从正文删除，用业务对象、适用场景、状态边界和用户影响重述；不要加“研发参考”，用户明确追问技术契约时下一轮再展开。`
+      : '',
+    audit.violations.includes('audience_technical_first') || audit.violations.includes('audience_technical_not_last')
+      ? `本轮是实施问法，草稿用技术信息开场，或把类/方法/表/字段散落在正文：${(audit.audienceTechnicalParts || []).join('；')}。第一屏先改成大白话业务结论；现场排查用 2~4 个只读步骤，每步写清看什么和不同结果最多判断到哪。完成判断必需的实际请求路径可留在对应步骤，其它研发细节统一移到文末简短“研发参考”，不要删除已核事实。`
       : '',
     audit.violations.includes('contradictory_observation_order')
       ? '草稿违反有序观测点：某个请求/报文/响应/收到值/落库值/页面在该点已经与原始或前一层不同，却又把差异写成发生在该点之后。删除这个完整自然句或完整表格数据行；安全改写只能说“差异在该观测点已经存在/不晚于该点，具体发生层仍待前序证据”。只有前一观测点仍相等、后一观测点才不同，才允许把边界写在两点之间。'
@@ -3309,6 +3382,10 @@ function consultAnswerSafeFallback(draft, audit) {
     if (audit.violations.includes('unsupported_component_fault') && (audit.unsupportedComponentClaims || []).includes(part.trim())) return false;
     if (audit.violations.includes('unsupported_evidence_negation') && (audit.unsupportedEvidenceNegations || []).includes(part.trim())) return false;
     if (audit.violations.includes('unsupported_evidence_absence') && (audit.unsupportedEvidenceAbsenceClaims || []).includes(part.trim())) return false;
+    if ((audit.violations.includes('audience_technical_overreach')
+      || audit.violations.includes('audience_technical_first')
+      || audit.violations.includes('audience_technical_not_last'))
+      && (audit.audienceTechnicalParts || []).includes(part.trim())) return false;
     if (audit.violations.includes('focused_fact_overreach') && (audit.focusedFactOverreach || []).includes(part.trim())) return false;
     if (audit.violations.includes('out_of_scope_entity') && (audit.unexpectedEntityTerms || []).some(term => part.toLowerCase().includes(String(term).toLowerCase()))) return false;
     if (audit.violations.includes('undefined_ordinal_reference') && (audit.undefinedOrdinalReferences || []).some(term => part.includes(String(term)))) return false;
@@ -3449,7 +3526,10 @@ function consultAnswerSafeFallback(draft, audit) {
   }
   if (audit.violations.includes('missing_primary_path') && audit.missingPrimaryPath) {
     const exact = audit.missingPrimaryPath.display;
-    safeKept = [safeKept, `当前请求应逐字核对已核主接口：\`${exact}\`。`].filter(Boolean).join('\n\n');
+    const primaryLine = `当前请求应逐字核对已核主接口：\`${exact}\`。`;
+    if (audit.audienceMode === 'implementation') {
+      safeKept = [safeKept, /(?:^|\n)\s*研发参考\s*(?:\n|$)/u.test(safeKept) ? '' : '研发参考', `- ${primaryLine}`].filter(Boolean).join('\n\n');
+    } else safeKept = [safeKept, primaryLine].filter(Boolean).join('\n\n');
   }
   if (audit.violations.includes('missing_evidence_sufficiency_verdict')
     || audit.violations.includes('missing_evidence_minimum_route_fact')
@@ -3459,6 +3539,8 @@ function consultAnswerSafeFallback(draft, audit) {
   if (audit.violations.includes('unsupported_evidence_absence')) {
     for (const fact of audit.evidenceAbsenceCorrectionFacts || []) {
       const normalizedFact = String(fact || '').trim();
+      const productTechnicalFact = /(?:\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/|\b[A-Z][A-Za-z0-9_$]*(?:Controller|Service|Mapper|Repository|DAO|DTO|VO)\b|\b[a-z][A-Za-z0-9_]{2,}\s*=|(?:接口路径|字段已确认|表名|数据库表)|`\/[A-Za-z0-9_./{}?=&:%-]+`)/i.test(normalizedFact);
+      if (productTechnicalFact && (audit.audienceMode === 'product' || audit.audienceMode === 'implementation')) continue;
       if (normalizedFact && !safeKept.includes(normalizedFact)) safeKept = [safeKept, normalizedFact].filter(Boolean).join('\n\n');
     }
   }
@@ -3473,6 +3555,24 @@ function consultAnswerSafeFallback(draft, audit) {
       .join('\n');
   }
   safeKept = consultDeduplicateFocusedAtomicAnswer(safeKept, audit);
+  if (audit.audienceMode === 'implementation') {
+    const recoveredTechnicalFacts = audit.violations.includes('unsupported_evidence_absence')
+      ? (audit.evidenceAbsenceCorrectionFacts || []).filter(fact => /(?:\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/|\b[A-Z][A-Za-z0-9_$]*(?:Controller|Service|Mapper|Repository|DAO|DTO|VO)\b|\b[a-z][A-Za-z0-9_]{2,}\s*=|(?:接口路径|字段已确认|表名|数据库表)|`\/[A-Za-z0-9_./{}?=&:%-]+`)/i.test(String(fact || '')))
+      : [];
+    const blockedTechnicalParts = new Set([
+      ...(audit.focusedFactOverreach || []),
+      ...(audit.unsupportedComponentClaims || []),
+      ...(audit.unsupportedEvidenceNegations || []),
+      ...(audit.unsupportedEvidenceAbsenceClaims || []),
+    ].map(part => String(part || '').trim()).filter(Boolean));
+    const audienceRelocationParts = audit.focusedFactQuestion ? [] : (audit.audienceTechnicalParts || []);
+    const technical = Array.from(new Set([...audienceRelocationParts, ...recoveredTechnicalFacts]
+      .map(part => String(part || '').trim()).filter(part => part
+        && !blockedTechnicalParts.has(part)
+        && !(audit.unexpectedEntityTerms || []).some(term => part.toLowerCase().includes(String(term).toLowerCase()))
+        && !(audit.unexpectedPaths || []).some(pathValue => consultConcretePaths(part).includes(String(pathValue))))));
+    if (technical.length) safeKept = [safeKept, '研发参考', ...technical.map(part => `- ${part}`)].filter(Boolean).join('\n\n');
+  }
   const notes = [];
   // 原子事实题的审计只负责删掉越界内容；内部违规原因留在 retrieval.answerAudit，
   // 不能再以“安全尾注”形式污染用户正文，否则字段类型/接口题仍然没有真正止答。
@@ -5500,6 +5600,7 @@ const server = http.createServer((req, res) => {
         retrieval = buildRetrieval({ query: qtext, deep: !!b.deep, ver: cver, subsystem: sub }, searchScored, kbScored, codeHits);
         retrieval.conversationIntent = !!conversationMode;
         retrieval.conversationIntentMode = conversationMode;
+        retrieval.audienceMode = consultAudienceMode(qtext);
         retrieval.routing = routingDiag(hasMap, route);
         if (retrieval.routing && retrieval.routing.enabled) { retrieval.routing.usedSpecSearch = usedSpecSearch; retrieval.routing.specTop = Math.round(searchTop * 1000) / 1000; retrieval.routing.specMinRelevant = SPEC_MIN_RELEVANT; }
       } catch {}
@@ -5528,7 +5629,7 @@ const server = http.createServer((req, res) => {
       else {
         // PD-04：命中 mustNotConfuse → 作负向提示注入 system（易混淆项，勿臆造）。answerFacts 已在 specHits 顶段（consultSystem 走 specExcerpts）。
         const mncNote = routeMnc.length ? '\n【以下为该问题的易混淆项，请勿臆造、勿张冠李戴】' + routeMnc.map(x => '\n· ' + x).join('') : '';
-        const consultPrompt = consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationMode) + '\n' + consultEvidenceLedgerGuard(qtext, route) + '\n' + consultCurrentRulingGuard(qtext, route) + '\n' + consultRuleApplicationGuard(qtext, route) + '\n' + consultPatientIdentityGuard(qtext, route) + '\n' + consultCriticalContextGuard(qtext, route) + '\n' + consultFocusedFactGuard(qtext) + '\n' + consultExactPathBoundaryGuard(qtext, route) + '\n' + consultGenericControlledActionGuard(qtext) + '\n' + consultOperationalSafetyGuard(qtext, route) + '\n' + consultFileArtifactGuard(qtext, route) + '\n' + consultDiagnosticGuard(qtext, route) + '\n' + consultNonDestructiveDiagnosticGuard(qtext, route) + '\n' + consultFinalActionConsistencyGuard(qtext, route) + '\n' + consultEvidenceLikelihoodGuard(qtext, route) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : '');
+        const consultPrompt = consultSystem(proj, cver, hits, specHits, codeHits, qtext) + '\n' + consultAudienceGuard(qtext) + '\n' + currentTurnEvidenceGuard(qtext, specHits) + '\n' + consultConversationGuard(qtext, conversationMode) + '\n' + consultEvidenceLedgerGuard(qtext, route) + '\n' + consultCurrentRulingGuard(qtext, route) + '\n' + consultRuleApplicationGuard(qtext, route) + '\n' + consultPatientIdentityGuard(qtext, route) + '\n' + consultCriticalContextGuard(qtext, route) + '\n' + consultFocusedFactGuard(qtext) + '\n' + consultExactPathBoundaryGuard(qtext, route) + '\n' + consultGenericControlledActionGuard(qtext) + '\n' + consultOperationalSafetyGuard(qtext, route) + '\n' + consultFileArtifactGuard(qtext, route) + '\n' + consultDiagnosticGuard(qtext, route) + '\n' + consultNonDestructiveDiagnosticGuard(qtext, route) + '\n' + consultFinalActionConsistencyGuard(qtext, route) + '\n' + consultEvidenceLikelihoodGuard(qtext, route) + mncNote + (imgs.length ? '\n用户本轮可能附了截图，请结合图片理解问题。' : '');
         let draft = '', firstError = null;
         try {
           // 先完整生成到服务端内存，发布前做确定性语义校验；未通过的草稿绝不先流给浏览器。

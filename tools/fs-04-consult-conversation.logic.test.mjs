@@ -29,6 +29,39 @@ function extractFn(src, name) {
 const mode = new Function(extractFn(SRC, 'consultConversationMode') + '\nreturn consultConversationMode;')();
 const classify = new Function('consultConversationMode', extractFn(SRC, 'consultConversationTurn') + '\nreturn consultConversationTurn;')(mode);
 const guard = new Function(extractFn(SRC, 'consultConversationGuard') + '\nreturn consultConversationGuard;')();
+const safeDiagnosticIntent = new Function(extractFn(SRC, 'consultSafeDiagnosticIntent') + '\nreturn consultSafeDiagnosticIntent;')();
+const audienceMode = new Function('consultSafeDiagnosticIntent', extractFn(SRC, 'consultAudienceMode') + '\nreturn consultAudienceMode;')(safeDiagnosticIntent);
+const audienceGuard = new Function('consultAudienceMode', extractFn(SRC, 'consultAudienceGuard') + '\nreturn consultAudienceGuard;')(audienceMode);
+
+test('答疑受众按问句意图分层：普通业务默认产品，现场诊断归实施，明确技术契约才归研发', () => {
+  for (const q of ['医嘱标记现在是怎么实现的？', '这个功能是什么？', '支持哪些业务场景？', '业务规则和状态边界是什么？']) {
+    assert.equal(audienceMode(q), 'product', q);
+  }
+  for (const q of ['现场怎么排查？', '复测到这里下一步怎么查？', '转开发前给我一份只读清单', '只有截图，怎么判断到哪一层？', '今天视图请求和响应抓到了，重点核什么？']) {
+    assert.equal(audienceMode(q), 'implementation', q);
+  }
+  for (const q of ['具体接口路径和字段是什么？', '从 Controller 到 Mapper 的开发链路在哪？', 'SQL 查哪张表？', '这段代码在哪个 Java 类实现？']) {
+    assert.equal(audienceMode(q), 'developer', q);
+  }
+});
+
+test('产品答复首屏业务化且不暴露源码名；实施给只读步骤和判断边界；研发保留完整技术契约', () => {
+  const product = audienceGuard('医嘱标记现在是怎么实现的？');
+  assert.match(product, /第一屏直接说业务结论、适用对象\/场景、状态边界和用户影响/);
+  assert.match(product, /不要输出源码文件名、Java 类\/方法名/);
+  assert.match(product, /Controller\/Service\/Mapper\/DTO\/VO/);
+  assert.match(product, /用户下一轮明确追问这些技术契约时再按研发受众展开/);
+
+  const implementation = audienceGuard('现场复测失败，怎么排查和留证？');
+  assert.match(implementation, /2~4 个可照做的只读编号步骤/);
+  assert.match(implementation, /看什么\/记录什么/);
+  assert.match(implementation, /看到不同结果分别能判断到哪/);
+  assert.match(implementation, /答案末尾的“研发参考”小节/);
+
+  const developer = audienceGuard('接口、字段、Java 类和 Mapper 调用链是什么？');
+  assert.match(developer, /可以完整展开有当前证据支持的接口方法与路径、字段、表、类\/方法和调用链/);
+  assert.match(developer, /不得为了简洁删掉本轮明确追问的技术契约/);
+});
 
 test('模型流式正常结束但无正文时切备用，全部为空时返回明确错误而非空气泡', async () => {
   const attempts = [];
@@ -873,6 +906,32 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(fallback, /未满足完整受控条件/);
   assert.deepEqual(bundle.audit(fallback, '患者号丢位怎么查？', route).violations, []);
 
+  const productDraft = '医嘱标记用于形成药师质控清单。具体由 OrderMarkService.java 和 IptCollectMapper 处理，字段是 iptTaskId。';
+  const productQuestion = '医嘱标记现在是怎么实现的？';
+  const productAudit = bundle.audit(productDraft, productQuestion, { matched: true, answerFacts: ['医嘱标记用于形成药师质控清单。', 'OrderMarkService.java 与 IptCollectMapper 实现，字段 iptTaskId。'] });
+  assert.ok(productAudit.violations.includes('audience_technical_overreach'));
+  assert.match(bundle.revision(productDraft, productAudit), /本轮是产品\/业务问法/);
+  const productFallback = bundle.fallback(productDraft, productAudit);
+  assert.match(productFallback, /医嘱标记用于形成药师质控清单/);
+  assert.doesNotMatch(productFallback, /OrderMarkService|IptCollectMapper|iptTaskId/);
+  assert.deepEqual(bundle.audit(productFallback, productQuestion, { matched: true, answerFacts: ['医嘱标记用于形成药师质控清单。'] }).violations, []);
+
+  const implementationQuestion = '现场复测标记失败，怎么排查和留证？';
+  const implementationRoute = { matched: true, answerFacts: ['研发依据为 OrderMarkService 和 IptCollectMapper，字段 iptTaskId。'] };
+  const implementationDraft = 'OrderMarkService 通过 IptCollectMapper 读取字段 iptTaskId。\n业务上先确认标记是否进入质控清单。';
+  const implementationAudit = bundle.audit(implementationDraft, implementationQuestion, implementationRoute);
+  assert.ok(implementationAudit.violations.includes('audience_technical_first'));
+  assert.ok(implementationAudit.violations.includes('audience_technical_not_last'));
+  assert.match(bundle.revision(implementationDraft, implementationAudit), /文末简短“研发参考”/);
+  const implementationFallback = bundle.fallback(implementationDraft, implementationAudit);
+  assert.match(implementationFallback, /^业务上先确认标记是否进入质控清单/m);
+  assert.match(implementationFallback, /研发参考[\s\S]*OrderMarkService[\s\S]*IptCollectMapper/);
+  assert.deepEqual(bundle.audit(implementationFallback, implementationQuestion, implementationRoute).violations, [], '实施 fallback 必须把技术细节末置后再审全绿');
+
+  const developerAnswer = 'OrderMarkService 通过 IptCollectMapper 读取字段 iptTaskId。';
+  const developerAudit = bundle.audit(developerAnswer, '接口字段和 Mapper 开发链路是什么？', implementationRoute);
+  assert.ok(!developerAudit.violations.some(item => item.startsWith('audience_')), '明确研发问法允许完整技术展开');
+
   const redisRoute = {
     matched: true,
     route: { id: 'GENERIC-QUEUE-FLOW', title: '常驻消费与错误流水' },
@@ -963,6 +1022,50 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     directEvidenceFacts: ['NEEDS-HUMAN：门诊回退规则未定义，当前正文无法确认具体回退字段。'],
   };
   assert.ok(!bundle.audit('门诊回退规则在现有说明书里未定义。', '门诊回退规则怎么处理？', explicitGapRoute).violations.includes('unsupported_evidence_absence'), 'current route 明确 NEEDS-HUMAN/未定义时允许照实标缺失');
+
+  const orderMarkRoute = {
+    matched: true,
+    route: { title: '医嘱标记' },
+    answerFacts: ['住院医嘱标记复用审核任务数据，通过收藏、标题和导出接口形成药师质控清单。'],
+    directEvidenceFacts: [
+      '医嘱标记接口路径已确认：GET /auditapi/audit/ipt/collects、POST /auditapi/audit/ipt/task/collect、DELETE /auditapi/audit/ipt/collect、GET /auditapi/comm/ipt/collects/excel。',
+      '医嘱标记字段已确认：iptTaskId、collectTitle、iptCollectId、severity、cautionLevel、isCollect。',
+      '医嘱标记状态边界已确认：取消标记为 deleted=1 软删除，列表页固定 isCollect=true。',
+    ],
+  };
+  const q0006Question = '医嘱标记现在是怎么实现的？';
+  const q0006Summary = '住院医嘱标记复用审核任务数据，通过收藏、标题和导出接口形成药师质控清单。';
+  const q0006MissingSentence = '更细的接口路径、字段、状态值，以及门诊医嘱标记是否同样实现，这轮说明书没有写成已确认事实。';
+  const q0006Draft = `${q0006Summary}\n${q0006MissingSentence}`;
+  const q0006Audit = bundle.audit(q0006Draft, q0006Question, orderMarkRoute);
+  assert.ok(q0006Audit.violations.includes('unsupported_evidence_absence'), '“没有写成已确认事实”同样是资料缺失声明');
+  assert.deepEqual(q0006Audit.unsupportedEvidenceAbsenceClaims, [q0006MissingSentence], '部分真部分假的混合句必须整句进审计');
+  assert.deepEqual(q0006Audit.evidenceAbsenceCorrectionFacts, orderMarkRoute.directEvidenceFacts, '必须从 current route 恢复被错误降级的接口、字段和状态契约');
+  const q0006Fallback = bundle.fallback(q0006Draft, q0006Audit);
+  assert.match(q0006Fallback, /住院医嘱标记复用审核任务数据/);
+  assert.doesNotMatch(q0006Fallback, /\/auditapi\/audit\/ipt\/collects|iptTaskId|deleted=1/, '普通“怎么实现”按产品受众，已核技术契约仅作内部取证不堆到正文');
+  assert.doesNotMatch(q0006Fallback, /说明书没有写成|门诊医嘱标记是否同样实现/);
+  assert.deepEqual(bundle.audit(q0006Fallback, q0006Question, orderMarkRoute).violations, [], 'fallback 保留业务结论、删除假缺失和技术堆叠后必须再审全绿');
+
+  const q0006DeveloperQuestion = '医嘱标记的接口路径、字段和状态值分别是什么？';
+  const q0006DeveloperAudit = bundle.audit(q0006Draft, q0006DeveloperQuestion, orderMarkRoute);
+  const q0006DeveloperFallback = bundle.fallback(q0006Draft, q0006DeveloperAudit);
+  assert.match(q0006DeveloperFallback, /\/auditapi\/audit\/ipt\/collects/);
+  assert.match(q0006DeveloperFallback, /iptTaskId.*collectTitle.*iptCollectId/s);
+  assert.match(q0006DeveloperFallback, /deleted=1.*isCollect=true/s);
+  assert.deepEqual(bundle.audit(q0006DeveloperFallback, q0006DeveloperQuestion, orderMarkRoute).violations, [], '明确追问技术契约时不得被产品层级误删');
+
+  for (const unsupportedVariant of [
+    '这轮说明书未写成已确认行为。',
+    '现有 Spec 没有将该接口列为已确认契约。',
+    '当前文档未把这些状态列入已确认范围。',
+  ]) assert.ok(bundle.audit(unsupportedVariant, q0006Question, orderMarkRoute).violations.includes('unsupported_evidence_absence'), unsupportedVariant);
+  const explicitUndefinedOrderRoute = {
+    matched: true,
+    answerFacts: ['住院医嘱标记契约已确认。'],
+    directEvidenceFacts: ['NEEDS-HUMAN：门诊医嘱标记当前未定义，是否同样实现待确认。'],
+  };
+  assert.ok(!bundle.audit('门诊医嘱标记在当前说明书中未列为已确认行为。', '门诊医嘱标记怎么实现？', explicitUndefinedOrderRoute).violations.includes('unsupported_evidence_absence'), '当 current route 明确 NEEDS-HUMAN/未定义时允许照实说明缺口');
 
   const q127Draft = [
     'patient_id 是 varchar(50)，按字符串存。',
@@ -2464,7 +2567,8 @@ test('发布前确定性语义校验：路径必须来自用户或route并逐字
   const userRelativePath = bundle.audit('按你提供的 vendor/probe 只读核当前请求。', '我抓到 vendor/probe，怎么判断？', { matched: true, answerFacts: ['只核当前请求'] });
   assert.deepEqual(userRelativePath.violations, [], '用户本轮逐字提供的裸相对路径可照实引用');
   const inventedWithoutKnownPath = bundle.audit('建议再看 GET /guessed/path。', '还要看哪里？', { matched: true, answerFacts: ['继续核当前请求'] });
-  assert.deepEqual(inventedWithoutKnownPath.violations, ['unexpected_concrete_path'], '没有已核路径时也不能新增具体路径');
+  assert.ok(inventedWithoutKnownPath.violations.includes('unexpected_concrete_path'), '没有已核路径时也不能新增具体路径');
+  assert.ok(inventedWithoutKnownPath.violations.includes('audience_technical_overreach'), '普通业务问法也不得主动展开猜测接口');
   const slashWords = bundle.audit('核对服务器/JVM 时间、year/week 字段和接口/页面展示差异。', '怎么只读核时间？', route);
   assert.deepEqual(slashWords.violations, [], '中英文普通斜杠短语不能被当作具体路径');
   const naturalSlashText = bundle.audit('日期是 2026/08/14，A/B 两组都正常，附件名 report.xlsx。', '怎么记录现场值？', route);
@@ -2516,12 +2620,14 @@ test('发布前事实作用域审计：相邻模块、通配路径不串入，�
   };
   const leaked = '今天视图仍调用 GET /pwrsapi/month/view/today。今天视图与外部调度、/comm/*、补跑无关。';
   const leakedAudit = bundle.audit(leaked, '今天请求响应都抓到了，重点核什么？', todayRoute);
-  assert.deepEqual(leakedAudit.violations, ['unexpected_concrete_path', 'out_of_scope_entity']);
+  assert.ok(leakedAudit.violations.includes('unexpected_concrete_path'));
+  assert.ok(leakedAudit.violations.includes('out_of_scope_entity'));
+  assert.ok(leakedAudit.violations.includes('audience_technical_first'), '实施答复不得用接口开场');
   assert.deepEqual(leakedAudit.unexpectedPaths, ['/comm/*']);
   assert.deepEqual(leakedAudit.unexpectedEntityTerms, ['外部调度', '补跑']);
   assert.match(bundle.revision(leaked, leakedAudit), /当前\/继承 route 事实未点名/);
   const leakedFallback = bundle.fallback(leaked, leakedAudit);
-  assert.equal(leakedFallback, '今天视图仍调用 GET /pwrsapi/month/view/today。');
+  assert.match(leakedFallback, /^研发参考[\s\S]*GET \/pwrsapi\/month\/view\/today/);
   assert.deepEqual(bundle.audit(leakedFallback, '今天请求响应都抓到了，重点核什么？', todayRoute).violations, []);
   const combinedEntityLeak = bundle.audit('不要把折线图、统计同步那套接口掺进来。', '今天请求响应都抓到了，重点核什么？', todayRoute);
   assert.deepEqual(combinedEntityLeak.violations, ['out_of_scope_entity']);
@@ -2659,6 +2765,8 @@ test('模糊的“第二步对不上”仍须先给规则条件分支，不能�
 test('consult prompt 同时注入规则应用、运行安全、文件验收与现场诊断，顺序固定', () => {
   const call = SRC.match(/consultSystem\(proj, cver, hits, specHits, codeHits, qtext\)[\s\S]{0,1100}?messages: msgs/);
   assert.ok(call, '应定位 consult 模型调用');
+  assert.ok(call[0].indexOf('consultAudienceGuard(qtext)') > call[0].indexOf('consultSystem('));
+  assert.ok(call[0].indexOf('consultAudienceGuard(qtext)') < call[0].indexOf('currentTurnEvidenceGuard'));
   assert.ok(call[0].indexOf('consultEvidenceLedgerGuard') < call[0].indexOf('consultRuleApplicationGuard'));
   assert.ok(call[0].indexOf('consultRuleApplicationGuard') < call[0].indexOf('consultPatientIdentityGuard'));
   assert.ok(call[0].indexOf('consultPatientIdentityGuard') < call[0].indexOf('consultCriticalContextGuard'));
@@ -2669,6 +2777,13 @@ test('consult prompt 同时注入规则应用、运行安全、文件验收与�
   assert.ok(call[0].indexOf('consultOperationalSafetyGuard') < call[0].indexOf('consultFileArtifactGuard'));
   assert.ok(call[0].indexOf('consultFileArtifactGuard') < call[0].indexOf('consultDiagnosticGuard'));
   assert.ok(call[0].indexOf('consultDiagnosticGuard') < call[0].indexOf('consultNonDestructiveDiagnosticGuard'));
+});
+
+test('consult 将受众模式写入本轮 retrieval，便于生产回看实际分层', () => {
+  const start = SRC.indexOf("if (url.pathname === '/api/consult'");
+  const end = SRC.indexOf("if (url.pathname === '/api/consult-to-intake'", start);
+  const route = SRC.slice(start, end);
+  assert.match(route, /retrieval\.audienceMode = consultAudienceMode\(qtext\)/);
 });
 
 test('安全诊断意图绕过机械 miss，但普通无证据事实题仍保持短路', () => {
