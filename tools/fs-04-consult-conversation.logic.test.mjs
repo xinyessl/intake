@@ -695,7 +695,7 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
   assert.deepEqual(audit('优先怀疑服务端时区。', '今天视图为什么不一致？', route).violations, ['unsupported_likelihood'], '用怀疑/判断包装的成因优先级同样须有当前差异证据');
   assert.deepEqual(audit('页面=接口但与本机不一致，优先查服务端时区。', '现场已确认页面=接口，但与本机不一致。', route).violations, [], '用户已给出直接差异时可据此排查对应层');
   assert.deepEqual(audit('按已核顺序优先查前端展示。', '页面为什么不一致？', { matched: true, route: { title: '展示排查' }, answerFacts: ['说明书明确排查顺序：页面与接口不一致时优先查前端展示'] }).violations, [], 'route明确顺序时放行');
-  assert.deepEqual(audit('响应与页面不一致，所以前端展示/缓存异常。', '今天视图不一致，怎么排查？', route).violations, ['unsupported_component_fault', 'out_of_scope_entity'], '答案自己补的条件不能把未核组件故障写成定论或引入未点名机制');
+  assert.deepEqual(audit('响应与页面不一致，所以前端展示/缓存异常。', '今天视图不一致，怎么排查？', route).violations, ['unsupported_likelihood', 'unsupported_component_fault', 'out_of_scope_entity'], '答案自己补的条件不能把未核组件故障写成定论或引入未点名机制');
   assert.deepEqual(audit('| 层级 | 结论 |\n| --- | --- |\n| 缓存 | 缓存异常 |\n最后就是前端问题。', '今天视图异常，怎么排查？', route).violations, ['unsupported_component_fault', 'out_of_scope_entity'], '表格和结尾同样进入四类事实与scope审计');
   assert.deepEqual(audit('可能分支：缓存异常，仍待验证。', '今天视图不一致，怎么排查？', route).violations, ['out_of_scope_entity'], '待验证标签也不能引入当前scope未点名的具体技术机制');
   assert.deepEqual(audit('已确认是缓存异常。', '现场日志已经确认缓存异常，下一步怎么留证？', route).violations, [], '用户已给直接故障证据可照实承接');
@@ -872,6 +872,36 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(fallback, /不支持对原因作频率排序/);
   assert.match(fallback, /未满足完整受控条件/);
   assert.deepEqual(bundle.audit(fallback, '患者号丢位怎么查？', route).violations, []);
+
+  const redisRoute = {
+    matched: true,
+    route: { id: 'GENERIC-QUEUE-FLOW', title: '常驻消费与错误流水' },
+    answerFacts: ['应用启动常驻消费线程处理队列，单对象写入失败时记录同步错误流水。'],
+  };
+  const q0005Question = '如果接口返回有数据而页面没呈现，转开发前要整理哪些最小证据？';
+  const q0005Draft = [
+    'LLEN 持续增长 + 日志无消费记录 → 消费线程未启动、假死或 Redis 连接异常，属进程/网络层问题。',
+    'LLEN 正常减少 + 错误流水有对应记录 → 已消费但单对象写入失败，属数据格式或库约束问题。',
+  ].join('\n');
+  const q0005Audit = bundle.audit(q0005Draft, q0005Question, redisRoute);
+  assert.ok(q0005Audit.violations.includes('unsupported_likelihood'), '箭头和“属…问题”不能把观测现象升级成确定根因');
+  assert.deepEqual(q0005Audit.unsupportedCausalLocalizationClaims, q0005Draft.split('\n'));
+  assert.match(bundle.revision(q0005Draft, q0005Audit), /日志无某记录.*不证明对应动作未发生/);
+  const q0005Fallback = bundle.fallback(q0005Draft, q0005Audit);
+  assert.doesNotMatch(q0005Fallback, /消费线程未启动|假死|Redis 连接异常|数据格式或库约束问题/);
+  assert.match(q0005Fallback, /待验证分支.*原始日志或异常堆栈/s);
+  assert.deepEqual(bundle.audit(q0005Fallback, q0005Question, redisRoute).violations, [], 'fallback 删除定性归因后必须再审全绿');
+
+  for (const safeCausalBoundary of [
+    'LLEN 持续增长只能确认队列长度未减少；日志无消费记录只说明未观察到对应日志，不能据此证明未消费。',
+    '待验证分支：消费线程未启动、运行异常或连接异常；需查看原始日志或异常堆栈逐项确认。',
+    '方案保存响应成功只能固定该响应观测，后续状态流转仍待验证。',
+  ]) assert.ok(!bundle.audit(safeCausalBoundary, q0005Question, redisRoute).violations.includes('unsupported_likelihood'), safeCausalBoundary);
+  assert.ok(bundle.audit('日志没有消费记录，所以消费线程没有启动。', q0005Question, redisRoute).violations.includes('unsupported_likelihood'), '日志缺失不能证明对应动作未发生');
+  assert.ok(bundle.audit('状态未变化 → 状态机实现错误，属后端逻辑问题。', '工作台标记后状态没变，怎么定位？', { matched: true, answerFacts: ['标记后进入待审状态'] }).violations.includes('unsupported_likelihood'), '因果守卫必须通用于状态流转等核心业务');
+  assert.ok(!bundle.audit('原始日志已明确报 Redis 连接异常，当前故障属于 Redis 连接问题。', '原始日志明确报 Redis 连接异常，现在能确认什么？', redisRoute).violations.includes('unsupported_likelihood'), '原始日志已直接确认同一根因时可照实承接');
+  const permissionRuleRoute = { matched: true, answerFacts: ['说明书明确：响应码为 AUTH_DENIED 时，原因是当前账号无标记权限。'] };
+  assert.ok(!bundle.audit('响应码是 AUTH_DENIED，当前问题属于标记权限问题。', '标记响应码 AUTH_DENIED 表示什么？', permissionRuleRoute).violations.includes('unsupported_likelihood'), 'current route 明确的业务因果契约应放行');
 
   const auditGenerationRoute = {
     matched: true,
