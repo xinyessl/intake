@@ -1059,13 +1059,16 @@ function loadRouteContext(proj, ver, routeResult) {
       text: '以下为该产品模块地图人工整理的经确认事实，回答请优先据此，不要臆造：\n' + facts.map((f, i) => `${i + 1}. ${f}`).join('\n') });
   }
   // 读被引 spec 章节
-  const refs = []
-    .concat((routeResult && routeResult.primaryRefs) || [])
-    .concat((routeResult && routeResult.contextRefs) || [])
-    .concat((routeResult && routeResult.specRefs) || []);   // tier-2/3 用 specRefs
+  const primaryRefs = ((routeResult && routeResult.primaryRefs) || []).map(refItem => ({ refItem, routeRefKind: 'primary' }));
+  const contextRefs = ((routeResult && routeResult.contextRefs) || []).map(refItem => ({ refItem, routeRefKind: 'context' }));
+  const specRefs = ((routeResult && routeResult.specRefs) || []).map(refItem => ({ refItem, routeRefKind: 'spec' }));   // tier-2/3 用 specRefs
+  // 已有 answerFacts 时，优先把精确 contextRefs 读进 load cap；primary 常是与 facts 重复的验证问题/当前事实摘要。
+  // 无 answerFacts 时仍以 primary 为主事实源，保持原语义。
+  const refs = facts.length ? [].concat(contextRefs, primaryRefs, specRefs) : [].concat(primaryRefs, contextRefs, specRefs);
   const seen = new Set();
-  for (const r of refs) {
+  for (const tagged of refs) {
     if (specHits.filter(h => h.section !== 'answerFacts').length >= 6) break;
+    const r = tagged.refItem;
     const rel = String((r && r.path) || '').trim(); if (!rel) continue;
     const dk = rel + '#' + String((r && r.anchor) || (r && r.section) || '');
     if (seen.has(dk)) continue; seen.add(dk);
@@ -1073,14 +1076,14 @@ function loadRouteContext(proj, ver, routeResult) {
     if (!full || !full.trim()) continue;   // 读不到该 spec 文件 → 跳过（不臆造）
     const sec = extractSection(full, r);
     if (!sec) continue;
-    specHits.push({ subsystem: '', module: String((r && r.specId) || ''), title: String((r && (r.section || r.title)) || ''), section: String((r && r.section) || ''), text: sec.slice(0, 800) });
+    specHits.push({ subsystem: '', module: String((r && r.specId) || ''), title: String((r && (r.section || r.title)) || ''), section: String((r && r.section) || ''), text: sec.slice(0, 800), routeRefKind: tagged.routeRefKind });
   }
   return { specHits, mustNotConfuse: (routeResult && routeResult.mustNotConfuse) || [] };
 }
 // PD-04 修复：把路由内容与 specSearch 底座合成「实际喂模型的 specHits」——纯函数、可单测。
 //   routeHits = loadRouteContext 的 specHits（含 answerFacts 顶段，路由命中时）；searchHits = specSearchScored 结果（specSearch 底座）。
-//   ① 路由命中（matched=true）：answerFacts 最高优 + specSearch 底座置前 + 其余 route 章节补后（去重、cap≤7）。
-//      搜索正文比宽泛模块章节更贴近本轮自然语言问题，避免正确片段虽召回却被 route 章节挤到末尾而被便宜模型忽略。
+//   ① 路由命中（matched=true）：answerFacts 最高优；随后为人工 route 的精确 contextRefs/primaryRefs 预留配额；
+//      最强 specSearch 作为纠偏底座补入。不能让 5 条宽泛 search 独占 cap，把接口/状态/权限等人工引用挤出真实模型上下文。
 //   ② 路由未命中（matched=false）：specSearch 首条 ≥ minRelevant → 用 specSearch（据 spec 底座作答）；否则空（走 miss 固定话术）。
 //   返回 { specHits, usedSpecSearch, searchTop, noSpec }（noSpec=true 表示既无路由也无够强 specSearch → 上层可判 miss 话术）。
 function assembleConsultSpecHits(matched, routeHits, searchHits, minRelevant, cap = 7) {
@@ -1089,12 +1092,37 @@ function assembleConsultSpecHits(matched, routeHits, searchHits, minRelevant, ca
   const searchOK = searchTop >= minRelevant;
   const keyOf = h => (String((h && h.module) || '') + '|' + String((h && h.title) || '') + '|' + String((h && h.text) || '').slice(0, 120));
   if (matched) {
-    const out = [], seen = new Set();
+    const out = [], seen = new Set(), directEvidenceHits = [];
     const route = Array.isArray(routeHits) ? routeHits : [];
     const facts = route.filter(h => h && h.section === 'answerFacts');
-    const rest = route.filter(h => !h || h.section !== 'answerFacts');
-    for (const h of [].concat(facts, base, rest)) { if (!h) continue; const k = keyOf(h); if (seen.has(k)) continue; seen.add(k); out.push(h); if (out.length >= cap) break; }
-    return { specHits: out, usedSpecSearch: base.length > 0, searchTop, noSpec: false };
+    const rest = route
+      .filter(h => h && h.section !== 'answerFacts')
+      // answerFacts 已覆盖 route 的事实摘要时，不再让重复的“当前事实/As-built”章节占用有限上下文位；
+      // 把配额留给接口、状态、权限、安全、数据等可回答细节。
+      .filter(h => !facts.length || !/(?:当前事实|已核事实|as[- ]?built)/iu.test(`${h.title || ''} ${h.section || ''}`))
+      .map((hit, index) => ({ hit, index }));
+    const routePriority = item => {
+      const hit = item.hit || {}, label = `${hit.title || ''} ${hit.section || ''}`;
+      const kind = hit.routeRefKind === 'context' ? 100 : hit.routeRefKind === 'primary' ? 50 : 10;
+      const contract = /(?:接口|状态|权限|安全|数据|表|字段|持久|删除|导出|入口)/u.test(label) ? 20 : 0;
+      return kind + contract;
+    };
+    rest.sort((a, b) => routePriority(b) - routePriority(a) || a.index - b.index);
+    let includedSearch = false;
+    const push = (h, direct = false) => {
+      if (!h || out.length >= cap) return false;
+      const k = keyOf(h); if (seen.has(k)) return false;
+      seen.add(k); out.push(h); if (direct) directEvidenceHits.push(h); return true;
+    };
+    facts.forEach(hit => push(hit, true));
+    // 最强 search 紧随 answerFacts（或在无 facts 时置首）作错路由纠偏；只先占 1 位，不能挤掉人工精确引用。
+    for (const hit of base) { if (push(hit, false)) { includedSearch = true; break; } }
+    const reservedRouteCount = Math.max(0, cap - out.length);
+    rest.slice(0, reservedRouteCount).forEach(item => push(item.hit, true));
+    // route 引用未占满 cap 时，再用其余 search 补齐。
+    for (const hit of base) { if (push(hit, false)) includedSearch = true; if (out.length >= cap) break; }
+    for (const item of rest.slice(reservedRouteCount)) { push(item.hit, true); if (out.length >= cap) break; }
+    return { specHits: out, directEvidenceHits, usedSpecSearch: includedSearch, searchTop, noSpec: false };
   }
   // 路由未命中
   if (searchOK) return { specHits: base.slice(0, 6), usedSpecSearch: true, searchTop, noSpec: false };
@@ -5584,7 +5612,7 @@ const server = http.createServer((req, res) => {
         // 发布前关系事实终审只可使用本轮真正注入模型的 current route/spec
         // 证据。保存文本供 content JSON 的“整份/整体快照”等直接限定复核；
         // 不从全局地图或未召回相邻模块扩展。
-        if (route.matched) route.directEvidenceFacts = (specHits || []).map(hit => String((hit && hit.text) || '')).filter(Boolean);
+        if (route.matched) route.directEvidenceFacts = (asm.directEvidenceHits || []).map(hit => String((hit && hit.text) || '')).filter(Boolean);
       } else {
         specHits = specSearch(proj, cver, retrievalQuery, 5, sub);   // 无地图产品：同样用已补实体的检索问题；正文证据边界仍由 qtext 控制
       }

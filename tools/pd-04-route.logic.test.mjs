@@ -1124,7 +1124,26 @@ test('AC-1/AC-5 loadModuleMap 读产品仓地图；loadRouteContext 读被引章
   // 被引 primaryRef 章节读进来
   const joined = ctx.specHits.map(h => h.text).join('\n');
   assert.match(joined, /配置项 order_instruction 在 usercenter/, '读到 primaryRef 指定章节正文');
+  assert.equal(ctx.specHits.find(h => h.section !== 'answerFacts')?.routeRefKind, 'context', '已有 answerFacts 时精确 contextRef 先读并保留引用类型');
+  assert.ok(ctx.specHits.some(h => h.routeRefKind === 'primary'), '仍保留 primary 引用供事实主线使用');
   assert.deepEqual(ctx.mustNotConfuse, FIXTURE_MAP.questionRoutes[0].mustNotConfuse, '带出 mustNotConfuse');
+});
+
+test('AC-9 loadRouteContext：已有 answerFacts 时先读 contextRefs，primary 不得挤掉第六条精确上下文', () => {
+  const repo = makeFixtureRepo(true);
+  const S = buildRoutingSandbox(makeDeps(repo));
+  const sp = path.join(repo, 'docs', 'specs');
+  for (let i = 0; i < 6; i++) fs.writeFileSync(path.join(sp, `CTX-${i}.md`), `---\nid: CTX-${i}\n---\n\n## 精确上下文${i}\n契约正文${i}。\n`);
+  const ref = i => ({ path: `docs/specs/CTX-${i}.md`, section: '精确上下文' + i, anchor: '精确上下文' + i, specId: 'CTX-' + i });
+  S.loadModuleMap({ id: 'pwrs', repoPath: repo }, '');
+  const ctx = S.loadRouteContext({ id: 'pwrs', repoPath: repo }, '', {
+    answerFacts: ['已有经确认事实。'],
+    primaryRefs: [{ path: 'docs/specs/PWRS-SYS-06.md', section: '7. order_instruction 的完整配置答案', anchor: '7-orderinstruction-的完整配置答案', specId: 'PWRS-SYS-06' }],
+    contextRefs: Array.from({ length: 6 }, (_, i) => ref(i)),
+  });
+  const refs = ctx.specHits.filter(h => h.section !== 'answerFacts');
+  assert.equal(refs.length, 6, 'loadRouteContext 自身 cap 仍为 6');
+  assert.ok(refs.every(h => h.routeRefKind === 'context'), '六条精确 contextRefs 全部先进入 load cap，宽泛 primary 不抢位');
 });
 
 test('AC-6 无地图产品：loadModuleMap 返 null（consult 回落 specSearch，向后兼容）', () => {
@@ -1146,13 +1165,14 @@ test('AC-6 无地图产品：consult 源码分支——map=null 才走 specSearc
 const RH = (m, t, x = '') => ({ subsystem: '', module: m, title: t, section: '', text: x || (m + t) });   // route hit（含 answerFacts 顶段 module='模块地图'）
 const SH = (m, t, score, x = '') => ({ subsystem: '', module: m, title: t, text: x || (m + t), score });   // specSearch scored hit
 
-test('PD-04修复 路由命中：specHits = 路由内容(置前) + specSearch 底座（去重合并），answerFacts 仍最高优', () => {
+test('PD-04修复 路由命中：answerFacts 最高、最强 search 纠偏、人工精确引用保留并去重', () => {
   const S = buildRoutingSandbox(makeDeps());
   const routeHits = [{ ...RH('模块地图', '经确认事实（最高优先，据此作答）', 'answerFacts 内容'), section: 'answerFacts' }, RH('PWRS-SYS-06', '收费配置', '收费章节正文')];
   const searchHits = [SH('PWRS-ACT-01', '系统激活注册', 16.5, '激活包上传、激活状态门禁'), SH('PWRS-SYS-06', '收费配置', 4.3, '收费章节正文')];   // 末条与 route 重复
   const asm = S.assembleConsultSpecHits(true, routeHits, searchHits, S.SPEC_MIN_RELEVANT);
   assert.equal(asm.specHits[0].title, '经确认事实（最高优先，据此作答）', 'answerFacts 顶段置前（最高优）');
-  assert.equal(asm.specHits[1].title, '系统激活注册', 'answerFacts 后应先放本轮 specSearch 强匹配，再放宽泛 route 章节');
+  assert.equal(asm.specHits[1].title, '系统激活注册', 'answerFacts 后仅先放最强 specSearch 作错路由纠偏');
+  assert.equal(asm.specHits[2].title, '收费配置', '纠偏位后保留人工 route 指向的精确章节');
   const joined = asm.specHits.map(h => h.text).join('\n');
   assert.match(joined, /激活包上传/, 'specSearch 强匹配「激活注册」也进 specHits（路由错配不再盖掉强 specSearch）');
   // 去重：route 的「收费配置」与 specSearch 的「收费配置」同 module|title|text → 只保留一条
@@ -1168,7 +1188,39 @@ test('PD-04修复 路由命中：cap≤7（route+specSearch 合并不超上限�
   const searchHits = Array.from({ length: 6 }, (_, i) => SH('E' + i, '搜索' + i, 10 - i, '搜索正文' + i));
   const asm = S.assembleConsultSpecHits(true, routeHits, searchHits, S.SPEC_MIN_RELEVANT);
   assert.ok(asm.specHits.length <= 7, 'cap≤7');
-  assert.equal(asm.specHits[0].title, '搜索0', '没有 answerFacts 时，当前问题的精准 specSearch 结果置前');
+  assert.equal(asm.specHits[0].title, '搜索0', '没有 answerFacts 时，最强 specSearch 仍置首作错路由纠偏');
+  assert.ok(asm.specHits.some(h => h.title === '路由0'), '同时保留人工 route 精确引用');
+});
+
+test('Q0009 MK-02：人工 contextRefs 在 cap 内保住导出、表、软删、权限与入口，directEvidence 不混入宽泛搜索', () => {
+  const S = buildRoutingSandbox(makeDeps());
+  const routeHits = [
+    { ...RH('模块地图', '经确认事实（最高优先，据此作答）', '住院医嘱标记支持列表、新增和取消。'), section: 'answerFacts' },
+    { ...RH('AUD-MK-02', '验证问题', '把入口、接口或数据到外部依赖串起来。'), routeRefKind: 'primary' },
+    { ...RH('AUD-MK-02', '接口契约', '列表 GET /auditapi/audit/ipt/collects；新增 POST /auditapi/audit/ipt/task/collect；取消 DELETE /auditapi/audit/ipt/collect；导出 GET /comm/ipt/collects/excel。'), routeRefKind: 'context' },
+    { ...RH('AUD-MK-02', '数据契约', '持久化表 audit_ipt_collect，记录住院医嘱标记。'), routeRefKind: 'context' },
+    { ...RH('AUD-MK-02', '状态边界', '取消采用软删除，更新 deleted=1。'), routeRefKind: 'context' },
+    { ...RH('AUD-MK-02', '权限与安全', '调用接口需要有效登录身份，并按既有权限边界执行。'), routeRefKind: 'context' },
+    { ...RH('AUD-MK-02', '前端入口与外部依赖', '住院医嘱审核任务提供标记入口，链路依赖既有审核任务与导出能力。'), routeRefKind: 'context' },
+  ];
+  const searchHits = Array.from({ length: 5 }, (_, i) => SH('AUD-OVERVIEW-' + i, '宽泛检索' + i, 100 - i, '相邻模块的宽泛搜索正文' + i));
+  const asm = S.assembleConsultSpecHits(true, routeHits, searchHits, S.SPEC_MIN_RELEVANT, 7);
+  const modelContext = asm.specHits.map(h => h.text).join('\n');
+  const direct = asm.directEvidenceHits.map(h => h.text).join('\n');
+
+  assert.equal(asm.specHits[0].section, 'answerFacts', 'answerFacts 仍为第一优先级');
+  assert.equal(asm.specHits[1].title, '宽泛检索0', '最强 specSearch 仅占第二位作错路由纠偏');
+  assert.equal(asm.specHits.length, 7, '实际模型上下文不超过统一 cap');
+  assert.match(modelContext, /GET \/comm\/ipt\/collects\/excel/, '导出接口精确引用进入实际模型上下文');
+  assert.match(modelContext, /audit_ipt_collect/, '表契约进入实际模型上下文');
+  assert.match(modelContext, /deleted=1/, '软删除状态边界进入实际模型上下文');
+  assert.match(modelContext, /权限边界/, '权限与安全引用进入实际模型上下文');
+  assert.match(modelContext, /住院医嘱审核任务提供标记入口/, '前端入口引用进入实际模型上下文');
+  assert.equal(asm.specHits.filter(h => /^宽泛检索/.test(h.title)).length, 1, '宽泛 specSearch 最多占一个纠偏位，不再挤掉精确 contextRefs');
+  assert.match(direct, /GET \/comm\/ipt\/collects\/excel/);
+  assert.match(direct, /audit_ipt_collect/);
+  assert.match(direct, /deleted=1/);
+  assert.doesNotMatch(direct, /相邻模块的宽泛搜索正文/, 'directEvidence 仅来自人工 route 已实际注入的证据，不混入相邻模块搜索');
 });
 
 test('PD-04修复 路由未命中但 specSearch 强（首条≥阈值）→ 用 specSearch，不 miss', () => {
@@ -1205,6 +1257,7 @@ test('PD-04修复 consult 端组装接线（源码级）：assembleConsultSpecHi
   // routing 带上 specTop / usedSpecSearch 方便回放判断
   assert.match(SRC, /retrieval\.routing\.specTop = Math\.round\(searchTop \* 1000\) \/ 1000/, 'routing.specTop 透出 specSearch 首条分');
   assert.match(SRC, /retrieval\.routing\.usedSpecSearch = usedSpecSearch/, 'routing.usedSpecSearch 透出是否用了底座');
+  assert.match(SRC, /route\.directEvidenceFacts = \(asm\.directEvidenceHits \|\| \[\]\)\.map\([^\n]+\.text\)[^\n]+\.filter\(Boolean\)/, '发布前审计只接收实际注入的人工 route 证据，不把宽泛 search 当 directEvidence');
 });
 
 test('AC-4 miss 固定话术：不调模型，SSE 固定文案（源码级断言）', () => {
