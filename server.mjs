@@ -1764,7 +1764,7 @@ function consultAudienceMode(question) {
   const developer = /(?:接口(?:路径|地址|契约|入参|出参|返回)?|字段(?:名|类型|长度|取值)?|哪张表|表名|数据库表|SQL|源码|代码|开发链路|调用链|调用关系|Java\s*类|类名|方法名|Controller|Service|Mapper|Repository|DAO|DTO|VO)(?:[^。！？\n]{0,28}(?:什么|哪些|哪个|哪里|在哪|怎么|如何|实现|定义|调用|读写|保存|返回|排查|看|查))?|(?:什么|哪些|哪个|哪里|在哪|怎么|如何|看|查)[^。！？\n]{0,28}(?:接口|字段|哪张表|表名|SQL|源码|代码|开发链路|调用链|Java\s*类|Controller|Service|Mapper|DTO|VO)/i.test(q);
   if (developer) return 'developer';
   const implementation = consultSafeDiagnosticIntent(q)
-    || /(?:现场|实施|复测|回归|怎么查|如何查|排查|留证|转开发|只读(?:步骤|清单|检查|核)|抓包|抓到|抓取|重点核|核什么|核对|请求(?:和|与|\/)?响应|日志|截图|怎么判断|如何判断|下一步怎么做)/i.test(q);
+    || /(?:现场|实施(?:口径|步骤|清单|排查|复测|核对|留证)|复测|回归|怎么查|如何查|排查|留证|转开发|只读(?:步骤|清单|检查|核)|抓包|抓到|抓取|重点核|核什么|核对|请求(?:和|与|\/)?响应|日志|截图|怎么判断|如何判断|下一步怎么做)/i.test(q);
   return implementation ? 'implementation' : 'product';
 }
 
@@ -3040,7 +3040,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   // 普通“怎么实现”仍是产品问法；只有显式技术契约才进入 developer。
   const audienceDeveloperQuestion = /(?:接口(?:路径|地址|契约|入参|出参|返回)?|字段(?:名|类型|长度|取值)?|哪张表|表名|数据库表|SQL|源码|代码|开发链路|调用链|调用关系|Java\s*类|类名|方法名|Controller|Service|Mapper|Repository|DAO|DTO|VO)(?:[^。！？\n]{0,28}(?:什么|哪些|哪个|哪里|在哪|怎么|如何|实现|定义|调用|读写|保存|返回|排查|看|查))?|(?:什么|哪些|哪个|哪里|在哪|怎么|如何|看|查)[^。！？\n]{0,28}(?:接口|字段|哪张表|表名|SQL|源码|代码|开发链路|调用链|Java\s*类|Controller|Service|Mapper|DTO|VO)/i.test(questionText);
   const audienceImplementationQuestion = !audienceDeveloperQuestion && (diagnosticQuestion
-    || /(?:实施|回归|转开发|只读(?:步骤|清单|检查|核)|抓包|抓到|抓取|重点核|核什么|核对|请求(?:和|与|\/)?响应|日志|截图|怎么查|如何查|排查|留证)/i.test(questionText));
+    || /(?:实施(?:口径|步骤|清单|排查|复测|核对|留证)|回归|转开发|只读(?:步骤|清单|检查|核)|抓包|抓到|抓取|重点核|核什么|核对|请求(?:和|与|\/)?响应|日志|截图|怎么查|如何查|排查|留证)/i.test(questionText));
   const audienceMode = audienceDeveloperQuestion ? 'developer' : audienceImplementationQuestion ? 'implementation' : 'product';
   const sourceTechnicalRe = /(?:[A-Za-z0-9_./-]+\.java\b|(?:^|[\s`/])src\/(?:main|test)\/|\b[A-Z][A-Za-z0-9_$]*(?:Controller|Service|Mapper|Repository|DAO|DTO|VO)\b|(?:Controller|Service|Mapper|Repository|DAO|DTO|VO)\s*[.#：:]|(?:表名|数据库表|写入表|读取表|落到表|查询表)\s*(?:是|为|[:：])?\s*[`'“”]?\s*[a-z][a-z0-9_]{2,}|(?:字段名?|参数名?)\s*(?:是|为|[:：])\s*[`'“”]?\s*[a-z][A-Za-z0-9_]{2,}|\b[a-z][A-Za-z0-9_]{2,}\s*=|`[a-z][A-Za-z0-9_]{2,}`)/i;
   const concreteInterfaceRe = /(?:\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/[A-Za-z0-9_./{}?=&:%-]+|`\/[A-Za-z0-9_./{}?=&:%-]+`)/i;
@@ -3060,9 +3060,13 @@ function consultAnswerSemanticAudit(answer, question, route) {
     ...implementationMisplacedTechnicalParts,
     ...implementationTechnicalFirstParts,
   ]));
-  const unsafeDirectActions = controlled || !diagnosticQuestion ? [] : text.split(/(?<=[。！？；\n])/u)
-    .map(x => x.trim()).filter(statement => statement && Array.from(statement.matchAll(CONSULT_DIRECT_RISKY_ACTION_RE))
-      .some(match => !negatedActorPrefix.test(statement.slice(0, match.index))));
+  const readOnlyWriteInstructionRe = /(?:^|[，：:；;]\s*)(?:[-*]\s+|[1-9]\d*[.、．]\s*)?(?:准备|先|再|然后|请|让|用|尝试|建议|可以|需要|应当|应该|去)[^。！？；\n]{0,40}(?:新建|新增|创建|编辑|删除|保存|提交|发送|完成|签名|审批|星标|补跑|重跑|重试|重新触发|再次触发)/iu;
+  const unsafeDirectActions = controlled || !(diagnosticQuestion || /只读/u.test(text)) ? [] : text.split(/(?<=[。！？；\n])/u)
+    .map(x => x.trim()).filter(statement => statement && (
+      Array.from(statement.matchAll(CONSULT_DIRECT_RISKY_ACTION_RE))
+        .some(match => !negatedActorPrefix.test(statement.slice(0, match.index)))
+      || readOnlyWriteInstructionRe.test(statement)
+    ));
   // “只有既有请求/响应、无数据库或日志权限”只定义了本轮观测边界，不能被
   // 模型改写成“未落库/不写日志/不涉及任务状态”等否定事实。此类错误不是
   // 概率归因，也未必是组件故障，必须单独做确定性终审。若用户原文或 current

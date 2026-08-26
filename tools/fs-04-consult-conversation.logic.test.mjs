@@ -1056,6 +1056,35 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(q0060Fallback, /无候选：当前已分配待审任务被直接记为 audit_operate=audit_pass/);
   assert.deepEqual(q0060Final.violations, [], 'Q0060 产品与实施混合问法的逐行已核事实终稿不得被通用排版门二次误杀');
 
+  const q0061Question = '药师在“标记管理”里建了个人标签和共享标签后，自己、其他药师分别能看到什么？其他人能不能编辑或删除共享标签；删除标签后历史标题会不会一起消失？请按产品和实施都能看懂的方式回答，只说已经确认的行为和风险。';
+  const q0061Route = {
+    matched: true,
+    route: { id: 'AUD-QR-MK-03', title: '标记管理', fallbackMode: 'verifiedFacts' },
+    answerFacts: [
+      '标记管理列表和处方/医嘱打标下拉都能看到当前药师自己的个人标签与所有人的共享标签，其他人的个人标签不可见；管理列表默认每页 10 条，下拉当前未分页。',
+      '个人标签只供创建人使用；共享标签扩大的是选择和查看范围，不是共同维护权限。',
+      '页面会禁用他人共享标签的编辑和删除；编辑时后台还会核对创建人并拒绝越权，但删除时后台缺少同等的创建人校验。',
+      '标签本身是直接删除，不是放入回收站；历史标记各自保存当时的标题文字，所以历史标题不会跟着消失。',
+      '现场只能优先只读核对现有账号、已有标签、列表、下拉、既有请求和日志；不得为了回答问题去新建、编辑或删除标签。',
+    ],
+  };
+  const q0061UnsafeDraft = [
+    '业务结论：共享标签所有药师都能看见。',
+    '现场核对建议（只读验证）',
+    '1. 准备两个药师账号，用 A 创建个人标签和共享标签。',
+    '2. 用 A 找到历史记录，然后删除该标签再次查看。',
+    '技术依据：GET /auditapi/audit/collect/titles，表名 audit_collect_title。',
+  ].join('\n');
+  const q0061Initial = bundle.audit(q0061UnsafeDraft, q0061Question, q0061Route);
+  assert.equal(q0061Initial.audienceMode, 'product', '仅说产品和实施都能看懂不等于请求实施诊断');
+  assert.ok(q0061Initial.violations.includes('audience_technical_overreach'), '产品业务题不得主动追加研发接口和表名');
+  assert.ok(q0061Initial.violations.includes('cross_actor_side_effect'), '标为只读的步骤不得实际创建或删除业务数据');
+  const q0061Fallback = bundle.fallback(q0061UnsafeDraft, q0061Initial);
+  const q0061Final = bundle.audit(q0061Fallback, q0061Question, q0061Route);
+  assert.doesNotMatch(q0061Fallback, /GET \/auditapi|audit_collect_title|准备两个药师账号|然后删除该标签/);
+  assert.match(q0061Fallback, /不得为了回答问题去新建、编辑或删除标签/);
+  assert.deepEqual(q0061Final.violations, [], 'Q0061 应回退为纯已核业务事实且不含伪只读写操作');
+
   const explicitUnknownChainQuestion = '把住院医嘱审核从入口、接口和数据到外部依赖串起来，资料未定义的部分明确停住。';
   const explicitUnknownChainRoute = {
     ...q0011Route,
