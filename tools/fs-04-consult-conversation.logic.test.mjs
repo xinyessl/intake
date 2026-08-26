@@ -1032,6 +1032,30 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(q0059Fallback, /POST \/comm\/send\/audit\/result\/log/);
   assert.deepEqual(q0059Final.violations, [], 'Q0059 完整链路的已核事实兜底须通过接口、入口、依赖与未知停点终审');
 
+  const q0060Question = '药师把一条待审任务“移交”给别人时，能不能选离线药师？移交成功后任务算不算审核完成，所属药师、优先级、挂起状态和倒计时分别怎么变，会通知谁？“移交”和 AI 挂起是不是同一个业务动作？页面显示挂起是否就能保证后台 Redis 超时键已删除？另外药师关闭审核时，名下已经分配的待审任务会怎么处理：有其它在线且有院权限并符合个人方案的药师时怎样重新分配，没有候选时是什么结果，属于 audit_pass 还是 auto_pass？请按产品和实施口径说明。';
+  const q0060Route = {
+    matched: true,
+    route: { id: 'AUD-QR-FLOW-02', title: '审核业务场景与状态机', fallbackMode: 'verifiedFacts' },
+    answerFacts: [
+      '产品：移交和 AI 挂起是两个业务动作；移交会换所属药师并把优先级+1，挂起只暂停当前药师自己的任务。两者实现上都使用 suspend=true 与 suspend 操作流水。',
+      '移交：页面禁用离线药师的移交按钮，后端也校验 WebSocket 在线连接；离线目标会报 USER_NOT_CONNECT。',
+      '状态：移交成功后任务仍是 audit_operate=start_audit，不是审核完成；pharmacist_id、pharmacist_name、pharmacist_phone 改为目标药师，suspend=true，priority_num 加 HAND_OVER_PRIORITY=1，并通知目标药师。',
+      '倒计时：suspend=true 时 WaitTimeMathUtil 返回 -1，页面显示挂起；但只在 audit_hand_over_close_time.open=true 时删除 Redis 超时 key，不能仅凭页面停表就承诺后台超时一定停止。',
+      '关闭审核：工作台有当前任务时先二次确认；确认后将药师移出对应门诊/住院在线审核集合，并立即回收其名下待审任务，不是只影响之后的新进件。',
+      '有候选：按其他在线、有医院权限药师与个人方案再筛选，有候选就更新任务所属，写 operate=redistribution、operate_role=sys 流水并推送给新药师；任务仍待审，不会丢失。',
+      '无候选：当前已分配待审任务被直接记为 audit_operate=audit_pass、passed=true，删除超时 key，写原药师关闭审核且暂无其他药师的通过流水，并通知医生/按配置回调 HIS；这不是新进件的 auto_pass。',
+      '实施：移交失败先核对目标在线状态；成功后核对所属药师、suspend、priority_num、suspend 流水、目标消息、audit_hand_over_close_time 开关及 Redis key。',
+    ],
+  };
+  const q0060Initial = bundle.audit('先讲几个产品结论，再列实施细节。', q0060Question, q0060Route);
+  const q0060Fallback = bundle.fallback('先讲几个产品结论，再列实施细节。', q0060Initial);
+  const q0060Final = bundle.audit(q0060Fallback, q0060Question, q0060Route);
+  assert.equal(q0060Final.verifiedFactsFallback, true);
+  assert.match(q0060Fallback, /^业务结论\n- 产品：移交和 AI 挂起是两个业务动作/m);
+  assert.match(q0060Fallback, /实施口径\n- 移交：页面禁用离线药师/);
+  assert.match(q0060Fallback, /无候选：当前已分配待审任务被直接记为 audit_operate=audit_pass/);
+  assert.deepEqual(q0060Final.violations, [], 'Q0060 产品与实施混合问法的逐行已核事实终稿不得被通用排版门二次误杀');
+
   const explicitUnknownChainQuestion = '把住院医嘱审核从入口、接口和数据到外部依赖串起来，资料未定义的部分明确停住。';
   const explicitUnknownChainRoute = {
     ...q0011Route,

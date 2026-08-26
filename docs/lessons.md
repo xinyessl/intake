@@ -14,6 +14,7 @@
 
 ## ✅ 本项目自检清单（每次交付前逐条过）
 - [ ] **【复杂多边界事实题的安全 fallback 不能只删句】**：路由显式开启 `fallbackMode=verifiedFacts` 时，模型修订失败后须从 current route 的全部原句重建“业务结论 → 实施口径”，不能继续搬运残稿、重复追加研发参考或遗漏中间事实；终审放行必须以逐行精确等于 route facts 为前提（见 L-115）。
+- [ ] **【逐行已核终稿不能再被混合受众排版门误杀】**：问题同时要求产品与实施口径时，`verifiedFacts` 终稿可能含用户点名的状态值、多个技术 token 且不适合强制改成 2~4 个诊断步骤；只有去标题/列表后逐行逐序精确等于全部 route facts 才可放行这三类排版 violation，其它事实、范围、动作和安全门继续严格执行（见 L-116）。
 - [ ] **【模型流结束原因必须参与完整性判定】**：OpenAI 兼容流的 `finish_reason=length` 与 Anthropic 兼容流的 `stop_reason=max_tokens` 都表示正文被长度上限截断；即使已经收到文本，也不能把半截稿交给审计清理后发布。普通/深入答疑须保留足够正文预算，初稿截断走可见错误，修订稿截断放弃修订并回到完整初稿的安全降级（见 L-114）。
 - [ ] **【Anthropic 兼容端点的 thinking 参数必须按服务商+模型+主机共同收窄】**：阿里云 Qwen 3.8 默认可能只回 thinking 块并耗尽 max_tokens；流式/非流式都需禁用 thinking，但不得按 `provider=anthropic` 全局改写而误伤 Claude（见 L-113）。
 - [ ] **【安全终稿缓冲期不能只保活，还要有独立进度与共享完成预算】**：阶段事件必须无 `v`、不进正文/历史；首字、候选和草稿+修订整轮分别限时，用户停止优先，预算耗尽仍用安全正文 + terminal done 收口（见 L-112）。
@@ -212,6 +213,13 @@
 - 解法：只对人工 route 显式开启 `fallbackMode=verifiedFacts`，并在 `routeQuestion` 的白名单返回结构里显式透传；首条 answerFact 固定为大白话业务结论，其余为实施口径。修订失败后忽略草稿，从全部 route 原句一次性重建终稿，并跳过技术搬移和通用尾注；Markdown 归一化同时消除双列表标记。
 - 防复发：用生产原问题、完整 route facts 和包含越界实体/重复技术段/双列表标记的不安全草稿回归；逐项断言保存范围、Upsert/INSERT、部分成功/回滚/重试及坏 JSON 边界齐全，且最终再审全绿。只有逐行精确等于 route facts 时，才可放行 route 中已经审核的概率/动作边界。
 - 关联：`FS-04 AC-138`；`server.mjs`；`tools/fs-04-consult-conversation.logic.test.mjs`；`docs/changes/CHG-consult-复杂事实路由确定性终稿兜底.md`。
+
+### L-116 逐行已核的产品+实施终稿仍会被通用排版门二次误杀
+- 现象（2026-08-26）：Audit 第 60 题命中正确 FLOW-02 route，`fallbackMode=verifiedFacts` 也已开启；确定性终稿包含移交、挂起、关闭审核与重分配全部原句，但生产仍退成机械安全提示。
+- 根因：问题明确要求“产品和实施口径”，受众分类进入 implementation；逐行事实终稿因此触发“技术内容未全部末置”“技术 token 过多”和“未写成 2~4 个编号步骤”三个通用排版门。通用门不知道这份文本已经是人工 route 白名单的不可改写事实集合。
+- 解法：继续以 `verifiedFactsOnlyAnswer` 的严格逐行、逐序相等为唯一前提，只对 `audience_technical_not_last`、`audience_technical_dump`、`nonsequential_top_level_steps` 三个排版 violation 放行；未开启 route 白名单、少一条、多一条、改写原句或模型新增文本均不放行，其它事实/范围/动作/结构/安全审计保持原样。
+- 防复发：用生产 Q0060 原问句和 8 条 FLOW-02 facts 回归；断言业务结论先出、实施事实全在、无候选明确为 `audit_pass` 非 `auto_pass`，终审全绿。测试不能只验证 route 命中或 fallback 已生成，必须把最终 fallback 再送入同一审计函数。
+- 关联：`FS-04 AC-139`；`server.mjs`；`tools/fs-04-consult-conversation.logic.test.mjs`；`docs/changes/CHG-consult-已核事实终稿不再被混合受众排版门误杀.md`。
 
 ### L-024 field.html 的 flex 右栏会被长 Markdown 最小内容宽度撑破，不能只给表格加 overflow
 - 现象（2026-08-10）：正常宽屏不明显；右侧停靠浏览器调试工具后，AI 长答复、超长 URL 或无断点行内代码把气泡/右栏撑宽，页面右侧被裁切。宽表虽已有 `overflow-x:auto`，仍不足以阻止祖先 flex 子项扩张。

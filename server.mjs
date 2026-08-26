@@ -3563,7 +3563,16 @@ function consultAnswerSemanticAudit(answer, question, route) {
     && verifiedFactLines.length === currentRouteFacts.length
     && verifiedFactLines.every((line, index) => line === currentRouteFacts[index]);
   if (verifiedFactsOnlyAnswer) {
-    for (const permitted of ['unsupported_likelihood', 'cross_actor_side_effect']) {
+    for (const permitted of [
+      'unsupported_likelihood',
+      'cross_actor_side_effect',
+      // “产品 + 实施口径”混合问法可能同时包含已核状态值和只读核对项。
+      // verifiedFacts 终稿已严格等于路由全部原句，不能再因通用实施排版门
+      // 要求技术内容只出现在末段或强制 2~4 个编号步骤而退成机械拒答。
+      'audience_technical_not_last',
+      'audience_technical_dump',
+      'nonsequential_top_level_steps',
+    ]) {
       const index = violations.indexOf(permitted);
       if (index >= 0) violations.splice(index, 1);
     }
