@@ -918,6 +918,28 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   const unrelatedHeadingAudit = bundle.audit('更多说明\n- 开始生成调用 POST /comm/ai/generate。\n- 停止生成调用 POST /ai/generate/stop?generateId={id}，其中 generateId 必须放在停止接口的 query 参数中。', auditAiInterfaceQuestion, auditAiInterfaceRoute);
   assert.ok(unrelatedHeadingAudit.violations.includes('focused_fact_overreach'));
   assert.ok(unrelatedHeadingAudit.focusedFactOverreach.includes('更多说明'), '其它无路径标题仍须拦截');
+  const q354Question = '产品准备验收“审核问题统计”功能。现在页面能打开，是否就能承诺已经接入真实后端数据？请用产品和实施能看懂的方式说明当前实际状态与验收边界，不要展开 HIS、AI 或 Redis。';
+  const q354Route = {
+    matched: true,
+    fallbackMode: 'verifiedFacts',
+    route: { id: 'AUD-QR-FAQ-01', title: '审核问题统计', fallbackMode: 'verifiedFacts' },
+    answerFacts: [
+      '当前实际状态：审核问题统计只有可打开的前端页面、筛选项和表格骨架；查询逻辑固定为空列表，当前后端未确认问题统计接口，因此不能承诺已接入真实后端数据。',
+      '验收边界：页面能打开、筛选项可见或表格为空，都不能证明真实查询已接通；当前只能验收页面骨架，不能验收真实统计数据能力。',
+    ],
+  };
+  const q354Fallback = bundle.verifiedFallback(q354Question, q354Route);
+  assert.ok(q354Fallback, JSON.stringify(bundle.audit(bundle.fallback('', bundle.audit('', q354Question, q354Route)), q354Question, q354Route)));
+  assert.deepEqual(q354Fallback.finalAudit.violations, []);
+  assert.match(q354Fallback.reply, /固定为空列表/);
+  assert.match(q354Fallback.reply, /当前只能验收页面骨架/);
+  assert.doesNotMatch(q354Fallback.reply, /HIS|AI|Redis/);
+  const q354ExpandedAudit = bundle.audit(`${q354Fallback.reply}\n- 建议打开页面，在 Network 中抓包确认接口。`, q354Question, q354Route);
+  assert.ok(q354ExpandedAudit.violations.includes('focused_fact_overreach'), '未经 route 证据的打开页面排查扩写仍须拦截');
+  const q354LikelihoodAudit = bundle.audit(`${q354Fallback.reply}\n- 这类空表格大概率是后端接口配置错误。`, q354Question, q354Route);
+  assert.ok(q354LikelihoodAudit.violations.includes('unsupported_likelihood'), '未经 route 证据的概率判断仍须拦截');
+  const q354RootCauseAudit = bundle.audit(`${q354Fallback.reply}\n- 当前问题属于后端服务故障。`, q354Question, q354Route);
+  assert.ok(q354RootCauseAudit.violations.includes('unsupported_likelihood'), '未经 route 证据的确定根因仍须拦截');
   const route = { matched: true, route: { title: '患者号字段' }, answerFacts: ['patient_id 是 varchar(50)'] };
   const draft = 'patient_id 是 varchar(50)。长号丢位多半是对接方按数字传。让对接方改成字符串后复测。';
   const first = bundle.audit(draft, '患者号丢位怎么查？', route);
