@@ -283,6 +283,19 @@ test('consult 草稿与修订共享整轮完成上限，超时失败仍走安全
     '用户停止必须优先于共享超时错误文案');
 });
 
+test('AC-137 consult 提高正文预算，截断初稿与截断修订稿都不能发布', () => {
+  assert.match(SRC, /const CONSULT_DRAFT_MAX_TOKENS = 1500;/);
+  assert.match(SRC, /const CONSULT_DEEP_DRAFT_MAX_TOKENS = 1800;/);
+  const consultStart = SRC.indexOf("if (url.pathname === '/api/consult'");
+  const consultEnd = SRC.indexOf("if (url.pathname === '/api/consult-to-intake'", consultStart);
+  const consult = SRC.slice(consultStart, consultEnd);
+  assert.match(consult, /maxTokens: b\.deep \? CONSULT_DEEP_DRAFT_MAX_TOKENS : CONSULT_DRAFT_MAX_TOKENS/g);
+  assert.match(consult, /if \(draft\.trim\(\) && !firstError\)/,
+    '初稿因 length/max_tokens 抛错后，即使已有部分文本也不得进入审计发布');
+  assert.match(consult, /catch \(error\) \{ revisionError = error; \}[\s\S]*?if \(revised\.trim\(\) && !revisionError\)/,
+    '修订稿被截断时不得用部分修订覆盖完整初稿');
+});
+
 test('Q0010 长会话只压缩模型 payload，最近追问与 route 历史继续保留', () => {
   const raw = [];
   for (let round = 1; round <= 18; round++) {

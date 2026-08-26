@@ -13,6 +13,7 @@
 ---
 
 ## ✅ 本项目自检清单（每次交付前逐条过）
+- [ ] **【模型流结束原因必须参与完整性判定】**：OpenAI 兼容流的 `finish_reason=length` 与 Anthropic 兼容流的 `stop_reason=max_tokens` 都表示正文被长度上限截断；即使已经收到文本，也不能把半截稿交给审计清理后发布。普通/深入答疑须保留足够正文预算，初稿截断走可见错误，修订稿截断放弃修订并回到完整初稿的安全降级（见 L-114）。
 - [ ] **【Anthropic 兼容端点的 thinking 参数必须按服务商+模型+主机共同收窄】**：阿里云 Qwen 3.8 默认可能只回 thinking 块并耗尽 max_tokens；流式/非流式都需禁用 thinking，但不得按 `provider=anthropic` 全局改写而误伤 Claude（见 L-113）。
 - [ ] **【安全终稿缓冲期不能只保活，还要有独立进度与共享完成预算】**：阶段事件必须无 `v`、不进正文/历史；首字、候选和草稿+修订整轮分别限时，用户停止优先，预算耗尽仍用安全正文 + terminal done 收口（见 L-112）。
 - [ ] **【SSE 端点不得把 async 回调交给不接 Promise 的 body reader】**：生成前、audit、fallback、持久化任一阶段抛错都要由端点 catch；连接可写时发可见 err + terminal done，日志带 requestId/stage。长会话的 route 历史与模型 payload 分开裁剪，不能靠清会话恢复（见 L-108）。
@@ -196,6 +197,13 @@
 
 ## 📚 教训明细
 > 还没有教训时本节为空。格式：现象 / 范围·模块 / 根因 / 解法 / 防复发 / 关联。
+
+### L-114 流式收到正文不等于回答完整，必须读取上游长度结束原因
+- 现象（2026-08-26）：复杂咨询的生产回答在“Upsert 策略”后只剩孤立横杠，关键更新规则消失，末尾又重复“研发参考”；Spec 与 `answerFacts` 实际完整。
+- 根因：普通咨询 800-token 预算触达上限后，上游仍以正常 HTTP/SSE 结束；旧解析只累计 `delta.text/content`，忽略 OpenAI `finish_reason=length` 和 Anthropic `stop_reason=max_tokens`。半截稿于是被当成完整稿送进安全清理，删句后进一步暴露为残结构。
+- 解法：普通/深入草稿预算分别提高到 1500/1800；流式解析记录停止原因，长度截断抛 `MODEL_OUTPUT_TRUNCATED`。初稿截断不发布部分正文；修订稿截断不覆盖完整初稿，改走确定性降级。
+- 防复发：测试同时模拟 OpenAI 与 Anthropic 两类结束帧，断言调用已收到部分 delta 仍必须 reject；consult 接线静态断言截断初稿不进审计、截断修订不被采用。浏览器验收必须看完整最终 DOM，不能只看 SSE 有字或 HTTP 200。
+- 关联：`FS-04 AC-137`；`docs/changes/CHG-consult-模型长度截断不得发布半截回答.md`。
 
 ### L-024 field.html 的 flex 右栏会被长 Markdown 最小内容宽度撑破，不能只给表格加 overflow
 - 现象（2026-08-10）：正常宽屏不明显；右侧停靠浏览器调试工具后，AI 长答复、超长 URL 或无断点行内代码把气泡/右栏撑宽，页面右侧被裁切。宽表虽已有 `overflow-x:auto`，仍不足以阻止祖先 flex 子项扩张。

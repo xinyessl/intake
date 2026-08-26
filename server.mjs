@@ -155,6 +155,8 @@ async function callModelOnce(cfg, { system, messages, maxTokens = 1024, images }
 const MODEL_STREAM_FIRST_TOKEN_TIMEOUT_MS = 25000;
 const MODEL_STREAM_CANDIDATE_TIMEOUT_MS = 60000;
 const CONSULT_MODEL_ROUND_TIMEOUT_MS = 90000;
+const CONSULT_DRAFT_MAX_TOKENS = 1500;
+const CONSULT_DEEP_DRAFT_MAX_TOKENS = 1800;
 
 // 阿里云 Qwen 3.8 的 Anthropic 兼容端点默认会把有限 max_tokens 全部用于
 // thinking 块，导致没有可显示 text。仅对这组三项共同命中的候选禁用 thinking；
@@ -215,7 +217,7 @@ async function callModelStreamOnce(cfg, { system, messages, maxTokens = 1024, im
   try {
     const r = await fetch(base + (isA ? '/v1/messages' : '/v1/chat/completions'), { method: 'POST', headers, body: JSON.stringify(body), signal: sig });
     if (!r.ok || !r.body) { let e = ''; try { e = ((await r.json()).error || {}).message || ''; } catch {} throw new Error(e || ('HTTP ' + r.status)); }
-    let full = '', buf = ''; const dec = new TextDecoder();
+    let full = '', buf = '', stopReason = ''; const dec = new TextDecoder();
     for await (const chunk of r.body) {
       buf += dec.decode(chunk, { stream: true });
       let i;
@@ -225,13 +227,24 @@ async function callModelStreamOnce(cfg, { system, messages, maxTokens = 1024, im
         const data = line.slice(5).trim(); if (!data || data === '[DONE]') continue;
         let j; try { j = JSON.parse(data); } catch { continue; }
         let piece = '';
-        if (isA) { if (j.type === 'content_block_delta' && j.delta && typeof j.delta.text === 'string') piece = j.delta.text; }
-        else piece = (((j.choices || [])[0] || {}).delta || {}).content || '';
+        if (isA) {
+          if (j.type === 'content_block_delta' && j.delta && typeof j.delta.text === 'string') piece = j.delta.text;
+          if (j.type === 'message_delta' && j.delta && j.delta.stop_reason) stopReason = String(j.delta.stop_reason);
+        } else {
+          const choice = ((j.choices || [])[0] || {});
+          piece = (choice.delta || {}).content || '';
+          if (choice.finish_reason) stopReason = String(choice.finish_reason);
+        }
         if (piece) {
           if (!gotFirstToken) { gotFirstToken = true; clearTimeout(firstTimer); }
           full += piece; if (onDelta) onDelta(piece);
         }
       }
+    }
+    if (/^(?:max_tokens|length)$/i.test(stopReason)) {
+      const error = new Error('模型输出达到长度上限，未完整结束');
+      error.code = 'MODEL_OUTPUT_TRUNCATED';
+      throw error;
     }
     return full;
   } catch (error) {
@@ -6036,7 +6049,7 @@ const server = http.createServer((req, res) => {
         try {
           // 先完整生成到服务端内存，发布前做确定性语义校验；未通过的草稿绝不先流给浏览器。
           consultStage = 'model_draft';
-          await callModelStream(cfg, { system: consultPrompt, messages: msgs, images: imgs, maxTokens: b.deep ? 1100 : 800, onAttempt: attempt => progress('generating', attempt) }, piece => {
+          await callModelStream(cfg, { system: consultPrompt, messages: msgs, images: imgs, maxTokens: b.deep ? CONSULT_DEEP_DRAFT_MAX_TOKENS : CONSULT_DRAFT_MAX_TOKENS, onAttempt: attempt => progress('generating', attempt) }, piece => {
             piece = String(piece == null ? '' : piece); if (piece) draft += piece;
           }, consultModelSignal);
         } catch (e) {
@@ -6044,7 +6057,7 @@ const server = http.createServer((req, res) => {
           else firstError = e;
         }
 
-        if (draft.trim()) {
+        if (draft.trim() && !firstError) {
           consultStage = 'answer_audit';
           progress('auditing');
           const initialAudit = consultAnswerSemanticAudit(draft, qtext, route);
@@ -6054,18 +6067,18 @@ const server = http.createServer((req, res) => {
           reply = draft;
           if (initialAudit.violations.length && !stopped) {
             revisionAttempted = true;
-            let revised = '';
+            let revised = '', revisionError = null;
             try {
               progress('revising');
               await callModelStream(cfg, {
                 system: consultPrompt + '\n' + consultAnswerRevisionPrompt(draft, initialAudit),
                 messages: msgs,
                 images: imgs,
-                maxTokens: b.deep ? 1100 : 800,
+                maxTokens: b.deep ? CONSULT_DEEP_DRAFT_MAX_TOKENS : CONSULT_DRAFT_MAX_TOKENS,
                 onAttempt: attempt => progress('revising', attempt),
               }, piece => { piece = String(piece == null ? '' : piece); if (piece) revised += piece; }, consultModelSignal);
-            } catch {}
-            if (revised.trim()) {
+            } catch (error) { revisionError = error; }
+            if (revised.trim() && !revisionError) {
               const revisedAudit = consultAnswerSemanticAudit(revised, qtext, route);
               revisionAudit = revisedAudit;
               finalAudit = revisedAudit;

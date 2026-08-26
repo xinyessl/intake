@@ -109,3 +109,32 @@ test('AC-12 普通 Claude/Anthropic 与非阿里云 qwen3.8 请求体保持原�
   assert.equal(Object.hasOwn(bodies[1], 'thinking'), false, 'Claude 流式请求也不得被全局禁用 thinking');
   assert.equal(Object.hasOwn(bodies[2], 'thinking'), false, '非阿里云 Qwen 请求不得套用阿里云兼容项');
 });
+
+test('AC-137 OpenAI length 与 Anthropic max_tokens 都拒绝发布半截流式正文', async () => {
+  const openaiEvent = [
+    `data: ${JSON.stringify({ choices: [{ delta: { content: '半截回答' }, finish_reason: null }] })}`,
+    `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'length' }] })}`,
+    'data: [DONE]',
+    '',
+  ].join('\n\n');
+  const anthropicEvent = [
+    `data: ${JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text: '半截回答' } })}`,
+    `data: ${JSON.stringify({ type: 'message_delta', delta: { stop_reason: 'max_tokens' } })}`,
+    'data: [DONE]',
+    '',
+  ].join('\n\n');
+  const response = event => ({ ok: true, body: { async *[Symbol.asyncIterator]() { yield new TextEncoder().encode(event); } } });
+
+  for (const [cfg, event] of [
+    [{ provider: 'openai', model: 'test', baseUrl: 'https://model.test', apiKey: 'test-key' }, openaiEvent],
+    [{ provider: 'anthropic', model: 'claude-test', baseUrl: 'https://model.test', apiKey: 'test-key' }, anthropicEvent],
+  ]) {
+    const { callModelStreamOnce } = modelFns(async () => response(event));
+    const pieces = [];
+    await assert.rejects(
+      callModelStreamOnce(cfg, { messages: [{ role: 'user', content: '请给完整答案' }], firstTokenTimeoutMs: 100, candidateTimeoutMs: 500 }, piece => pieces.push(piece), null),
+      error => error && error.code === 'MODEL_OUTPUT_TRUNCATED' && /长度上限/.test(error.message),
+    );
+    assert.deepEqual(pieces, ['半截回答'], '允许服务端暂存部分草稿，但调用必须以截断错误结束');
+  }
+});
