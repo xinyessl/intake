@@ -204,8 +204,9 @@ depends_on: [FS-01]
 - **AC-138【复杂事实路由可显式启用已核事实终稿兜底】** Given 人工 question route 对跨多类对象、幂等、事务、重试和坏消息边界的复杂事实题显式声明 `fallbackMode='verifiedFacts'`，且 route 已按“首条业务结论、其余实施口径”提供完整 `answerFacts` When tier-1 路由命中 Then `routeQuestion` 必须把该白名单策略透传到运行时 current route；未声明或其它值一律归一为空，不得误开。When 完整初稿和一次模型修订仍未通过发布审计 Then fallback 必须忽略不安全草稿，从 current route 的全部已核原句确定性生成“业务结论 → 实施口径”终稿；一条不得少、一条不得增，不再搬移旧技术段或追加通用安全尾注。终审只在正文逐行精确等于全部 route facts 时放行其中已核的“可失败/未经授权不得重放”等边界；任一新增句仍走原严格审计。最终不得重复“研发参考”、不得出现 `- -` 双列表标记。
 - **AC-139【已核事实终稿不再被混合受众排版门误杀】** Given 当前问题明确要求同时按产品与实施口径说明，人工 route 已显式启用 `fallbackMode='verifiedFacts'`，且确定性终稿去除固定标题和列表标记后逐行、逐序精确等于全部 `answerFacts` When 通用实施受众审计因已核状态值未全部末置、同一事实包含用户点名的多个状态字段，或未写成 2~4 个编号步骤而产生 `audience_technical_not_last` / `audience_technical_dump` / `nonsequential_top_level_steps` Then 只放行这三个排版类 violation，保留其它事实、范围、动作、结构和安全审计；普通模型文本、少一条、多一条、改写原句或未开启白名单时不得放行。
 - **AC-140【“产品和实施都能看懂”不是现场写操作授权】** Given 用户只要求按产品和实施都能看懂的方式解释已确认业务行为，未要求现场排查、复测、留证、只读清单或技术契约 When 识别答复受众并执行发布前审计 Then 单独出现“实施”不得把本轮升级成实施诊断模式，仍按产品/业务受众禁止主动追加研发接口、表、字段或“技术依据”。Given 草稿把某节称为“只读核对/只读验证” When 同节或后续步骤却要求准备账号并新建、编辑、删除、保存、提交或重试业务数据 Then 记为 `cross_actor_side_effect` 并删除这些写操作；不得因另有“未经授权不要调用接口”提醒而放行相互矛盾的真实操作步骤。复杂人工 route 可用 `fallbackMode='verifiedFacts'` 重建纯已核业务终稿，但仍须通过其它安全审计。
+- **AC-141【已核事实固定标题不触发原子事实越界】** Given 原子接口题命中 `fallbackMode='verifiedFacts'`，确定性终稿由系统固定生成“业务结论”“实施口径”两段标题和 current route 全部原句 When 发布前 `focused_fact_overreach` 逐句审计 Then 只豁免这两个固定标题及其合法 Markdown 标题/粗体包裹，不因标题本身没有 HTTP 路径而拒绝终稿；其它没有已核路径的自拟标题或说明（如“更多说明”）仍必须触发 `focused_fact_overreach`。终稿仍须保留用户点名的全部 HTTP 方法、完整路径与固定参数位置，并继续拦截 `mustNotConfuse` 禁止的路径。
 
-> **AC 编号**：现编号至 **AC-140**（保留既有历史编号与 AC-19-KB）。AC-44 至 AC-140 为 P1。
+> **AC 编号**：现编号至 **AC-141**（保留既有历史编号与 AC-19-KB）。AC-44 至 AC-141 为 P1。
 
 ## 4. 接口契约
 > 统一前缀 `/api`；除 `consult`（SSE）外返回 `{...}` JSON。**本条 100% 复用现有端点，不新增端点**；提交人 `reporter`、归档医院 `site` 服务端按当前登录用户收敛（忽略越权传参）。契约锚点见 `docs/specs/00-实施端-spec清单.md §4` 对照表。

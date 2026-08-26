@@ -13,6 +13,7 @@
 ---
 
 ## ✅ 本项目自检清单（每次交付前逐条过）
+- [ ] **【原子事实止答的标题豁免必须精确】**：`verifiedFacts` 系统固定生成的“业务结论”“实施口径”可无路径并允许合法 Markdown 包裹；不得放宽成通用“短标题都通过”，任意自拟无路径标题（如“更多说明”）仍须触发 `focused_fact_overreach`。生产回归必须走真实 `consultVerifiedFactsFallback` 并复审终稿 `violations=[]`（见 L-119）。
 - [ ] **【完整 route 标题不能无条件压过高分专用路由】**：完整唯一标题只在其 IDF 相关分至少达到最高候选 50% 时强制切题；“待审工作台”等通用场景标题若只是专用问题前缀，应让批量失败、权限、重试等高分业务路由胜出。生产回归必须同时核 `topN`、`exactRouteTitle` 与 fallbackMode（见 L-118）。
 - [ ] **【证据充分性首句门不得误杀逐行已核终稿】**：`verifiedFacts` 终稿可先回答总业务结论、再在后续原句中回答截图或现有证据够什么/不够什么；只要终稿逐行逐序等于全部 route facts，且其中已有明确充分性结论，就不得因“第一句不是够不够”退成通用最小缺口模板。普通模型草稿仍须首句直答（见 L-117）。
 - [ ] **【复杂多边界事实题的安全 fallback 不能只删句】**：路由显式开启 `fallbackMode=verifiedFacts` 时，模型修订失败后须从 current route 的全部原句重建“业务结论 → 实施口径”，不能继续搬运残稿、重复追加研发参考或遗漏中间事实；终审放行必须以逐行精确等于 route facts 为前提（见 L-115）。
@@ -237,6 +238,13 @@
 - 解法：标题候选相关分至少达到最高候选 50% 才可强制置首。Q0014 的“处方标记”仍达到竞争门槛并保留显式切题；数量级落后的“待审工作台”不再抢占批量失败专用路由。
 - 防复发：路由测试不能只断 selected；同时断言原始 `topN`、`exactRouteTitle`、专用 route facts 和 fallbackMode。至少覆盖真正显式短标题、FAQ、多标题比较以及“通用场景标题 + 专用业务问题”。
 - 关联：`server.mjs`；`tools/pd-04-route.logic.test.mjs`；`docs/changes/CHG-consult-通用完整标题不得压过专用高分路由.md`。
+
+### L-119 原子接口题的通用止答门会把系统固定段落标题当成无路径扩写
+- 现象（2026-08-27）：AI 审方开始/停止接口题已命中 `verifiedFacts`，两条 HTTP 方法、完整路径和 `generateId` query 位置都齐全，但确定性终稿仍被 `focused_fact_overreach` 拒绝。
+- 根因：`consultAnswerSafeFallback` 固定生成无冒号的“业务结论”“实施口径”，而原子接口审计只豁免“以冒号结尾的短标题”；两个系统标题没有路径，因而被当作越界句。
+- 解法：在 `consultFocusedFactOverreach` 中只精确豁免这两个系统固定标题，并兼容 Markdown 标题与成对粗体包裹；不改变其它无路径标题的拦截规则。
+- 防复发：生产形态测试必须调用真实 `consultVerifiedFactsFallback`，断言终审零违规、全部点名路径和固定参数位置保留、禁止路径不出现；同时用“更多说明”证明白名单没有泛化。
+- 关联：`FS-04 AC-141`；`server.mjs`；`tools/fs-04-consult-conversation.logic.test.mjs`；`docs/changes/CHG-consult-原子接口已核终稿固定标题不再误杀.md`。
 
 ### L-024 field.html 的 flex 右栏会被长 Markdown 最小内容宽度撑破，不能只给表格加 overflow
 - 现象（2026-08-10）：正常宽屏不明显；右侧停靠浏览器调试工具后，AI 长答复、超长 URL 或无断点行内代码把气泡/右栏撑宽，页面右侧被裁切。宽表虽已有 `overflow-x:auto`，仍不足以阻止祖先 flex 子项扩张。

@@ -4207,6 +4207,9 @@ function consultFocusedFactOverreach(answer, question, route) {
   return String(answer || '').split(/(?<=[。！？；\n])/u).map(x => x.trim()).filter(statement => {
     if (!statement) return false;
     if (/^[^。！？\n]{1,40}[：:]$/u.test(statement)) return false;
+    // verifiedFacts 确定性终稿固定生成这两个标题；只精确豁免
+    // 这两个系统标题（含合法 Markdown 包裹），其它无路径标题仍拦截。
+    if (/^\s*(?:#{1,6}\s+)?(?:(\*\*|__)(?:业务结论|实施口径)\1|(?:业务结论|实施口径))\s*$/u.test(statement)) return false;
     if (/(?:现场(?:怎么|如何|快速|排查|核对)|排查步骤|下一步|接下来|开发者工具|\bNetwork\b|抓包|复现|留证|优先查|建议(?:先|再|去|让)|(?:打开|点击|刷新)[^。！？；\n]{0,24}(?:页面|工作台|网络|请求|接口)|如果[^。！？；\n]{0,36}(?:失败|异常|报错|没调到|没有请求)|把[^。！？；\n]{0,30}(?:截图|日志|请求|响应)[^。！？；\n]{0,16}(?:发来|贴出|提供)|需要更细|再一起看)/i.test(statement)) return true;
     if (interfaceOnly) {
       const paths = consultConcretePaths(statement);

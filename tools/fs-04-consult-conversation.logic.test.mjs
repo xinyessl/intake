@@ -897,6 +897,27 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     + extractFn(SRC, 'consultVerifiedFactsFallback') + '\n'
     + 'return { audit:consultAnswerSemanticAudit, revision:consultAnswerRevisionPrompt, fallback:consultAnswerSafeFallback, verifiedFallback:consultVerifiedFactsFallback };',
   )();
+  const auditAiInterfaceQuestion = 'AI 审方开始生成和停止生成分别调用哪个接口？请只给出两个 HTTP 方法与完整路径，并说明停止接口的 generateId 放在哪里。';
+  const auditAiInterfaceRoute = {
+    matched: true,
+    fallbackMode: 'verifiedFacts',
+    route: { id: 'AUD-QR-FAQ-01-AI', title: 'AI 审方生成和停止接口', fallbackMode: 'verifiedFacts' },
+    answerFacts: [
+      '开始生成调用 POST /comm/ai/generate。',
+      '停止生成调用 POST /ai/generate/stop?generateId={id}，其中 generateId 必须放在停止接口的 query 参数中。',
+    ],
+    mustNotConfuse: ['不得输出 POST /external。'],
+  };
+  const auditAiInterfaceFallback = bundle.verifiedFallback(auditAiInterfaceQuestion, auditAiInterfaceRoute);
+  assert.ok(auditAiInterfaceFallback, '生产第351题的 verifiedFacts 确定性终稿应可发布');
+  assert.deepEqual(auditAiInterfaceFallback.finalAudit.violations, []);
+  assert.match(auditAiInterfaceFallback.reply, /POST \/comm\/ai\/generate/);
+  assert.match(auditAiInterfaceFallback.reply, /POST \/ai\/generate\/stop\?generateId=\{id\}/);
+  assert.doesNotMatch(auditAiInterfaceFallback.reply, /POST \/external/);
+  assert.deepEqual(bundle.audit('**业务结论**\n- 开始生成调用 POST /comm/ai/generate。\n__实施口径__\n- 停止生成调用 POST /ai/generate/stop?generateId={id}，其中 generateId 必须放在停止接口的 query 参数中。', auditAiInterfaceQuestion, auditAiInterfaceRoute).violations, [], 'Markdown 包裹的系统标题不应被原子接口审计误杀');
+  const unrelatedHeadingAudit = bundle.audit('更多说明\n- 开始生成调用 POST /comm/ai/generate。\n- 停止生成调用 POST /ai/generate/stop?generateId={id}，其中 generateId 必须放在停止接口的 query 参数中。', auditAiInterfaceQuestion, auditAiInterfaceRoute);
+  assert.ok(unrelatedHeadingAudit.violations.includes('focused_fact_overreach'));
+  assert.ok(unrelatedHeadingAudit.focusedFactOverreach.includes('更多说明'), '其它无路径标题仍须拦截');
   const route = { matched: true, route: { title: '患者号字段' }, answerFacts: ['patient_id 是 varchar(50)'] };
   const draft = 'patient_id 是 varchar(50)。长号丢位多半是对接方按数字传。让对接方改成字符串后复测。';
   const first = bundle.audit(draft, '患者号丢位怎么查？', route);
