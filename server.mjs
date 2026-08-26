@@ -4025,6 +4025,15 @@ function consultAnswerSafeFallback(draft, audit) {
   return [safeKept || audit.safeDiagnosticFallback || '当前草稿未通过发布前证据与动作安全校验，已停止发布其中未经证实的判断和操作指令。', ...notes].filter(Boolean).join('\n\n');
 }
 
+function consultVerifiedFactsFallback(question, route) {
+  const initialAudit = consultAnswerSemanticAudit('', question, route);
+  if (!initialAudit.verifiedFactsFallback) return null;
+  const reply = consultAnswerSafeFallback('', initialAudit);
+  const finalAudit = consultAnswerSemanticAudit(reply, question, route);
+  if (finalAudit.violations.length) return null;
+  return { reply, initialAudit, finalAudit };
+}
+
 // 模型草稿和一次修订都可能同时含多类违规；两轮整句清理后若仍有残留，
 // 不能直接退化为机械拒答。诊断题已在 audit 内基于 current route 构造了
 // 确定性“已核事实 + 只读留证”终稿；这里单独重审它，安全时优先发布。
@@ -6202,7 +6211,40 @@ const server = http.createServer((req, res) => {
           reply = await publishSafeFinal(reply);
         } else if (firstError && !stopped) {
           console.error(`[consult-error] request=${consultRequestId} stage=model_draft message=${String((firstError && firstError.message) || firstError).replace(/[\r\n]+/g, ' ').slice(0, 500)}`);
-          const m = `（AI 暂时连不上，请稍后重试。错误编号：${consultRequestId}。）`; reply = await publishSafeFinal(m, { err: true, code: 'consult_model_error', requestId: consultRequestId, stage: 'model_draft' });
+          // 完整业务链等 verifiedFacts 路由已有逐句审核过的确定性事实。
+          // 模型因长度上限或临时故障未能产出时，优先发布这些事实；普通路由
+          // 仍保持明确报错，不能把任意检索片段伪装成完整答案。
+          const verifiedFallback = consultVerifiedFactsFallback(qtext, route);
+          if (verifiedFallback) {
+            reply = verifiedFallback.reply;
+            const answerAudit = {
+              version: 2,
+              checked: true,
+              modelDraftError: true,
+              initialViolations: [],
+              initialChainRequested: !!verifiedFallback.initialAudit.chainRequested,
+              initialMissingChainDimensions: verifiedFallback.initialAudit.missingChainDimensions || [],
+              initialUnexpectedPaths: [],
+              initialUnexpectedEntities: [],
+              revisionAttempted: false,
+              revisionAccepted: false,
+              revisionViolations: [],
+              fallbackUsed: true,
+              fallbackPasses: 1,
+              finalViolations: verifiedFallback.finalAudit.violations,
+              finalChainRequested: !!verifiedFallback.finalAudit.chainRequested,
+              finalMissingChainDimensions: verifiedFallback.finalAudit.missingChainDimensions || [],
+              finalUnexpectedPaths: [],
+              finalUnexpectedEntities: [],
+              likelihoodEvidence: verifiedFallback.initialAudit.likelihoodAllowed,
+            };
+            if (retrieval) retrieval.answerAudit = answerAudit;
+            sse({ answerAudit });
+            if (!kbInjected && kbRefs.length) { kbInjected = true; sse({ kb: kbRefs, kbInjected: true }); }
+            reply = await publishSafeFinal(reply);
+          } else {
+            const m = `（AI 暂时连不上，请稍后重试。错误编号：${consultRequestId}。）`; reply = await publishSafeFinal(m, { err: true, code: 'consult_model_error', requestId: consultRequestId, stage: 'model_draft' });
+          }
         }
       }
       reply = reply.trim();

@@ -894,7 +894,8 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     + extractFn(SRC, 'consultDeduplicateFocusedAtomicAnswer') + '\n'
     + extractFn(SRC, 'consultNormalizeSafeMarkdown') + '\n'
     + extractFn(SRC, 'consultAnswerSafeFallback') + '\n'
-    + 'return { audit:consultAnswerSemanticAudit, revision:consultAnswerRevisionPrompt, fallback:consultAnswerSafeFallback };',
+    + extractFn(SRC, 'consultVerifiedFactsFallback') + '\n'
+    + 'return { audit:consultAnswerSemanticAudit, revision:consultAnswerRevisionPrompt, fallback:consultAnswerSafeFallback, verifiedFallback:consultVerifiedFactsFallback };',
   )();
   const route = { matched: true, route: { title: '患者号字段' }, answerFacts: ['patient_id 是 varchar(50)'] };
   const draft = 'patient_id 是 varchar(50)。长号丢位多半是对接方按数字传。让对接方改成字符串后复测。';
@@ -1053,6 +1054,10 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(q0059Fallback, /住院当前代码未确认存在同等去重/);
   assert.match(q0059Fallback, /POST \/comm\/send\/audit\/result\/log/);
   assert.deepEqual(q0059Final.violations, [], 'Q0059 完整链路的已核事实兜底须通过接口、入口、依赖与未知停点终审');
+  const q0059ModelErrorFallback = bundle.verifiedFallback(q0059Question, q0059Route);
+  assert.ok(q0059ModelErrorFallback, 'Q0059 模型超长或临时失败时应返回已核事实终稿');
+  assert.equal(q0059ModelErrorFallback.reply, q0059Fallback);
+  assert.deepEqual(q0059ModelErrorFallback.finalAudit.violations, []);
 
   const q0060Question = '药师把一条待审任务“移交”给别人时，能不能选离线药师？移交成功后任务算不算审核完成，所属药师、优先级、挂起状态和倒计时分别怎么变，会通知谁？“移交”和 AI 挂起是不是同一个业务动作？页面显示挂起是否就能保证后台 Redis 超时键已删除？另外药师关闭审核时，名下已经分配的待审任务会怎么处理：有其它在线且有院权限并符合个人方案的药师时怎样重新分配，没有候选时是什么结果，属于 audit_pass 还是 auto_pass？请按产品和实施口径说明。';
   const q0060Route = {
