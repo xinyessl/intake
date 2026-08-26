@@ -49,6 +49,7 @@ function buildRoutingSandbox(deps) {
   const consts =
     `const ROUTE_MATCH_MIN = ${extractConst(SRC, 'ROUTE_MATCH_MIN')};\n` +
     `const ROUTE_ALIAS_BONUS = ${extractConst(SRC, 'ROUTE_ALIAS_BONUS')};\n` +
+    `const ROUTE_EXACT_TITLE_MIN_RATIO = ${extractConst(SRC, 'ROUTE_EXACT_TITLE_MIN_RATIO')};\n` +
     `const ROUTE_EXACT_TIER3 = ${extractConst(SRC, 'ROUTE_EXACT_TIER3')};\n` +
     `const SPEC_MIN_RELEVANT = ${extractConst(SRC, 'SPEC_MIN_RELEVANT')};\n` +
     `const MAP_REL = ${extractConst(SRC, 'MAP_REL')};\n` +
@@ -308,6 +309,30 @@ test('Q0014 当前问句完整命中唯一 route title 时强制显式切题，�
   const faq = S.routeQuestion(map, '审方关键接口与边界 FAQ 里有哪些问题？', '');
   assert.equal(faq.route.id, 'AUD-QR-FAQ-01');
   assert.equal(faq.exactRouteTitle, true, '普通 FAQ 完整 title 正例仍应直达 FAQ');
+});
+
+test('通用短标题不得无条件压过高分专用业务路由', () => {
+  const S = buildRoutingSandbox(makeDeps());
+  const map = {
+    questionRoutes: [
+      {
+        id: 'AUD-QR-WB-01', title: '待审工作台', aliases: [], keywords: ['待审工作台', '审核工作台'],
+        answerFacts: ['工作台概览。'], searchText: '待审工作台 审核工作台 当日统计 快捷菜单 待审入口',
+      },
+      {
+        id: 'AUD-QR-FLOW-BATCH-RETRY-01', title: '批量审核中途失败与重复重试边界', aliases: [],
+        keywords: ['批量通过', '中途报错', '全成或全败', '审核流水', 'Redis 消息和 HIS 回调', '同一个事务', '同一批 taskId', '重复重试'],
+        fallbackMode: 'verifiedFacts', answerFacts: ['不能承诺全成全败，必须逐条核对且不得盲目整批重试。'],
+        searchText: '批量审核中途失败与重复重试边界 批量通过 中途报错 全成或全败 审核流水 任务状态 Redis 消息 HIS 回调 同一个事务 同一批 taskId 重复重试 部分成功 不统一回滚',
+      },
+    ], specs: [], indexes: {},
+  };
+  const question = '药师在待审工作台一次批量通过 10 条任务，中途第 6 条报错，整批一定全成或全败吗？审核流水、任务状态、Redis 消息和 HIS 回调是否在同一个事务里；能否再次点击同一批 taskId？';
+  const hit = S.routeQuestion(map, question, '');
+  assert.equal(hit.route.id, 'AUD-QR-FLOW-BATCH-RETRY-01', JSON.stringify(hit.topN));
+  assert.equal(hit.exactRouteTitle, false, '低分通用标题不应标记为强制命中');
+  assert.equal(hit.fallbackMode, 'verifiedFacts');
+  assert.equal(hit.topN[0].id, 'AUD-QR-FLOW-BATCH-RETRY-01');
 });
 
 test('接口权限自然问法族优先专用QR，并同时保留功能授权缺口与业务数据边界', () => {

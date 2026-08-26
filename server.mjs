@@ -820,6 +820,7 @@ function specSearchScored(proj, ver, query, n = 5, subKey = '') {
 // 阈值常量（部署后在 pwrs 上用回放调准）：路由最高分 ≥ 阈值 → 命中；否则 miss。
 const ROUTE_MATCH_MIN = 3.0;        // tier-1 questionRoutes / tier-2 specs 命中阈值（IDF 加权重叠得分）
 const ROUTE_ALIAS_BONUS = 6.0;      // query 整串命中某 alias 子串 → 强 bonus（别名是人工整理的高判别短语）
+const ROUTE_EXACT_TITLE_MIN_RATIO = 0.5; // 完整标题候选至少达到最高相关分的一半，才允许强制切题；防通用短标题压过高分专用业务路由
 const ROUTE_EXACT_TIER3 = 8.0;      // tier-3 精确名（config/table/api）命中 → 直接强命中（远超阈值）
 // PD-04 修复：specSearch 始终作底座，路由作「精选事实」加成——路由未命中时，只要 specSearch 首条 IDF 得分 ≥ 本阈值，
 //   仍把 specSearch 强匹配喂给模型（由提示词的功能级覆盖判定决定答/说没覆盖），只有 specSearch 也弱/空才走 miss 固定话术。
@@ -894,13 +895,18 @@ function routeQuestion(map, query, subKey = '') {
       return title.length >= 4 && qLower.includes(title);
     });
     const exactTitle = exactTitleHits.length === 1 ? exactTitleHits[0] : null;
-    if (exactTitle) {
-      const at = scored.indexOf(exactTitle);
+    // 完整标题仍是强显式实体，但像“待审工作台”这类通用短标题可能只是专用问题的场景前缀。
+    // 当另一路由的真实相关分超过标题候选两倍时，尊重专用高分路由，避免低分标题无条件抢占。
+    const scoreLeader = scored[0] || null;
+    const acceptedExactTitle = exactTitle && (!scoreLeader || exactTitle === scoreLeader || exactTitle.sc >= scoreLeader.sc * ROUTE_EXACT_TITLE_MIN_RATIO)
+      ? exactTitle : null;
+    if (acceptedExactTitle) {
+      const at = scored.indexOf(acceptedExactTitle);
       if (at > 0) scored.splice(at, 1);
-      if (at !== 0) scored.unshift(exactTitle);
+      if (at !== 0) scored.unshift(acceptedExactTitle);
     }
     best = scored[0];
-    if (best && (exactTitle || best.sc >= ROUTE_MATCH_MIN)) {
+    if (best && (acceptedExactTitle || best.sc >= ROUTE_MATCH_MIN)) {
       const r = best.r;
       const fallbackMode = r.fallbackMode === 'verifiedFacts' ? 'verifiedFacts' : '';
       return {
@@ -910,7 +916,7 @@ function routeQuestion(map, query, subKey = '') {
           // 仅透传服务端认识的路由发布策略，不能把整张可变地图卡片直接带入运行态。
           fallbackMode,
         }, score: best.sc,
-        exactRouteTitle: !!exactTitle,
+        exactRouteTitle: !!acceptedExactTitle,
         primaryRefs: Array.isArray(r.primaryRefs) ? r.primaryRefs : [],
         contextRefs: Array.isArray(r.contextRefs) ? r.contextRefs : [],
         answerFacts: Array.isArray(r.answerFacts) ? r.answerFacts : [],
