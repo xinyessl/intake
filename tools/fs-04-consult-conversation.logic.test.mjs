@@ -1008,6 +1008,30 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   const q0054FinalAudit = bundle.audit(q0054Fallback, q0054Question, q0054Route);
   assert.deepEqual(q0054FinalAudit.violations, [], 'Q0054 已核事实兜底必须完整、无重复技术附录且终审全绿');
 
+  const q0059Question = '请把一张门诊处方和一组住院医嘱从 HIS 提交到审方、再到结果回给 HIS 的完整业务主流程讲清楚：HIS 用什么入口和接口码提交，系统如何记请求/响应、校验 XML；门诊重复请求怎么处理，住院是否同样去重；在线且有院权限的药师和审核方案如何决定人工审核或自动通过；两条路径分别怎样落库、推送任务和设置超时；超时后怎么处理；HIS 最后如何查询结果并记录回写日志？请同时说明当前已知的事务、重试、权限和外部依赖边界，哪些局部事实仍需人工确认，不要堆全量字段表。';
+  const q0059Route = {
+    matched: true,
+    route: { id: 'AUD-QR-FLOW-01', title: '处方审核端到端主流程', fallbackMode: 'verifiedFacts' },
+    answerFacts: [
+      '业务主链是“HIS 提交门诊处方或住院医嘱 → 审方校验并决定人工/自动审核 → 药师或系统产出结果 → HIS 主动查询结果”；主链跨 HIS、audit-server、Redis、redis2db、用户中心与药师工作台，任一单点成功都不能代表整链成功。',
+      '接入入口与主接口：HIS 通过 POST /external 提交 XML，门诊接口码为 V1_OPT_AUDIT、住院为 V1_IPT_AUDIT；系统异步记录请求和响应日志。XML 缺 BASE、PATIENT、门诊 PRESCRIPTION_ARRAY 等必要节点时返回对应错误且不写业务表。',
+      '门诊在配置的去重窗口内用 Redis setIfAbsent 拦重复请求，窗口配置为 0 时跳过去重；住院当前代码未确认存在同等去重，必须保持为局部未知，不能照搬门诊结论。',
+      '人工候选先取当前在线药师与有本院权限药师的交集，再依次经过系统审核方案和个人审核方案筛选并分配；无需人工审核或没有合适候选时走自动通过。具体负载均衡算法仍需人工确认。',
+      '人工审核路径异步写 audit-server 的 audit_* 业务表，向药师 Socket 推送 start_audit，并设置等待时间加 5 秒的 Redis 超时键；自动通过路径进入 AUDIT:OPT:AUTO 或 AUDIT:IPT:AUTO，由 redis2db 后台消费落库，不给药师派任务。',
+      '超时键自然过期后由 Redis 过期监听器调用门诊/住院回调，任务变为超时通过并推送 sys_time_over_pass；仓内定时兜底扫描已注释，Redis keyspace 通知若丢失没有已激活的定时补偿。',
+      'HIS 使用 V1_OPT_AUDIT_QUERY 或 V1_IPT_AUDIT_QUERY 按提交标识主动查询审核结果；客户端回写/对接结果日志另走 POST /comm/send/audit/result/log，查询成功不等于客户端日志一定已记录。',
+      '人工审核落库各类别独立 try-catch、没有总事务，失败类别不回滚已成功数据且未见自动重试；自动通过的 redis2db 落库同样按类别处理，失败写 audit_sync_error_flow，设计中的定时重试当前已注释。人工路径是否同时写入哪些 MySQL sf_* 表仍需确认。',
+      '/external 与 /comm 属免 JWT 前缀，依赖网络层隔离；当前 Controller 未见接口级角色/权限注解，写操作角色与数据归属规则需业务负责人确认。未经授权不得为抓包重复提交、触发超时、重放队列或修改业务数据。',
+    ],
+  };
+  const q0059Initial = bundle.audit('接口如下：\n1. POST /external?interface_code=V1_OPT_AUDIT。', q0059Question, q0059Route);
+  const q0059Fallback = bundle.fallback('接口如下：\n1. POST /external?interface_code=V1_OPT_AUDIT。', q0059Initial);
+  const q0059Final = bundle.audit(q0059Fallback, q0059Question, q0059Route);
+  assert.match(q0059Fallback, /接入入口与主接口：HIS 通过 POST \/external/);
+  assert.match(q0059Fallback, /住院当前代码未确认存在同等去重/);
+  assert.match(q0059Fallback, /POST \/comm\/send\/audit\/result\/log/);
+  assert.deepEqual(q0059Final.violations, [], 'Q0059 完整链路的已核事实兜底须通过接口、入口、依赖与未知停点终审');
+
   const explicitUnknownChainQuestion = '把住院医嘱审核从入口、接口和数据到外部依赖串起来，资料未定义的部分明确停住。';
   const explicitUnknownChainRoute = {
     ...q0011Route,
