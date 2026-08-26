@@ -983,6 +983,31 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.equal(q0011Fallback, q0011Fact, 'Q0011 fallback 只保留产品 As-built，不追加未知停点或技术说明');
   assert.deepEqual(bundle.audit(q0011Fallback, q0011Question, q0011Route).violations, []);
 
+  const q0054Question = '一组住院医嘱被审方判定为自动通过后，后台会保存哪些业务资料？除患者、诊断、过敏和普通医嘱外，警示、审核提交、自动通过结果、手术、生命体征、检验、草药方及明细会不会一起保存？这是药师页面能触发的吗，每次处理多少条？同一条消息重复投递时哪些数据会更新、哪些仍可能重复主键失败；某一类表写失败会不会整批回滚和自动重试？如果队列头是坏 JSON 会丢弃、跳过还是持续堵住？请按业务和实施口径说明。';
+  const q0054Route = {
+    matched: true,
+    route: { id: 'AUD-QR-DI-04', title: '住院处方数据采集落库', fallbackMode: 'verifiedFacts' },
+    answerFacts: [
+      '住院自动通过后会完整保存患者、诊断、过敏、普通医嘱、医嘱警示、审核提交、自动通过任务、手术、生命体征、检验报告/明细、草药方/明细；这不是药师页面可触发的功能。',
+      '后台线程消费 AUDIT:IPT:AUTO 队列，每批最多处理 10 条消息。',
+      'PostgreSQL 下患者、诊断、过敏、普通医嘱、警示、提交、手术、生命体征、检验报告/明细按冲突键更新；普通医嘱冲突仅更新药名，警示冲突也仅更新药名，提交仅更新患者名。自动通过任务、草药方、草药明细使用普通 INSERT，重复主键可失败，不保证整包幂等。',
+      '各类别不在一个总事务内；失败类写 audit_sync_error_flow 后继续，已成功数据不回滚。方法正常返回后原批次仍裁掉，失败类不自动留队重试。坏 JSON 会在写库前令整批失败且不执行 LTRIM，不丢弃、不跳过，会持续堵住后续消息。未经授权不得改队列、重放消息或改业务数据。',
+    ],
+    mustNotConfuse: ['不得只说重复投递不安全，必须分别说明 upsert 类与普通 INSERT 类。'],
+  };
+  const q0054UnsafeDraft = '这类问题通常是 UUID 或 orderType 导致。研发参考\n- - ipt_p_id。让实施重放消息。';
+  const q0054Audit = bundle.audit(q0054UnsafeDraft, q0054Question, q0054Route);
+  assert.equal(q0054Audit.verifiedFactsFallback, true);
+  assert.deepEqual(q0054Audit.currentRouteFacts, q0054Route.answerFacts);
+  const q0054Fallback = bundle.fallback(q0054UnsafeDraft, q0054Audit);
+  assert.match(q0054Fallback, /^业务结论\n- 住院自动通过后会完整保存/m);
+  assert.match(q0054Fallback, /实施口径\n- 后台线程消费 AUDIT:IPT:AUTO/);
+  assert.match(q0054Fallback, /自动通过任务、草药方、草药明细使用普通 INSERT/);
+  assert.match(q0054Fallback, /坏 JSON 会在写库前令整批失败且不执行 LTRIM/);
+  assert.doesNotMatch(q0054Fallback, /研发参考|\n- - /);
+  const q0054FinalAudit = bundle.audit(q0054Fallback, q0054Question, q0054Route);
+  assert.deepEqual(q0054FinalAudit.violations, [], 'Q0054 已核事实兜底必须完整、无重复技术附录且终审全绿');
+
   const explicitUnknownChainQuestion = '把住院医嘱审核从入口、接口和数据到外部依赖串起来，资料未定义的部分明确停住。';
   const explicitUnknownChainRoute = {
     ...q0011Route,

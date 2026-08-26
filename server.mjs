@@ -2134,6 +2134,9 @@ function consultRequiredPrimaryPath(question, route, answer = '') {
 function consultNormalizeSafeMarkdown(text) {
   const lines = String(text || '').split('\n').map(line => {
     let out = line;
+    // fallback 迁移技术段时，原正文可能已经是列表项；再次加前缀不能把
+    // `- 事实` 变成浏览器可见的 `- - 事实`。
+    out = out.replace(/^(\s*)[-*+]\s+[-*+]\s+/u, '$1- ');
     if (((out.match(/\*\*/g) || []).length % 2) !== 0) out = out.replace(/\*\*/g, '');
     if (((out.match(/```/g) || []).length % 2) !== 0) out = out.replace(/```/g, '');
     const withoutFences = out.replace(/```/g, '');
@@ -3246,6 +3249,8 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const hasEvidenceSufficiencyVerdict = !evidenceSufficiencyQuestion
     || /(?:只够|足够|够(?:用|判断|固定|完成)|不够|不足|不能单独|尚不能|只能固定|只能证明|只能确认|最多(?:只能|能|可))/u.test(firstMeaningfulLine);
   const currentRouteFacts = route && route.matched ? (route.answerFacts || []).map(String).map(item => item.trim()).filter(Boolean) : [];
+  const verifiedFactsFallback = !!(route && route.matched && route.route
+    && route.route.fallbackMode === 'verifiedFacts' && currentRouteFacts.length);
   const currentRoutePathFacts = currentRouteFacts.flatMap(fact => {
     const method = fact.match(/\b(GET|POST|PUT|PATCH|DELETE)\b/i)?.[1]?.toUpperCase() || '';
     return consultConcretePaths(fact).filter(pathValue => pathValue.startsWith('/') && !pathValue.includes('*'))
@@ -3542,7 +3547,23 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (contradictoryNegativeSections.length) violations.push('contradictory_negative_section');
   if (singleStepOverreach) violations.push('single_step_diagnostic_overreach');
   if (malformedMarkdown.length) violations.push('malformed_markdown');
-  return { checked: true, diagnosticQuestion, audienceMode, audienceTechnicalParts, productTechnicalParts, implementationMisplacedTechnicalParts, implementationTechnicalFirstParts, chainRequested, chainDimensions, missingRequestedInterfaces, missingChainDimensions, audienceTechnicalDumpParts: uniqueChainTechnicalDetailParts, safeChainFallback, evidenceSufficiencyQuestion, fullHandoffMaterialQuestion, hasEvidenceSufficiencyVerdict, minimumRoutePath, missingEvidenceMinimumPath, observationInputContract, undefinedObservationVariables, symbolicDefinitions: Object.fromEntries(symbolicDefinitions), undefinedSymbolicComparisons, focusedFactQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, focusedRelationshipFacts, missingFocusedRelationshipFacts, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsupportedEvidenceNegations, unsupportedEvidenceAbsenceClaims, evidenceAbsenceCorrectionFacts, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, optionCardinalityMismatches, nonSequentialOptionSets, undefinedGroupReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, emptyNumberedSections, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, emptyDiagnosticBranchHeadings, emptyListStepItems, danglingClosingPunctuationLines, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
+  // verifiedFacts fallback 的终稿只允许由固定标题和 current route 原句组成。
+  // 这些原句本身已经过 Spec 审核，其中“重复主键可失败”“未经授权不得重放”
+  // 是已核边界，不应再次被概率词/副作用启发式误杀。只在整份正文逐行精确
+  // 等于全部 route facts 时放行；任何模型新增句仍走原来的严格审计。
+  const verifiedFactLines = documentLines.map(line => line
+    .replace(/^\s*[-*+]\s+/u, '').trim())
+    .filter(line => line && line !== '业务结论' && line !== '实施口径');
+  const verifiedFactsOnlyAnswer = verifiedFactsFallback
+    && verifiedFactLines.length === currentRouteFacts.length
+    && verifiedFactLines.every((line, index) => line === currentRouteFacts[index]);
+  if (verifiedFactsOnlyAnswer) {
+    for (const permitted of ['unsupported_likelihood', 'cross_actor_side_effect']) {
+      const index = violations.indexOf(permitted);
+      if (index >= 0) violations.splice(index, 1);
+    }
+  }
+  return { checked: true, diagnosticQuestion, audienceMode, audienceTechnicalParts, productTechnicalParts, implementationMisplacedTechnicalParts, implementationTechnicalFirstParts, currentRouteFacts, verifiedFactsFallback, chainRequested, chainDimensions, missingRequestedInterfaces, missingChainDimensions, audienceTechnicalDumpParts: uniqueChainTechnicalDetailParts, safeChainFallback, evidenceSufficiencyQuestion, fullHandoffMaterialQuestion, hasEvidenceSufficiencyVerdict, minimumRoutePath, missingEvidenceMinimumPath, observationInputContract, undefinedObservationVariables, symbolicDefinitions: Object.fromEntries(symbolicDefinitions), undefinedSymbolicComparisons, focusedFactQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, focusedRelationshipFacts, missingFocusedRelationshipFacts, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsupportedEvidenceNegations, unsupportedEvidenceAbsenceClaims, evidenceAbsenceCorrectionFacts, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, optionCardinalityMismatches, nonSequentialOptionSets, undefinedGroupReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, emptyNumberedSections, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, emptyDiagnosticBranchHeadings, emptyListStepItems, danglingClosingPunctuationLines, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -3732,6 +3753,18 @@ function consultDeduplicateFocusedAtomicAnswer(text, audit) {
 }
 
 function consultAnswerSafeFallback(draft, audit) {
+  // 复杂的多边界事实题若显式声明 verifiedFacts fallback，模型修订失败后直接
+  // 从 current route 的已核事实生成确定性终稿。首条必须是业务结论，其余才是
+  // 实施口径；不再搬运草稿技术段或追加通用尾注，避免删漏和重复“研发参考”。
+  if (audit && audit.verifiedFactsFallback && Array.isArray(audit.currentRouteFacts) && audit.currentRouteFacts.length) {
+    const [businessFact, ...implementationFacts] = audit.currentRouteFacts;
+    return consultNormalizeSafeMarkdown([
+      '业务结论',
+      `- ${businessFact}`,
+      implementationFacts.length ? '实施口径' : '',
+      ...implementationFacts.map(fact => `- ${fact}`),
+    ].filter(Boolean).join('\n'));
+  }
   const actorAction = /(?:让|请|交给|通知|要求|转|压|催|催促|推动|协调)?\s*(?:实施|用户|患者|对接(?:方)?|接口方|第三方|厂商|供应商|院方|运维|开发)[^。！？；\n]{0,64}(?:(?:改|修改|调整|切换|对齐|校准|统一|转换|修(?:复)?)[^。！？；\n]{0,16}(?:参数|传参(?:方式)?|传输方式|接口入参|报文(?:类型)?|类型|序列化(?:口径|方式|规则)?|编码(?:口径|方式|规则)?|协议(?:口径|规则)?|映射|结构|关联|链路|配置|时区|系统时间|环境|产品口径|业务口径|日切要求|服务配置|字符串|数字(?:类型)?|字段格式|数据格式|值类型)|(?:按|以)[^。！？；\n]{0,12}(?:字符串|数字(?:类型)?|指定格式|文本格式|字段格式|数据格式|值类型)[^。！？；\n]{0,8}(?:传|发送)|对时|重试|复测|重跑|补跑|重新触发|再次触发|再点|点一次|提交|保存|发送|完成|签名|审批|星标|再传|重传|重新发送)/ig;
   const negatedActorPrefix = /(?:不得|不能|不要|禁止|不可|不应|先别|停止|未确认)\s*$/i;
   const keepPart = part => {
