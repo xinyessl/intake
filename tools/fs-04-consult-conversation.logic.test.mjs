@@ -1623,6 +1623,33 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.doesNotMatch(fullyUnsafeDiagnosticFallback, /当前草稿未通过发布前|改时区配置/);
   assert.deepEqual(bundle.audit(fullyUnsafeDiagnosticFallback, '今天视图和浏览器理解不一致，给我一个排查顺序。', todayAtomicRoute).violations, [], '草稿全部被清理时，确定性诊断fallback自身也必须通过最终审计');
 
+  const q185Question = '医院 HIS 调用审方后收到“提交成功”，但之后一直查询不到审核结果。实施人员第一轮应该收集和核对哪些同一次请求证据？请说明是否必须拿到真实的 HTTP 方法与路径、interface_code、脱敏后的完整 XML 原文、原始响应、发生时间或请求标识和对应日志；只有一张报错截图够不够？为了复现能不能重发同一位真实患者的 XML？“提交成功”是否就等于审核闭环完成、结果已经回写给 HIS？';
+  const q185Route = {
+    matched: true,
+    // 模拟上下文/诊断链只保住顶层发布策略的运行态；仍必须回到同一路由已核事实。
+    fallbackMode: 'verifiedFacts',
+    route: { id: 'AUD-QR-GUIDE-01', title: 'HIS XML 接入只读排查' },
+    answerFacts: [
+      '业务结论：HIS 收到“提交成功”只证明该次提交入口返回成功，不等于任务已分配、药师已审核、查询已有完成结果或结果已经回写给 HIS。',
+      '同一次请求证据：确认 HTTP 方法为 POST、完整路径为 /external、query 参数 interface_code 的原值，并保存脱敏后的完整请求 XML、完整原始响应和请求时间；只有截图不能替代这些原始材料。',
+      '关联证据：在已有日志中按同一次请求核对 requestId、submitId、taskId、医院/院区标识、当前业务状态、请求/响应日志；未取得的项目明确写“未取得”，不得用另一笔请求或另一环境样本代替。',
+      '分层判定：提交入口成功后，继续只读核对任务状态、审核流水、查询响应和回写日志，定位首次出现差异的环节；没有逐层证据时不能直接归因于审方、HIS、网络、网关或某个服务。',
+      '安全红线：现场只对照同一次已有请求、响应和日志；不得重发真实患者 XML，不得新建处方/医嘱，也不得调用审核、超时、回写或重试端点来复现。',
+    ],
+    mustNotConfuse: ['不得输出 current route、路由事实、最小缺口模板等内部措辞；不得把本机日期、星期或一次新的页面刷新列为 HIS 接入证据。'],
+  };
+  const q185UnsafeDraft = '一般是网络问题。先重发真实患者 XML 复现，再按截图判断。';
+  const q185Audit = bundle.audit(q185UnsafeDraft, q185Question, q185Route);
+  assert.equal(q185Audit.routeFallbackMode, 'verifiedFacts');
+  assert.equal(q185Audit.verifiedFactsFallback, true, '顶层发布策略必须激活已核事实兜底');
+  assert.doesNotMatch(q185Audit.safeDiagnosticFallback, /本机显示的日期和星期|current route/, '普通诊断模板本身也不得被一般请求时间或内部术语污染');
+  const q185Fallback = bundle.fallback(q185UnsafeDraft, q185Audit);
+  assert.match(q185Fallback, /^业务结论\n- 业务结论：HIS 收到“提交成功”/m);
+  assert.match(q185Fallback, /实施口径\n- 同一次请求证据：确认 HTTP 方法为 POST/);
+  assert.match(q185Fallback, /不得重发真实患者 XML/);
+  assert.doesNotMatch(q185Fallback, /current route|最小缺口|本机.*日期.*星期|若本轮实际没有上传/);
+  assert.deepEqual(bundle.audit(q185Fallback, q185Question, q185Route).violations, [], 'Q185 已核事实终稿必须无内部模板污染且终审全绿');
+
   const q122Question = '现场还卡在今天视图时间这里，我只拿得到这张截图，没有日志，够不够？';
   const q122GenericFallbackDraft = [
     '已知事实（继续作为判断基线）：',
@@ -1640,7 +1667,7 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   const q122Fallback = bundle.fallback(q122GenericFallbackDraft, q122GenericAudit);
   assert.match(q122Fallback, /^结论：这张截图只够固定当前页面现象，不能单独完成与已核规则的对照，也不足以闭环原因。/);
   assert.match(q122Fallback, /GET \/pwrsapi\/month\/view\/today 完整响应/);
-  assert.match(q122Fallback, /响应内容只按 current route 已核事实核对：响应包含 year、week/);
+  assert.match(q122Fallback, /响应内容只按当前已核事实核对：响应包含 year、week/);
   assert.match(q122Fallback, /同一时刻本机显示的日期和星期/);
   assert.match(q122Fallback, /不必先拿服务器日志/);
   assert.match(q122Fallback, /若本轮实际没有上传可核验附件/);

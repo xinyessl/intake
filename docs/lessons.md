@@ -13,6 +13,7 @@
 ---
 
 ## ✅ 本项目自检清单（每次交付前逐条过）
+- [ ] **【证据充分性首句门不得误杀逐行已核终稿】**：`verifiedFacts` 终稿可先回答总业务结论、再在后续原句中回答截图或现有证据够什么/不够什么；只要终稿逐行逐序等于全部 route facts，且其中已有明确充分性结论，就不得因“第一句不是够不够”退成通用最小缺口模板。普通模型草稿仍须首句直答（见 L-117）。
 - [ ] **【复杂多边界事实题的安全 fallback 不能只删句】**：路由显式开启 `fallbackMode=verifiedFacts` 时，模型修订失败后须从 current route 的全部原句重建“业务结论 → 实施口径”，不能继续搬运残稿、重复追加研发参考或遗漏中间事实；终审放行必须以逐行精确等于 route facts 为前提（见 L-115）。
 - [ ] **【逐行已核终稿不能再被混合受众排版门误杀】**：问题同时要求产品与实施口径时，`verifiedFacts` 终稿可能含用户点名的状态值、多个技术 token 且不适合强制改成 2~4 个诊断步骤；只有去标题/列表后逐行逐序精确等于全部 route facts 才可放行这三类排版 violation，其它事实、范围、动作和安全门继续严格执行（见 L-116）。
 - [ ] **【模型流结束原因必须参与完整性判定】**：OpenAI 兼容流的 `finish_reason=length` 与 Anthropic 兼容流的 `stop_reason=max_tokens` 都表示正文被长度上限截断；即使已经收到文本，也不能把半截稿交给审计清理后发布。普通/深入答疑须保留足够正文预算，初稿截断走可见错误，修订稿截断放弃修订并回到完整初稿的安全降级（见 L-114）。
@@ -220,6 +221,13 @@
 - 解法：继续以 `verifiedFactsOnlyAnswer` 的严格逐行、逐序相等为唯一前提，只对 `audience_technical_not_last`、`audience_technical_dump`、`nonsequential_top_level_steps` 三个排版 violation 放行；未开启 route 白名单、少一条、多一条、改写原句或模型新增文本均不放行，其它事实/范围/动作/结构/安全审计保持原样。
 - 防复发：用生产 Q0060 原问句和 8 条 FLOW-02 facts 回归；断言业务结论先出、实施事实全在、无候选明确为 `audit_pass` 非 `auto_pass`，终审全绿。测试不能只验证 route 命中或 fallback 已生成，必须把最终 fallback 再送入同一审计函数。
 - 关联：`FS-04 AC-139`；`server.mjs`；`tools/fs-04-consult-conversation.logic.test.mjs`；`docs/changes/CHG-consult-已核事实终稿不再被混合受众排版门误杀.md`。
+
+### L-117 证据充分性首句门不能覆盖逐行已核事实集合
+- 现象（2026-08-26）：Audit 第 185 题已命中 `GUIDE-01` 且开启 `fallbackMode=verifiedFacts`，五条已核事实完整回答了“提交成功不等于闭环”、同一次请求材料、截图边界和禁止重发真实患者 XML；生产却发布了带 `current route`、本机日期星期和“最小缺口”的通用模板。
+- 根因：已核事实终稿第一条先给总业务结论，截图“不够/不能替代”的直接结论在第二条。证据充分性审计只检查第一条有意义文本，误报 `missing_evidence_sufficiency_verdict`；两轮 verified fallback 因此仍红，第三轮恢复逻辑改用普通 `safeDiagnosticFallback`，覆盖了完整事实集合。通用时间判断还把“请求时间/发生时间”误识别成日历/时区主题。
+- 解法：路由发布策略在顶层与 route 卡片双通道透传；终稿严格逐行逐序等于全部 route facts 且其中任一事实已有明确充分性结论时，只放行该首句排版 violation。恢复层继续优先 verified 事实。普通模板删除内部 `current route` 文案，并只在明确“今天/日期/星期/时区”主题下加入本机日期星期。
+- 防复发：用第 185 题原问、五条 GUIDE-01 facts、仅保留顶层 fallbackMode 的运行态和包含归因/重发动作的不安全草稿回归；断言最终事实全集、禁止动作和业务结论都在，无内部模板、日期星期、附件臆读，且终稿再审全绿。普通非 verified 证据充分性草稿仍须首句直答，不能整体放松。
+- 关联：`server.mjs`；`tools/fs-04-consult-conversation.logic.test.mjs`；`tools/pd-04-route.logic.test.mjs`；`docs/changes/CHG-consult-已核事实充分性首句门冲突.md`。
 
 ### L-024 field.html 的 flex 右栏会被长 Markdown 最小内容宽度撑破，不能只给表格加 overflow
 - 现象（2026-08-10）：正常宽屏不明显；右侧停靠浏览器调试工具后，AI 长答复、超长 URL 或无断点行内代码把气泡/右栏撑宽，页面右侧被裁切。宽表虽已有 `overflow-x:auto`，仍不足以阻止祖先 flex 子项扩张。
