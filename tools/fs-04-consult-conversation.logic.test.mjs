@@ -1008,6 +1008,28 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   const q0054FinalAudit = bundle.audit(q0054Fallback, q0054Question, q0054Route);
   assert.deepEqual(q0054FinalAudit.violations, [], 'Q0054 已核事实兜底必须完整、无重复技术附录且终审全绿');
 
+  const q0069Question = '门诊处方走自动通过后，后台会保存哪些业务资料？患者、诊断、过敏、处方头、药品明细、警示、审核提交、自动通过结果、手术、检验、生命体征、影像和费用是否都覆盖？同一条消息重复投递时哪些能更新、哪些可能重复失败；某一类保存失败是否整条回滚？处方撤销或更新是不是也由这条自动通过队列处理？请用产品和实施能看懂的方式说明。';
+  const q0069Route = {
+    matched: true,
+    route: { id: 'AUD-QR-DI-05', title: '门诊处方数据采集落库', fallbackMode: 'verifiedFacts' },
+    answerFacts: [
+      '门诊处方自动通过后会保存患者、诊断、过敏、处方头、药品明细、警示、审核提交、自动通过任务、手术和检验；这是后台落库链路，不是药师页面可点击的采集功能，也不是 HIS 初次接入入口。',
+      '明确未覆盖的独立业务对象：当前消息和保存流程没有生命体征或影像报告，也没有费用结算/收费明细。费用只保存在已有对象的局部字段中，例如患者费用类型、处方总额、药品单价和金额，不能外推为完整收费业务。',
+      'RedisConsumer 持续消费 AUDIT:OPT:AUTO，每批最多 10 条，队列为空等待 1 秒；保存患者、诊断、过敏、处方头、药品明细、警示、提交、自动通过任务、手术和检验。',
+      'PostgreSQL 路径中患者、诊断、过敏、手术和检验按业务唯一键更新；处方、明细、警示、提交和自动通过任务直接 INSERT，重复消息不保证整包幂等。',
+      '所有数据类别不在一个总事务内；某类 Mapper 失败被 audit_sync_error_flow 记录后会继续后续类别，已经成功的数据不回滚，因此会形成部分成功；方法返回后原 Redis 批次仍会被裁掉，失败类别不自动留队重试。',
+      '坏 JSON 会在任何业务表写入前使整批解析失败；LTRIM 不执行，坏消息不丢弃、不跳过，会留在队列头并反复阻塞后续消息。',
+      '处方撤销或更新不是 AUDIT:OPT:AUTO 中已实现的独立状态机；HC1015 属于 DI-08，当前自动消费调用已注释。',
+      '实施先只读核对队列长度与头部、RedisConsumer 日志、audit_sync_error_flow 和相关业务表；未经授权不得 LTRIM、删除、改写或重放队列消息。',
+    ],
+  };
+  const q0069Initial = bundle.audit('一般是重复消息造成的，让实施重放一次确认。', q0069Question, q0069Route);
+  const q0069Fallback = bundle.fallback('一般是重复消息造成的，让实施重放一次确认。', q0069Initial);
+  const q0069Final = bundle.audit(q0069Fallback, q0069Question, q0069Route);
+  assert.equal(q0069Final.verifiedFactsFallback, true);
+  assert.match(q0069Fallback, /^业务结论\n- 门诊处方自动通过后会保存/m);
+  assert.deepEqual(q0069Final.violations, [], 'Q0069 门诊自动通过的逐行已核事实终稿不得被普通草稿规则二次误杀');
+
   const q0059Question = '请把一张门诊处方和一组住院医嘱从 HIS 提交到审方、再到结果回给 HIS 的完整业务主流程讲清楚：HIS 用什么入口和接口码提交，系统如何记请求/响应、校验 XML；门诊重复请求怎么处理，住院是否同样去重；在线且有院权限的药师和审核方案如何决定人工审核或自动通过；两条路径分别怎样落库、推送任务和设置超时；超时后怎么处理；HIS 最后如何查询结果并记录回写日志？请同时说明当前已知的事务、重试、权限和外部依赖边界，哪些局部事实仍需人工确认，不要堆全量字段表。';
   const q0059Route = {
     matched: true,

@@ -3574,6 +3574,9 @@ function consultAnswerSemanticAudit(answer, question, route) {
       // verifiedFacts 终稿已严格等于路由全部原句，不能再因通用实施排版门
       // 要求技术内容只出现在末段或强制 2~4 个编号步骤而退成机械拒答。
       'audience_technical_not_last',
+      // 产品与实施混合题的 route 原句可包含 Redis、Mapper、INSERT 等
+      // 已核实施边界；逐行精确匹配时不得再按普通产品草稿判为技术越界。
+      'audience_technical_overreach',
       'audience_technical_dump',
       'nonsequential_top_level_steps',
     ]) {
