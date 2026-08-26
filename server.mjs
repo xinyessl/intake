@@ -3288,7 +3288,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   // inheritedFromQuestion 曾点名入口/接口/数据，也不得再次要求终稿复述整条
   // 技术链，否则安全清单会被错误判成 incomplete_requested_chain 并机械拒答。
   const chainRequested = audienceMode === 'developer' && !!(route && route.matched)
-    && /(?:串起来|串联|全链路|完整链路|调用链|实现链路|从[^.。！？\n]{1,80}到[^.。！？\n]{1,40})/u.test(questionText)
+    && /(?:串起来|串联|全链路|完整链路|调用链|实现链路|从[^.。！？\n，,；;]{1,80}到[^.。！？\n，,；;]{1,40})/u.test(questionText)
     && /(?:入口|接口|数据|状态|权限|外部依赖|依赖|留痕)/u.test(questionText);
   const chainDimensions = chainRequested ? [
     ['entry', '入口', /入口/u],

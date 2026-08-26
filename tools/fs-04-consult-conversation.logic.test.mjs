@@ -1623,6 +1623,35 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.doesNotMatch(fullyUnsafeDiagnosticFallback, /当前草稿未通过发布前|改时区配置/);
   assert.deepEqual(bundle.audit(fullyUnsafeDiagnosticFallback, '今天视图和浏览器理解不一致，给我一个排查顺序。', todayAtomicRoute).violations, [], '草稿全部被清理时，确定性诊断fallback自身也必须通过最终审计');
 
+  const q210Question = 'HC1015 主要把医院哪些业务变化同步进审方？请按住院、诊断、医嘱、手术过敏、门诊和患者资料分组说明，别只列技术类名。当前仓库里这条链是否正在自动消费，实施能不能从审方页面手动触发；只看到处理代码能否认定生产已启用？现场发现数据没同步时，可以直接重放已有消息吗，失败消息手工补发又属于哪套功能？';
+  const q210Route = {
+    matched: true,
+    fallbackMode: 'verifiedFacts',
+    route: { id: 'AUD-QR-DI-08', title: 'HC1015 HIS标准消息接入' },
+    answerFacts: [
+      'HC1015 处理代码覆盖 15 类医院业务变化：住院登记/取消、出院/取消、转科，诊断新增/删除，医嘱新增/状态/执行，手术、过敏，门诊挂号/退号和患者基础资料。',
+      '仓内 RedisConsumer 的 HC1015 消费调用已注释，当前仓库没有激活的自动消费入口或前端触发入口；代码存在不能作为生产正在自动运行的证据。',
+      '现场只核已有 HC1015 调用记录、HIS 返回日志和失败记录；未确认入口、幂等和副作用前不得主动重放。失败消息手工补发属于 DI-07。',
+    ],
+    mustNotConfuse: [
+      '不得把处理类存在写成生产自动消费已启用。',
+      '不得在未确认入口、幂等和副作用前建议重放已有消息。',
+    ],
+  };
+  const q210Initial = bundle.audit('', q210Question, q210Route);
+  assert.equal(q210Initial.verifiedFactsFallback, true);
+  assert.equal(q210Initial.chainRequested, false, '“不能从页面触发；只看到代码”不得把普通的“从…看到”跨分句拼成从A到B研发链路');
+  assert.deepEqual(q210Initial.missingChainDimensions, []);
+  const q210Fallback = bundle.fallback('', q210Initial);
+  assert.match(q210Fallback, /住院登记\/取消、出院\/取消、转科/);
+  assert.match(q210Fallback, /代码存在不能作为生产正在自动运行的证据/);
+  assert.match(q210Fallback, /失败消息手工补发属于 DI-07/);
+  assert.deepEqual(bundle.audit(q210Fallback, q210Question, q210Route).violations, [], 'Q210 已核业务事实终稿必须直接通过最终审计');
+
+  const explicitFromToChainQuestion = '请把这个功能从入口、接口和数据状态到外部依赖完整串起来。';
+  const explicitFromToChainAudit = bundle.audit('', explicitFromToChainQuestion, todayAtomicRoute);
+  assert.equal(explicitFromToChainAudit.chainRequested, true, '真正同一分句内的从A到B研发链路仍须启用完整性合同');
+
   const q185Question = '医院 HIS 调用审方后收到“提交成功”，但之后一直查询不到审核结果。实施人员第一轮应该收集和核对哪些同一次请求证据？请说明是否必须拿到真实的 HTTP 方法与路径、interface_code、脱敏后的完整 XML 原文、原始响应、发生时间或请求标识和对应日志；只有一张报错截图够不够？为了复现能不能重发同一位真实患者的 XML？“提交成功”是否就等于审核闭环完成、结果已经回写给 HIS？';
   const q185Route = {
     matched: true,
