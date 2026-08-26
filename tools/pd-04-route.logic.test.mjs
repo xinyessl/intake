@@ -79,6 +79,7 @@ const FIXTURE_MAP = {
     {
       id: 'QR-ORDER-INSTRUCTION',
       title: '医嘱干预中查看药品说明书／说明书地址如何配置',
+      fallbackMode: 'verifiedFacts',
       aliases: ['医嘱干预查看说明书', '说明书按钮不显示', '说明书打不开', 'order_instruction'],
       keywords: ['医嘱干预', '说明书', '地址', '配置', 'order_instruction'],
       primaryRefs: [{ specId: 'PWRS-SYS-06', section: '7. order_instruction 的完整配置答案', title: '跨系统配置中心', path: 'docs/specs/PWRS-SYS-06.md', anchor: '7-orderinstruction-的完整配置答案' }],
@@ -137,9 +138,12 @@ test('AC-2 tier-1 别名整串命中 → 强 bonus 命中，超阈值', () => {
   assert.equal(r.matched, true, '应命中');
   assert.equal(r.tier, 1);
   assert.equal(r.route.id, 'QR-ORDER-INSTRUCTION');
+  assert.equal(r.route.fallbackMode, 'verifiedFacts', '显式终稿兜底策略须从地图卡透传到运行时 route');
   assert.ok(r.score >= S.ROUTE_MATCH_MIN, '分数超阈值');
   assert.deepEqual(r.answerFacts, FIXTURE_MAP.questionRoutes[0].answerFacts, '带出 answerFacts');
   assert.deepEqual(r.mustNotConfuse, FIXTURE_MAP.questionRoutes[0].mustNotConfuse);
+  const noFallback = S.routeQuestion(FIXTURE_MAP, '登录不上，token 失效怎么处理？', '');
+  assert.equal(noFallback.route.fallbackMode, '', '普通 route 不得误开启已核事实兜底');
 });
 
 test('专用 QR 与泛化 DQ 小分差竞争时优先 QR；明显更相关的 DQ 仍可命中', () => {

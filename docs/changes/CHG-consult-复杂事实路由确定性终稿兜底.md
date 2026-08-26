@@ -10,7 +10,7 @@
 
 ## 修复
 
-- question route 可显式声明 `fallbackMode='verifiedFacts'`；未声明的所有既有 route 保持原行为。
+- question route 可显式声明 `fallbackMode='verifiedFacts'`；`routeQuestion` 在 tier-1 命中后白名单透传该策略，未声明或其它值归一为空，所有既有 route 保持原行为。
 - 语义审计把 current route 的完整 facts 和 opt-in 标记交给 fallback。
 - 模型修订失败时，opt-in route 忽略不安全草稿，按“首条业务结论、其余实施口径”重建终稿，不追加通用尾注或重复技术附录。
 - 终审仅在正文逐行精确等于全部 route facts 时，放行原句中已核的“可失败/未经授权不得重放”等边界；任何新增句仍按原规则拦截。

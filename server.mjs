@@ -903,7 +903,12 @@ function routeQuestion(map, query, subKey = '') {
     if (best && (exactTitle || best.sc >= ROUTE_MATCH_MIN)) {
       const r = best.r;
       return {
-        matched: true, tier: 1, route: { id: r.id, title: r.title }, score: best.sc,
+        matched: true, tier: 1, route: {
+          id: r.id,
+          title: r.title,
+          // 仅透传服务端认识的路由发布策略，不能把整张可变地图卡片直接带入运行态。
+          fallbackMode: r.fallbackMode === 'verifiedFacts' ? 'verifiedFacts' : '',
+        }, score: best.sc,
         exactRouteTitle: !!exactTitle,
         primaryRefs: Array.isArray(r.primaryRefs) ? r.primaryRefs : [],
         contextRefs: Array.isArray(r.contextRefs) ? r.contextRefs : [],

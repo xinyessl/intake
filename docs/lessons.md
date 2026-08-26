@@ -209,7 +209,7 @@
 ### L-115 复杂事实题的安全降级需要恢复事实集合，不能只做破坏性删句
 - 现象（2026-08-26）：模型已完整生成第 54 题，但初稿和修订都被语义门拦截；两轮通用 fallback 删掉越界句后，完整保存范围和普通 INSERT 类被删漏，又把已有技术段搬到第二个“研发参考”，浏览器出现 `- -`。
 - 根因：通用安全降级只知道删除不安全句和移动技术片段，不知道该 route 的完整事实集合是发布契约；清理过程不会恢复未保住的 route facts，第二轮 fallback 还会重复处理第一轮输出。
-- 解法：只对人工 route 显式开启 `fallbackMode=verifiedFacts`；首条 answerFact 固定为大白话业务结论，其余为实施口径。修订失败后忽略草稿，从全部 route 原句一次性重建终稿，并跳过技术搬移和通用尾注；Markdown 归一化同时消除双列表标记。
+- 解法：只对人工 route 显式开启 `fallbackMode=verifiedFacts`，并在 `routeQuestion` 的白名单返回结构里显式透传；首条 answerFact 固定为大白话业务结论，其余为实施口径。修订失败后忽略草稿，从全部 route 原句一次性重建终稿，并跳过技术搬移和通用尾注；Markdown 归一化同时消除双列表标记。
 - 防复发：用生产原问题、完整 route facts 和包含越界实体/重复技术段/双列表标记的不安全草稿回归；逐项断言保存范围、Upsert/INSERT、部分成功/回滚/重试及坏 JSON 边界齐全，且最终再审全绿。只有逐行精确等于 route facts 时，才可放行 route 中已经审核的概率/动作边界。
 - 关联：`FS-04 AC-138`；`server.mjs`；`tools/fs-04-consult-conversation.logic.test.mjs`；`docs/changes/CHG-consult-复杂事实路由确定性终稿兜底.md`。
 
