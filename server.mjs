@@ -140,7 +140,8 @@ async function callModelOnce(cfg, { system, messages, maxTokens = 1024, images }
   if (provider === 'anthropic') {
     const base = (cfg.baseUrl || 'https://api.anthropic.com').replace(/\/$/, '');
     const mm = withImages(messages, images, true);   // 有图→末条 user 变多模态块；无图→原样（向后兼容）
-    const r = await fetch(base + '/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' }, body: JSON.stringify({ model, max_tokens: maxTokens, ...(system ? { system } : {}), messages: mm }) });
+    const body = { model, max_tokens: maxTokens, ...anthropicThinkingOverride(cfg, model, base), ...(system ? { system } : {}), messages: mm };
+    const r = await fetch(base + '/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' }, body: JSON.stringify(body) });
     const j = await r.json(); if (!r.ok) throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
     return (j.content || []).map(b => b.text || '').join('');
   }
@@ -154,6 +155,18 @@ async function callModelOnce(cfg, { system, messages, maxTokens = 1024, images }
 const MODEL_STREAM_FIRST_TOKEN_TIMEOUT_MS = 25000;
 const MODEL_STREAM_CANDIDATE_TIMEOUT_MS = 60000;
 const CONSULT_MODEL_ROUND_TIMEOUT_MS = 90000;
+
+// 阿里云 Qwen 3.8 的 Anthropic 兼容端点默认会把有限 max_tokens 全部用于
+// thinking 块，导致没有可显示 text。仅对这组三项共同命中的候选禁用 thinking；
+// Claude、其它 Anthropic 端点和 OpenAI 兼容请求保持原样。
+function anthropicThinkingOverride(cfg, model, baseUrl) {
+  if (String((cfg && cfg.provider) || 'anthropic').trim().toLowerCase() !== 'anthropic') return {};
+  if (!/^qwen3\.8(?:[-_.]|$)/i.test(String(model || '').trim())) return {};
+  let host = '';
+  try { host = new URL(String(baseUrl || '')).hostname.toLowerCase(); } catch { return {}; }
+  if (host !== 'aliyuncs.com' && !host.endsWith('.aliyuncs.com')) return {};
+  return { thinking: { type: 'disabled' } };
+}
 
 // 流式：主/备按序 failover——只在"还没吐出任何内容、且非用户主动停止"时才切备用（避免重复输出）。
 // 候选数量有硬上限；consult 会另外给草稿+修订共用一个整轮 deadline，避免两个阶段分别叠加完整 failover 预算。
@@ -189,7 +202,7 @@ async function callModelStreamOnce(cfg, { system, messages, maxTokens = 1024, im
   const base = (cfg.baseUrl || (isA ? 'https://api.anthropic.com' : 'https://api.openai.com')).replace(/\/$/, '');
   const headers = isA ? { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' } : { 'content-type': 'application/json', authorization: 'Bearer ' + key };
   const mm = withImages(messages, images, isA);   // 有图→末条 user 变多模态块（两家格式）；无图→原样字符串（向后兼容）
-  const body = isA ? { model, max_tokens: maxTokens, stream: true, ...(system ? { system } : {}), messages: mm } : { model, stream: true, max_tokens: maxTokens, messages: system ? [{ role: 'system', content: system }, ...mm] : mm };
+  const body = isA ? { model, max_tokens: maxTokens, stream: true, ...anthropicThinkingOverride(cfg, model, base), ...(system ? { system } : {}), messages: mm } : { model, stream: true, max_tokens: maxTokens, messages: system ? [{ role: 'system', content: system }, ...mm] : mm };
   const firstMs = Math.max(1, Number(firstTokenTimeoutMs) || MODEL_STREAM_FIRST_TOKEN_TIMEOUT_MS);
   const candidateMs = Math.max(firstMs, Number(candidateTimeoutMs) || MODEL_STREAM_CANDIDATE_TIMEOUT_MS);
   const firstAc = new AbortController(), candidateAc = new AbortController();

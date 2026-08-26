@@ -13,6 +13,7 @@
 ---
 
 ## ✅ 本项目自检清单（每次交付前逐条过）
+- [ ] **【Anthropic 兼容端点的 thinking 参数必须按服务商+模型+主机共同收窄】**：阿里云 Qwen 3.8 默认可能只回 thinking 块并耗尽 max_tokens；流式/非流式都需禁用 thinking，但不得按 `provider=anthropic` 全局改写而误伤 Claude（见 L-113）。
 - [ ] **【安全终稿缓冲期不能只保活，还要有独立进度与共享完成预算】**：阶段事件必须无 `v`、不进正文/历史；首字、候选和草稿+修订整轮分别限时，用户停止优先，预算耗尽仍用安全正文 + terminal done 收口（见 L-112）。
 - [ ] **【SSE 端点不得把 async 回调交给不接 Promise 的 body reader】**：生成前、audit、fallback、持久化任一阶段抛错都要由端点 catch；连接可写时发可见 err + terminal done，日志带 requestId/stage。长会话的 route 历史与模型 payload 分开裁剪，不能靠清会话恢复（见 L-108）。
 - [ ] **【点名多维链路要审集合完整性，不只审句子是否真】**：问接口/API/路径时，current route answerFacts 同一事实中的每个 METHOD + path 都必须在终稿；未问字段时禁止用长 token 清单代替业务链，“除……”缺主句同样不可发布（见 L-107）。
@@ -1098,3 +1099,9 @@
 - 解法：保留“未审计草稿绝不展示”，另发无 `v` 的白名单阶段事件，仅更新等待占位；首字、单候选与草稿+修订整轮使用分层且共享的 deadline，候选数硬限。预算失败走安全可见错误和 terminal done，用户主动停止信号优先。
 - 防复发：自动化必须真执行无首字 abort、正常首字/正文、候选数量与停止；同时静态锁住阶段事件不进入 `acc/full/messages/chat`，不能只断言页面出现了新文案。
 - 通用性提示：适用于所有“先完整生成/审核，再发布安全结果”的 SSE；当前环境 `$STEWARD_LESSONS` 未配置，先记项目经验库，待全局库可用时再分流。
+
+### L-113 Anthropic 兼容协议相同，不代表 thinking 默认行为相同
+- 现象（2026-08-26）：阿里云 `/apps/anthropic` 上的 `qwen3.8-max` 默认非流式响应只有 `content:[{type:'thinking'}]`，随后以 `max_tokens` 停止；正文提取为空，流式链路则等不到可显示首字。
+- 根因：调用层按 Anthropic 协议统一构造请求体，但 Qwen 3.8 的 thinking 默认行为与 Claude 不同；只调大超时或 failover 不能修复正文额度被思考块吃完的问题。
+- 解法：流式与非流式共用同一兼容判定，仅 `provider=anthropic` + `qwen3.8*` + `aliyuncs.com` 三项同时命中时发送 `thinking:{type:'disabled'}`；普通 Claude、非阿里云 Qwen 和 OpenAI 请求保持原样。
+- 防复发：请求体测试必须真实执行两条调用函数，既测 Qwen 正例，也测普通 Claude 流式/非流式及非阿里云 Qwen 反例，不能只做源码字符串断言。
