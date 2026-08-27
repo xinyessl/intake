@@ -9,10 +9,13 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FIX = path.join(ROOT, 'tools', 'fixtures');
 const AUDIT_REPO = path.resolve(process.env.AUDIT_REPO || path.join(ROOT, '..', 'psp', 'audit'));
-const VERSION = process.env.AUDIT_VERSION || '2.7.260825-1';
+const VERSION = process.env.AUDIT_VERSION || '2.7.260828-1';
 const MAP_PATH = 'docs/specs/00-功能模块地图.json';
 const QUESTIONS_OUT = path.join(FIX, 'audit-browser-1000.questions.json');
 const GOLD_OUT = path.join(FIX, 'audit-browser-1000.question-requirements.json');
+const CONVERSATION_COUNT = 200;
+const TURNS_PER_CONVERSATION = 5;
+const QUESTION_COUNT = CONVERSATION_COUNT * TURNS_PER_CONVERSATION;
 
 function gitShow(rel) {
   const r = spawnSync('git', ['show', `${VERSION}:${rel}`], {
@@ -27,21 +30,20 @@ function gitShow(rel) {
 
 const map = JSON.parse(gitShow(MAP_PATH));
 const routes = Array.isArray(map.questionRoutes) ? map.questionRoutes : [];
-if (map.projectId !== 'audit' || routes.length !== 41) {
+if (map.projectId !== 'audit' || !routes.length) {
   throw new Error(`审方路由地图不符合预期: project=${map.projectId}, routes=${routes.length}`);
 }
+const routeIds = routes.map(r => r.id);
+if (routeIds.some(id => !id) || new Set(routeIds).size !== routeIds.length) {
+  throw new Error('审方路由地图包含空 route id 或重复 route id');
+}
+const sourceCommit = spawnSync('git', ['rev-list', '-n', '1', VERSION], {
+  cwd: AUDIT_REPO,
+  encoding: 'utf8',
+  timeout: 10_000,
+}).stdout.trim();
+if (!sourceCommit) throw new Error(`无法读取审方 Tag ${VERSION} 的 commit`);
 
-const scenePrefixes = [
-  '今天门诊现场反馈', '住院药师复测时发现', '实施在测试环境核对时碰到', '医院电话里只描述',
-  '值班药师刚反馈', '另一院区复现了', '上线后首次巡检看到', '业务老师现场演示时发现',
-];
-const factOpeners = [
-  r => r.aliases?.[0] || `${r.title}现在是怎么实现的？`,
-  r => r.aliases?.[1] || `${r.title}涉及哪些接口、数据和边界？`,
-  r => `请按当前实现说明“${r.title}”的主链路，不要把待确认项当成已上线事实。`,
-  r => `“${r.title}”现在能从 Spec 确认到什么，最关键的边界是什么？`,
-  r => `从实施视角解释一下“${r.title}”：入口、处理链路和系统边界分别是什么？`,
-];
 const partialEvidence = [
   t => `关于${t}，我现在只有一次既有请求和响应，没有数据库权限。现有证据最多能判断到哪？`,
   t => `${t}这条链路只确认前端发出了请求，服务端后续日志还没拿到。先说能确定的，未知项请单独标出来。`,
@@ -56,14 +58,6 @@ const contextFollows = [
   t => `${t}这一步只能确认现象稳定复现，不能做写操作。现在应停在哪个边界并交给谁继续？`,
   t => `我没完全听懂${t}的排查建议，换成实施可以逐项照做的只读清单。`,
 ];
-const diagnosticOpeners = [
-  (p, t) => `${p}“${t}结果与预期不一致”。第一步先核对前端、接口、任务状态还是数据？`,
-  (p, t) => `${p}“${t}没有得到预期结果”。不改业务数据的前提下，先抓什么最有用？`,
-  (p, t) => `${p}“${t}偶发异常”。给我一个从入口到依赖边界的只读排查顺序。`,
-  (p, t) => `${p}“${t}看起来卡住了”。哪些观测只能说明现象，不能直接推出根因？`,
-  (p, t) => `${p}“${t}和另一账号表现不同”。先怎样区分页面可见、接口认证和业务归属？`,
-];
-
 function requirementFor(route, turnType, evaluationFocus) {
   return {
     requirementId: route.id,
@@ -77,6 +71,15 @@ function requirementFor(route, turnType, evaluationFocus) {
     evaluationFocus,
     safety: '实质错误、漏答当前问题关键点、跨模块串事实、把 NEEDS-HUMAN/未知写成肯定或否定、无证据猜按钮/接口/字段/步骤、建议有副作用的现场验证均 FAIL；不得声称看过未提供的截图或附件。',
   };
+}
+
+function safeAlias(route, index) {
+  const aliases = Array.isArray(route.aliases) ? route.aliases : [];
+  const candidates = aliases.filter(alias => {
+    const text = String(alias || '').trim();
+    return text && text.length >= 8 && text.length <= 150 && !/PWRS|药师工作站|pwrs\//i.test(text);
+  });
+  return candidates[index] || `${route.title}现在是怎么实现的？`;
 }
 
 const questions = [];
@@ -95,22 +98,57 @@ function addQuestion(conversationId, turn, text, route, turnType, focus) {
   routeTurns[route.id] += 1;
 }
 
-// 200 个独立会话 × 5 轮 = 1000 题。17 与 41 互质，路由在会话入口均匀轮转。
-for (let ci = 0; ci < 200; ci++) {
-  const conversationId = `C${String(ci + 1).padStart(3, '0')}`;
-  const source = routes[(ci * 17) % routes.length];
-  const switched = routes[(routes.indexOf(source) + 9 + ci * 7) % routes.length];
-  const variant = Math.floor(ci / routes.length) % factOpeners.length;
-  const prefix = scenePrefixes[ci % scenePrefixes.length];
+// 200 个独立会话 × 5 轮 = 1000 题。把三种会话角色先按目标配额展开，再
+// 配对到 100 个会话槽位，确保 55 条路由严格落在 18/19 题，而不是依赖
+// 贪心选择后再放宽最低覆盖门槛。
+function expandSchedule(countForRoute) {
+  const schedule = [];
+  routes.forEach((route, index) => {
+    const count = countForRoute(index);
+    for (let i = 0; i < count; i++) schedule.push(route);
+  });
+  return schedule;
+}
 
-  addQuestion(conversationId, 1, factOpeners[variant](source), source, 'fact',
+// 偶数会话的 source 占 3 题，奇数会话的 source 占 5 题，换题后的 route 占 2 题。
+// 这组整数配额合计为 source(偶数)=100、source(奇数)=100、switched=100，
+// 且最终总量为 45×18 + 10×19 = 1000。
+const oddSourceSchedule = expandSchedule(index => (index < 10 ? 1 : 2));
+const evenSourceSchedule = expandSchedule(index => (index < 10 ? 2 : index < 15 ? 0 : 2));
+const switchedBaseSchedule = expandSchedule(index => (index < 15 ? 4 : 1));
+if (oddSourceSchedule.length !== 100 || evenSourceSchedule.length !== 100 || switchedBaseSchedule.length !== 100) {
+  throw new Error(`路由角色配额错误: odd=${oddSourceSchedule.length}, even=${evenSourceSchedule.length}, switched=${switchedBaseSchedule.length}`);
+}
+
+function rotateSchedule(schedule, offset) {
+  return schedule.slice(offset).concat(schedule.slice(0, offset));
+}
+
+let switchedSchedule;
+for (let offset = 0; offset < switchedBaseSchedule.length; offset++) {
+  const candidate = rotateSchedule(switchedBaseSchedule, offset);
+  if (evenSourceSchedule.every((route, index) => route.id !== candidate[index].id)) {
+    switchedSchedule = candidate;
+    break;
+  }
+}
+if (!switchedSchedule) throw new Error('无法为 topic switch 找到不重复的 switched route 配对');
+
+for (let ci = 0; ci < CONVERSATION_COUNT; ci++) {
+  const conversationId = `C${String(ci + 1).padStart(3, '0')}`;
+  const sessionSlot = Math.floor(ci / 2);
+  const source = ci % 2 === 0 ? evenSourceSchedule[sessionSlot] : oddSourceSchedule[sessionSlot];
+  const variant = Math.floor(ci / routes.length) % partialEvidence.length;
+
+  addQuestion(conversationId, 1, safeAlias(source, 0), source, 'fact',
     '直接回答当前功能的已确认 As-built 事实和边界；不把 Target、NEEDS-HUMAN 或推测写成现状。');
-  addQuestion(conversationId, 2, diagnosticOpeners[variant](prefix, source.title), source, 'field_diagnostic',
+  addQuestion(conversationId, 2, safeAlias(source, 1), source, 'field_diagnostic',
     '沿当前 route 给分层、只读、可执行的排查顺序，只索取会改变判断分支的最少证据。');
   addQuestion(conversationId, 3, partialEvidence[(ci + variant) % partialEvidence.length](source.title), source, 'partial_evidence',
     '保留已核 route 事实，只把本轮缺少的现场证据局部标未知；不得整体拒答或反向写死。');
 
   if (ci % 2 === 0) {
+    const switched = switchedSchedule[sessionSlot];
     addQuestion(conversationId, 4, `先切到另一个问题：“${switched.title}”当前实现的关键入口或处理链是什么？`, switched, 'topic_switch',
       '当前轮出现明确的新业务实体，必须切换 route，不得沿用前一主题的接口、状态或数据事实。');
     addQuestion(conversationId, 5, contextFollows[(ci + 2) % contextFollows.length](switched.title), switched, 'switched_followup',
@@ -123,14 +161,29 @@ for (let ci = 0; ci < 200; ci++) {
   }
 }
 
-if (questions.length !== 1000 || Object.keys(questionToRequirements).length !== 1000) throw new Error('1000 题数量错误');
-if (Math.min(...Object.values(routeTurns)) < 20) throw new Error(`路由覆盖不足: ${JSON.stringify(routeTurns)}`);
+const minRouteTurns = Math.min(...Object.values(routeTurns));
+const expectedMinRouteTurns = Math.floor(QUESTION_COUNT / routes.length);
+const expectedMaxRouteTurns = Math.ceil(QUESTION_COUNT / routes.length);
+const routeTurnValues = Object.values(routeTurns);
+const minCount = routeTurnValues.filter(value => value === expectedMinRouteTurns).length;
+const maxCount = routeTurnValues.filter(value => value === expectedMaxRouteTurns).length;
+if (questions.length !== QUESTION_COUNT || Object.keys(questionToRequirements).length !== QUESTION_COUNT) throw new Error('1000 题数量错误');
+if (minRouteTurns !== expectedMinRouteTurns || Math.max(...routeTurnValues) !== expectedMaxRouteTurns ||
+    minCount !== routes.length - (QUESTION_COUNT % routes.length) || maxCount !== QUESTION_COUNT % routes.length) {
+  throw new Error(`路由覆盖不均衡: min=${minRouteTurns}, max=${Math.max(...routeTurnValues)}, expected=${expectedMinRouteTurns}/${expectedMaxRouteTurns}, distribution=${JSON.stringify(routeTurns)}`);
+}
 
 const fixture = {
   schema: 2,
   product: 'audit',
   version: VERSION,
   model: 'grok-4.5',
+  sourceMap: MAP_PATH,
+  sourceCommit,
+  routeIds,
+  conversationCount: CONVERSATION_COUNT,
+  turnsPerConversation: TURNS_PER_CONVERSATION,
+  questionCount: QUESTION_COUNT,
   description: '审方系统 1000 题真实 Chrome UI 评测；题库不含答案。200 个独立现场会话，每个 5 轮，覆盖事实、链路、只读诊断、证据不足承接和显式换题。',
   questions,
 };
@@ -139,7 +192,7 @@ const gold = {
   product: 'audit',
   version: VERSION,
   sourceMap: MAP_PATH,
-  sourceCommit: spawnSync('git', ['rev-list', '-n', '1', VERSION], { cwd: AUDIT_REPO, encoding: 'utf8' }).stdout.trim(),
+  sourceCommit,
   note: '完整 question→requirements 显式语义映射；禁止按 Q 编号、数组位置、conversationId 或 turn 推断 gold。',
   routeTurns,
   questionToRequirements,
@@ -148,4 +201,4 @@ const gold = {
 fs.mkdirSync(FIX, { recursive: true });
 fs.writeFileSync(QUESTIONS_OUT, JSON.stringify(fixture, null, 2) + '\n');
 fs.writeFileSync(GOLD_OUT, JSON.stringify(gold, null, 2) + '\n');
-console.log(JSON.stringify({ questions: questions.length, conversations: 200, routes: routes.length, minRouteTurns: Math.min(...Object.values(routeTurns)), output: [QUESTIONS_OUT, GOLD_OUT] }));
+console.log(JSON.stringify({ questions: questions.length, conversations: CONVERSATION_COUNT, turnsPerConversation: TURNS_PER_CONVERSATION, routes: routes.length, minRouteTurns, maxRouteTurns: Math.max(...Object.values(routeTurns)), sourceCommit, output: [QUESTIONS_OUT, GOLD_OUT] }));
