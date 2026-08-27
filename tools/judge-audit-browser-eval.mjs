@@ -9,7 +9,9 @@
  * 兼容旧式四参数调用（第二个 mapping 参数会被忽略）：
  *   node tools/judge-audit-browser-eval.mjs <results> <ignored-map> <requirements> <output>
  *
- * 环境变量：MODEL_CONFIG、JUDGE_BATCH_SIZE、JUDGE_RETRIES、JUDGE_TIMEOUT_MS、JUDGE_ONLY_IDS。
+ * 环境变量：MODEL_CONFIG、JUDGE_BATCH_SIZE、JUDGE_RETRIES、JUDGE_TIMEOUT_MS、JUDGE_ONLY_IDS、
+ * JUDGE_DEBUG_RAW（仅显式开启时把裁判解析失败的原始模型文本输出到 stderr）、
+ * JUDGE_DEBUG_RAW_FILE（仅显式指定时把原始模型文本保存到该路径）。
  */
 
 import crypto from 'node:crypto';
@@ -82,6 +84,8 @@ function parseArgs(argv) {
     else if (arg.startsWith('--only-ids=')) options.onlyIds = arg.slice('--only-ids='.length);
     else if (arg.startsWith('--retries=')) options.retries = Number(arg.slice('--retries='.length));
     else if (arg.startsWith('--timeout-ms=')) options.timeoutMs = Number(arg.slice('--timeout-ms='.length));
+    else if (arg === '--debug-raw') options.debugRaw = true;
+    else if (arg.startsWith('--debug-raw-file=')) options.debugRawFile = arg.slice('--debug-raw-file='.length);
     else if (arg === '--help' || arg === '-h') options.help = true;
     else positional.push(arg);
   }
@@ -89,7 +93,7 @@ function parseArgs(argv) {
 }
 
 function usage() {
-  return '用法: node tools/judge-audit-browser-eval.mjs <browser-results.json> <question-requirements.json> <output.json>';
+  return '用法: node tools/judge-audit-browser-eval.mjs <browser-results.json> <question-requirements.json> <output.json> [--debug-raw|--debug-raw-file=<path>]';
 }
 
 function normalizeText(value) {
@@ -100,6 +104,27 @@ function normalizeText(value) {
     try { return JSON.stringify(value); } catch { return String(value); }
   }
   return String(value);
+}
+
+function independentAnswerFacts(requirementText, answerFacts) {
+  const coveredText = normalizeText(requirementText).replace(/\s+/gu, ' ').trim();
+  if (!Array.isArray(answerFacts)) return [];
+  const normalizedFacts = Array.from(new Set(answerFacts.map(fact => normalizeText(fact).replace(/\s+/gu, ' ').trim())
+    .filter(Boolean)));
+  if (!coveredText) return normalizedFacts;
+  const normalizedCoveredText = coveredText.replace(/\s+/gu, '');
+  return normalizedFacts.filter(fact => !normalizedCoveredText.includes(fact.replace(/\s+/gu, '')));
+}
+
+function compactJudgeRequirement(requirement) {
+  const source = requirement && typeof requirement === 'object' ? requirement : {};
+  const missingFacts = independentAnswerFacts(source.requirement, source.answerFacts);
+  return {
+    requirement: source.requirement,
+    ...(missingFacts.length ? { answerFacts: missingFacts } : {}),
+    mustNotConfuse: source.mustNotConfuse,
+    safety: source.safety,
+  };
 }
 
 function extractRows(input) {
@@ -201,6 +226,79 @@ function stripCodeFence(text) {
   return String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
 }
 
+function isTruthyFlag(value) {
+  return /^(?:1|true|yes|on)$/i.test(String(value || '').trim());
+}
+
+function judgeRawDiagnosticsEnabled(options = {}) {
+  if (options.debugRaw === true) return true;
+  if (options.debugRaw === false) return false;
+  return isTruthyFlag(process.env.JUDGE_DEBUG_RAW)
+    || Boolean(String(options.debugRawFile || process.env.JUDGE_DEBUG_RAW_FILE || '').trim());
+}
+
+function buildJudgeParserDiagnostic(raw, error, context = {}, options = {}) {
+  if (!judgeRawDiagnosticsEnabled(options)) return null;
+  return {
+    event: 'judge_parser_failure',
+    error: normalizeText(error?.message || error),
+    ...context,
+    raw: normalizeText(raw),
+  };
+}
+
+function reportJudgeParserFailure(raw, error, context = {}, options = {}) {
+  const diagnostic = buildJudgeParserDiagnostic(raw, error, context, options);
+  if (!diagnostic) return false;
+  const outputPath = String(options.debugRawFile || process.env.JUDGE_DEBUG_RAW_FILE || '').trim();
+  if (outputPath) {
+    writeJsonAtomic(outputPath, diagnostic);
+    return true;
+  }
+  const rawText = diagnostic.raw;
+  const configuredLimit = Number(process.env.JUDGE_DEBUG_RAW_MAX || 20_000);
+  const limit = Number.isFinite(configuredLimit) && configuredLimit > 0
+    ? Math.max(1_000, configuredLimit)
+    : 20_000;
+  const output = rawText.length > limit
+    ? { ...diagnostic, raw: rawText.slice(0, limit), rawTruncated: true }
+    : diagnostic;
+  process.stderr.write(`[judge-debug] ${JSON.stringify(output)}\n`);
+  return true;
+}
+
+function isSingleJudgeVerdict(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const id = normalizeText(value.id).trim();
+  return Boolean(id) && Object.hasOwn(value, 'pass') && normalizePass(value.pass) !== null;
+}
+
+function hasUnclosedJsonObject(text, position) {
+  let depth = 0;
+  let quote = '';
+  let escaped = false;
+  for (let index = 0; index < position; index += 1) {
+    const ch = text[index];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === quote) quote = '';
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (ch === '{') depth += 1;
+    else if (ch === '}' && depth > 0) depth -= 1;
+  }
+  return depth > 0;
+}
+
+function nonEmptyJudgeRows(value) {
+  return Array.isArray(value) && value.length > 0 ? value : null;
+}
+
 function parseJudgeJson(raw, allowSingleObject = false) {
   const text = stripCodeFence(raw);
   let directValue;
@@ -208,32 +306,38 @@ function parseJudgeJson(raw, allowSingleObject = false) {
     directValue = JSON.parse(text);
   } catch {}
   if (directValue !== undefined) {
-    if (Array.isArray(directValue)) return directValue;
-    if (Array.isArray(directValue.verdicts)) return directValue.verdicts;
+    if (nonEmptyJudgeRows(directValue)) return directValue;
+    if (nonEmptyJudgeRows(directValue?.verdicts)) return directValue.verdicts;
     // 单题调用允许模型返回单个 verdict 对象；批量调用必须仍返回数组，
     // 否则一个对象可能被错误地当成整批答案，漏掉其它题。
-    if (allowSingleObject && directValue && typeof directValue === 'object') return [directValue];
+    if (allowSingleObject && isSingleJudgeVerdict(directValue)) return [directValue];
     // 不要继续从对象里的 categories:[] 截出一个空数组，把批量单对象
     // 错误地当成合法批次；批量调用应交给上层逐题 fallback。
-    if (directValue && typeof directValue === 'object') throw new Error('批量裁判必须返回 JSON 数组');
+    if (directValue && typeof directValue === 'object' && !allowSingleObject) {
+      throw new Error('批量裁判必须返回 JSON 数组');
+    }
   }
-  const start = text.indexOf('[');
-  const end = text.lastIndexOf(']');
-  if (start >= 0 && end > start) {
-    try {
-      const value = JSON.parse(text.slice(start, end + 1));
-      if (Array.isArray(value)) return value;
-    } catch {}
-  }
+  // 单题模型有时会在 JSON 前后带一小段说明。对象优先于数组，避免把
+  // verdict.categories=[] 中的空数组截成“合法结果”。
   if (allowSingleObject) {
     const objectStart = text.indexOf('{');
     const objectEnd = text.lastIndexOf('}');
     if (objectStart >= 0 && objectEnd > objectStart) {
       try {
         const value = JSON.parse(text.slice(objectStart, objectEnd + 1));
-        if (value && typeof value === 'object' && !Array.isArray(value)) return [value];
+        if (isSingleJudgeVerdict(value)) return [value];
       } catch {}
     }
+  }
+  const start = text.indexOf('[');
+  const end = text.lastIndexOf(']');
+  // 若“[”位于一个尚未闭合的对象内，它很可能只是截断 verdict 的
+  // categories 数组；不能把它当成批量裁判结果。
+  if (start >= 0 && end > start && !hasUnclosedJsonObject(text, start)) {
+    try {
+      const value = JSON.parse(text.slice(start, end + 1));
+      if (nonEmptyJudgeRows(value)) return value;
+    } catch {}
   }
   throw new Error('裁判模型未返回合法 JSON 数组');
 }
@@ -407,10 +511,7 @@ async function judgeBatch(items, config, options, allowSingleFallback = true) {
     routeTitle: item.requirement.routeTitle,
     turnType: item.requirement.turnType,
     evaluationFocus: item.requirement.evaluationFocus,
-    requirement: item.requirement.requirement,
-    answerFacts: item.requirement.answerFacts,
-    mustNotConfuse: item.requirement.mustNotConfuse,
-    safety: item.requirement.safety,
+    ...compactJudgeRequirement(item.requirement),
     precheck: { suspiciousSideEffects: suspiciousSideEffects(item.answer) },
   }));
   let raw;
@@ -423,6 +524,15 @@ async function judgeBatch(items, config, options, allowSingleFallback = true) {
   try {
     rows = parseJudgeJson(raw, items.length === 1);
   } catch (error) {
+    try {
+      reportJudgeParserFailure(raw, error, {
+        batchSize: items.length,
+        itemIds: items.map(item => item.id),
+      }, options);
+    } catch (diagnosticError) {
+      // 诊断是旁路能力；文件权限/路径错误不能改变原有协议失败结果。
+      process.stderr.write(`[judge-debug] diagnostic write failed: ${diagnosticError.message}\n`);
+    }
     // DeepSeek/Anthropic 兼容端点在 batch>1 时偶尔只返回自然语言或截断稿；
     // 逐题重试，避免把一整批可判答案统一吞成 judge_protocol_error。
     if (allowSingleFallback && items.length > 1) {
@@ -534,7 +644,13 @@ async function main() {
     return { ...row, requirementId: requirement.requirementId, requirement };
   });
   const batchSize = Math.max(1, Math.min(50, Number(cliOptions.batchSize || process.env.JUDGE_BATCH_SIZE || 4)));
-  const options = { batchSize, retries: cliOptions.retries, timeoutMs: cliOptions.timeoutMs };
+  const options = {
+    batchSize,
+    retries: cliOptions.retries,
+    timeoutMs: cliOptions.timeoutMs,
+    debugRaw: cliOptions.debugRaw,
+    debugRawFile: cliOptions.debugRawFile,
+  };
   const checkpointPath = `${outputPath}.partial`;
   const verdicts = loadPriorCheckpoint(checkpointPath, items);
   for (const item of items) {
