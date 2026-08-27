@@ -41,11 +41,14 @@ const routeQuestion = new Function(
     + extractFn(SRC, 'routeScorer') + '\n'
     + extractFn(SRC, 'routeQuestion') + '\nreturn routeQuestion;',
 )();
+const consultScopeTechnicalTokens = new Function(
+  extractFn(SRC, 'consultScopeTechnicalTokens') + '\nreturn consultScopeTechnicalTokens;',
+)();
 const contextualRouteQuestion = new Function(
-  'routeQuestion',
+  'routeQuestion', 'consultScopeTechnicalTokens',
   extractFn(SRC, 'consultContextFollowupIntent') + '\n'
     + extractFn(SRC, 'contextualRouteQuestion') + '\nreturn contextualRouteQuestion;',
-)(routeQuestion);
+)(routeQuestion, consultScopeTechnicalTokens);
 const assembleConsultSpecHits = new Function(extractFn(SRC, 'assembleConsultSpecHits') + '\nreturn assembleConsultSpecHits;')();
 const loadRouteContext = new Function(
   'safeRef', 'moduleMapRepo', 'specFileText',
@@ -2157,6 +2160,27 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(q0015Fallback.reply, /audit_sync_error_flow/);
   assert.match(q0015Fallback.reply, /另一套|不由.*统一处理/);
   assert.deepEqual(q0015Fallback.finalAudit.violations, [], 'Q0015 DI-07 只读清单 fallback 终审必须全绿');
+
+  const q0147Question = Object.keys(browserRequirements).find(question => question === '先不转开发，导出请求是 200，下载下来的文件却打不开，这个问题实施还能怎么往下定位？');
+  assert.ok(q0147Question, 'Q0147 应从真实浏览器题目 fixture 取到原问题');
+  const q0147History = [
+    { role: 'user', content: '导出接口返回 200 就算成功了吗？' },
+    { role: 'assistant', content: '前一轮已回答下载与导出文件验收边界。' },
+    { role: 'user', content: q0147Question },
+  ];
+  const q0147MatchedRoute = contextualRouteQuestion(productionRuntimeRouteMap, q0147History, q0147Question);
+  assert.equal(q0147MatchedRoute.route.id, 'AUD-QR-GUIDE-04', 'C030 Q0147 历史会话当前 route 必须命中 GUIDE-04');
+  assert.equal(q0147MatchedRoute.answerFacts.length, 4, 'C030 Q0147 必须保留 GUIDE-04 全部已核事实');
+  const q0147Route = runtimeRouteWithRepositoryContext(q0147MatchedRoute, '2.7.260828-2');
+  const q0147Initial = bundle.audit('', q0147Question, q0147Route);
+  const q0147SafeAudit = bundle.audit(q0147Initial.safeDiagnosticFallback, q0147Question, q0147Route);
+  const q0147Fallback = bundle.modelFailureFallback(q0147Question, q0147Route, { status: 429, message: 'rate limit' });
+  assert.ok(q0147Fallback, `C030 Q0147 HTTP429 实施只读追问必须发布 GUIDE-04 确定性兜底；mode=${q0147Initial.fallbackAnswerMode}; safeViolations=${JSON.stringify(q0147SafeAudit.violations)}`);
+  assert.equal(q0147Fallback.initialAudit.fallbackAnswerMode, 'field_diagnostic');
+  assert.match(q0147Fallback.reply, /HTTP 200|响应体|bytes|文件签名|MIME|结构|正文/);
+  assert.doesNotMatch(q0147Fallback.reply, /(?:建议|请|让|尝试|可以|应该|应当)[^。！？\n]{0,20}(?:重复导出|重新导出|修改权限|修改模板|修改业务数据)/);
+  assert.doesNotMatch(q0147Fallback.reply, /AI 暂时连不上|当前回答未通过发布前/);
+  assert.deepEqual(q0147Fallback.finalAudit.violations, [], 'C030 Q0147 GUIDE-04 field diagnostic fallback 终审必须全绿');
 
   const q0106Question = Object.keys(browserRequirements).find(question => question === '采集异常处理现在是怎么实现的？');
   assert.ok(q0106Question, 'Q0106 应从真实浏览器题目 fixture 取到原问题');

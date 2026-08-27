@@ -45,6 +45,7 @@
 - [ ] **【路径字面量不做“友好归一化”，抓包也不能要求重做未知动作】**：allowlist/路由前缀的尾斜杠属于安全边界，`/comm/` 不等于 `/comm` 或 `/community`；模型不得补“部分接口另有写法”。缺少请求时先用已有请求/日志/审计/历史记录，不能让现场“再点一次”未知动作；即使事实已核，也不能追加真实完成/提交/签名/审批作为验证。
 - [ ] **【verifiedFacts 的事实覆盖与 Top-N 选择要保住安全边界】**：partial evidence 的相关性 Top-N 之外，必须补入 route 明确的“另一套机制/不由统一处理”等隔离句；普通“怎么实现”即使主题含“异常/故障”，也要检查 route 已给出的生产部署/发布记录/支持范围/运维授权边界。现场/证据/只读追问与字段原子题仍按各自窄范围处理（见 L-122）。
 - [ ] **【独立裁判协议错误与业务 verdict 必须分开】**：judge parser 只接受严格合法且非空的 JSON verdict；单题 `categories:[]` 不能误截成空数组通过，协议失败不能算业务错。默认不泄漏 raw，只有显式 debug 才输出/保存诊断；构造裁判 payload 时 requirement 已覆盖的 answerFacts 不重复发送，仅补独立遗漏 facts（见 L-123）。
+- [ ] **【实施受众不等于诊断意图】**：问句含“实施”仍要单独识别诊断意图；“往下定位/继续定位”必须进入只读诊断。route 已核且 `fallbackMode=verifiedFacts` 时，HTTP429、截断或空模型结果要能用 current route facts 生成并通过终审的安全只读 fallback（见 L-124）。
 - [ ] **【调度/同步旧时间只算观测，补跑不是排查动作】**：截图、最后成功时间、长时间无新增或中断不能单独推出“调度停了/平台故障/责任方”；先核预期计划，再只读取任务状态、日志时间窗和影响范围。恢复/重跑/补跑/重触发前必须同时确认 Owner/授权、幂等或补偿、时间窗、范围和当前运行态；即使已知幂等也不能跳过其余条件。回归覆盖批处理/ETL/同步/调度自然问法、同主题继承和显式新实体。
 - [ ] **【同会话只继承已核事实账本，不把“本轮证据少”误当“系统事实未知”】**：用户说“上午反馈、数据库没权限、只靠页面/响应、目前只能确认请求发出、还缺什么、复测到某一步”时，先保留同主题 route/Spec/源码已确认事实，再局部标本次路径/日志未知；连续弱追问可回溯，但不同 route/新实体必须断开。历史 assistant 的示例、假设和猜测永远不进账本。回归至少覆盖配置、退出、反馈、权限四类及显式换题反例。
 - [ ] **【证据状态 unknown/unverified 不是“否定”，最终句级审计也必须拦】**：答疑只确认到链路中间层或缺数据库/日志/状态观测权限时，不得把“看不到”反写成“未落库、不写日志、不涉及状态/后续处理”；先保留 current route 已核的一般规则，再把本次结果局部标为无法确认。若 route 明确给出同一否定规则可逐字保留。回归至少覆盖生产原句、已核否定规则、用户直接提供的否定事实和安全 fallback 再审（见 L-101）。
@@ -1201,3 +1202,10 @@
 - 防复发：逻辑测试覆盖 `categories:[]`、自然语言、截断 JSON、多对象拼接负例，raw 默认不泄漏且显式 debug 才可取；覆盖全部 answerFacts 被 requirement 覆盖时省略 answerFacts、有遗漏时只补遗漏项。不要把协议失败记作业务 omission/business_fact，也不能声称 payload 去重必然修复模型空响应。
 - 回归：`node --test tools/judge-audit-browser-eval.logic.test.mjs` 7/7 通过；两个工具文件 `node --check` 与 `git diff --check` 通过。该工具只在离线浏览器评测读取/裁判调用时生效，不改变 Intake `server.mjs` 业务运行时。
 - 关联：`tools/judge-audit-browser-eval.mjs`、`tools/judge-audit-browser-eval.logic.test.mjs`。
+
+### L-124 实施受众与诊断意图必须分别识别
+- 现象：实施问法含“往下定位/继续定位”时，上游 HTTP429 会错误退成连接失败。
+- 根因：受众命中 implementation 被误当作非诊断，漏掉只读诊断 fallback。
+- 解法：单独识别定位等诊断信号；route 已核时用 current route facts 生成安全只读 fallback。
+- 防复发：回归 HTTP429、截断、空模型结果，确认终审全绿且不建议重复导出或改数据。
+- 关联：`server.mjs`、`tools/fs-04-consult-conversation.logic.test.mjs`、`docs/changes/CHG-consult-定位问法进入只读诊断兜底.md`。

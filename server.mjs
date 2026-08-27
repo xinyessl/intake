@@ -3133,7 +3133,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
       || /(?:现有|当前|已有|这些?)?证据[^。！？\n]{0,24}(?:最多|至多)(?:能|可(?:以)?)?(?:判断|确认|证明)到哪/u.test(intentQuestionText)
       || explicitPartialEvidenceQuestion
       || existingRecordNarrowingQuestion);
-  const diagnosticQuestion = /(?:排查|不一致|对不上|异常|故障|现场|验证|复测|下一步|怎么判断|如何判断|怎么确认|检查|留证|只能确认|能确定|能判断到哪|最多(?:能|可)?判断|不知道|未知|走到哪|还缺什么|够不够|够吗|是否足够|能不能判断|能否判断)/i.test(intentQuestionText);
+  const diagnosticQuestion = /(?:排查|定位|不一致|对不上|异常|故障|现场|验证|复测|下一步|怎么判断|如何判断|怎么确认|检查|留证|只能确认|能确定|能判断到哪|最多(?:能|可)?判断|不知道|未知|走到哪|还缺什么|够不够|够吗|是否足够|能不能判断|能否判断)/i.test(intentQuestionText);
   // 受众层级也必须过发布前确定性终审，不能只相信模型遵守 prompt。
   // 普通“怎么实现”仍是产品问法；只有显式技术契约才进入 developer。
   const audienceDeveloperQuestion = /(?:接口(?:路径|地址|契约|入参|出参|返回)?|字段(?:名|类型|长度|取值)?|列(?:名|类型|长度|取值)?|column(?:s)?(?:\s*(?:name|type|length|value))?|哪张表|表名|数据库表|SQL|源码|代码|开发链路|调用链|调用关系|Java\s*类|类名|方法名|Controller|Service|Mapper|Repository|DAO|DTO|VO)(?:[^。！？\n]{0,28}(?:什么|哪些|哪个|哪里|在哪|怎么|如何|实现|定义|调用|读写|保存|返回|排查|看|查))?|(?:什么|哪些|哪个|哪里|在哪|怎么|如何|看|查)[^。！？\n]{0,28}(?:接口|字段|列|column|哪张表|表名|SQL|源码|代码|开发链路|调用链|Java\s*类|Controller|Service|Mapper|DTO|VO)/i.test(questionText);
