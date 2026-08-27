@@ -1,10 +1,10 @@
 {
   "schema": 2,
   "product": "audit",
-  "version": "2.7.260828-1",
+  "version": "2.7.260828-2",
   "model": "grok-4.5",
   "sourceMap": "docs/specs/00-功能模块地图.json",
-  "sourceCommit": "af230a1fd4c898d4a3ae0b9c4c6e6a13b42a7eac",
+  "sourceCommit": "376117883ecb0b1b1646be06765ec52d1d54d9b8",
   "routeIds": [
     "AUD-QR-AI-01",
     "AUD-QR-CFG-01",

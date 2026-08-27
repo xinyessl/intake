@@ -1,9 +1,9 @@
 {
   "schema": 2,
   "product": "audit",
-  "version": "2.7.260828-1",
+  "version": "2.7.260828-2",
   "sourceMap": "docs/specs/00-功能模块地图.json",
-  "sourceCommit": "af230a1fd4c898d4a3ae0b9c4c6e6a13b42a7eac",
+  "sourceCommit": "376117883ecb0b1b1646be06765ec52d1d54d9b8",
   "note": "完整 question→requirements 显式语义映射；禁止按 Q 编号、数组位置、conversationId 或 turn 推断 gold。",
   "routeTurns": {
     "AUD-QR-AI-01": 19,
@@ -66,25 +66,43 @@
     "AI 审方生成现在是怎么实现的？": {
       "requirementId": "AUD-QR-AI-01",
       "routeTitle": "AI 审方生成",
-      "requirement": "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。",
+      "requirement": "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。；入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。；任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。；外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。；生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。；停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。；前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。；实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。；端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。",
       "answerFacts": [
-        "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。"
+        "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。",
+        "入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。",
+        "任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。",
+        "外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。",
+        "生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。",
+        "停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。",
+        "前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。",
+        "实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。",
+        "端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。"
       ],
       "mustNotConfuse": [
         "正文中的 NEEDS-HUMAN、未实现 Target、菜单标签或 Java Model 推测不得写成当前已确认行为。",
-        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文或药师采纳。"
+        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文、生成记录或药师采纳。",
+        "只有前端请求、响应或 requestId 时，不得把后端场景校验、任务读取、Dify 处理、数据库写入、停止结果或药师采纳写成已证实。",
+        "Dify 工作流内部步骤、模型判断、停止响应、迟到回调、统一 requestId 关联以及数据表真实 DDL 当前未由本仓证据完整定义；不得补写具体状态、重试或超时结论。"
       ],
       "primaryRefs": [
         {
           "specId": "AI-01",
-          "section": "当前事实（As-built）",
+          "section": "Intake 紧凑事实",
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
-          "anchor": "#当前事实as-built",
+          "anchor": "#intake-紧凑事实",
           "missing": false
         }
       ],
       "contextRefs": [
+        {
+          "specId": "AI-01",
+          "section": "Intake 紧凑事实",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#intake-紧凑事实",
+          "missing": false
+        },
         {
           "specId": "AI-01",
           "section": "接口契约",
@@ -107,6 +125,22 @@
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
           "anchor": "#权限与安全",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "跨系统依赖",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#跨系统依赖",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "证据",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#证据",
           "missing": false
         }
       ],
@@ -117,25 +151,43 @@
     "AI 审方生成涉及哪些接口、数据和边界？": {
       "requirementId": "AUD-QR-AI-01",
       "routeTitle": "AI 审方生成",
-      "requirement": "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。",
+      "requirement": "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。；入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。；任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。；外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。；生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。；停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。；前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。；实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。；端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。",
       "answerFacts": [
-        "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。"
+        "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。",
+        "入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。",
+        "任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。",
+        "外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。",
+        "生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。",
+        "停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。",
+        "前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。",
+        "实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。",
+        "端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。"
       ],
       "mustNotConfuse": [
         "正文中的 NEEDS-HUMAN、未实现 Target、菜单标签或 Java Model 推测不得写成当前已确认行为。",
-        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文或药师采纳。"
+        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文、生成记录或药师采纳。",
+        "只有前端请求、响应或 requestId 时，不得把后端场景校验、任务读取、Dify 处理、数据库写入、停止结果或药师采纳写成已证实。",
+        "Dify 工作流内部步骤、模型判断、停止响应、迟到回调、统一 requestId 关联以及数据表真实 DDL 当前未由本仓证据完整定义；不得补写具体状态、重试或超时结论。"
       ],
       "primaryRefs": [
         {
           "specId": "AI-01",
-          "section": "当前事实（As-built）",
+          "section": "Intake 紧凑事实",
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
-          "anchor": "#当前事实as-built",
+          "anchor": "#intake-紧凑事实",
           "missing": false
         }
       ],
       "contextRefs": [
+        {
+          "specId": "AI-01",
+          "section": "Intake 紧凑事实",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#intake-紧凑事实",
+          "missing": false
+        },
         {
           "specId": "AI-01",
           "section": "接口契约",
@@ -158,6 +210,22 @@
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
           "anchor": "#权限与安全",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "跨系统依赖",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#跨系统依赖",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "证据",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#证据",
           "missing": false
         }
       ],
@@ -168,25 +236,43 @@
     "关于AI 审方生成，我现在只有一次既有请求和响应，没有数据库权限。现有证据最多能判断到哪？": {
       "requirementId": "AUD-QR-AI-01",
       "routeTitle": "AI 审方生成",
-      "requirement": "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。",
+      "requirement": "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。；入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。；任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。；外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。；生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。；停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。；前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。；实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。；端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。",
       "answerFacts": [
-        "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。"
+        "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。",
+        "入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。",
+        "任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。",
+        "外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。",
+        "生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。",
+        "停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。",
+        "前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。",
+        "实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。",
+        "端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。"
       ],
       "mustNotConfuse": [
         "正文中的 NEEDS-HUMAN、未实现 Target、菜单标签或 Java Model 推测不得写成当前已确认行为。",
-        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文或药师采纳。"
+        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文、生成记录或药师采纳。",
+        "只有前端请求、响应或 requestId 时，不得把后端场景校验、任务读取、Dify 处理、数据库写入、停止结果或药师采纳写成已证实。",
+        "Dify 工作流内部步骤、模型判断、停止响应、迟到回调、统一 requestId 关联以及数据表真实 DDL 当前未由本仓证据完整定义；不得补写具体状态、重试或超时结论。"
       ],
       "primaryRefs": [
         {
           "specId": "AI-01",
-          "section": "当前事实（As-built）",
+          "section": "Intake 紧凑事实",
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
-          "anchor": "#当前事实as-built",
+          "anchor": "#intake-紧凑事实",
           "missing": false
         }
       ],
       "contextRefs": [
+        {
+          "specId": "AI-01",
+          "section": "Intake 紧凑事实",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#intake-紧凑事实",
+          "missing": false
+        },
         {
           "specId": "AI-01",
           "section": "接口契约",
@@ -209,6 +295,22 @@
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
           "anchor": "#权限与安全",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "跨系统依赖",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#跨系统依赖",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "证据",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#证据",
           "missing": false
         }
       ],
@@ -337,25 +439,43 @@
     "另一轮独立复测（6）里，AI 审方生成现在是怎么实现的？": {
       "requirementId": "AUD-QR-AI-01",
       "routeTitle": "AI 审方生成",
-      "requirement": "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。",
+      "requirement": "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。；入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。；任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。；外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。；生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。；停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。；前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。；实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。；端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。",
       "answerFacts": [
-        "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。"
+        "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。",
+        "入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。",
+        "任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。",
+        "外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。",
+        "生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。",
+        "停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。",
+        "前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。",
+        "实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。",
+        "端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。"
       ],
       "mustNotConfuse": [
         "正文中的 NEEDS-HUMAN、未实现 Target、菜单标签或 Java Model 推测不得写成当前已确认行为。",
-        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文或药师采纳。"
+        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文、生成记录或药师采纳。",
+        "只有前端请求、响应或 requestId 时，不得把后端场景校验、任务读取、Dify 处理、数据库写入、停止结果或药师采纳写成已证实。",
+        "Dify 工作流内部步骤、模型判断、停止响应、迟到回调、统一 requestId 关联以及数据表真实 DDL 当前未由本仓证据完整定义；不得补写具体状态、重试或超时结论。"
       ],
       "primaryRefs": [
         {
           "specId": "AI-01",
-          "section": "当前事实（As-built）",
+          "section": "Intake 紧凑事实",
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
-          "anchor": "#当前事实as-built",
+          "anchor": "#intake-紧凑事实",
           "missing": false
         }
       ],
       "contextRefs": [
+        {
+          "specId": "AI-01",
+          "section": "Intake 紧凑事实",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#intake-紧凑事实",
+          "missing": false
+        },
         {
           "specId": "AI-01",
           "section": "接口契约",
@@ -378,6 +498,22 @@
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
           "anchor": "#权限与安全",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "跨系统依赖",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#跨系统依赖",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "证据",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#证据",
           "missing": false
         }
       ],
@@ -388,25 +524,43 @@
     "另一轮独立复测（7）里，AI 审方生成涉及哪些接口、数据和边界？": {
       "requirementId": "AUD-QR-AI-01",
       "routeTitle": "AI 审方生成",
-      "requirement": "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。",
+      "requirement": "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。；入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。；任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。；外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。；生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。；停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。；前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。；实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。；端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。",
       "answerFacts": [
-        "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。"
+        "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。",
+        "入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。",
+        "任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。",
+        "外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。",
+        "生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。",
+        "停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。",
+        "前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。",
+        "实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。",
+        "端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。"
       ],
       "mustNotConfuse": [
         "正文中的 NEEDS-HUMAN、未实现 Target、菜单标签或 Java Model 推测不得写成当前已确认行为。",
-        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文或药师采纳。"
+        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文、生成记录或药师采纳。",
+        "只有前端请求、响应或 requestId 时，不得把后端场景校验、任务读取、Dify 处理、数据库写入、停止结果或药师采纳写成已证实。",
+        "Dify 工作流内部步骤、模型判断、停止响应、迟到回调、统一 requestId 关联以及数据表真实 DDL 当前未由本仓证据完整定义；不得补写具体状态、重试或超时结论。"
       ],
       "primaryRefs": [
         {
           "specId": "AI-01",
-          "section": "当前事实（As-built）",
+          "section": "Intake 紧凑事实",
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
-          "anchor": "#当前事实as-built",
+          "anchor": "#intake-紧凑事实",
           "missing": false
         }
       ],
       "contextRefs": [
+        {
+          "specId": "AI-01",
+          "section": "Intake 紧凑事实",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#intake-紧凑事实",
+          "missing": false
+        },
         {
           "specId": "AI-01",
           "section": "接口契约",
@@ -429,6 +583,22 @@
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
           "anchor": "#权限与安全",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "跨系统依赖",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#跨系统依赖",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "证据",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#证据",
           "missing": false
         }
       ],
@@ -439,25 +609,43 @@
     "AI 审方生成这条链路只确认前端发出了请求，服务端后续日志还没拿到。先说能确定的，未知项请单独标出来。": {
       "requirementId": "AUD-QR-AI-01",
       "routeTitle": "AI 审方生成",
-      "requirement": "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。",
+      "requirement": "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。；入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。；任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。；外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。；生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。；停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。；前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。；实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。；端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。",
       "answerFacts": [
-        "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。"
+        "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。",
+        "入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。",
+        "任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。",
+        "外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。",
+        "生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。",
+        "停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。",
+        "前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。",
+        "实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。",
+        "端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。"
       ],
       "mustNotConfuse": [
         "正文中的 NEEDS-HUMAN、未实现 Target、菜单标签或 Java Model 推测不得写成当前已确认行为。",
-        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文或药师采纳。"
+        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文、生成记录或药师采纳。",
+        "只有前端请求、响应或 requestId 时，不得把后端场景校验、任务读取、Dify 处理、数据库写入、停止结果或药师采纳写成已证实。",
+        "Dify 工作流内部步骤、模型判断、停止响应、迟到回调、统一 requestId 关联以及数据表真实 DDL 当前未由本仓证据完整定义；不得补写具体状态、重试或超时结论。"
       ],
       "primaryRefs": [
         {
           "specId": "AI-01",
-          "section": "当前事实（As-built）",
+          "section": "Intake 紧凑事实",
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
-          "anchor": "#当前事实as-built",
+          "anchor": "#intake-紧凑事实",
           "missing": false
         }
       ],
       "contextRefs": [
+        {
+          "specId": "AI-01",
+          "section": "Intake 紧凑事实",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#intake-紧凑事实",
+          "missing": false
+        },
         {
           "specId": "AI-01",
           "section": "接口契约",
@@ -480,6 +668,22 @@
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
           "anchor": "#权限与安全",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "跨系统依赖",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#跨系统依赖",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "证据",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#证据",
           "missing": false
         }
       ],
@@ -490,25 +694,43 @@
     "把AI 审方生成从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。": {
       "requirementId": "AUD-QR-AI-01",
       "routeTitle": "AI 审方生成",
-      "requirement": "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。",
+      "requirement": "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。；入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。；任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。；外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。；生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。；停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。；前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。；实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。；端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。",
       "answerFacts": [
-        "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。"
+        "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。",
+        "入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。",
+        "任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。",
+        "外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。",
+        "生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。",
+        "停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。",
+        "前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。",
+        "实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。",
+        "端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。"
       ],
       "mustNotConfuse": [
         "正文中的 NEEDS-HUMAN、未实现 Target、菜单标签或 Java Model 推测不得写成当前已确认行为。",
-        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文或药师采纳。"
+        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文、生成记录或药师采纳。",
+        "只有前端请求、响应或 requestId 时，不得把后端场景校验、任务读取、Dify 处理、数据库写入、停止结果或药师采纳写成已证实。",
+        "Dify 工作流内部步骤、模型判断、停止响应、迟到回调、统一 requestId 关联以及数据表真实 DDL 当前未由本仓证据完整定义；不得补写具体状态、重试或超时结论。"
       ],
       "primaryRefs": [
         {
           "specId": "AI-01",
-          "section": "当前事实（As-built）",
+          "section": "Intake 紧凑事实",
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
-          "anchor": "#当前事实as-built",
+          "anchor": "#intake-紧凑事实",
           "missing": false
         }
       ],
       "contextRefs": [
+        {
+          "specId": "AI-01",
+          "section": "Intake 紧凑事实",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#intake-紧凑事实",
+          "missing": false
+        },
         {
           "specId": "AI-01",
           "section": "接口契约",
@@ -531,6 +753,22 @@
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
           "anchor": "#权限与安全",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "跨系统依赖",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#跨系统依赖",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "证据",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#证据",
           "missing": false
         }
       ],
@@ -541,25 +779,43 @@
     "我没完全听懂AI 审方生成的排查建议，换成实施可以逐项照做的只读清单。": {
       "requirementId": "AUD-QR-AI-01",
       "routeTitle": "AI 审方生成",
-      "requirement": "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。",
+      "requirement": "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。；入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。；任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。；外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。；生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。；停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。；前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。；实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。；端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。",
       "answerFacts": [
-        "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。"
+        "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。",
+        "入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。",
+        "任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。",
+        "外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。",
+        "生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。",
+        "停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。",
+        "前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。",
+        "实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。",
+        "端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。"
       ],
       "mustNotConfuse": [
         "正文中的 NEEDS-HUMAN、未实现 Target、菜单标签或 Java Model 推测不得写成当前已确认行为。",
-        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文或药师采纳。"
+        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文、生成记录或药师采纳。",
+        "只有前端请求、响应或 requestId 时，不得把后端场景校验、任务读取、Dify 处理、数据库写入、停止结果或药师采纳写成已证实。",
+        "Dify 工作流内部步骤、模型判断、停止响应、迟到回调、统一 requestId 关联以及数据表真实 DDL 当前未由本仓证据完整定义；不得补写具体状态、重试或超时结论。"
       ],
       "primaryRefs": [
         {
           "specId": "AI-01",
-          "section": "当前事实（As-built）",
+          "section": "Intake 紧凑事实",
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
-          "anchor": "#当前事实as-built",
+          "anchor": "#intake-紧凑事实",
           "missing": false
         }
       ],
       "contextRefs": [
+        {
+          "specId": "AI-01",
+          "section": "Intake 紧凑事实",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#intake-紧凑事实",
+          "missing": false
+        },
         {
           "specId": "AI-01",
           "section": "接口契约",
@@ -582,6 +838,22 @@
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
           "anchor": "#权限与安全",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "跨系统依赖",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#跨系统依赖",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "证据",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#证据",
           "missing": false
         }
       ],
@@ -592,25 +864,43 @@
     "另一轮独立复测（11）里，AI 审方生成现在是怎么实现的？": {
       "requirementId": "AUD-QR-AI-01",
       "routeTitle": "AI 审方生成",
-      "requirement": "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。",
+      "requirement": "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。；入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。；任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。；外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。；生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。；停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。；前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。；实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。；端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。",
       "answerFacts": [
-        "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。"
+        "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。",
+        "入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。",
+        "任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。",
+        "外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。",
+        "生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。",
+        "停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。",
+        "前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。",
+        "实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。",
+        "端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。"
       ],
       "mustNotConfuse": [
         "正文中的 NEEDS-HUMAN、未实现 Target、菜单标签或 Java Model 推测不得写成当前已确认行为。",
-        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文或药师采纳。"
+        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文、生成记录或药师采纳。",
+        "只有前端请求、响应或 requestId 时，不得把后端场景校验、任务读取、Dify 处理、数据库写入、停止结果或药师采纳写成已证实。",
+        "Dify 工作流内部步骤、模型判断、停止响应、迟到回调、统一 requestId 关联以及数据表真实 DDL 当前未由本仓证据完整定义；不得补写具体状态、重试或超时结论。"
       ],
       "primaryRefs": [
         {
           "specId": "AI-01",
-          "section": "当前事实（As-built）",
+          "section": "Intake 紧凑事实",
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
-          "anchor": "#当前事实as-built",
+          "anchor": "#intake-紧凑事实",
           "missing": false
         }
       ],
       "contextRefs": [
+        {
+          "specId": "AI-01",
+          "section": "Intake 紧凑事实",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#intake-紧凑事实",
+          "missing": false
+        },
         {
           "specId": "AI-01",
           "section": "接口契约",
@@ -633,6 +923,22 @@
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
           "anchor": "#权限与安全",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "跨系统依赖",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#跨系统依赖",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "证据",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#证据",
           "missing": false
         }
       ],
@@ -643,25 +949,43 @@
     "另一轮独立复测（12）里，AI 审方生成涉及哪些接口、数据和边界？": {
       "requirementId": "AUD-QR-AI-01",
       "routeTitle": "AI 审方生成",
-      "requirement": "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。",
+      "requirement": "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。；入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。；任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。；外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。；生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。；停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。；前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。；实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。；端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。",
       "answerFacts": [
-        "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。"
+        "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。",
+        "入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。",
+        "任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。",
+        "外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。",
+        "生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。",
+        "停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。",
+        "前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。",
+        "实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。",
+        "端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。"
       ],
       "mustNotConfuse": [
         "正文中的 NEEDS-HUMAN、未实现 Target、菜单标签或 Java Model 推测不得写成当前已确认行为。",
-        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文或药师采纳。"
+        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文、生成记录或药师采纳。",
+        "只有前端请求、响应或 requestId 时，不得把后端场景校验、任务读取、Dify 处理、数据库写入、停止结果或药师采纳写成已证实。",
+        "Dify 工作流内部步骤、模型判断、停止响应、迟到回调、统一 requestId 关联以及数据表真实 DDL 当前未由本仓证据完整定义；不得补写具体状态、重试或超时结论。"
       ],
       "primaryRefs": [
         {
           "specId": "AI-01",
-          "section": "当前事实（As-built）",
+          "section": "Intake 紧凑事实",
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
-          "anchor": "#当前事实as-built",
+          "anchor": "#intake-紧凑事实",
           "missing": false
         }
       ],
       "contextRefs": [
+        {
+          "specId": "AI-01",
+          "section": "Intake 紧凑事实",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#intake-紧凑事实",
+          "missing": false
+        },
         {
           "specId": "AI-01",
           "section": "接口契约",
@@ -684,6 +1008,22 @@
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
           "anchor": "#权限与安全",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "跨系统依赖",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#跨系统依赖",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "证据",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#证据",
           "missing": false
         }
       ],
@@ -694,25 +1034,43 @@
     "复测AI 审方生成时只有页面现象和 requestId，暂时没有原始日志。下一步最少还要补哪类只读证据？": {
       "requirementId": "AUD-QR-AI-01",
       "routeTitle": "AI 审方生成",
-      "requirement": "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。",
+      "requirement": "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。；入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。；任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。；外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。；生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。；停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。；前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。；实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。；端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。",
       "answerFacts": [
-        "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。"
+        "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。",
+        "入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。",
+        "任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。",
+        "外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。",
+        "生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。",
+        "停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。",
+        "前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。",
+        "实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。",
+        "端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。"
       ],
       "mustNotConfuse": [
         "正文中的 NEEDS-HUMAN、未实现 Target、菜单标签或 Java Model 推测不得写成当前已确认行为。",
-        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文或药师采纳。"
+        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文、生成记录或药师采纳。",
+        "只有前端请求、响应或 requestId 时，不得把后端场景校验、任务读取、Dify 处理、数据库写入、停止结果或药师采纳写成已证实。",
+        "Dify 工作流内部步骤、模型判断、停止响应、迟到回调、统一 requestId 关联以及数据表真实 DDL 当前未由本仓证据完整定义；不得补写具体状态、重试或超时结论。"
       ],
       "primaryRefs": [
         {
           "specId": "AI-01",
-          "section": "当前事实（As-built）",
+          "section": "Intake 紧凑事实",
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
-          "anchor": "#当前事实as-built",
+          "anchor": "#intake-紧凑事实",
           "missing": false
         }
       ],
       "contextRefs": [
+        {
+          "specId": "AI-01",
+          "section": "Intake 紧凑事实",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#intake-紧凑事实",
+          "missing": false
+        },
         {
           "specId": "AI-01",
           "section": "接口契约",
@@ -735,6 +1093,22 @@
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
           "anchor": "#权限与安全",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "跨系统依赖",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#跨系统依赖",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "证据",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#证据",
           "missing": false
         }
       ],
@@ -36959,25 +37333,43 @@
     "先切到另一个问题：“AI 审方生成”当前实现的关键入口或处理链是什么？": {
       "requirementId": "AUD-QR-AI-01",
       "routeTitle": "AI 审方生成",
-      "requirement": "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。",
+      "requirement": "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。；入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。；任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。；外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。；生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。；停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。；前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。；实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。；端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。",
       "answerFacts": [
-        "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。"
+        "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。",
+        "入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。",
+        "任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。",
+        "外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。",
+        "生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。",
+        "停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。",
+        "前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。",
+        "实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。",
+        "端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。"
       ],
       "mustNotConfuse": [
         "正文中的 NEEDS-HUMAN、未实现 Target、菜单标签或 Java Model 推测不得写成当前已确认行为。",
-        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文或药师采纳。"
+        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文、生成记录或药师采纳。",
+        "只有前端请求、响应或 requestId 时，不得把后端场景校验、任务读取、Dify 处理、数据库写入、停止结果或药师采纳写成已证实。",
+        "Dify 工作流内部步骤、模型判断、停止响应、迟到回调、统一 requestId 关联以及数据表真实 DDL 当前未由本仓证据完整定义；不得补写具体状态、重试或超时结论。"
       ],
       "primaryRefs": [
         {
           "specId": "AI-01",
-          "section": "当前事实（As-built）",
+          "section": "Intake 紧凑事实",
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
-          "anchor": "#当前事实as-built",
+          "anchor": "#intake-紧凑事实",
           "missing": false
         }
       ],
       "contextRefs": [
+        {
+          "specId": "AI-01",
+          "section": "Intake 紧凑事实",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#intake-紧凑事实",
+          "missing": false
+        },
         {
           "specId": "AI-01",
           "section": "接口契约",
@@ -37000,6 +37392,22 @@
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
           "anchor": "#权限与安全",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "跨系统依赖",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#跨系统依赖",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "证据",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#证据",
           "missing": false
         }
       ],
@@ -37010,25 +37418,43 @@
     "回到AI 审方生成这里，第一层核过没有异常，下一步按什么顺序继续只读排查？": {
       "requirementId": "AUD-QR-AI-01",
       "routeTitle": "AI 审方生成",
-      "requirement": "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。",
+      "requirement": "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。；入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。；任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。；外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。；生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。；停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。；前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。；实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。；端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。",
       "answerFacts": [
-        "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。"
+        "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。",
+        "入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。",
+        "任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。",
+        "外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。",
+        "生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。",
+        "停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。",
+        "前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。",
+        "实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。",
+        "端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。"
       ],
       "mustNotConfuse": [
         "正文中的 NEEDS-HUMAN、未实现 Target、菜单标签或 Java Model 推测不得写成当前已确认行为。",
-        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文或药师采纳。"
+        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文、生成记录或药师采纳。",
+        "只有前端请求、响应或 requestId 时，不得把后端场景校验、任务读取、Dify 处理、数据库写入、停止结果或药师采纳写成已证实。",
+        "Dify 工作流内部步骤、模型判断、停止响应、迟到回调、统一 requestId 关联以及数据表真实 DDL 当前未由本仓证据完整定义；不得补写具体状态、重试或超时结论。"
       ],
       "primaryRefs": [
         {
           "specId": "AI-01",
-          "section": "当前事实（As-built）",
+          "section": "Intake 紧凑事实",
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
-          "anchor": "#当前事实as-built",
+          "anchor": "#intake-紧凑事实",
           "missing": false
         }
       ],
       "contextRefs": [
+        {
+          "specId": "AI-01",
+          "section": "Intake 紧凑事实",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#intake-紧凑事实",
+          "missing": false
+        },
         {
           "specId": "AI-01",
           "section": "接口契约",
@@ -37051,6 +37477,22 @@
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
           "anchor": "#权限与安全",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "跨系统依赖",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#跨系统依赖",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "证据",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#证据",
           "missing": false
         }
       ],
@@ -37620,25 +38062,43 @@
     "另一轮独立复测（604）里，先切到另一个问题：“AI 审方生成”当前实现的关键入口或处理链是什么？": {
       "requirementId": "AUD-QR-AI-01",
       "routeTitle": "AI 审方生成",
-      "requirement": "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。",
+      "requirement": "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。；入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。；任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。；外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。；生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。；停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。；前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。；实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。；端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。",
       "answerFacts": [
-        "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。"
+        "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。",
+        "入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。",
+        "任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。",
+        "外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。",
+        "生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。",
+        "停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。",
+        "前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。",
+        "实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。",
+        "端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。"
       ],
       "mustNotConfuse": [
         "正文中的 NEEDS-HUMAN、未实现 Target、菜单标签或 Java Model 推测不得写成当前已确认行为。",
-        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文或药师采纳。"
+        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文、生成记录或药师采纳。",
+        "只有前端请求、响应或 requestId 时，不得把后端场景校验、任务读取、Dify 处理、数据库写入、停止结果或药师采纳写成已证实。",
+        "Dify 工作流内部步骤、模型判断、停止响应、迟到回调、统一 requestId 关联以及数据表真实 DDL 当前未由本仓证据完整定义；不得补写具体状态、重试或超时结论。"
       ],
       "primaryRefs": [
         {
           "specId": "AI-01",
-          "section": "当前事实（As-built）",
+          "section": "Intake 紧凑事实",
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
-          "anchor": "#当前事实as-built",
+          "anchor": "#intake-紧凑事实",
           "missing": false
         }
       ],
       "contextRefs": [
+        {
+          "specId": "AI-01",
+          "section": "Intake 紧凑事实",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#intake-紧凑事实",
+          "missing": false
+        },
         {
           "specId": "AI-01",
           "section": "接口契约",
@@ -37661,6 +38121,22 @@
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
           "anchor": "#权限与安全",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "跨系统依赖",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#跨系统依赖",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "证据",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#证据",
           "missing": false
         }
       ],
@@ -37671,25 +38147,43 @@
     "关于AI 审方生成，如果接口返回有数据而页面没呈现，转开发前要整理哪些最小证据？": {
       "requirementId": "AUD-QR-AI-01",
       "routeTitle": "AI 审方生成",
-      "requirement": "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。",
+      "requirement": "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。；入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。；任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。；外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。；生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。；停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。；前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。；实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。；端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。",
       "answerFacts": [
-        "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。"
+        "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。",
+        "入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。",
+        "任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。",
+        "外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。",
+        "生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。",
+        "停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。",
+        "前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。",
+        "实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。",
+        "端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。"
       ],
       "mustNotConfuse": [
         "正文中的 NEEDS-HUMAN、未实现 Target、菜单标签或 Java Model 推测不得写成当前已确认行为。",
-        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文或药师采纳。"
+        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文、生成记录或药师采纳。",
+        "只有前端请求、响应或 requestId 时，不得把后端场景校验、任务读取、Dify 处理、数据库写入、停止结果或药师采纳写成已证实。",
+        "Dify 工作流内部步骤、模型判断、停止响应、迟到回调、统一 requestId 关联以及数据表真实 DDL 当前未由本仓证据完整定义；不得补写具体状态、重试或超时结论。"
       ],
       "primaryRefs": [
         {
           "specId": "AI-01",
-          "section": "当前事实（As-built）",
+          "section": "Intake 紧凑事实",
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
-          "anchor": "#当前事实as-built",
+          "anchor": "#intake-紧凑事实",
           "missing": false
         }
       ],
       "contextRefs": [
+        {
+          "specId": "AI-01",
+          "section": "Intake 紧凑事实",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#intake-紧凑事实",
+          "missing": false
+        },
         {
           "specId": "AI-01",
           "section": "接口契约",
@@ -37712,6 +38206,22 @@
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
           "anchor": "#权限与安全",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "跨系统依赖",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#跨系统依赖",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "证据",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#证据",
           "missing": false
         }
       ],
@@ -38226,25 +38736,43 @@
     "另一轮独立复测（614）里，先切到另一个问题：“AI 审方生成”当前实现的关键入口或处理链是什么？": {
       "requirementId": "AUD-QR-AI-01",
       "routeTitle": "AI 审方生成",
-      "requirement": "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。",
+      "requirement": "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。；入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。；任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。；外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。；生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。；停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。；前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。；实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。；端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。",
       "answerFacts": [
-        "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。"
+        "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。",
+        "入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。",
+        "任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。",
+        "外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。",
+        "生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。",
+        "停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。",
+        "前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。",
+        "实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。",
+        "端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。"
       ],
       "mustNotConfuse": [
         "正文中的 NEEDS-HUMAN、未实现 Target、菜单标签或 Java Model 推测不得写成当前已确认行为。",
-        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文或药师采纳。"
+        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文、生成记录或药师采纳。",
+        "只有前端请求、响应或 requestId 时，不得把后端场景校验、任务读取、Dify 处理、数据库写入、停止结果或药师采纳写成已证实。",
+        "Dify 工作流内部步骤、模型判断、停止响应、迟到回调、统一 requestId 关联以及数据表真实 DDL 当前未由本仓证据完整定义；不得补写具体状态、重试或超时结论。"
       ],
       "primaryRefs": [
         {
           "specId": "AI-01",
-          "section": "当前事实（As-built）",
+          "section": "Intake 紧凑事实",
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
-          "anchor": "#当前事实as-built",
+          "anchor": "#intake-紧凑事实",
           "missing": false
         }
       ],
       "contextRefs": [
+        {
+          "specId": "AI-01",
+          "section": "Intake 紧凑事实",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#intake-紧凑事实",
+          "missing": false
+        },
         {
           "specId": "AI-01",
           "section": "接口契约",
@@ -38267,6 +38795,22 @@
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
           "anchor": "#权限与安全",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "跨系统依赖",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#跨系统依赖",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "证据",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#证据",
           "missing": false
         }
       ],
@@ -38277,25 +38821,43 @@
     "另一轮独立复测（615）里，我没完全听懂AI 审方生成的排查建议，换成实施可以逐项照做的只读清单。": {
       "requirementId": "AUD-QR-AI-01",
       "routeTitle": "AI 审方生成",
-      "requirement": "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。",
+      "requirement": "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。；入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。；任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。；外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。；生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。；停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。；前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。；实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。；端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。",
       "answerFacts": [
-        "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。"
+        "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。",
+        "入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。",
+        "任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。",
+        "外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。",
+        "生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。",
+        "停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。",
+        "前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。",
+        "实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。",
+        "端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。"
       ],
       "mustNotConfuse": [
         "正文中的 NEEDS-HUMAN、未实现 Target、菜单标签或 Java Model 推测不得写成当前已确认行为。",
-        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文或药师采纳。"
+        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文、生成记录或药师采纳。",
+        "只有前端请求、响应或 requestId 时，不得把后端场景校验、任务读取、Dify 处理、数据库写入、停止结果或药师采纳写成已证实。",
+        "Dify 工作流内部步骤、模型判断、停止响应、迟到回调、统一 requestId 关联以及数据表真实 DDL 当前未由本仓证据完整定义；不得补写具体状态、重试或超时结论。"
       ],
       "primaryRefs": [
         {
           "specId": "AI-01",
-          "section": "当前事实（As-built）",
+          "section": "Intake 紧凑事实",
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
-          "anchor": "#当前事实as-built",
+          "anchor": "#intake-紧凑事实",
           "missing": false
         }
       ],
       "contextRefs": [
+        {
+          "specId": "AI-01",
+          "section": "Intake 紧凑事实",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#intake-紧凑事实",
+          "missing": false
+        },
         {
           "specId": "AI-01",
           "section": "接口契约",
@@ -38318,6 +38880,22 @@
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
           "anchor": "#权限与安全",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "跨系统依赖",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#跨系统依赖",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "证据",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#证据",
           "missing": false
         }
       ],
@@ -38805,25 +39383,43 @@
     "另一轮独立复测（624）里，先切到另一个问题：“AI 审方生成”当前实现的关键入口或处理链是什么？": {
       "requirementId": "AUD-QR-AI-01",
       "routeTitle": "AI 审方生成",
-      "requirement": "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。",
+      "requirement": "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。；入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。；任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。；外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。；生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。；停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。；前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。；实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。；端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。",
       "answerFacts": [
-        "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。"
+        "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。",
+        "入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。",
+        "任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。",
+        "外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。",
+        "生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。",
+        "停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。",
+        "前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。",
+        "实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。",
+        "端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。"
       ],
       "mustNotConfuse": [
         "正文中的 NEEDS-HUMAN、未实现 Target、菜单标签或 Java Model 推测不得写成当前已确认行为。",
-        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文或药师采纳。"
+        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文、生成记录或药师采纳。",
+        "只有前端请求、响应或 requestId 时，不得把后端场景校验、任务读取、Dify 处理、数据库写入、停止结果或药师采纳写成已证实。",
+        "Dify 工作流内部步骤、模型判断、停止响应、迟到回调、统一 requestId 关联以及数据表真实 DDL 当前未由本仓证据完整定义；不得补写具体状态、重试或超时结论。"
       ],
       "primaryRefs": [
         {
           "specId": "AI-01",
-          "section": "当前事实（As-built）",
+          "section": "Intake 紧凑事实",
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
-          "anchor": "#当前事实as-built",
+          "anchor": "#intake-紧凑事实",
           "missing": false
         }
       ],
       "contextRefs": [
+        {
+          "specId": "AI-01",
+          "section": "Intake 紧凑事实",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#intake-紧凑事实",
+          "missing": false
+        },
         {
           "specId": "AI-01",
           "section": "接口契约",
@@ -38846,6 +39442,22 @@
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
           "anchor": "#权限与安全",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "跨系统依赖",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#跨系统依赖",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "证据",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#证据",
           "missing": false
         }
       ],
@@ -38856,25 +39468,43 @@
     "AI 审方生成的请求是通的，但业务结果仍不符合预期。接下来重点对照哪一层？": {
       "requirementId": "AUD-QR-AI-01",
       "routeTitle": "AI 审方生成",
-      "requirement": "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。",
+      "requirement": "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。；入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。；任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。；外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。；生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。；停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。；前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。；实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。；端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。",
       "answerFacts": [
-        "AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。"
+        "产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。",
+        "入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。",
+        "任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId；两类内容转成中文 JSON 放入 Dify inputs.content。",
+        "外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk；Dify 内部步骤、模型判断和结果正确性不属于本仓已确认事实。",
+        "生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。",
+        "停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify /v1/workflows/tasks/{taskId}/stop，查不到记录或尚未有 task_id 时当前无操作。",
+        "前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。",
+        "实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态，也不得凭空补 taskId、密钥或成功结论。",
+        "端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。"
       ],
       "mustNotConfuse": [
         "正文中的 NEEDS-HUMAN、未实现 Target、菜单标签或 Java Model 推测不得写成当前已确认行为。",
-        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文或药师采纳。"
+        "只询问 AI 开始生成、停止生成的 HTTP 方法、完整路径或 generateId 位置时，属于 AUD-QR-FAQ-01-AI；不扩展 Dify、任务上下文、生成记录或药师采纳。",
+        "只有前端请求、响应或 requestId 时，不得把后端场景校验、任务读取、Dify 处理、数据库写入、停止结果或药师采纳写成已证实。",
+        "Dify 工作流内部步骤、模型判断、停止响应、迟到回调、统一 requestId 关联以及数据表真实 DDL 当前未由本仓证据完整定义；不得补写具体状态、重试或超时结论。"
       ],
       "primaryRefs": [
         {
           "specId": "AI-01",
-          "section": "当前事实（As-built）",
+          "section": "Intake 紧凑事实",
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
-          "anchor": "#当前事实as-built",
+          "anchor": "#intake-紧凑事实",
           "missing": false
         }
       ],
       "contextRefs": [
+        {
+          "specId": "AI-01",
+          "section": "Intake 紧凑事实",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#intake-紧凑事实",
+          "missing": false
+        },
         {
           "specId": "AI-01",
           "section": "接口契约",
@@ -38897,6 +39527,22 @@
           "path": "docs/specs/AI-01-AI审方生成.md",
           "title": "AI 审方生成",
           "anchor": "#权限与安全",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "跨系统依赖",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#跨系统依赖",
+          "missing": false
+        },
+        {
+          "specId": "AI-01",
+          "section": "证据",
+          "path": "docs/specs/AI-01-AI审方生成.md",
+          "title": "AI 审方生成",
+          "anchor": "#证据",
           "missing": false
         }
       ],
