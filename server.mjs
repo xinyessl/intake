@@ -4259,7 +4259,9 @@ function consultFocusedFactOverreach(answer, question, route) {
       const statementTokens = consultScopeTechnicalTokens(statement).map(token => token.toLowerCase());
       const hasFocusedToken = statementTokens.some(token => focusedTokens.has(token));
       const hasAskedAttribute = /(?:类型|长度|varchar|character\s+varying|char|text|uuid|integer|bigint|smallint|\bint\b|\d+\s*(?:位|字符))/i.test(statement);
-      const adjacentImplementation = /(?:索引|唯一约束|联合键|主键|缓存|接口|请求|落库|迁移|SQL|身份元组|院区上下文)/i.test(statement);
+      // `PostgreSQL` contains the letters `SQL`; only a standalone SQL
+      // mention is an implementation expansion for a focused type question.
+      const adjacentImplementation = /(?:索引|唯一约束|联合键|主键|缓存|接口|请求|落库|迁移|\bSQL\b|身份元组|院区上下文)/i.test(statement);
       return !(hasAskedAttribute && (hasFocusedToken || statementTokens.length === 0) && !adjacentImplementation);
     }
     if (relationshipOnly) {

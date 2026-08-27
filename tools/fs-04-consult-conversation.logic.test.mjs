@@ -3099,6 +3099,18 @@ test('发布前事实作用域审计：相邻模块、通配路径不串入，�
   assert.deepEqual(pIdUuidAudit.violations, [], 'UUID/uuid 大小写差异不应把同一字段答案判成越界');
   assert.deepEqual(pIdUuidAudit.focusedTechnicalOverreach, [], 'UUID 不应因通用 ID 后缀规则成为 focused overreach');
 
+  const pIdColumnTypeAnswer = 'pwrs_patient.p_id 是 character varying(50)，不是 PostgreSQL 原生 uuid。';
+  const pIdColumnTypeAudit = bundle.audit(pIdColumnTypeAnswer, 'p_id 列类型是什么？', pIdTypeRoute);
+  assert.deepEqual(pIdColumnTypeAudit.violations, [], 'PostgreSQL 中的 SQL 子串不应把 p_id 类型答案判成 focused_fact_overreach');
+  assert.deepEqual(pIdColumnTypeAudit.focusedFactOverreach, [], 'PostgreSQL 不是独立 SQL 实施扩写');
+
+  const pIdSqlLeak = bundle.audit(
+    'pwrs_patient.p_id 是 character varying(50)，不是 PostgreSQL 原生 uuid；请执行 SQL 查看索引。',
+    'p_id 列类型是什么？',
+    pIdTypeRoute,
+  );
+  assert.ok(pIdSqlLeak.violations.includes('focused_fact_overreach'), '真正的 SQL 操作扩写仍须拦截');
+
   const pIdSiblingLeak = bundle.audit(
     'pwrs_patient.p_id 是 character varying(50)，不是 PostgreSQL 原生 UUID；同表 patient_id、visit_id 和 district_code 也都是这个类型。',
     'pwrs_patient.p_id 是 PostgreSQL 原生 uuid 吗？',
