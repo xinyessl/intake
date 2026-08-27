@@ -3026,7 +3026,8 @@ test('发布前事实作用域审计：相邻模块、通配路径不串入，�
     + extractFn(SRC, 'consultDeduplicateFocusedAtomicAnswer') + '\n'
     + extractFn(SRC, 'consultNormalizeSafeMarkdown') + '\n'
     + extractFn(SRC, 'consultAnswerSafeFallback') + '\n'
-    + 'return { audit:consultAnswerSemanticAudit, revision:consultAnswerRevisionPrompt, fallback:consultAnswerSafeFallback };',
+    + extractFn(SRC, 'consultVerifiedFactsFallback') + '\n'
+    + 'return { audit:consultAnswerSemanticAudit, revision:consultAnswerRevisionPrompt, fallback:consultAnswerSafeFallback, verifiedFallback:consultVerifiedFactsFallback };',
   )();
   const todayRoute = {
     matched: true,
@@ -3090,9 +3091,14 @@ test('发布前事实作用域审计：相邻模块、通配路径不串入，�
 
   const pIdTypeRoute = {
     matched: true,
-    route: { id: 'QR-PATIENT-P-ID-TYPE', title: '患者主表 p_id 字段类型' },
+    fallbackMode: 'verifiedFacts',
+    route: { id: 'QR-PATIENT-P-ID-TYPE', title: '患者主表 p_id 字段类型', fallbackMode: 'verifiedFacts' },
     focusTechnicalTokens: ['pwrs_patient', 'p_id', 'uuid'],
-    answerFacts: ['pwrs_patient.p_id 是 character varying(50)，不是 PostgreSQL 原生 uuid。'],
+    answerFacts: [
+      'pwrs_patient.p_id 是 character varying(50)，不是 PostgreSQL 原生 uuid。',
+      '类型核对应以已经取得的 DDL 或 schema 元数据为准；如果按只读步骤在第二步出现不一致，保留字段名、实例、版本和原始观测，再升级给数据库负责人。',
+      '本路由只回答 p_id 这个字段的存储类型，不把未经提问的其他身份字段扩展进答案。',
+    ],
   };
   const pIdUuidAnswer = 'pwrs_patient.p_id 是 character varying(50)，不是 PostgreSQL 原生 UUID。';
   const pIdUuidAudit = bundle.audit(pIdUuidAnswer, 'pwrs_patient.p_id 是 PostgreSQL 原生 uuid 吗？', pIdTypeRoute);
@@ -3103,6 +3109,12 @@ test('发布前事实作用域审计：相邻模块、通配路径不串入，�
   const pIdColumnTypeAudit = bundle.audit(pIdColumnTypeAnswer, 'p_id 列类型是什么？', pIdTypeRoute);
   assert.deepEqual(pIdColumnTypeAudit.violations, [], 'PostgreSQL 中的 SQL 子串不应把 p_id 类型答案判成 focused_fact_overreach');
   assert.deepEqual(pIdColumnTypeAudit.focusedFactOverreach, [], 'PostgreSQL 不是独立 SQL 实施扩写');
+
+  const pIdColumnTypeFallback = bundle.verifiedFallback('p_id 列类型是什么？', pIdTypeRoute);
+  assert.ok(pIdColumnTypeFallback, 'p_id 类型题的 verifiedFacts fallback 应可发布');
+  assert.deepEqual(pIdColumnTypeFallback.finalAudit.violations, [], 'p_id 类型题 fallback 终稿必须终审全绿');
+  assert.match(pIdColumnTypeFallback.reply, /character varying\(50\)/);
+  assert.doesNotMatch(pIdColumnTypeFallback.reply, /只读步骤|第二步|升级给数据库负责人|本路由/);
 
   const pIdSqlLeak = bundle.audit(
     'pwrs_patient.p_id 是 character varying(50)，不是 PostgreSQL 原生 uuid；请执行 SQL 查看索引。',

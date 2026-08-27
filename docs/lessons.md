@@ -13,6 +13,7 @@
 ---
 
 ## ✅ 本项目自检清单（每次交付前逐条过）
+- [ ] **【类型/长度原子题的 verifiedFacts fallback 只保首条直接事实】**：字段类型/长度问题的路由后续 facts 可能是只读步骤、升级路径或路由自述；兜底终稿不得无条件拼接这些实施句。保留首条已核类型事实后，必须用同一终审复核，并用 `PostgreSQL`/`varchar`/`uuid` 合法例和 `SQL`、`patient_id`/`visit_id`/`district_code` 越界例回归（见 L-121）。
 - [ ] **【原子事实的页面状态不是打开动作】**：`focused_fact_overreach` 不得把“可打开的前端页面/页面能打开”等已核状态误当成“打开页面去排查”；动作扩写必须有句首命令或请/建议/先/再等明确指令上下文。生产回归须走真实 `consultVerifiedFactsFallback`，并用未核概率、根因和打开页面抓包扩写作反例（见 L-120）。
 - [ ] **【原子事实止答的标题豁免必须精确】**：`verifiedFacts` 系统固定生成的“业务结论”“实施口径”可无路径并允许合法 Markdown 包裹；不得放宽成通用“短标题都通过”，任意自拟无路径标题（如“更多说明”）仍须触发 `focused_fact_overreach`。生产回归必须走真实 `consultVerifiedFactsFallback` 并复审终稿 `violations=[]`（见 L-119）。
 - [ ] **【完整 route 标题不能无条件压过高分专用路由】**：完整唯一标题只在其 IDF 相关分至少达到最高候选 50% 时强制切题；“待审工作台”等通用场景标题若只是专用问题前缀，应让批量失败、权限、重试等高分业务路由胜出。生产回归必须同时核 `topN`、`exactRouteTitle` 与 fallbackMode（见 L-118）。
@@ -211,6 +212,13 @@
 - 解法：打开、点击、刷新只在句首命令或带请/建议/先/再/然后/去/尝试/需要/应当/应该等明确指令前缀时计为动作扩写；`verifiedFacts` 的逐行逐序精确相等窄门不改。
 - 防复发：回归同时覆盖“可打开的页面”正例、“建议打开页面抓包”扩写反例，以及无 route 证据的概率和确定根因反例；不得为单个问题字符串或 route id 加白名单。
 - 关联：`FS-04 AC-142`；`server.mjs`；`tools/fs-04-consult-conversation.logic.test.mjs`；`docs/changes/CHG-consult-已核页面状态不再误判打开动作.md`。
+
+### L-121 类型题的安全兜底不能把实施步骤当成直接事实
+- 现象（2026-08-28）：`p_id 列类型是什么？` 的直接事实已经核对为 `character varying(50)`，但 verifiedFacts fallback 无条件拼接 DDL/schema 核对、第二步不一致、升级数据库负责人和“本路由只回答……”等实施句，原子止答审计因此拒绝终稿。
+- 根因：fallback 将复杂诊断题的“业务结论 → 实施口径”模板应用到了字段类型/长度原子题；类型题的后续 route facts 虽然真实，但不是用户所问属性，且其中的 `PostgreSQL` 还曾被裸 `SQL` 正则误识别为实施扩写。
+- 解法：类型/长度原子题的确定性 fallback 只发布首条 route `answerFact`；同时将相邻实施识别限定为独立 `SQL` 词，避免 `PostgreSQL` 子串误判。其它诊断题继续保留完整 route facts，sibling 字段仍由作用域审计拦截。
+- 防复发：回归必须调用真实 `consultVerifiedFactsFallback`，断言 `p_id` 类型终稿 `finalViolations=[]` 且不含只读步骤/升级/路由自述；同时验证 `PostgreSQL`/`varchar`/`uuid` 放行、真正 SQL 操作和 `patient_id`/`visit_id`/`district_code` 越界仍拦。
+- 关联：`server.mjs`；`tools/fs-04-consult-conversation.logic.test.mjs`；`docs/changes/CHG-consult-UUID字段作用域审计.md`。
 
 ### L-114 流式收到正文不等于回答完整，必须读取上游长度结束原因
 - 现象（2026-08-26）：复杂咨询的生产回答在“Upsert 策略”后只剩孤立横杠，关键更新规则消失，末尾又重复“研发参考”；Spec 与 `answerFacts` 实际完整。
