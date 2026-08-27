@@ -1162,7 +1162,7 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   const q0059Initial = bundle.audit('接口如下：\n1. POST /external?interface_code=V1_OPT_AUDIT。', q0059Question, q0059Route);
   const q0059Fallback = bundle.fallback('接口如下：\n1. POST /external?interface_code=V1_OPT_AUDIT。', q0059Initial);
   const q0059Final = bundle.audit(q0059Fallback, q0059Question, q0059Route);
-  assert.match(q0059Fallback, /接入入口与主接口：HIS 通过 POST \/external/);
+  assert.match(q0059Fallback, /(?:接入入口与主接口|入口)：HIS 通过 POST \/external/);
   assert.match(q0059Fallback, /住院当前代码未确认存在同等去重/);
   assert.match(q0059Fallback, /POST \/comm\/send\/audit\/result\/log/);
   assert.deepEqual(q0059Final.violations, [], 'Q0059 完整链路的已核事实兜底须通过接口、入口、依赖与未知停点终审');
@@ -1869,6 +1869,60 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.doesNotMatch(q0009ProductionFallback.reply, /医嘱标记|AI 暂时连不上/);
   assert.deepEqual(q0009ProductionFallback.finalAudit.violations, [], 'Q0009 生产 AI-01 chain fallback 终审必须全绿');
 
+  const q0008PartialQuestion = 'AI 审方生成这条链路只确认前端发出了请求，服务端后续日志还没拿到。先说能确定的，未知项请单独标出来。';
+  const q0008MatchedRoute = routeQuestion(productionRouteMap, q0008PartialQuestion);
+  assert.equal(q0008MatchedRoute.route.id, 'AUD-QR-AI-01', 'Q0008 真实 route matcher 必须命中 AI-01');
+  const q0008RuntimeRoute = runtimeRouteWithContext(q0008MatchedRoute);
+  const q0008Fallback = bundle.modelFailureFallback(q0008PartialQuestion, q0008RuntimeRoute, { status: 429, message: 'rate limit' });
+  assert.ok(q0008Fallback, 'Q0008 只确认前端请求且缺服务端日志时 HTTP429 必须走 partial evidence 兜底');
+  assert.equal(q0008Fallback.initialAudit.fallbackAnswerMode, 'partial_evidence');
+  assert.match(q0008Fallback.reply, /只能确认页面发起的请求/);
+  assert.match(q0008Fallback.reply, /本轮未知/);
+  assert.doesNotMatch(q0008Fallback.reply, /当前回答未通过发布前|AI 暂时连不上/);
+  assert.deepEqual(q0008Fallback.finalAudit.violations, [], 'Q0008 partial evidence 确定性终稿必须终审全绿');
+
+  const q0019ConfigChainQuestion = '把审核方案配置从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。';
+  const q0019ConfigMatchedRoute = routeQuestion(productionRouteMap, q0019ConfigChainQuestion);
+  assert.equal(q0019ConfigMatchedRoute.route.id, 'AUD-QR-CFG-01', 'Q0019 唯一完整业务标题应优先于高词频医嘱标记 route');
+  assert.equal(q0019ConfigMatchedRoute.exactRouteTitle, true);
+  const q0019ConfigFallback = bundle.modelFailureFallback(
+    q0019ConfigChainQuestion,
+    runtimeRouteWithContext(q0019ConfigMatchedRoute),
+    { status: 429, message: 'rate limit' },
+  );
+  assert.ok(q0019ConfigFallback, 'Q0019 CFG-01 链路题模型失败时必须使用配置 route 事实兜底');
+  assert.match(q0019ConfigFallback.reply, /审核方案配置|方案/);
+  assert.doesNotMatch(q0019ConfigFallback.reply, /医嘱标记|audit_ipt_collect/);
+  assert.deepEqual(q0019ConfigFallback.finalAudit.violations, [], 'Q0019 CFG-01 链路 fallback 终审必须全绿');
+  const q0019UnsafeDraft = `${q0019ConfigFallback.reply}\n建议删除旧方案并重新提交。`;
+  const q0019UnsafeAudit = bundle.audit(q0019UnsafeDraft, q0019ConfigChainQuestion, runtimeRouteWithContext(q0019ConfigMatchedRoute));
+  assert.ok(q0019UnsafeAudit.violations.includes('cross_actor_side_effect'), 'Q0019 模型额外生成删除旧方案并重新提交时仍须拦截');
+
+  // deterministic chain fallback 中若 route 事实本身含角色动作，动作门也必须
+  // 逐条追溯到 route；不能因为 unsafeDirectActions 为空而由 every([]) 放行。
+  const q0019ActorRoute = {
+    ...q0019ConfigMatchedRoute,
+    answerFacts: [
+      ...q0019ConfigMatchedRoute.answerFacts,
+      '实施：由运维重试后原失败状态不变。',
+    ],
+  };
+  const q0019ActorFallback = bundle.modelFailureFallback(
+    q0019ConfigChainQuestion,
+    runtimeRouteWithContext(q0019ActorRoute),
+    { status: 429, message: 'rate limit' },
+  );
+  assert.ok(q0019ActorFallback, 'route 已核角色动作也应能生成确定性链路兜底');
+  assert.ok(q0019ActorFallback.finalAudit.unsafeActorActionCount > 0, '回归必须覆盖 unsafeActorActions 命中');
+  assert.deepEqual(q0019ActorFallback.finalAudit.violations, [], 'route 事实中的角色动作逐条可追溯时才允许确定性兜底');
+  const q0019ActorExtraDraft = `${q0019ActorFallback.reply}\n建议让运维重试并重新提交。`;
+  const q0019ActorExtraAudit = bundle.audit(
+    q0019ActorExtraDraft,
+    q0019ConfigChainQuestion,
+    runtimeRouteWithContext(q0019ActorRoute),
+  );
+  assert.ok(q0019ActorExtraAudit.violations.includes('cross_actor_side_effect'), '模型额外生成角色动作时仍须拦截');
+
   const browserRequirements = JSON.parse(fs.readFileSync(
     path.resolve(ROOT, 'tools/fixtures/audit-browser-1000.question-requirements.json'), 'utf8',
   )).questionToRequirements;
@@ -1913,6 +1967,8 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(q0015Fallback.reply, /运维确认|运维授权/);
   assert.match(q0015Fallback.reply, /未经运维授权不得/);
   assert.match(q0015Fallback.reply, /后续调用仍会命中/);
+  assert.match(q0015Fallback.reply, /audit_sync_error_flow/);
+  assert.match(q0015Fallback.reply, /另一套|不由.*统一处理/);
   assert.deepEqual(q0015Fallback.finalAudit.violations, [], 'Q0015 DI-07 只读清单 fallback 终审必须全绿');
 
   const q0021Question = '审核方案配置现在是怎么实现的？';

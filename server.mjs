@@ -915,7 +915,15 @@ function routeQuestion(map, query, subKey = '') {
     // 完整标题仍是强显式实体，但像“待审工作台”这类通用短标题可能只是专用问题的场景前缀。
     // 当另一路由的真实相关分超过标题候选两倍时，尊重专用高分路由，避免低分标题无条件抢占。
     const scoreLeader = scored[0] || null;
-    const acceptedExactTitle = exactTitle && (!scoreLeader || exactTitle === scoreLeader || exactTitle.sc >= scoreLeader.sc * ROUTE_EXACT_TITLE_MIN_RATIO)
+    const exactTitleText = String(exactTitle && exactTitle.r && exactTitle.r.title || '').trim();
+    const genericExactTitleRe = /^(?:待审工作台|工作台|业务工作台|列表|详情|首页|主页|设置|个人设置|系统设置)$/u;
+    const specificExactTitle = exactTitle
+      && Array.from(exactTitleText).length >= 5
+      && !genericExactTitleRe.test(exactTitleText);
+    const acceptedExactTitle = exactTitle && (specificExactTitle
+      || !scoreLeader
+      || exactTitle === scoreLeader
+      || exactTitle.sc >= scoreLeader.sc * ROUTE_EXACT_TITLE_MIN_RATIO)
       ? exactTitle : null;
     if (acceptedExactTitle) {
       const at = scored.indexOf(acceptedExactTitle);
@@ -3086,9 +3094,11 @@ function consultAnswerSemanticAudit(answer, question, route) {
     .map(x => x.trim()).filter(statement => statement && Array.from(statement.matchAll(actorAction))
       .some(match => !negatedActorPrefix.test(statement.slice(0, match.index))));
   const fullHandoffMaterialQuestion = /(?:(?:完整|全部|全套|正式)[^。！？\n]{0,16}(?:提单|工单|转开发|交接|材料包|留证包)|(?:提单|工单|转开发|交接)[^。！？\n]{0,16}(?:完整|全部|全套|材料清单|最少补哪些信息))/u.test(intentQuestionText);
+  const explicitPartialEvidenceQuestion = /(?:只(?:能)?确认|仅(?:能)?确认|只确认|仅确认)[\s\S]{0,160}(?:没(?:有)?拿到|未(?:拿到|取得)|没有|无|拿不到|未知|待确认|尚未)[\s\S]{0,160}(?:先说|能确定|未知(?:项|部分)?(?:单独|另行)|哪些(?:成立|确认)|待确认)/iu.test(intentQuestionText);
   const evidenceSufficiencyQuestion = !fullHandoffMaterialQuestion
     && (/(?:只有|仅有|只(?:有|拿得到|拿到|能拿到)|没有|拿不到)[^。！？\n]{0,48}(?:够不够|够吗|是否足够|足不足够|能不能判断|能否判断|可以判断吗)/u.test(intentQuestionText)
-      || /(?:现有|当前|已有|这些?)?证据[^。！？\n]{0,24}(?:最多|至多)(?:能|可(?:以)?)?(?:判断|确认|证明)到哪/u.test(intentQuestionText));
+      || /(?:现有|当前|已有|这些?)?证据[^。！？\n]{0,24}(?:最多|至多)(?:能|可(?:以)?)?(?:判断|确认|证明)到哪/u.test(intentQuestionText)
+      || explicitPartialEvidenceQuestion);
   const diagnosticQuestion = /(?:排查|不一致|对不上|异常|故障|现场|验证|复测|下一步|怎么判断|如何判断|怎么确认|检查|留证|只能确认|能确定|能判断到哪|最多(?:能|可)?判断|不知道|未知|走到哪|还缺什么|够不够|够吗|是否足够|能不能判断|能否判断)/i.test(intentQuestionText);
   // 受众层级也必须过发布前确定性终审，不能只相信模型遵守 prompt。
   // 普通“怎么实现”仍是产品问法；只有显式技术契约才进入 developer。
@@ -3419,7 +3429,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const normalizeChainFact = value => {
     let normalized = String(value || '').replace(/^\s*(?:[-*+]\s+|[1-9]\d*[.、．]\s+)/u, '').trim();
     for (let index = 0; index < 3; index++) {
-      const next = normalized.replace(/^\s*(?:业务结论|产品|入口|接口|任务和警示|外部依赖|生成记录|停止|前端证据边界|实施只读清单|端到端边界|数据与状态|留痕|当前停点)\s*[：:]\s*/u, '').trim();
+      const next = normalized.replace(/^\s*(?:业务结论|产品|入口|接口|任务和警示|外部依赖|生成记录|停止|前端证据边界|实施只读清单|端到端边界|数据与状态|留痕|当前停点|影响|实施|时间|约束|排班|结果|边界|当前页面|后端边界|统一入口|接入入口与主接口)\s*[：:]\s*/u, '').trim();
       if (next === normalized) break;
       normalized = next;
     }
@@ -3428,7 +3438,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const chainFactLabels = new Map();
   const normalizeAndRememberChainFact = value => {
     const raw = String(value || '').replace(/^\s*(?:[-*+]\s+|[1-9]\d*[.、．]\s+)/u, '').trim();
-    const label = raw.match(/^(业务结论|产品|入口|接口|任务和警示|外部依赖|生成记录|停止|前端证据边界|实施只读清单|端到端边界|数据与状态|留痕|当前停点)\s*[：:]/u)?.[1] || '';
+    const label = raw.match(/^(业务结论|产品|入口|接口|任务和警示|外部依赖|生成记录|停止|前端证据边界|实施只读清单|端到端边界|数据与状态|留痕|当前停点|影响|实施|时间|约束|排班|结果|边界|当前页面|后端边界|统一入口|接入入口与主接口)\s*[：:]/u)?.[1] || '';
     const normalized = normalizeChainFact(value);
     if (normalized && label && !chainFactLabels.has(normalized)) chainFactLabels.set(normalized, label);
     return normalized;
@@ -3468,7 +3478,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
       chainInterfaceFacts.push({ method: match[1].toUpperCase(), path: match[2], display: `${match[1].toUpperCase()} ${match[2]}` });
     }
   }
-  const uniqueChainInterfaces = Array.from(new Map(chainInterfaceFacts.map(item => [item.path, item])).values());
+  const uniqueChainInterfaces = Array.from(new Map(chainInterfaceFacts.map(item => [`${item.method} ${item.path}`, item])).values());
   const businessChainFact = chainAvailableFacts.find(fact => !/\b(?:GET|POST|PUT|PATCH|DELETE)\s+\//iu.test(fact)
     && !/(?:Controller|Service|Mapper|Repository|DAO|DTO|VO|\b[a-z][a-z0-9_]+_[a-z0-9_]+\b|\bdeleted\s*=)/i.test(fact)) || '';
   const entryChainFact = chainAvailableFacts.find(fact => /(?:入口|详情|列表|页面)/u.test(fact)
@@ -3574,12 +3584,12 @@ function consultAnswerSemanticAudit(answer, question, route) {
     // 已核的事务、重试、队列和落库边界，但不展开字段清单。
     const entryChainFacts = chainFactsByLabelOrRule(
       chainDimensionFacts,
-      ['入口'],
+      ['入口', '当前页面', '统一入口', '接入入口与主接口'],
       /(?:入口|提交|接入|XML|页面|详情|列表)/iu,
     );
     const dataStateChainFacts = chainFactsByLabelOrRule(
       chainDimensionFacts,
-      ['任务和警示', '生成记录', '停止', '数据与状态', '留痕'],
+      ['任务和警示', '生成记录', '停止', '数据与状态', '留痕', '影响', '实施', '时间', '约束', '排班', '结果', '边界', '后端边界'],
       /(?:数据|字段|表|落库|写入|保存|更新|删除|Redis|队列|消费|超时|状态|去重|事务|重试|查询|回写|日志|请求|响应|XML|校验)/iu,
     );
     const dependencyChainFacts = chainFactsByLabelOrRule(
@@ -3602,7 +3612,13 @@ function consultAnswerSemanticAudit(answer, question, route) {
       for (const item of uniqueChainInterfaces) chainLines.push(`- 接口：\`${item.display}\`。`);
     }
     if (chainDimensions.some(item => item.id === 'data' || item.id === 'state')) addChainFacts('数据与状态', dataStateChainFacts, dataChainFact);
-    if (chainDimensions.some(item => item.id === 'dependencies')) addChainFacts('外部依赖', dependencyChainFacts, compactDependencyChainFact);
+    if (chainDimensions.some(item => item.id === 'dependencies')) {
+      const dependencyLineBefore = chainLines.length;
+      addChainFacts('外部依赖', dependencyChainFacts, compactDependencyChainFact);
+      if (chainLines.length === dependencyLineBefore) {
+        chainLines.push('- 外部依赖：当前已核事实未提供外部依赖，本轮停在这里，不补写。');
+      }
+    }
     const gapBlock = compactChainGapFacts.length ? ['当前停点（只列资料明确的未知）：', ...compactChainGapFacts.map(fact => `- ${fact}`)] : [];
     safeChainFallback = [chainBusinessFact ? `业务结论：${normalizeChainFact(chainBusinessFact)}` : '', '链路（按本轮点名维度）：', ...chainLines, ...gapBlock].filter(Boolean).join('\n');
   }
@@ -3687,7 +3703,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
     // 只读清单不能固定截前 3 条：同一 route 的后段经常才是生产核对、授权
     // 和重复调用边界。按本轮实施/排查意图优先保留与观测、安全、生产状态
     // 直接相关的 facts，同时保留首条业务基线；技术细节稍后仍按受众收敛。
-    const diagnosticFactRelevanceRe = /(?:实施|只读|排查|留证|核对|记录|日志|生产包|发布记录|访问|失败记录|支持能力|授权|未经|不得|不能|后续调用|重复|重发|重提|异常|现状|状态|证据|响应|返回|日期|星期|时间|页面|业务|功能|范围|对象|结果|条件)/iu;
+    const diagnosticFactRelevanceRe = /(?:实施|只读|排查|留证|核对|记录|日志|生产包|发布记录|访问|失败记录|支持能力|授权|未经|不得|不能|后续调用|重复|重发|重提|异常|现状|状态|证据|响应|返回|日期|星期|时间|页面|业务|功能|范围|对象|结果|条件|另一套(?:错误)?机制|不由[^。！？；\n]{0,32}统一处理|相邻(?:机制|功能)|机制隔离)/iu;
     const diagnosticFactQuestion = /(?:实施|只读|排查|留证|复测|现场|清单|证据|缩小范围|转开发|怎么查|如何查|核对|怎么判断|如何判断)/iu.test(intentQuestionText);
     const allConfirmedFacts = route && route.matched
       ? Array.from(new Set([
@@ -3891,6 +3907,33 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (verifiedChainFallback) {
     const technicalDumpIndex = violations.indexOf('audience_technical_dump');
     if (technicalDumpIndex >= 0) violations.splice(technicalDumpIndex, 1);
+    // safeChainFallback 是由 route.answerFacts 确定性生成的，但其中的“删除/插入”
+    // 等现状描述仍会被通用动作门识别。只有当每个命中动作门的完整片段都能
+    // 在本轮 safe fallback 与 current route answerFacts 中逐字找到时才放行；
+    // 模型额外写出的“建议删除/重新提交”等动作不满足该条件，继续拦截。
+    const chainFallbackText = String(safeChainFallback || '').trim();
+    const routeFactTraceText = value => String(value || '')
+      .replace(/^\s*(?:业务结论|产品|入口|接口|任务和警示|外部依赖|生成记录|停止|前端证据边界|实施只读清单|端到端边界|数据与状态|留痕|当前停点|影响|实施|时间|约束|排班|结果|边界|当前页面|后端边界|统一入口|接入入口与主接口)\s*[：:]\s*/u, '')
+      .trim();
+    // Do not let every([]) waive the action gate: if either detector found an
+    // action, every detected direct/actor fragment must be traceable to the
+    // deterministic route-derived fallback and to a current route fact.
+    const chainFallbackActionStatements = [...unsafeDirectActions, ...unsafeActorActions];
+    const chainFallbackActionsAreRouteFacts = chainFallbackActionStatements.length > 0
+      && chainFallbackActionStatements.every(statement => {
+      const line = String(statement || '').trim();
+      const body = line.replace(/^\s*(?:[-*+]\s+)?(?:[^：:\n]{1,24})\s*[：:]\s*/u, '').trim();
+      const appearsInFallback = chainFallbackText.includes(line) || (body && chainFallbackText.includes(body));
+      const appearsInRoute = currentRouteFacts.some(fact => {
+        const routeText = routeFactTraceText(fact);
+        return routeText && (routeText.includes(body) || body.includes(routeText));
+      });
+      return appearsInFallback && appearsInRoute;
+      });
+    if (chainFallbackActionsAreRouteFacts) {
+      const actionIndex = violations.indexOf('cross_actor_side_effect');
+      if (actionIndex >= 0) violations.splice(actionIndex, 1);
+    }
   }
   return { checked: true, diagnosticQuestion, audienceMode, audienceTechnicalParts, productTechnicalParts, implementationMisplacedTechnicalParts, implementationTechnicalFirstParts, currentRouteFacts, routeFallbackMode: routeFallbackMode || '', verifiedFactsFallback, chainRequested, chainDimensions, missingRequestedInterfaces, missingChainDimensions, audienceTechnicalDumpParts: uniqueChainTechnicalDetailParts, safeChainFallback, evidenceSufficiencyQuestion, fullHandoffMaterialQuestion, broadEvidenceQuestion, partialEvidenceQuestion, broadFactQuestion, fieldDiagnosticQuestion, contextFollowupQuestion, fallbackAnswerMode, factQuestionDimensions, missingRouteFactDimensions, verifiedFactCoverageQuestion, missingVerifiedFactCoverage, hasEvidenceSufficiencyVerdict, minimumRoutePath, missingEvidenceMinimumPath, observationInputContract, undefinedObservationVariables, symbolicDefinitions: Object.fromEntries(symbolicDefinitions), undefinedSymbolicComparisons, focusedFactQuestion, focusedTypeOrLengthQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, focusedRelationshipFacts, missingFocusedRelationshipFacts, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsupportedEvidenceNegations, unsupportedEvidenceAbsenceClaims, evidenceAbsenceCorrectionFacts, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, optionCardinalityMismatches, nonSequentialOptionSets, undefinedGroupReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, emptyNumberedSections, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, emptyDiagnosticBranchHeadings, emptyListStepItems, danglingClosingPunctuationLines, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
 }
