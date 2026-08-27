@@ -1217,3 +1217,10 @@
 - 解法：按“当前/现在/本轮/现有只有（仅有）……哪些成立/确认、仍需确认”通用识别为 `partial_evidence`；终稿先给证据充分性结论，再分列 current route 已核事实与本轮未知。
 - 防复发：真实 route 回归原样完整 facts、HTTP429/截断/空模型结果，均须出现“现有受限证据只够”和“本轮未知”，且 `finalAudit.violations=[]`。
 - 关联：`server.mjs`、`tools/fs-04-consult-conversation.logic.test.mjs`、`docs/changes/CHG-consult-受限证据结论边界.md`。
+
+### L-126 结论盘点型 partial evidence 不得用 Top-3 吞掉关键边界
+- 现象：Q0173 的“当前只有接口状态和业务返回，哪些结论成立/哪些仍需确认”虽已进入 partial evidence，但 Top-3 fallback 漏掉未覆盖对象和坏 JSON 队首阻塞等后段边界。
+- 根因：所有受限证据问法共用最小相关性截取，未区分“最小缺口”与“盘点已知/未知结论”两种回答契约。
+- 解法：仅对明确盘点哪些结论成立、哪些仍需确认的问法完整发布 current route `answerFacts`；其它 partial evidence 继续 Top-3 精简。
+- 防复发：回归未覆盖对象、坏消息阻塞、事务/部分成功与只读边界，确认终审全绿；不得用更宽泛的“证据题”一律扩写全部 facts。
+- 关联：`server.mjs`、`tools/fs-04-consult-conversation.logic.test.mjs`、`docs/changes/CHG-consult-受限证据结论边界.md`。

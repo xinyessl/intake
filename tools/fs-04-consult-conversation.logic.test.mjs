@@ -2134,6 +2134,9 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(q0173Fallback.reply, /本轮未知/);
   assert.match(q0173Fallback.reply, /不能单独|仍需|待补充|具体细节/);
   assert.match(q0173Fallback.reply, /门诊处方自动通过|RedisConsumer|AUDIT:OPT:AUTO/);
+  assert.match(q0173Fallback.reply, /未覆盖|生命体征|影像|费用结算|收费明细/);
+  assert.match(q0173Fallback.reply, /坏 JSON|队首|阻塞/);
+  assert.match(q0173Fallback.reply, /总事务|部分成功|只读|未经授权/);
   assert.deepEqual(q0173Fallback.finalAudit.violations, [], 'Q0173 partial evidence fallback 必须明确已知/未知并终审全绿');
 
   const q0039Question = Object.keys(browserRequirements).find(question => question.includes('把药师个人审核方案从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。'));
