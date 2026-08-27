@@ -2090,6 +2090,36 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(q0015Fallback.reply, /另一套|不由.*统一处理/);
   assert.deepEqual(q0015Fallback.finalAudit.violations, [], 'Q0015 DI-07 只读清单 fallback 终审必须全绿');
 
+  const q0030Question = Object.keys(browserRequirements).find(question => question === '评语常用语维护这一步只能确认现象稳定复现，不能做写操作。现在应停在哪个边界并交给谁继续？');
+  assert.ok(q0030Question, 'Q0030 应从真实浏览器题目 fixture 取到原问题');
+  const q0030Route = runtimeRouteWithRepositoryContext(routeQuestion(productionRuntimeRouteMap, q0030Question), '2.7.260828-2');
+  assert.equal(q0030Route.route.id, 'AUD-QR-CFG-02', 'Q0030 真实 route matcher 必须命中 CFG-02');
+  const q0030Initial = bundle.audit('', q0030Question, q0030Route);
+  const q0030Fallback = bundle.modelFailureFallback(q0030Question, q0030Route, { status: 429, message: 'rate limit' });
+  assert.ok(q0030Fallback, `Q0030 点名交接对象时 HTTP429 必须使用只读兜底；safeViolations=${JSON.stringify(bundle.audit(q0030Initial.safeDiagnosticFallback, q0030Question, q0030Route).violations)}`);
+  assert.match(q0030Fallback.reply, /对应功能的产品负责人/);
+  assert.match(q0030Fallback.reply, /研发\/接口负责人/);
+  assert.match(q0030Fallback.reply, /只读|已有请求|证据/);
+  assert.doesNotMatch(q0030Fallback.reply, /张三|李四|某某医院/);
+  assert.deepEqual(q0030Fallback.finalAudit.violations, [], 'Q0030 只读边界与责任交接终稿必须终审全绿');
+
+  const q0041Question = Object.keys(browserRequirements).find(question => question === '另一轮独立复测（41）里，评语常用语维护现在是怎么实现的？');
+  assert.ok(q0041Question, 'Q0041 应从真实浏览器题目 fixture 取到原问题');
+  const q0041Route = runtimeRouteWithRepositoryContext(routeQuestion(productionRuntimeRouteMap, q0041Question), '2.7.260828-2');
+  assert.equal(q0041Route.route.id, 'AUD-QR-CFG-02', 'Q0041 真实 route matcher 必须命中 CFG-02');
+  assert.equal(q0041Route.answerFacts.length, 7, 'Q0041 应使用生产 route 的 7 条 CFG-02 facts');
+  const q0041PartialDraft = '评语常用语维护给药师准备个人和共享常用语，按门诊、住院或全部范围使用，页面最多填写500个字符。';
+  const q0041Initial = bundle.audit(q0041PartialDraft, q0041Question, q0041Route);
+  assert.equal(q0041Initial.audienceMode, 'product', 'Q0041 的复测前缀不能覆盖核心事实问法的产品受众');
+  assert.equal(q0041Initial.implementationFactCoverageQuestion, true, 'Q0041 broad as-built 问法必须启用 route fact 覆盖门');
+  assert.ok(q0041Initial.violations.includes('incomplete_verified_facts'), 'Q0041 只给产品概括时必须拦截关键实现事实漏答');
+  const q0041Fallback = bundle.fallback(q0041PartialDraft, q0041Initial);
+  assert.match(q0041Fallback, /软删除|deleted/);
+  assert.match(q0041Fallback, /back_reason|历史审核原因/);
+  assert.match(q0041Fallback, /创建人|OPERATE_TEMPLATE_PERMISSION_DENIED|权限/);
+  assert.match(q0041Fallback, /GET \/auditapi\/audit\/templates|POST \/auditapi\/audit\/template/);
+  assert.deepEqual(bundle.audit(q0041Fallback, q0041Question, q0041Route).violations, [], 'Q0041 关键业务边界与研发事实补全后终审必须全绿');
+
   const q0021Question = '审核方案配置现在是怎么实现的？';
   const q0021Route = {
     matched: true,
