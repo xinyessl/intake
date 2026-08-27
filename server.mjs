@@ -2025,12 +2025,19 @@ function consultDiagnosticMechanismTerms(text) {
 
 function consultScopeTechnicalTokens(text) {
   const source = String(text || '');
+  // UUID 是一个完整的技术词，不应被下面的通用 `...ID` 后缀规则拆成
+  // 一个看似字段名的 token。统一成小写 canonical token，保证问题里的
+  // `uuid` 与答案里的 `UUID` 命中同一作用域；其它字段 token 的规则保持不变。
+  const uuidTokens = (source.match(/\buuid\b/ig) || []).map(() => 'uuid');
   const tokens = [
+    ...uuidTokens,
     ...(source.match(/\b[A-Za-z][A-Za-z0-9]*(?:Id|ID|Code|Status|No|Type)\b/g) || []),
     ...(source.match(/\b[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+\b/g) || []),
   ];
   const shared = new Set(['id', 'code', 'status', 'type', 'user', 'patient', 'http', 'https', 'url', 'uri', 'api', 'json', 'jwt', 'get', 'post', 'put', 'delete', 'year', 'week']);
-  return Array.from(new Set(tokens.filter(token => token.length > 2 && !shared.has(token.toLowerCase()))));
+  return Array.from(new Set(tokens
+    .map(token => /^uuid$/i.test(token) ? 'uuid' : token)
+    .filter(token => token.length > 2 && !shared.has(token.toLowerCase()))));
 }
 
 function consultMalformedMarkdownTokens(text) {
