@@ -187,7 +187,11 @@ async function callModelStream(cfg, opts, onDelta, signal) {
       // 某些 OpenAI 兼容端点会以 HTTP/SSE 正常结束，但 choices.delta.content
       // 始终为空。它不是一次成功回答；在尚无可见正文时应像首 token 前失败一样
       // 切备用模型，所有候选都空时抛错交上层输出明确降级文案，绝不能发布空气泡。
-      if (!got && !String(result == null ? '' : result).trim()) throw new Error('模型返回空内容');
+      if (!got && !String(result == null ? '' : result).trim()) {
+        const error = new Error('模型返回空内容');
+        error.code = 'MODEL_EMPTY_RESPONSE';
+        throw error;
+      }
       return result;
     }
     catch (e) { lastErr = e; if ((signal && signal.aborted) || got) throw e; if (i < cands.length - 1) console.warn('[model-stream] 第' + (i + 1) + '个模型失败，切下一个：', String((e && e.message) || e)); }
@@ -216,7 +220,12 @@ async function callModelStreamOnce(cfg, { system, messages, maxTokens = 1024, im
   const sig = signal ? AbortSignal.any([signal, firstAc.signal, candidateAc.signal]) : AbortSignal.any([firstAc.signal, candidateAc.signal]);
   try {
     const r = await fetch(base + (isA ? '/v1/messages' : '/v1/chat/completions'), { method: 'POST', headers, body: JSON.stringify(body), signal: sig });
-    if (!r.ok || !r.body) { let e = ''; try { e = ((await r.json()).error || {}).message || ''; } catch {} throw new Error(e || ('HTTP ' + r.status)); }
+    if (!r.ok || !r.body) {
+      let e = ''; try { e = ((await r.json()).error || {}).message || ''; } catch {}
+      const error = new Error(e || ('HTTP ' + r.status));
+      if (Number.isInteger(r.status)) { error.status = r.status; error.code = `MODEL_HTTP_${r.status}`; }
+      throw error;
+    }
     let full = '', buf = '', stopReason = ''; const dec = new TextDecoder();
     for await (const chunk of r.body) {
       buf += dec.decode(chunk, { stream: true });
@@ -249,8 +258,16 @@ async function callModelStreamOnce(cfg, { system, messages, maxTokens = 1024, im
     return full;
   } catch (error) {
     if (signal && signal.aborted) throw error;   // 用户停止/连接关闭优先，不改写成模型超时。
-    if (firstTimedOut && !gotFirstToken) throw new Error('模型首字等待超时');
-    if (candidateTimedOut) throw new Error('模型候选生成超时');
+    if (firstTimedOut && !gotFirstToken) {
+      const timeout = new Error('模型首字等待超时');
+      timeout.code = 'MODEL_FIRST_TOKEN_TIMEOUT';
+      throw timeout;
+    }
+    if (candidateTimedOut) {
+      const timeout = new Error('模型候选生成超时');
+      timeout.code = 'MODEL_CANDIDATE_TIMEOUT';
+      throw timeout;
+    }
     throw error;
   } finally {
     clearTimeout(firstTimer); clearTimeout(candidateTimer);
@@ -2270,6 +2287,7 @@ function consultProgressEvent(stage, options = {}) {
     generating: '已找到相关资料，正在生成回答…',
     auditing: '回答已生成，正在做发布前安全校验…',
     revising: '初稿未通过校验，正在安全修订…',
+    fallback: '模型暂未返回完整内容，正在依据已核事实整理回答…',
     publishing: '安全校验完成，正在输出回答…',
   };
   const key = String(stage || '').trim();
@@ -3290,6 +3308,27 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const routeFallbackMode = route && (route.fallbackMode || (route.route && route.route.fallbackMode));
   const verifiedFactsFallback = !!(route && route.matched
     && routeFallbackMode === 'verifiedFacts' && currentRouteFacts.length);
+  // 普通“怎么实现”问法也不能把人工 route 已明确的核心业务边界漏掉后
+  // 直接放行。这里只检查带有明确“日期/时段→前置门槛→人工审”结构的
+  // 边界事实，并要求保留其关键条件词；不要求逐字复述其它 answerFacts，
+  // 以免把每个普通问法都强制扩写成整张 route 卡。
+  const verifiedFactCoverageQuestion = verifiedFactsFallback
+    && !focusedFactQuestion
+    && !diagnosticQuestion
+    && /(?:怎么实现|如何实现|涉及哪些|包含哪些|覆盖哪些|分别说明|介绍)/u.test(questionText);
+  const verifiedFactCoverageText = String(text || '').replace(/[*_`#]/g, '');
+  const missingVerifiedFactCoverage = verifiedFactCoverageQuestion
+    ? currentRouteFacts.filter(fact => /边界[：:]/u.test(fact)
+      && /(?:日期|时段)/u.test(fact)
+      && /人工审/u.test(fact)
+      && !(
+        /日期/u.test(verifiedFactCoverageText)
+        && /时段/u.test(verifiedFactCoverageText)
+        && /(?:前置|门槛)/u.test(verifiedFactCoverageText)
+        && /(?:警示|科室|病区|药品|药品属性)/u.test(verifiedFactCoverageText)
+        && /人工审/u.test(verifiedFactCoverageText)
+      ))
+    : [];
   const currentRoutePathFacts = currentRouteFacts.flatMap(fact => {
     const method = fact.match(/\b(GET|POST|PUT|PATCH|DELETE)\b/i)?.[1]?.toUpperCase() || '';
     return consultConcretePaths(fact).filter(pathValue => pathValue.startsWith('/') && !pathValue.includes('*'))
@@ -3644,6 +3683,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
     const hasUnknownBoundary = /(?:本轮|当前)(?:仍)?(?:未确认|未知|无法确认|不能确认)|(?:资料|证据)不足[^。！？\n]{0,24}(?:补写|确认)/u.test(text);
     if (!hasUnknownBoundary) violations.push('incomplete_verified_facts');
   }
+  if (missingVerifiedFactCoverage.length && !violations.includes('incomplete_verified_facts')) violations.push('incomplete_verified_facts');
   if (cardinalityMismatches.length) violations.push('inconsistent_structured_cardinality');
   if (incompleteResultBranchTables.length) violations.push('incomplete_result_branch_set');
   if (conflictingCountDeclarations.length) violations.push('conflicting_count_declaration');
@@ -3665,9 +3705,32 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const verifiedFactLines = documentLines.map(line => line
     .replace(/^\s*[-*+]\s+/u, '').trim())
     .filter(line => line && line !== '业务结论' && line !== '实施口径');
+  const routeFactLineIndexes = new Set();
+  let routeFactCursor = 0;
+  let routeFactsAppearExactly = verifiedFactsFallback && currentRouteFacts.length > 0;
+  if (routeFactsAppearExactly) {
+    for (const fact of currentRouteFacts) {
+      const index = verifiedFactLines.findIndex((line, lineIndex) => lineIndex >= routeFactCursor && line === fact);
+      if (index < 0) { routeFactsAppearExactly = false; break; }
+      routeFactLineIndexes.add(index); routeFactCursor = index + 1;
+    }
+  }
+  const verifiedFallbackExtraLines = routeFactsAppearExactly
+    ? verifiedFactLines.filter((line, index) => !routeFactLineIndexes.has(index))
+    : [];
+  const verifiedFallbackExtraLinesSafe = verifiedFallbackExtraLines.every(line =>
+    /^(?:结论：现有受限证据|结论：这张截图|业务结论|实施口径|本轮未知(?:：|$)|当前只有上述已核事实)/u.test(line)
+  );
   const verifiedFactsOnlyAnswer = verifiedFactsFallback
-    && verifiedFactLines.length === currentRouteFacts.length
-    && verifiedFactLines.every((line, index) => line === currentRouteFacts[index]);
+    && routeFactsAppearExactly
+    && verifiedFallbackExtraLinesSafe
+    && (
+      verifiedFactLines.length === currentRouteFacts.length
+      || fallbackAnswerMode === 'partial_evidence'
+      || fallbackAnswerMode === 'facts_with_unknowns'
+    )
+    && (fallbackAnswerMode !== 'partial_evidence' || /本轮未知/u.test(text))
+    && (fallbackAnswerMode !== 'partial_evidence' || /(?:现有受限证据|只能确认|不能单独)/u.test(text));
   if (verifiedFactsOnlyAnswer) {
     const verifiedRouteHasEvidenceVerdict = currentRouteFacts.some(fact =>
       /(?:只够|足够|够(?:用|判断|固定|完成)|不够|不足|不能单独|不能替代|尚不能|只能固定|只能证明|只能确认|最多(?:只能|能|可))/u.test(fact)
@@ -3693,7 +3756,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
       if (index >= 0) violations.splice(index, 1);
     }
   }
-  return { checked: true, diagnosticQuestion, audienceMode, audienceTechnicalParts, productTechnicalParts, implementationMisplacedTechnicalParts, implementationTechnicalFirstParts, currentRouteFacts, routeFallbackMode: routeFallbackMode || '', verifiedFactsFallback, chainRequested, chainDimensions, missingRequestedInterfaces, missingChainDimensions, audienceTechnicalDumpParts: uniqueChainTechnicalDetailParts, safeChainFallback, evidenceSufficiencyQuestion, fullHandoffMaterialQuestion, broadEvidenceQuestion, partialEvidenceQuestion, broadFactQuestion, fieldDiagnosticQuestion, contextFollowupQuestion, fallbackAnswerMode, factQuestionDimensions, missingRouteFactDimensions, hasEvidenceSufficiencyVerdict, minimumRoutePath, missingEvidenceMinimumPath, observationInputContract, undefinedObservationVariables, symbolicDefinitions: Object.fromEntries(symbolicDefinitions), undefinedSymbolicComparisons, focusedFactQuestion, focusedTypeOrLengthQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, focusedRelationshipFacts, missingFocusedRelationshipFacts, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsupportedEvidenceNegations, unsupportedEvidenceAbsenceClaims, evidenceAbsenceCorrectionFacts, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, optionCardinalityMismatches, nonSequentialOptionSets, undefinedGroupReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, emptyNumberedSections, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, emptyDiagnosticBranchHeadings, emptyListStepItems, danglingClosingPunctuationLines, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
+  return { checked: true, diagnosticQuestion, audienceMode, audienceTechnicalParts, productTechnicalParts, implementationMisplacedTechnicalParts, implementationTechnicalFirstParts, currentRouteFacts, routeFallbackMode: routeFallbackMode || '', verifiedFactsFallback, chainRequested, chainDimensions, missingRequestedInterfaces, missingChainDimensions, audienceTechnicalDumpParts: uniqueChainTechnicalDetailParts, safeChainFallback, evidenceSufficiencyQuestion, fullHandoffMaterialQuestion, broadEvidenceQuestion, partialEvidenceQuestion, broadFactQuestion, fieldDiagnosticQuestion, contextFollowupQuestion, fallbackAnswerMode, factQuestionDimensions, missingRouteFactDimensions, verifiedFactCoverageQuestion, missingVerifiedFactCoverage, hasEvidenceSufficiencyVerdict, minimumRoutePath, missingEvidenceMinimumPath, observationInputContract, undefinedObservationVariables, symbolicDefinitions: Object.fromEntries(symbolicDefinitions), undefinedSymbolicComparisons, focusedFactQuestion, focusedTypeOrLengthQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, focusedRelationshipFacts, missingFocusedRelationshipFacts, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsupportedEvidenceNegations, unsupportedEvidenceAbsenceClaims, evidenceAbsenceCorrectionFacts, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, optionCardinalityMismatches, nonSequentialOptionSets, undefinedGroupReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, emptyNumberedSections, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, emptyDiagnosticBranchHeadings, emptyListStepItems, danglingClosingPunctuationLines, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -3902,9 +3965,10 @@ function consultAnswerSafeFallback(draft, audit) {
       const routeHasEvidenceVerdict = routeFacts.some(fact =>
         /(?:只够|足够|够(?:用|判断|固定|完成)|不够|不足|不能单独|不能替代|尚不能|只能固定|只能证明|只能确认|最多(?:只能|能|可))/u.test(fact)
       );
-      const evidenceVerdict = routeHasEvidenceVerdict
-        ? ''
-        : '结论：现有受限证据只够固定已经提供的观测，不能单独完成与已核规则的对照，也不足以闭环原因。';
+      // 即使某条 route fact 自身已经写了“不能据此确认”，首句仍要直答
+      // 本轮受限证据能确认到哪里；否则答案会从“业务结论”开头，终审仍会
+      // 报 missing_evidence_sufficiency_verdict，进而错误退成安全拒答。
+      const evidenceVerdict = '结论：现有受限证据只够固定已经提供的观测，不能单独完成与已核规则的对照，也不足以闭环原因。';
       const unavailable = new Set();
       if (Array.isArray(audit.missingRouteFactDimensions)) {
         for (const label of audit.missingRouteFactDimensions) unavailable.add(String(label));
@@ -4198,6 +4262,41 @@ function consultVerifiedFactsFallback(question, route) {
   const finalAudit = consultAnswerSemanticAudit(reply, question, route);
   if (finalAudit.violations.length) return null;
   return { reply, initialAudit, finalAudit };
+}
+
+// 模型草稿失败仍要可观测：只把有限的错误分类/状态写入 retrieval，避免把
+// 上游返回体、密钥或完整异常栈回显给现场用户。真正的模型/协议错误在没有
+// 已核 route 事实可安全发布时仍由上层以 err 事件收口，不能被兜底静默吞掉。
+function consultModelErrorInfo(error) {
+  const status = Number(error && (error.status || error.statusCode));
+  const rawCode = String((error && error.code) || '').trim();
+  const message = String((error && error.message) || error || '模型请求失败')
+    .replace(/[\r\n]+/g, ' ').trim().slice(0, 300);
+  const code = (rawCode || (Number.isInteger(status) && status >= 100 && status <= 599 ? `MODEL_HTTP_${status}` : 'MODEL_DRAFT_ERROR')).slice(0, 80);
+  let kind = 'model_error';
+  if (status === 429 || code === 'MODEL_HTTP_429') kind = 'rate_limit';
+  else if (code === 'MODEL_OUTPUT_TRUNCATED') kind = 'length_limit';
+  else if (code === 'MODEL_EMPTY_RESPONSE') kind = 'empty_response';
+  else if (code === 'MODEL_FIRST_TOKEN_TIMEOUT' || code === 'MODEL_CANDIDATE_TIMEOUT') kind = 'timeout';
+  return {
+    code,
+    kind,
+    ...(Number.isInteger(status) && status >= 100 && status <= 599 ? { status } : {}),
+    message,
+  };
+}
+
+// 初稿 429、长度截断、空响应和其它暂时性模型失败都走同一个发布口：只有
+// 人工 route 显式开启 verifiedFacts 且最终语义审计全绿时才返回确定性答案。
+// route miss、普通 route 或审计失败一律返回 null，由调用方保留原错误事件。
+function consultModelFailureFallback(question, route, error) {
+  const fallback = consultVerifiedFactsFallback(question, route);
+  if (!fallback) return null;
+  return {
+    ...fallback,
+    modelDraftError: consultModelErrorInfo(error),
+    fallbackSource: 'verifiedFacts',
+  };
 }
 
 // 模型草稿和一次修订都可能同时含多类违规；两轮整句清理后若仍有残留，
@@ -6334,6 +6433,18 @@ const server = http.createServer((req, res) => {
                   fallbackPasses = 3 + recovered.passes;
                 }
               }
+              // 草稿和修订都失败时，仍优先尝试人工 route 的完整 verifiedFacts
+              // 终稿。尤其 partial_evidence/chain 问法不能因为模型两轮失败而
+              // 退成通用“未通过安全校验”占位；没有 route 或终审不通过则继续
+              // 使用下面的严格停止文案。
+              if (finalAudit.violations.length) {
+                const verifiedFacts = consultVerifiedFactsFallback(qtext, route);
+                if (verifiedFacts) {
+                  reply = verifiedFacts.reply;
+                  finalAudit = verifiedFacts.finalAudit;
+                  fallbackPasses += 1;
+                }
+              }
               if (finalAudit.violations.length) {
                 reply = '当前回答未通过发布前事实与动作安全校验，已停止发布未经证实的判断；请先按当前已核事实和已有只读证据继续核对。';
                 finalAudit = consultAnswerSemanticAudit(reply, qtext, route);
@@ -6351,6 +6462,14 @@ const server = http.createServer((req, res) => {
               if (recovered) {
                 reply = recovered.reply; finalAudit = recovered.audit;
                 fallbackPasses = 3 + recovered.passes;
+              }
+            }
+            if (finalAudit.violations.length) {
+              const verifiedFacts = consultVerifiedFactsFallback(qtext, route);
+              if (verifiedFacts) {
+                reply = verifiedFacts.reply;
+                finalAudit = verifiedFacts.finalAudit;
+                fallbackPasses += 1;
               }
             }
             if (finalAudit.violations.length) {
@@ -6373,6 +6492,9 @@ const server = http.createServer((req, res) => {
             revisionViolations: revisionAudit ? revisionAudit.violations : [],
             fallbackUsed,
             fallbackPasses,
+            fallbackSource: fallbackUsed
+              ? ((initialAudit.verifiedFactsFallback || finalAudit.verifiedFactsFallback) ? 'verifiedFacts' : 'safeSanitizer')
+              : '',
             finalViolations: finalAudit.violations,
             finalChainRequested: !!finalAudit.chainRequested,
             finalMissingChainDimensions: finalAudit.missingChainDimensions || [],
@@ -6380,7 +6502,10 @@ const server = http.createServer((req, res) => {
             finalUnexpectedEntities: finalAudit.unexpectedEntityTerms || [],
             likelihoodEvidence: initialAudit.likelihoodAllowed,
           };
-          if (retrieval) retrieval.answerAudit = answerAudit;
+          if (retrieval) {
+            retrieval.answerAudit = answerAudit;
+            if (answerAudit.fallbackSource) retrieval.fallbackSource = answerAudit.fallbackSource;
+          }
           sse({ answerAudit });
           if (!kbInjected && kbRefs.length) { kbInjected = true; sse({ kb: kbRefs, kbInjected: true }); }
           reply = await publishSafeFinal(reply);
@@ -6389,13 +6514,21 @@ const server = http.createServer((req, res) => {
           // 完整业务链等 verifiedFacts 路由已有逐句审核过的确定性事实。
           // 模型因长度上限或临时故障未能产出时，优先发布这些事实；普通路由
           // 仍保持明确报错，不能把任意检索片段伪装成完整答案。
-          const verifiedFallback = consultVerifiedFactsFallback(qtext, route);
+          progress('fallback');
+          const modelDraftError = consultModelErrorInfo(firstError);
+          const verifiedFallback = consultModelFailureFallback(qtext, route, firstError);
+          if (retrieval) {
+            retrieval.modelDraftError = modelDraftError;
+            retrieval.fallbackSource = verifiedFallback ? 'verifiedFacts' : 'model_error';
+          }
           if (verifiedFallback) {
             reply = verifiedFallback.reply;
             const answerAudit = {
               version: 2,
               checked: true,
               modelDraftError: true,
+              modelDraftErrorInfo: verifiedFallback.modelDraftError,
+              fallbackSource: verifiedFallback.fallbackSource,
               initialViolations: [],
               initialChainRequested: !!verifiedFallback.initialAudit.chainRequested,
               initialMissingChainDimensions: verifiedFallback.initialAudit.missingChainDimensions || [],
@@ -6408,6 +6541,7 @@ const server = http.createServer((req, res) => {
               revisionViolations: [],
               fallbackUsed: true,
               fallbackPasses: 1,
+              fallbackAnswerMode: verifiedFallback.initialAudit.fallbackAnswerMode || 'facts',
               finalViolations: verifiedFallback.finalAudit.violations,
               finalChainRequested: !!verifiedFallback.finalAudit.chainRequested,
               finalMissingChainDimensions: verifiedFallback.finalAudit.missingChainDimensions || [],
@@ -6420,6 +6554,22 @@ const server = http.createServer((req, res) => {
             if (!kbInjected && kbRefs.length) { kbInjected = true; sse({ kb: kbRefs, kbInjected: true }); }
             reply = await publishSafeFinal(reply);
           } else {
+            // 无 route/无 verifiedFacts 或兜底终审仍失败时，先发诊断元数据，再
+            // 发可见 err 正文；这样不会把真正的协议/服务错误伪装成成功答案。
+            const answerAudit = {
+              version: 2,
+              checked: true,
+              modelDraftError: true,
+              modelDraftErrorInfo: modelDraftError,
+              fallbackSource: 'model_error',
+              routeFallbackMode: (route && (route.fallbackMode || (route.route && route.route.fallbackMode))) || '',
+              verifiedFactsFallback: false,
+              fallbackUsed: false,
+              fallbackPasses: 0,
+              finalViolations: [],
+            };
+            if (retrieval) retrieval.answerAudit = answerAudit;
+            sse({ answerAudit });
             const m = `（AI 暂时连不上，请稍后重试。错误编号：${consultRequestId}。）`; reply = await publishSafeFinal(m, { err: true, code: 'consult_model_error', requestId: consultRequestId, stage: 'model_draft' });
           }
         }

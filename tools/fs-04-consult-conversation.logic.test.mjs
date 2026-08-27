@@ -895,7 +895,9 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     + extractFn(SRC, 'consultNormalizeSafeMarkdown') + '\n'
     + extractFn(SRC, 'consultAnswerSafeFallback') + '\n'
     + extractFn(SRC, 'consultVerifiedFactsFallback') + '\n'
-    + 'return { audit:consultAnswerSemanticAudit, revision:consultAnswerRevisionPrompt, fallback:consultAnswerSafeFallback, verifiedFallback:consultVerifiedFactsFallback };',
+    + extractFn(SRC, 'consultModelErrorInfo') + '\n'
+    + extractFn(SRC, 'consultModelFailureFallback') + '\n'
+    + 'return { audit:consultAnswerSemanticAudit, revision:consultAnswerRevisionPrompt, fallback:consultAnswerSafeFallback, verifiedFallback:consultVerifiedFactsFallback, modelErrorInfo:consultModelErrorInfo, modelFailureFallback:consultModelFailureFallback };',
   )();
   const auditAiInterfaceQuestion = 'AI 审方开始生成和停止生成分别调用哪个接口？请只给出两个 HTTP 方法与完整路径，并说明停止接口的 generateId 放在哪里。';
   const auditAiInterfaceRoute = {
@@ -1775,6 +1777,123 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     assert.match(fallback.reply, /本轮未知/);
     assert.deepEqual(fallback.finalAudit.violations, [], `${questionId} fallback 终审应全绿`);
   }
+
+  const q0003Question = '关于AI 审方生成，我现在只有一次既有请求和响应，没有数据库权限。现有证据最多能判断到哪？';
+  const q0003Route = {
+    matched: true,
+    fallbackMode: 'verifiedFacts',
+    route: { id: 'AUD-QR-AI-01', title: 'AI 审方生成', fallbackMode: 'verifiedFacts' },
+    answerFacts: [
+      '产品：门诊处方审核页和住院医嘱审核页都可点击“AI 解读”；内容以流式辅助文字展示，不会自动成为审核意见，只有药师点击“立即加入审核建议”才追加到当前意见框。',
+      '入口：前端 lc-ai 组件每次生成创建 UUID 作为 bizId，使用 fetch 调用 POST /auditapi/comm/ai/generate，传入医院、患者/就诊、当前 taskId、sceneCode、source；门诊另传 recipeId。',
+      '任务和警示：source=ipt 调用 getIptCurrentTask(taskId)，再按 hospitalId、patientId、visitId、null 和 iptSubmitId 调用 listOrderCautionByGroupNo；source=opt 调用 getOptCurrentTask(taskId)，再按 recipeId 调用 listCautionByOptRecipeId。',
+      '外部依赖：服务端按 sceneCode 读取未删除且 open=true 的 audit_ai_scene，再把场景地址、场景密钥和上下文交给配置的 Dify 工作流，以 streaming 模式消费 text_chunk。',
+      '生成记录：外调前插入 audit_ai_generate；首个有效文本块回写 task_id，流结束回写完整 content。这只能说明生成记录链，不能代替审核通过、打回、HIS 回传或药师采纳状态。',
+      '停止：页面提交 POST /auditapi/ai/generate/stop?generateId={bizId}；服务端只有查到生成记录且已有 task_id 时才调用 Dify 停止。',
+      '前端证据边界：只有浏览器 Network 的请求/响应和其中出现的 requestId 时，只能确认页面发起的请求及看到的 HTTP 状态、响应头和响应内容；不能据此确认场景开关、任务/警示读取、Dify 已接收或持续输出、生成记录已写入、停止已成功或药师已采纳。',
+      '实施只读清单：记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId；再按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务。不得重复提交真实业务、手工改生成记录或审核状态。',
+      '端到端边界：页面 → fetch → AiController → 场景校验 → opt/ipt 任务与警示读取 → 中文 JSON → Dify 流 → 前端展示 → 生成记录回写 → 药师手动采纳；Dify 停止响应、迟到回调和统一 requestId 关联的处理，现有资料未定义，必须明确停住。',
+    ],
+  };
+  const q0003UnsafeDraft = '现有请求正常就说明已经落库，建议重发一次请求再看结果。';
+  const q0003Initial = bundle.audit(q0003UnsafeDraft, q0003Question, q0003Route);
+  assert.ok(q0003Initial.violations.length, 'Q0003 不安全模型草稿应进入发布前修订/降级');
+  const q0003Fallback = bundle.verifiedFallback(q0003Question, q0003Route);
+  assert.ok(q0003Fallback, 'Q0003 9 条 AI-01 route facts 的 partial_evidence 兜底必须可发布');
+  assert.equal(q0003Fallback.initialAudit.fallbackAnswerMode, 'partial_evidence');
+  assert.match(q0003Fallback.reply, /本轮未知/);
+  assert.match(q0003Fallback.reply, /只能确认页面发起的请求/);
+  assert.doesNotMatch(q0003Fallback.reply, /当前回答未通过发布前事实与动作安全校验/);
+  assert.deepEqual(q0003Fallback.finalAudit.violations, [], 'Q0003 两轮模型失败后最终必须为已确认事实+未知边界，而非安全拒答占位');
+
+  const q0021Question = '审核方案配置现在是怎么实现的？';
+  const q0021Route = {
+    matched: true,
+    fallbackMode: 'verifiedFacts',
+    route: { id: 'AUD-QR-CFG-01', title: '审核方案配置', fallbackMode: 'verifiedFacts' },
+    answerFacts: [
+      '产品：同一家医院、同一种门诊或住院审核类型的系统方案是替换关系，当前新增不支持多套并存共同生效。',
+      '影响：新建前会删除所选医院同类型的旧方案主记录及科室/病区、药品、药品属性关联，再逐家医院创建新方案；旧方案不是停用保留。',
+      '实施：当前新增替换由多次删除和插入组成，操作前应留存旧配置，失败后核对主表和全部关联，不能假定自动回滚。',
+      '时间：药师工作台按 pharmReviewerTime 显示审核倒计时；医生等待页按 docWaitTime 显示等待药师结果的倒计时。',
+      '约束：医生等待时间必须大于等于药师审核时间+5秒；后台 Redis 过期再加 EXTRA_TIME=5 只是技术容错。',
+      '排班：方案开启不等于全天人工审；已配审核日期必须命中当天，已配上午时段必须命中至少一段。',
+      '结果：只读取 open=true 的当院当类型方案；方案关闭/不存在、已配日期不命中或已配时段全部不命中时，当前进件落为 auto_pass。',
+      '边界：日期和时段只是前置门槛；通过后仍要校验警示、科室/病区、药品和药品属性等条件，不能承诺一定进人工审。',
+      '当前页面：管理端编辑保存实际仍走按医院+schemeSource 删除旧记录后重建，原方案 ID 不保留。',
+      '后端边界：后端另有 PUT /auditapi/audit/scheme 的就地编辑接口，但当前管理端未调用该 PUT。',
+    ],
+  };
+  const q0021Draft = '审核方案按医院和审核类型配置，新增时替换旧方案；日期命中后进入审核判断。';
+  const q0021Initial = bundle.audit(q0021Draft, q0021Question, q0021Route);
+  assert.equal(q0021Initial.verifiedFactCoverageQuestion, true);
+  assert.deepEqual(q0021Initial.missingVerifiedFactCoverage.map(fact => fact.split('：')[0]), ['边界']);
+  assert.ok(q0021Initial.violations.includes('incomplete_verified_facts'), 'CFG-01 核心“日期/时段只是前置门槛”不能被普通怎么实现问法漏答后放行');
+  const q0021Fallback = bundle.verifiedFallback(q0021Question, q0021Route);
+  assert.ok(q0021Fallback, '模型草稿/修订均失败时 CFG-01 必须可用 verifiedFacts 确定性终稿');
+  assert.match(q0021Fallback.reply, /日期和时段只是前置门槛/);
+  assert.match(q0021Fallback.reply, /警示、科室\/病区、药品和药品属性/);
+  assert.doesNotMatch(q0021Fallback.reply, /当前回答未通过发布前事实与动作安全校验/);
+  assert.deepEqual(q0021Fallback.finalAudit.violations, [], 'CFG-01 verifiedFacts 终稿必须终审全绿');
+
+  const modelFailureCases = [
+    {
+      id: 'AI-01-broad',
+      question: aiBroadQuestion,
+      route: aiBroadRoute,
+    },
+    {
+      id: 'AI-01-partial',
+      question: debugAiQuestion,
+      route: debugAiRoute,
+    },
+    {
+      id: 'AI-01-chain',
+      question: '请把 AI 审方从入口、接口、数据到外部依赖完整串起来。',
+      route: {
+        matched: true,
+        fallbackMode: 'verifiedFacts',
+        route: { id: 'AUD-QR-AI-01', title: 'AI 审方生成', fallbackMode: 'verifiedFacts' },
+        answerFacts: [
+          '入口是审方页面的 AI 审方生成入口。',
+          '开始生成调用 POST /comm/ai/generate。',
+          '生成内容读取当前门诊或住院任务上下文，结果须由药师主动采纳。',
+          '外部依赖是配置的 Dify 工作流，Dify 内部步骤和模型判断不属于当前已核事实。',
+        ],
+      },
+    },
+    {
+      id: 'AI-01-implementation',
+      question: '我没完全听懂 AI 审方的排查建议，换成实施可以逐项照做的只读清单。',
+      route: {
+        matched: true,
+        inherited: true,
+        fallbackMode: 'verifiedFacts',
+        route: { id: 'AUD-QR-AI-01', title: 'AI 审方生成', fallbackMode: 'verifiedFacts' },
+        answerFacts: [
+          'AI 审方按当前任务上下文生成辅助建议，结果须由药师主动采纳。',
+          '现场只读查看已有页面、请求、响应和日志，不重复提交真实业务。',
+          '当前资料没有核实的接口、数据和后续状态不能补写。',
+        ],
+      },
+    },
+  ];
+  for (const modelError of [
+    { status: 429, message: 'rate limit' },
+    { code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束' },
+    { code: 'MODEL_EMPTY_RESPONSE', message: '模型返回空内容' },
+  ]) {
+    for (const scenario of modelFailureCases) {
+      const result = bundle.modelFailureFallback(scenario.question, scenario.route, modelError);
+      assert.ok(result, `${scenario.id} ${modelError.code || modelError.status} 应走 verifiedFacts fallback`);
+      assert.equal(result.fallbackSource, 'verifiedFacts');
+      assert.equal(result.modelDraftError.kind, modelError.status === 429 ? 'rate_limit' : modelError.code === 'MODEL_OUTPUT_TRUNCATED' ? 'length_limit' : 'empty_response');
+      assert.deepEqual(result.finalAudit.violations, [], `${scenario.id} ${modelError.code || modelError.status} 终审应全绿`);
+      assert.doesNotMatch(result.reply, /AI 暂时连不上/);
+    }
+  }
+  assert.equal(bundle.modelFailureFallback('没有命中路由的问题', { matched: false, fallbackMode: 'verifiedFacts', answerFacts: ['不能把这条事实伪装成答案'] }, { status: 429, message: 'rate limit' }), null, 'route miss 不得伪造 verifiedFacts 答案');
+  assert.equal(bundle.modelFailureFallback('普通路由问题', { matched: true, answerFacts: ['普通事实'] }, { code: 'MODEL_EMPTY_RESPONSE', message: '模型返回空内容' }), null, '未显式开启 verifiedFacts 的 route 不得伪造答案');
 
   const explicitFromToChainQuestion = '请把这个功能从入口、接口和数据状态到外部依赖完整串起来。';
   const explicitFromToChainAudit = bundle.audit('', explicitFromToChainQuestion, todayAtomicRoute);
@@ -3097,7 +3216,9 @@ test('发布前事实作用域审计：相邻模块、通配路径不串入，�
     + extractFn(SRC, 'consultNormalizeSafeMarkdown') + '\n'
     + extractFn(SRC, 'consultAnswerSafeFallback') + '\n'
     + extractFn(SRC, 'consultVerifiedFactsFallback') + '\n'
-    + 'return { audit:consultAnswerSemanticAudit, revision:consultAnswerRevisionPrompt, fallback:consultAnswerSafeFallback, verifiedFallback:consultVerifiedFactsFallback };',
+    + extractFn(SRC, 'consultModelErrorInfo') + '\n'
+    + extractFn(SRC, 'consultModelFailureFallback') + '\n'
+    + 'return { audit:consultAnswerSemanticAudit, revision:consultAnswerRevisionPrompt, fallback:consultAnswerSafeFallback, verifiedFallback:consultVerifiedFactsFallback, modelErrorInfo:consultModelErrorInfo, modelFailureFallback:consultModelFailureFallback };',
   )();
   const todayRoute = {
     matched: true,

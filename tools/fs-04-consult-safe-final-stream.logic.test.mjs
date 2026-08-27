@@ -198,6 +198,9 @@ test('等待安全终稿时阶段事件可见但与 v 正文严格分离', () =>
   assert.deepEqual(consultProgressEvent('generating', { attempt: 2, total: 2 }), {
     type: 'progress', stage: 'generating', label: '首个模型未及时返回，正在尝试备用模型…', attempt: 2, total: 2,
   });
+  assert.deepEqual(consultProgressEvent('fallback'), {
+    type: 'progress', stage: 'fallback', label: '模型暂未返回完整内容，正在依据已核事实整理回答…',
+  });
   assert.equal(consultProgressEvent('prompt-body'), null, '未知阶段不得把任意内部文案透给客户端');
   assert.equal(Object.prototype.hasOwnProperty.call(consultProgressEvent('auditing'), 'v'), false, 'progress 绝不能伪装正文');
 
@@ -207,6 +210,7 @@ test('等待安全终稿时阶段事件可见但与 v 正文严格分离', () =>
   assert.match(consult, /progress\('preparing'\)/);
   assert.match(consult, /progress\('auditing'\)/);
   assert.match(consult, /progress\('revising'/);
+  assert.match(consult, /progress\('fallback'\)/);
   assert.match(consult, /progress\('publishing'\)/);
   assert.doesNotMatch(consult, /reply\s*\+=?\s*consultProgressEvent|chat[^\n]*consultProgressEvent/,
     '阶段事件不得进入正式回答或会话持久化');
@@ -233,6 +237,37 @@ test('模型无首字时按独立短预算终止并给出可观测错误', async
     /模型首字等待超时/,
   );
   assert.ok(Date.now() - started < 200, '专项首字预算不得退回旧 90 秒总超时');
+});
+
+test('模型 HTTP 429、空响应和长度截断均保留可观测错误分类', async () => {
+  const cfg = { provider: 'openai', apiKey: 'test', baseUrl: 'https://model.test', model: 'test-model' };
+  const rateLimited = modelStreamFactory(async () => ({
+    ok: false,
+    status: 429,
+    async json() { return { error: { message: 'rate limit' } }; },
+  }), [cfg]);
+  await assert.rejects(
+    rateLimited.callModelStreamOnce(cfg, { system: '', messages: [] }, () => {}, null),
+    error => error && error.code === 'MODEL_HTTP_429' && error.status === 429 && /rate limit/.test(error.message),
+  );
+
+  const empty = modelStreamFactory(async () => ({
+    ok: true,
+    body: { async *[Symbol.asyncIterator]() { yield new TextEncoder().encode('data: [DONE]\n\n'); } },
+  }), [cfg]);
+  await assert.rejects(
+    empty.callModelStream({ apiKey: 'test' }, { system: '', messages: [] }, () => {}, null),
+    error => error && error.code === 'MODEL_EMPTY_RESPONSE',
+  );
+
+  const truncated = modelStreamFactory(async () => ({
+    ok: true,
+    body: { async *[Symbol.asyncIterator]() { yield new TextEncoder().encode('data: {"choices":[{"delta":{"content":"半截"},"finish_reason":"length"}]}\n\n'); } },
+  }), [cfg]);
+  await assert.rejects(
+    truncated.callModelStreamOnce(cfg, { system: '', messages: [] }, () => {}, null),
+    error => error && error.code === 'MODEL_OUTPUT_TRUNCATED',
+  );
 });
 
 test('模型候选最多尝试两个，正常首字后仍能完成流式正文', async () => {
@@ -278,6 +313,13 @@ test('consult 草稿与修订共享整轮完成上限，超时失败仍走安全
   assert.match(consult, /const consultModelSignal = consultModelDeadlineSignal\(ac\.signal\)/);
   assert.equal((consult.match(/\}, consultModelSignal\);/g) || []).length, 2, '草稿与最多一次修订必须共用同一 deadline');
   assert.match(consult, /else if \(firstError && !stopped\)[\s\S]*?publishSafeFinal\(m, \{ err: true, code: 'consult_model_error'/);
+  assert.match(consult, /const verifiedFallback = consultModelFailureFallback\(qtext, route, firstError\)/, '模型失败时必须先尝试 route verifiedFacts fallback');
+  assert.match(consult, /retrieval\.modelDraftError = modelDraftError/);
+  assert.match(consult, /retrieval\.fallbackSource = verifiedFallback \? 'verifiedFacts' : 'model_error'/);
+  assert.match(consult, /modelDraftErrorInfo: verifiedFallback\.modelDraftError/);
+  assert.match(consult, /fallbackSource: verifiedFallback\.fallbackSource/);
+  assert.match(consult, /if \(finalAudit\.violations\.length\) \{[\s\S]*?const verifiedFacts = consultVerifiedFactsFallback\(qtext, route\)/,
+    '草稿/修订均失败时仍须尝试 verifiedFacts 确定性终稿');
   assert.match(consult, /sse\(\{ done: true, convId, kbHits:[\s\S]*?stopSseHeartbeat\(\)[\s\S]*?res\.end\(\)/);
   assert.match(consult, /if \(ac\.signal\.aborted\) stopped = true;\s*else firstError = e;/,
     '用户停止必须优先于共享超时错误文案');
