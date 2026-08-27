@@ -3803,7 +3803,14 @@ function consultAnswerSafeFallback(draft, audit) {
   // 实施口径；不再搬运草稿技术段或追加通用尾注，避免删漏和重复“研发参考”。
   if (audit && audit.verifiedFactsFallback && Array.isArray(audit.currentRouteFacts) && audit.currentRouteFacts.length) {
     const [businessFact, ...implementationFacts] = audit.currentRouteFacts;
+    const routeHasEvidenceVerdict = audit.currentRouteFacts.some(fact =>
+      /(?:只够|足够|够(?:用|判断|固定|完成)|不够|不足|不能单独|不能替代|尚不能|只能固定|只能证明|只能确认|最多(?:只能|能|可))/u.test(String(fact || ''))
+    );
+    const evidenceVerdict = audit.violations.includes('missing_evidence_sufficiency_verdict') && !routeHasEvidenceVerdict
+      ? '结论：现有受限证据只够固定已经提供的请求、响应和页面观测，不能单独完成与已核规则的对照，也不足以闭环原因。'
+      : '';
     return consultNormalizeSafeMarkdown([
+      evidenceVerdict,
       '业务结论',
       `- ${businessFact}`,
       implementationFacts.length ? '实施口径' : '',

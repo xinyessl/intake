@@ -1691,6 +1691,21 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(q210Fallback, /失败消息手工补发属于 DI-07/);
   assert.deepEqual(bundle.audit(q210Fallback, q210Question, q210Route).violations, [], 'Q210 已核业务事实终稿必须直接通过最终审计');
 
+  const debugAiQuestion = '关于AI审方生成，如果只有一次既有请求和响应、没有数据库权限，现有证据最多能判断到哪？';
+  const debugAiRoute = {
+    matched: true,
+    fallbackMode: 'verifiedFacts',
+    route: { id: 'AUD-QR-AI-01', title: 'AI 审方生成', fallbackMode: 'verifiedFacts' },
+    answerFacts: ['AI 审方按 audit 场景读取当前门诊或住院任务上下文，经 Dify 工作流流式生成辅助建议，结果须由药师主动采纳。'],
+  };
+  const debugAiInitial = bundle.audit('', debugAiQuestion, debugAiRoute);
+  const debugAiFallback = bundle.verifiedFallback(debugAiQuestion, debugAiRoute);
+  assert.equal(debugAiInitial.verifiedFactsFallback, true);
+  assert.ok(debugAiFallback, 'AI-01 受限证据问法在模型失败时应发布已核事实兜底');
+  assert.match(debugAiFallback.reply, /^结论：现有受限证据只够固定/);
+  assert.match(debugAiFallback.reply, /业务结论\n- AI 审方按 audit 场景/);
+  assert.deepEqual(debugAiFallback.finalAudit.violations, []);
+
   const explicitFromToChainQuestion = '请把这个功能从入口、接口和数据状态到外部依赖完整串起来。';
   const explicitFromToChainAudit = bundle.audit('', explicitFromToChainQuestion, todayAtomicRoute);
   assert.equal(explicitFromToChainAudit.chainRequested, true, '真正同一分句内的从A到B研发链路仍须启用完整性合同');
