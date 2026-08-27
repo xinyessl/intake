@@ -40,7 +40,7 @@ test('答疑受众按问句意图分层：普通业务默认产品，现场诊�
   for (const q of ['现场怎么排查？', '复测到这里下一步怎么查？', '转开发前给我一份只读清单', '只有截图，怎么判断到哪一层？', '今天视图请求和响应抓到了，重点核什么？', '怎么只读核对时间？', '怎么只读核时间？', '我没完全听懂医嘱标记的排查建议，换成实施可以逐项照做的只读清单。']) {
     assert.equal(audienceMode(q), 'implementation', q);
   }
-  for (const q of ['具体接口路径和字段是什么？', '从 Controller 到 Mapper 的开发链路在哪？', 'SQL 查哪张表？', '这段代码在哪个 Java 类实现？']) {
+  for (const q of ['具体接口路径和字段是什么？', 'p_id 列类型是什么？', 'p_id column type 是什么？', '从 Controller 到 Mapper 的开发链路在哪？', 'SQL 查哪张表？', '这段代码在哪个 Java 类实现？']) {
     assert.equal(audienceMode(q), 'developer', q);
   }
 });
@@ -3113,6 +3113,7 @@ test('发布前事实作用域审计：相邻模块、通配路径不串入，�
   const pIdColumnTypeFallback = bundle.verifiedFallback('p_id 列类型是什么？', pIdTypeRoute);
   assert.ok(pIdColumnTypeFallback, 'p_id 类型题的 verifiedFacts fallback 应可发布');
   assert.deepEqual(pIdColumnTypeFallback.finalAudit.violations, [], 'p_id 类型题 fallback 终稿必须终审全绿');
+  assert.equal(pIdColumnTypeFallback.finalAudit.audienceMode, 'developer', '列类型契约题应按研发受众审计');
   assert.match(pIdColumnTypeFallback.reply, /character varying\(50\)/);
   assert.doesNotMatch(pIdColumnTypeFallback.reply, /只读步骤|第二步|升级给数据库负责人|本路由/);
 
