@@ -2120,6 +2120,22 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.doesNotMatch(q0078Fallback.reply, /AI 暂时连不上|当前回答未通过发布前/);
   assert.deepEqual(q0078Fallback.finalAudit.violations, [], 'C016 Q0078 DI-04 partial evidence fallback 终审必须全绿');
 
+  const q0173Question = Object.keys(browserRequirements).find(question => question === '先别把门诊处方自动通过的原因说死：当前只有接口状态和业务返回，哪些结论成立，哪些仍需确认？');
+  assert.ok(q0173Question, 'Q0173 应从真实浏览器题目 fixture 取到原问题');
+  const q0173Route = runtimeRouteWithRepositoryContext(routeQuestion(productionRuntimeRouteMap, q0173Question), '2.7.260828-2');
+  assert.equal(q0173Route.route.id, 'AUD-QR-DI-05', 'Q0173 必须命中门诊处方自动通过 route');
+  const q0173FullFacts = q0173Route.answerFacts.join('\n');
+  const q0173Initial = bundle.audit(q0173FullFacts, q0173Question, q0173Route);
+  assert.equal(q0173Initial.fallbackAnswerMode, 'partial_evidence', 'Q0173 “当前只有…哪些成立/仍需确认”应识别为 partial_evidence');
+  assert.ok(q0173Initial.violations.includes('missing_evidence_sufficiency_verdict'), 'Q0173 只罗列 route facts 时必须补证据充分性边界');
+  const q0173Fallback = bundle.modelFailureFallback(q0173Question, q0173Route, { status: 429, message: 'rate limit' });
+  assert.ok(q0173Fallback, 'Q0173 HTTP429 时必须使用门诊自动通过 route facts 确定性兜底');
+  assert.match(q0173Fallback.reply, /现有受限证据只够|现有受限证据/);
+  assert.match(q0173Fallback.reply, /本轮未知/);
+  assert.match(q0173Fallback.reply, /不能单独|仍需|待补充|具体细节/);
+  assert.match(q0173Fallback.reply, /门诊处方自动通过|RedisConsumer|AUDIT:OPT:AUTO/);
+  assert.deepEqual(q0173Fallback.finalAudit.violations, [], 'Q0173 partial evidence fallback 必须明确已知/未知并终审全绿');
+
   const q0039Question = Object.keys(browserRequirements).find(question => question.includes('把药师个人审核方案从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。'));
   assert.ok(q0039Question, 'Q0039 真实 fixture 题目应存在');
   const q0039Route = runtimeRouteWithRepositoryContext(routeQuestion(productionRuntimeRouteMap, q0039Question), '2.7.260828-2');

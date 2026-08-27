@@ -1798,7 +1798,7 @@ function consultSafeDiagnosticIntent(question) {
   const direct = /(?:现场(?:要|怎么)?复现|怎么复现|如何复现|复现(?:步骤|条件)|怎么排查|如何排查|先查什么|从哪查起|哪里出问题|怎么留证|如何留证|现场留证|转开发前|交给开发前|(?:最少|至少)(?:要|需)?(?:补|提供|收集|记录)(?:什么|哪些)|抓什么|需要什么证据|只有(?:一张)?图|只有截图|拿不到\s*spec|没有\s*spec|先别让我找\s*spec)/i.test(q);
   const symptom = /(?:列表为空|查不到|没数据|没有数据|一个都看不到|不显示|看不到|没反应|没变化|对不上|失败|异常|错误|页码|分页|筛选|保存后|患者端|医生端|药师端|详情|下钻)/i.test(q);
   const diagnosticAsk = /(?:怎么查|如何查|查什么|排查|复现|留证|补什么|提供什么|抓什么|确认什么|怎么判断|如何判断|怎么办|怎么处理|接下来|下一步)/i.test(q);
-  const partialEvidence = /(?:目前|现在|这次|现场)?(?:只能|只)(?:确认|看到|拿到|靠|看)|(?:数据库|日志|源码|后台)(?:这边)?(?:暂时)?(?:没|没有|拿不到|无)(?:权限|法)?(?:查|看|拿)|仅靠(?:页面|截图|接口|响应)|只靠(?:页面|截图|接口|响应)|还缺(?:什么|哪些)|缺(?:什么|哪些)(?:信息|证据)|先说(?:说)?能确定的部分|能先排除什么/i.test(q);
+  const partialEvidence = /(?:目前|现在|这次|现场)?(?:只能|只)(?:确认|看到|拿到|靠|看)|(?:当前|现在|本轮|现有)?\s*(?:只有|仅有|只拿到|仅拿到)[^。！？\n]{0,120}(?:哪些[^。！？\n]{0,20}(?:成立|确认)|(?:仍|还)?需(?:要)?确认)|(?:数据库|日志|源码|后台)(?:这边)?(?:暂时)?(?:没|没有|拿不到|无)(?:权限|法)?(?:查|看|拿)|仅靠(?:页面|截图|接口|响应)|只靠(?:页面|截图|接口|响应)|还缺(?:什么|哪些)|缺(?:什么|哪些)(?:信息|证据)|先说(?:说)?能确定的部分|能先排除什么/i.test(q);
   return direct || partialEvidence || (symptom && diagnosticAsk);
 }
 
@@ -3124,7 +3124,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
     .map(x => x.trim()).filter(statement => statement && !statementIsRouteFact(statement) && Array.from(statement.matchAll(actorAction))
       .some(match => !negatedActorPrefix.test(statement.slice(0, match.index)) && !negatedRiskyAction(statement, match.index)));
   const fullHandoffMaterialQuestion = /(?:(?:完整|全部|全套|正式)[^。！？\n]{0,16}(?:提单|工单|转开发|交接|材料包|留证包)|(?:提单|工单|转开发|交接)[^。！？\n]{0,16}(?:完整|全部|全套|材料清单|最少补哪些信息))/u.test(intentQuestionText);
-  const explicitPartialEvidenceQuestion = /(?:只(?:能)?确认|仅(?:能)?确认|只确认|仅确认)[\s\S]{0,160}(?:没(?:有)?拿到|未(?:拿到|取得)|没有|无|拿不到|未知|待确认|尚未)[\s\S]{0,160}(?:先说|能确定|未知(?:项|部分)?(?:单独|另行)|哪些(?:成立|确认)|待确认)/iu.test(intentQuestionText);
+  const explicitPartialEvidenceQuestion = /(?:(?:只(?:能)?确认|仅(?:能)?确认|只确认|仅确认)[\s\S]{0,160}(?:没(?:有)?拿到|未(?:拿到|取得)|没有|无|拿不到|未知|待确认|尚未)[\s\S]{0,160}(?:先说|能确定|未知(?:项|部分)?(?:单独|另行)|哪些(?:成立|确认)|待确认)|(?:当前|现在|本轮|现有)?\s*(?:只有|仅有|只拿到|仅拿到)[^。！？\n]{0,120}(?:哪些[^。！？\n]{0,20}(?:成立|确认)|(?:仍|还)?需(?:要)?确认))/iu.test(intentQuestionText);
   const existingRecordNarrowingQuestion = /(?:仅用|只用|只靠)(?:已有|现有)(?:的)?(?:记录|请求|响应|证据)[^。！？\n]{0,64}(?:缩小范围|缩小定位范围|判断|定位)/iu.test(intentQuestionText);
   const explicitNonDestructiveBoundaryQuestion = existingRecordNarrowingQuestion
     && /(?:不能|不得|不要|禁止)[^。！？\n]{0,32}(?:改数据|重放|重提|重复提交)/u.test(intentQuestionText);
@@ -3133,7 +3133,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
       || /(?:现有|当前|已有|这些?)?证据[^。！？\n]{0,24}(?:最多|至多)(?:能|可(?:以)?)?(?:判断|确认|证明)到哪/u.test(intentQuestionText)
       || explicitPartialEvidenceQuestion
       || existingRecordNarrowingQuestion);
-  const diagnosticQuestion = /(?:排查|定位|不一致|对不上|异常|故障|现场|验证|复测|下一步|怎么判断|如何判断|怎么确认|检查|留证|只能确认|能确定|能判断到哪|最多(?:能|可)?判断|不知道|未知|走到哪|还缺什么|够不够|够吗|是否足够|能不能判断|能否判断)/i.test(intentQuestionText);
+  const diagnosticQuestion = explicitPartialEvidenceQuestion || /(?:排查|定位|不一致|对不上|异常|故障|现场|验证|复测|下一步|怎么判断|如何判断|怎么确认|检查|留证|只能确认|能确定|能判断到哪|最多(?:能|可)?判断|不知道|未知|走到哪|还缺什么|够不够|够吗|是否足够|能不能判断|能否判断)/i.test(intentQuestionText);
   // 受众层级也必须过发布前确定性终审，不能只相信模型遵守 prompt。
   // 普通“怎么实现”仍是产品问法；只有显式技术契约才进入 developer。
   const audienceDeveloperQuestion = /(?:接口(?:路径|地址|契约|入参|出参|返回)?|字段(?:名|类型|长度|取值)?|列(?:名|类型|长度|取值)?|column(?:s)?(?:\s*(?:name|type|length|value))?|哪张表|表名|数据库表|SQL|源码|代码|开发链路|调用链|调用关系|Java\s*类|类名|方法名|Controller|Service|Mapper|Repository|DAO|DTO|VO)(?:[^。！？\n]{0,28}(?:什么|哪些|哪个|哪里|在哪|怎么|如何|实现|定义|调用|读写|保存|返回|排查|看|查))?|(?:什么|哪些|哪个|哪里|在哪|怎么|如何|看|查)[^。！？\n]{0,28}(?:接口|字段|列|column|哪张表|表名|SQL|源码|代码|开发链路|调用链|Java\s*类|Controller|Service|Mapper|DTO|VO)/i.test(questionText);
