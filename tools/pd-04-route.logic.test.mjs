@@ -149,6 +149,31 @@ test('AC-2 tier-1 别名整串命中 → 强 bonus 命中，超阈值', () => {
   assert.equal(noFallback.route.fallbackMode, '', '普通 route 不得误开启已核事实兜底');
 });
 
+test('routeQuestion 只透传 route 卡显式技术焦点，不从问题或事实推断 sibling', () => {
+  const S = buildRoutingSandbox(makeDeps());
+  const map = {
+    questionRoutes: [{
+      id: 'QR-P-ID-TYPE',
+      title: '患者 p_id 字段类型',
+      aliases: ['pwrs_patient.p_id 类型'],
+      keywords: ['p_id', 'uuid', '字段类型'],
+      focusTechnicalTokens: ['pwrs_patient', 'p_id', 'uuid'],
+      answerFacts: ['pwrs_patient.p_id 是 varchar(50)，不是 PostgreSQL 原生 uuid。'],
+      mustNotConfuse: ['不得扩写 patient_id、visit_id、district_code。'],
+      searchText: '患者 p_id 字段类型 pwrs_patient.p_id 类型 p_id uuid 字段类型',
+    }, {
+      id: 'QR-GENERIC', title: '通用字段排查', aliases: ['通用字段排查'], keywords: ['通用字段'], answerFacts: ['通用字段事实。'],
+      searchText: '通用字段排查 通用字段',
+    }],
+    specs: [], indexes: {},
+  };
+  const hit = S.routeQuestion(map, 'pwrs_patient.p_id 类型，同时出现 patient_id、visit_id、district_code', '');
+  assert.equal(hit.route.id, 'QR-P-ID-TYPE');
+  assert.deepEqual(hit.focusTechnicalTokens, ['pwrs_patient', 'p_id', 'uuid'], '只使用 route 卡显式焦点，不能把 query sibling 带入');
+  const generic = S.routeQuestion(map, '通用字段排查', '');
+  assert.deepEqual(generic.focusTechnicalTokens, [], '未显式配置焦点的 route 不得从 query 推断技术焦点');
+});
+
 test('专用 QR 与泛化 DQ 小分差竞争时优先 QR；明显更相关的 DQ 仍可命中', () => {
   const S = buildRoutingSandbox(makeDeps());
   const map = {

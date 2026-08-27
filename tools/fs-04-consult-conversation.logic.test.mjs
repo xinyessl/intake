@@ -3091,6 +3091,7 @@ test('发布前事实作用域审计：相邻模块、通配路径不串入，�
   const pIdTypeRoute = {
     matched: true,
     route: { id: 'QR-PATIENT-P-ID-TYPE', title: '患者主表 p_id 字段类型' },
+    focusTechnicalTokens: ['pwrs_patient', 'p_id', 'uuid'],
     answerFacts: ['pwrs_patient.p_id 是 character varying(50)，不是 PostgreSQL 原生 uuid。'],
   };
   const pIdUuidAnswer = 'pwrs_patient.p_id 是 character varying(50)，不是 PostgreSQL 原生 UUID。';
@@ -3099,12 +3100,12 @@ test('发布前事实作用域审计：相邻模块、通配路径不串入，�
   assert.deepEqual(pIdUuidAudit.focusedTechnicalOverreach, [], 'UUID 不应因通用 ID 后缀规则成为 focused overreach');
 
   const pIdSiblingLeak = bundle.audit(
-    'pwrs_patient.p_id 是 character varying(50)，不是 PostgreSQL 原生 UUID；同表 visit_id 和 district_code 也都是这个类型。',
+    'pwrs_patient.p_id 是 character varying(50)，不是 PostgreSQL 原生 UUID；同表 patient_id、visit_id 和 district_code 也都是这个类型。',
     'pwrs_patient.p_id 是 PostgreSQL 原生 uuid 吗？',
     pIdTypeRoute,
   );
   assert.ok(pIdSiblingLeak.violations.includes('out_of_scope_entity'), 'p_id route 仍须拦 sibling 字段越界');
-  assert.deepEqual(pIdSiblingLeak.unexpectedTechnicalTokens, ['visit_id', 'district_code']);
+  assert.deepEqual(pIdSiblingLeak.unexpectedTechnicalTokens, ['patient_id', 'visit_id', 'district_code']);
 
   const sharedBasics = bundle.audit('只核当前页面、接口、记录、状态、id、code、HTTP 200、JSON 和 JWT。', '今天视图怎么只读核？', todayRoute);
   assert.deepEqual(sharedBasics.violations, [], '共享基础词、协议词和裸 id/code/status 不得误判为相邻业务实体');

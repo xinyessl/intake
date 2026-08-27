@@ -909,6 +909,14 @@ function routeQuestion(map, query, subKey = '') {
     if (best && (acceptedExactTitle || best.sc >= ROUTE_MATCH_MIN)) {
       const r = best.r;
       const fallbackMode = r.fallbackMode === 'verifiedFacts' ? 'verifiedFacts' : '';
+      // 技术焦点只能由人工 route 卡显式声明；不要从 query、answerFacts
+      // 或 mustNotConfuse 推断，否则单字段题会把 sibling 字段带进放行范围。
+      const focusTechnicalTokens = Array.from(new Set(
+        (Array.isArray(r.focusTechnicalTokens) ? r.focusTechnicalTokens : [])
+          .filter(token => typeof token === 'string')
+          .map(token => token.trim())
+          .filter(Boolean),
+      ));
       return {
         matched: true, tier: 1, fallbackMode, route: {
           id: r.id,
@@ -921,6 +929,7 @@ function routeQuestion(map, query, subKey = '') {
         contextRefs: Array.isArray(r.contextRefs) ? r.contextRefs : [],
         answerFacts: Array.isArray(r.answerFacts) ? r.answerFacts : [],
         mustNotConfuse: Array.isArray(r.mustNotConfuse) ? r.mustNotConfuse : [],
+        focusTechnicalTokens,
         topN: scored.slice(0, 5).map(x => ({ id: x.r.id, title: x.r.title, score: x.sc })),
       };
     }
