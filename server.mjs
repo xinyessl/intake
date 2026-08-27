@@ -1964,14 +1964,20 @@ function consultHasLikelihoodEvidence(question, route, claim = '') {
   const userSample = /(?:统计|样本|抽样|最近|近)\s*(?:了|的)?\s*\d+\s*(?:次|条|例|份)[^。；\n]{0,30}(?:其中|有|占)\s*\d+|(?:占比|比例|频率)\s*(?:为|是|达到)?\s*\d+(?:\.\d+)?\s*%|百分之\s*[零一二三四五六七八九十百\d]+/i.test(q);
   const frequencyEvidenceRe = /(?:统计样本|抽样结果|发生频率|占比|比例|百分之|\d+(?:\.\d+)?\s*%|明确(?:规定|定义|写明)[^。；\n]{0,24}(?:最高频|最常见|(?:很|较|比较)?常见|经常|通常|一般|大概率|多半|往往|多发|高发|很多|不少|多数|大多(?:数)?|绝大多数|少数|极少|大部分|小部分|几乎全部|频繁|偶尔|有时|首要原因|主要原因|典型原因|常见于|(?:高度|强烈|明显|更|较|比较)符合)|(?:最高频|最常见|(?:很|较|比较)?常见|经常|通常|一般|大概率|多半|往往|多发|高发|很多|不少|多数|大多(?:数)?|绝大多数|少数|极少|大部分|小部分|几乎全部|频繁|偶尔|有时|首要原因|主要原因|典型原因|常见于|(?:高度|强烈|明显|更|较|比较)符合)[^。；\n]{0,24}(?:规则|结论|定义|统计|样本|比例))/i;
   const deterministicEvidenceRe = /(?:明确|已核|已确认|说明书|契约|源码|规则)[^。；\n]{0,32}(?:一旦|只要|如果|若|必然|必定|一定|肯定|必须|拒绝|导致|造成|传错|类型错|根因|原因|故障|异常|错误|归因|属于|定位)|(?:一旦|只要|如果|若)[^。；\n]{0,32}(?:就会|必然|必定|一定|肯定|必须|拒绝|导致|造成)|(?:原始|完整)?(?:日志|堆栈|error_info|错误流水|错误码|响应原文)[^。；\n]{0,40}(?:明确|显示|记录|包含|报(?:错)?|定位)[^。；\n]{0,40}(?:异常|故障|错误|失败|根因|原因|未启动|假死)/i;
-  const routeEvidence = route && route.matched
-    ? [...(route.answerFacts || []), ...(route.mustNotConfuse || []), ...(route.directEvidenceFacts || [])].filter(item => frequencyEvidenceRe.test(String(item || '')) || deterministicEvidenceRe.test(String(item || '')))
+  const routeFactTexts = route && route.matched
+    ? [...(route.answerFacts || []), ...(route.mustNotConfuse || []), ...(route.directEvidenceFacts || [])].map(String).filter(Boolean)
     : [];
+  const routeFactClauses = routeFactTexts.flatMap(source => source.split(/[。！？；;\n]/u).map(clause => clause.trim()).filter(Boolean));
+  const routeEvidence = routeFactTexts.filter(item => frequencyEvidenceRe.test(String(item || '')) || deterministicEvidenceRe.test(String(item || '')));
   const evidenceTexts = [...((userSample || deterministicEvidenceRe.test(q)) ? [q] : []), ...routeEvidence.map(String)];
   if (!String(claim || '').trim()) return evidenceTexts.length > 0;
-  if (!evidenceTexts.length) return false;
   const normalizeClaimText = value => String(value || '').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
   const normalizedClaim = normalizeClaimText(claim);
+  // A route fact is already reviewed evidence. Preserve a probability/status
+  // boundary when the answer quotes that fact verbatim, without authorizing
+  // a model-invented variant merely because it shares a few tokens.
+  if (normalizedClaim.length >= 6 && routeFactClauses.some(source => normalizeClaimText(source) === normalizedClaim)) return true;
+  if (!evidenceTexts.length) return false;
   if (normalizedClaim.length >= 6 && evidenceTexts.some(source => normalizeClaimText(source).includes(normalizedClaim))) return true;
   const claimTokens = (value) => {
     const cleaned = String(value || '').toLowerCase()
@@ -3090,15 +3096,41 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const controlled = consultHasControlledActionBundle(question);
   const actorAction = /(?:让|请|交给|通知|要求|转|压|催|催促|推动|协调)?\s*(?:实施|用户|患者|对接(?:方)?|接口方|第三方|厂商|供应商|院方|运维|开发)[^。！？；\n]{0,64}(?:(?:改|修改|调整|切换|对齐|校准|统一|转换|修(?:复)?)[^。！？；\n]{0,16}(?:参数|传参(?:方式)?|传输方式|接口入参|报文(?:类型)?|类型|序列化(?:口径|方式|规则)?|编码(?:口径|方式|规则)?|协议(?:口径|规则)?|映射|结构|关联|链路|配置|时区|系统时间|环境|产品口径|业务口径|日切要求|服务配置|字符串|数字(?:类型)?|字段格式|数据格式|值类型)|(?:按|以)[^。！？；\n]{0,12}(?:字符串|数字(?:类型)?|指定格式|文本格式|字段格式|数据格式|值类型)[^。！？；\n]{0,8}(?:传|发送)|对时|重试|复测|重跑|补跑|重新触发|再次触发|再点|点一次|提交|保存|发送|完成|签名|审批|星标|再传|重传|重新发送)/ig;
   const negatedActorPrefix = /(?:不得|不能|不要|禁止|不可|不应|先别|停止|未确认)\s*$/i;
+  const negatedRiskyAction = (statement, matchIndex) => {
+    const source = String(statement || '');
+    const prefix = source.slice(0, Math.max(0, Number.isInteger(matchIndex) ? matchIndex : source.length));
+    const delimiterIndex = Math.max(
+      prefix.lastIndexOf('，'), prefix.lastIndexOf(','), prefix.lastIndexOf('：'),
+      prefix.lastIndexOf(':'), prefix.lastIndexOf('；'), prefix.lastIndexOf(';'),
+      prefix.lastIndexOf('。'), prefix.lastIndexOf('！'), prefix.lastIndexOf('？'), prefix.lastIndexOf('\n'),
+    );
+    const clausePrefix = prefix.slice(delimiterIndex + 1).trim();
+    // A route fact may put context between the prohibition and the risky verb
+    // ("不能单独证明患者…" / "也不要为补日志重复提交…"). Keep the check
+    // within the same clause so a later positive instruction remains unsafe.
+    return /(?:不得|不能|不要|禁止|不可|不应|先别|停止|未确认)[^。！？；\n]{0,24}$/u.test(clausePrefix);
+  };
+  const routeActionFacts = route && route.matched
+    ? [...(route.answerFacts || []), ...(route.mustNotConfuse || []), ...(route.directEvidenceFacts || [])].map(String).filter(Boolean)
+    : [];
+  const normalizeRouteActionText = value => String(value || '').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
+  const statementIsRouteFact = statement => {
+    const normalized = normalizeRouteActionText(statement);
+    return normalized.length >= 8 && routeActionFacts.some(fact => normalizeRouteActionText(fact).includes(normalized));
+  };
   const unsafeActorActions = controlled ? [] : text.split(/(?<=[。！？；\n])/u)
-    .map(x => x.trim()).filter(statement => statement && Array.from(statement.matchAll(actorAction))
-      .some(match => !negatedActorPrefix.test(statement.slice(0, match.index))));
+    .map(x => x.trim()).filter(statement => statement && !statementIsRouteFact(statement) && Array.from(statement.matchAll(actorAction))
+      .some(match => !negatedActorPrefix.test(statement.slice(0, match.index)) && !negatedRiskyAction(statement, match.index)));
   const fullHandoffMaterialQuestion = /(?:(?:完整|全部|全套|正式)[^。！？\n]{0,16}(?:提单|工单|转开发|交接|材料包|留证包)|(?:提单|工单|转开发|交接)[^。！？\n]{0,16}(?:完整|全部|全套|材料清单|最少补哪些信息))/u.test(intentQuestionText);
   const explicitPartialEvidenceQuestion = /(?:只(?:能)?确认|仅(?:能)?确认|只确认|仅确认)[\s\S]{0,160}(?:没(?:有)?拿到|未(?:拿到|取得)|没有|无|拿不到|未知|待确认|尚未)[\s\S]{0,160}(?:先说|能确定|未知(?:项|部分)?(?:单独|另行)|哪些(?:成立|确认)|待确认)/iu.test(intentQuestionText);
+  const existingRecordNarrowingQuestion = /(?:仅用|只用|只靠)(?:已有|现有)(?:的)?(?:记录|请求|响应|证据)[^。！？\n]{0,64}(?:缩小范围|缩小定位范围|判断|定位)/iu.test(intentQuestionText);
+  const explicitNonDestructiveBoundaryQuestion = existingRecordNarrowingQuestion
+    && /(?:不能|不得|不要|禁止)[^。！？\n]{0,32}(?:改数据|重放|重提|重复提交)/u.test(intentQuestionText);
   const evidenceSufficiencyQuestion = !fullHandoffMaterialQuestion
     && (/(?:只有|仅有|只(?:有|拿得到|拿到|能拿到)|没有|拿不到)[^。！？\n]{0,48}(?:够不够|够吗|是否足够|足不足够|能不能判断|能否判断|可以判断吗)/u.test(intentQuestionText)
       || /(?:现有|当前|已有|这些?)?证据[^。！？\n]{0,24}(?:最多|至多)(?:能|可(?:以)?)?(?:判断|确认|证明)到哪/u.test(intentQuestionText)
-      || explicitPartialEvidenceQuestion);
+      || explicitPartialEvidenceQuestion
+      || existingRecordNarrowingQuestion);
   const diagnosticQuestion = /(?:排查|不一致|对不上|异常|故障|现场|验证|复测|下一步|怎么判断|如何判断|怎么确认|检查|留证|只能确认|能确定|能判断到哪|最多(?:能|可)?判断|不知道|未知|走到哪|还缺什么|够不够|够吗|是否足够|能不能判断|能否判断)/i.test(intentQuestionText);
   // 受众层级也必须过发布前确定性终审，不能只相信模型遵守 prompt。
   // 普通“怎么实现”仍是产品问法；只有显式技术契约才进入 developer。
@@ -3126,9 +3158,9 @@ function consultAnswerSemanticAudit(answer, question, route) {
   ]));
   const readOnlyWriteInstructionRe = /(?:^|[，：:；;]\s*)(?:[-*]\s+|[1-9]\d*[.、．]\s*)?(?:准备|先|再|然后|请|让|用|尝试|建议|可以|需要|应当|应该|去)[^。！？；\n]{0,40}(?:新建|新增|创建|编辑|删除|保存|提交|发送|完成|签名|审批|星标|补跑|重跑|重试|重新触发|再次触发)/iu;
   const unsafeDirectActions = controlled || !(diagnosticQuestion || /只读/u.test(text)) ? [] : text.split(/(?<=[。！？；\n])/u)
-    .map(x => x.trim()).filter(statement => statement && (
+    .map(x => x.trim()).filter(statement => statement && !statementIsRouteFact(statement) && (
       Array.from(statement.matchAll(CONSULT_DIRECT_RISKY_ACTION_RE))
-        .some(match => !negatedActorPrefix.test(statement.slice(0, match.index)))
+        .some(match => !negatedActorPrefix.test(statement.slice(0, match.index)) && !negatedRiskyAction(statement, match.index))
       || readOnlyWriteInstructionRe.test(statement)
     ));
   // “只有既有请求/响应、无数据库或日志权限”只定义了本轮观测边界，不能被
@@ -4039,7 +4071,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
       if (actionIndex >= 0) violations.splice(actionIndex, 1);
     }
   }
-  return { checked: true, diagnosticQuestion, audienceMode, audienceTechnicalParts, productTechnicalParts, implementationMisplacedTechnicalParts, implementationTechnicalFirstParts, currentRouteFacts, routeFallbackMode: routeFallbackMode || '', verifiedFactsFallback, chainRequested, chainDimensions, missingRequestedInterfaces, missingChainDimensions, audienceTechnicalDumpParts: uniqueChainTechnicalDetailParts, safeChainFallback, evidenceSufficiencyQuestion, fullHandoffMaterialQuestion, broadEvidenceQuestion, partialEvidenceQuestion, broadFactQuestion, fieldDiagnosticQuestion, contextFollowupQuestion, fallbackAnswerMode, factQuestionDimensions, missingRouteFactDimensions, verifiedFactCoverageQuestion, missingVerifiedFactCoverage, implementationFactCoverageQuestion, missingImplementationFactCoverage, implementationFactCoverageGroups, hasEvidenceSufficiencyVerdict, minimumRoutePath, missingEvidenceMinimumPath, observationInputContract, undefinedObservationVariables, symbolicDefinitions: Object.fromEntries(symbolicDefinitions), undefinedSymbolicComparisons, focusedFactQuestion, focusedTypeOrLengthQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, focusedRelationshipFacts, missingFocusedRelationshipFacts, safeDiagnosticFallback, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsupportedEvidenceNegations, unsupportedEvidenceAbsenceClaims, evidenceAbsenceCorrectionFacts, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, optionCardinalityMismatches, nonSequentialOptionSets, undefinedGroupReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, emptyNumberedSections, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, emptyDiagnosticBranchHeadings, emptyListStepItems, danglingClosingPunctuationLines, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
+  return { checked: true, diagnosticQuestion, audienceMode, audienceTechnicalParts, productTechnicalParts, implementationMisplacedTechnicalParts, implementationTechnicalFirstParts, currentRouteFacts, routeFallbackMode: routeFallbackMode || '', verifiedFactsFallback, chainRequested, chainDimensions, missingRequestedInterfaces, missingChainDimensions, audienceTechnicalDumpParts: uniqueChainTechnicalDetailParts, safeChainFallback, evidenceSufficiencyQuestion, fullHandoffMaterialQuestion, broadEvidenceQuestion, partialEvidenceQuestion, broadFactQuestion, fieldDiagnosticQuestion, contextFollowupQuestion, fallbackAnswerMode, factQuestionDimensions, missingRouteFactDimensions, verifiedFactCoverageQuestion, missingVerifiedFactCoverage, implementationFactCoverageQuestion, missingImplementationFactCoverage, implementationFactCoverageGroups, hasEvidenceSufficiencyVerdict, minimumRoutePath, missingEvidenceMinimumPath, observationInputContract, undefinedObservationVariables, symbolicDefinitions: Object.fromEntries(symbolicDefinitions), undefinedSymbolicComparisons, focusedFactQuestion, focusedTypeOrLengthQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, focusedRelationshipFacts, missingFocusedRelationshipFacts, safeDiagnosticFallback, explicitNonDestructiveBoundaryQuestion, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsupportedEvidenceNegations, unsupportedEvidenceAbsenceClaims, evidenceAbsenceCorrectionFacts, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, optionCardinalityMismatches, nonSequentialOptionSets, undefinedGroupReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, emptyNumberedSections, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, emptyDiagnosticBranchHeadings, emptyListStepItems, danglingClosingPunctuationLines, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -4287,12 +4319,16 @@ function consultAnswerSafeFallback(draft, audit) {
       // 本轮没有确认什么；这里只列通用的证据边界，不生成任何业务事实。
       if (!unavailable.size) for (const label of ['接口', '数据', '后续状态']) unavailable.add(label);
       const unknown = `${Array.from(unavailable).join('、')}的具体细节待补充；本轮回答仅依据上述已核事实。`;
+      const safetyBoundary = audit.explicitNonDestructiveBoundaryQuestion
+        ? '本轮只读边界：不改数据、不重放消息、不重提任务；只核对已有记录。'
+        : '';
       return consultNormalizeSafeMarkdown([
         evidenceVerdict,
         '业务结论',
         ...businessEvidenceFacts.map(fact => `- ${fact}`),
         technicalEvidenceFacts.length ? '研发参考' : '',
         ...technicalEvidenceFacts.map(fact => `- ${fact}`),
+        safetyBoundary,
         '本轮未知',
         `- ${unknown}`,
       ].filter(Boolean).join('\n'));
@@ -4330,6 +4366,19 @@ function consultAnswerSafeFallback(draft, audit) {
   }
   const actorAction = /(?:让|请|交给|通知|要求|转|压|催|催促|推动|协调)?\s*(?:实施|用户|患者|对接(?:方)?|接口方|第三方|厂商|供应商|院方|运维|开发)[^。！？；\n]{0,64}(?:(?:改|修改|调整|切换|对齐|校准|统一|转换|修(?:复)?)[^。！？；\n]{0,16}(?:参数|传参(?:方式)?|传输方式|接口入参|报文(?:类型)?|类型|序列化(?:口径|方式|规则)?|编码(?:口径|方式|规则)?|协议(?:口径|规则)?|映射|结构|关联|链路|配置|时区|系统时间|环境|产品口径|业务口径|日切要求|服务配置|字符串|数字(?:类型)?|字段格式|数据格式|值类型)|(?:按|以)[^。！？；\n]{0,12}(?:字符串|数字(?:类型)?|指定格式|文本格式|字段格式|数据格式|值类型)[^。！？；\n]{0,8}(?:传|发送)|对时|重试|复测|重跑|补跑|重新触发|再次触发|再点|点一次|提交|保存|发送|完成|签名|审批|星标|再传|重传|重新发送)/ig;
   const negatedActorPrefix = /(?:不得|不能|不要|禁止|不可|不应|先别|停止|未确认)\s*$/i;
+  const negatedRiskyAction = (statement, matchIndex) => {
+    const source = String(statement || '');
+    const prefix = source.slice(0, Math.max(0, Number.isInteger(matchIndex) ? matchIndex : source.length));
+    const delimiterIndex = Math.max(
+      prefix.lastIndexOf('，'), prefix.lastIndexOf(','), prefix.lastIndexOf('：'),
+      prefix.lastIndexOf(':'), prefix.lastIndexOf('；'), prefix.lastIndexOf(';'),
+      prefix.lastIndexOf('。'), prefix.lastIndexOf('！'), prefix.lastIndexOf('？'), prefix.lastIndexOf('\n'),
+    );
+    const clausePrefix = prefix.slice(delimiterIndex + 1).trim();
+    // Keep the negation local to this clause; an affirmative action in a later
+    // clause must still be rejected by the side-effect guard.
+    return /(?:不得|不能|不要|禁止|不可|不应|先别|停止|未确认)[^。！？；\n]{0,24}$/u.test(clausePrefix);
+  };
   const keepPart = part => {
     if (audit.violations.includes('contradictory_observation_order') && CONSULT_OBSERVATION_ORDER_CONTRADICTION_RE.test(part)) {
       CONSULT_OBSERVATION_ORDER_CONTRADICTION_RE.lastIndex = 0; return false;
@@ -4343,9 +4392,9 @@ function consultAnswerSafeFallback(draft, audit) {
     CONSULT_CAUSAL_LOCALIZATION_RE.lastIndex = 0;
     CONSULT_DETERMINISTIC_FAILURE_RE.lastIndex = 0;
     if (audit.violations.includes('cross_actor_side_effect') && Array.from(part.matchAll(actorAction))
-      .some(match => !negatedActorPrefix.test(part.slice(0, match.index)))) return false;
+      .some(match => !negatedActorPrefix.test(part.slice(0, match.index)) && !negatedRiskyAction(part, match.index))) return false;
     if (audit.violations.includes('cross_actor_side_effect') && Array.from(part.matchAll(CONSULT_DIRECT_RISKY_ACTION_RE))
-      .some(match => !negatedActorPrefix.test(part.slice(0, match.index)))) return false;
+      .some(match => !negatedActorPrefix.test(part.slice(0, match.index)) && !negatedRiskyAction(part, match.index))) return false;
     if (audit.violations.includes('unsupported_component_fault') && (audit.unsupportedComponentClaims || []).includes(part.trim())) return false;
     if (audit.violations.includes('unsupported_evidence_negation') && (audit.unsupportedEvidenceNegations || []).includes(part.trim())) return false;
     if (audit.violations.includes('unsupported_evidence_absence') && (audit.unsupportedEvidenceAbsenceClaims || []).includes(part.trim())) return false;

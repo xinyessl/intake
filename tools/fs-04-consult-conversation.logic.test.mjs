@@ -2049,6 +2049,50 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.doesNotMatch(q0033Fallback.reply, /当前回答未通过发布前|AI 暂时连不上/);
   assert.deepEqual(q0033Fallback.finalAudit.violations, [], 'Q0033 CFG-01 partial evidence fallback 终审必须全绿');
 
+  const q0068Question = Object.keys(browserRequirements).find(question => question === 'XML报文解析集成现场暂时不能改数据、重放消息或重提任务。仅用已有记录应该怎样缩小范围？');
+  assert.ok(q0068Question, 'Q0068 应从真实浏览器题目 fixture 取到原问题');
+  const q0068ConversationHistory = [
+    { role: 'user', content: 'XML报文解析集成现在是怎么实现的？' },
+    { role: 'assistant', content: '前一轮已答复 XML 解析业务事实。' },
+    { role: 'user', content: 'XML报文解析集成涉及哪些接口、数据和边界？' },
+    { role: 'assistant', content: '前一轮已答复 XML 接口、数据和边界。' },
+    { role: 'user', content: q0068Question },
+  ];
+  const q0068MatchedRoute = contextualRouteQuestion(productionRuntimeRouteMap, q0068ConversationHistory, q0068Question);
+  assert.equal(q0068MatchedRoute.route.id, 'AUD-QR-DI-03', 'C014 Q0068 历史会话当前 route 必须命中 DI-03');
+  assert.equal(q0068MatchedRoute.answerFacts.length, 8, 'C014 Q0068 不能因前两轮历史丢失 DI-03 facts');
+  const q0068Route = runtimeRouteWithRepositoryContext(q0068MatchedRoute, '2.7.260828-2');
+  const q0068Initial = bundle.audit('', q0068Question, q0068Route);
+  const q0068SafeAudit = bundle.audit(q0068Initial.safeDiagnosticFallback, q0068Question, q0068Route);
+  const q0068Fallback = bundle.modelFailureFallback(q0068Question, q0068Route, { code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限' });
+  assert.ok(q0068Fallback, `C014 Q0068 模型截断时必须发布 DI-03 只读兜底；mode=${q0068Initial.fallbackAnswerMode}; safeViolations=${JSON.stringify(q0068SafeAudit.violations)}`);
+  assert.equal(q0068Fallback.initialAudit.fallbackAnswerMode, 'partial_evidence');
+  assert.match(q0068Fallback.reply, /格式合法|必需节点|业务落库/);
+  assert.match(q0068Fallback.reply, /请求日志|响应日志|已有记录/);
+  assert.match(q0068Fallback.reply, /只读|本轮未知|不能单独/);
+  assert.match(q0068Fallback.reply, /本轮只读边界：不改数据/);
+  assert.match(q0068Fallback.reply, /不重放消息/);
+  assert.match(q0068Fallback.reply, /不重提任务/);
+  assert.doesNotMatch(q0068Fallback.reply, /AI 暂时连不上|当前回答未通过发布前/);
+  assert.deepEqual(q0068Fallback.finalAudit.violations, [], 'C014 Q0068 DI-03 partial evidence 历史会话 fallback 终审必须全绿');
+  const q0068PositiveReplay = bundle.audit('建议让现场重新提交业务数据以补日志。', q0068Question, q0068Route);
+  assert.ok(q0068PositiveReplay.violations.includes('cross_actor_side_effect'), '明确建议重提仍必须拦截');
+
+  const q0078Question = Object.keys(browserRequirements).find(question => question === '关于住院医嘱自动通过，我现在只有一次既有请求和响应，没有数据库权限。现有证据最多能判断到哪？');
+  assert.ok(q0078Question, 'Q0078 应从真实浏览器题目 fixture 取到原问题');
+  const q0078Route = runtimeRouteWithRepositoryContext(routeQuestion(productionRuntimeRouteMap, q0078Question), '2.7.260828-2');
+  assert.equal(q0078Route.route.id, 'AUD-QR-DI-04', 'C016 Q0078 必须命中住院医嘱自动通过 route');
+  assert.equal(q0078Route.answerFacts.length, 6, 'C016 Q0078 必须保留 DI-04 受限证据 facts');
+  const q0078Initial = bundle.audit('', q0078Question, q0078Route);
+  const q0078FallbackAudit = bundle.audit(q0078Initial.safeDiagnosticFallback, q0078Question, q0078Route);
+  const q0078Fallback = bundle.modelFailureFallback(q0078Question, q0078Route, { status: 429, message: 'rate limit' });
+  assert.ok(q0078Fallback, `C016 Q0078 HTTP429 时必须发布 DI-04 partial evidence 兜底；mode=${q0078Initial.fallbackAnswerMode}; safeViolations=${JSON.stringify(q0078FallbackAudit.violations)}`);
+  assert.equal(q0078Fallback.initialAudit.fallbackAnswerMode, 'partial_evidence');
+  assert.match(q0078Fallback.reply, /住院自动通过|AUDIT:IPT:AUTO|已有请求|响应/);
+  assert.match(q0078Fallback.reply, /数据库|本轮未知|不能单独/);
+  assert.doesNotMatch(q0078Fallback.reply, /AI 暂时连不上|当前回答未通过发布前/);
+  assert.deepEqual(q0078Fallback.finalAudit.violations, [], 'C016 Q0078 DI-04 partial evidence fallback 终审必须全绿');
+
   const q0039Question = Object.keys(browserRequirements).find(question => question.includes('把药师个人审核方案从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。'));
   assert.ok(q0039Question, 'Q0039 真实 fixture 题目应存在');
   const q0039Route = runtimeRouteWithRepositoryContext(routeQuestion(productionRuntimeRouteMap, q0039Question), '2.7.260828-2');
