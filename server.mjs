@@ -3348,6 +3348,39 @@ function consultAnswerSemanticAudit(answer, question, route) {
         && /人工审/u.test(verifiedFactCoverageText)
       ))
     : [];
+  // 明确问“怎么实现”时，产品首屏仍可先讲人话，但若人工 route 本身已经
+  // 提供了成套实现事实，不能只回答“有按钮/交给工作流”就放行。按 route
+  // 原有标签提取每组的技术锚点；只有至少两组锚点的丰富 route 才启用此门，
+  // 普通单事实功能不会因此被强制技术化或堆满无关事实。
+  const implementationFactCoverageQuestion = verifiedFactsFallback
+    && !diagnosticQuestion
+    && !evidenceSufficiencyQuestion
+    && !focusedFactQuestion
+    && /(?:怎么|如何)实现/u.test(intentQuestionText)
+    && currentRouteFacts.length >= 3;
+  const implementationFactAnchorRe = /(?:\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/[A-Za-z0-9_./{}?=&:%-]+|\b[a-z][A-Za-z0-9_]*(?:[A-Z][A-Za-z0-9_]+)+\b|\b[a-z][a-z0-9_]*_[a-z0-9_]+\b|\b[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*\b|\b(?:Dify|UUID|HTTP|JSON|SQL|Redis|HIS|Dubbo|Network)\b)/giu;
+  const implementationFactCoverageGroups = [
+    ['入口与接口', /^(?:入口|接口|统一入口|接入入口与主接口)\s*[：:]/u],
+    ['任务与警示', /^任务和警示\s*[：:]/u],
+    ['外部依赖', /^外部依赖\s*[：:]/u],
+    ['生成记录', /^生成记录\s*[：:]/u],
+    ['停止链路', /^停止\s*[：:]/u],
+    ['证据边界', /^前端证据边界\s*[：:]/u],
+    ['只读对照', /^实施只读清单\s*[：:]/u],
+    ['端到端边界', /^端到端边界\s*[：:]/u],
+  ].map(([label, factRe]) => {
+    const anchors = Array.from(new Set(currentRouteFacts
+      .filter(factRe.test.bind(factRe))
+      .flatMap(fact => Array.from(String(fact).matchAll(implementationFactAnchorRe), match => match[0]))));
+    implementationFactAnchorRe.lastIndex = 0;
+    return { label, anchors };
+  }).filter(group => group.anchors.length >= 2);
+  const missingImplementationFactCoverage = implementationFactCoverageQuestion
+    ? implementationFactCoverageGroups.filter(group => {
+        const matched = group.anchors.filter(anchor => verifiedFactCoverageText.toLowerCase().includes(anchor.toLowerCase()));
+        return matched.length < Math.min(2, group.anchors.length);
+      }).map(group => group.label)
+    : [];
   const currentRoutePathFacts = currentRouteFacts.flatMap(fact => {
     const method = fact.match(/\b(GET|POST|PUT|PATCH|DELETE)\b/i)?.[1]?.toUpperCase() || '';
     return consultConcretePaths(fact).filter(pathValue => pathValue.startsWith('/') && !pathValue.includes('*'))
@@ -3429,7 +3462,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const normalizeChainFact = value => {
     let normalized = String(value || '').replace(/^\s*(?:[-*+]\s+|[1-9]\d*[.、．]\s+)/u, '').trim();
     for (let index = 0; index < 3; index++) {
-      const next = normalized.replace(/^\s*(?:业务结论|产品|入口|接口|任务和警示|外部依赖|生成记录|停止|前端证据边界|实施只读清单|端到端边界|数据与状态|留痕|当前停点|影响|实施|时间|约束|排班|结果|边界|当前页面|后端边界|统一入口|接入入口与主接口)\s*[：:]\s*/u, '').trim();
+      const next = normalized.replace(/^\s*(?:业务结论|产品|入口|接口|任务和警示|外部依赖|生成记录|停止|前端证据边界|实施只读清单|实施只读核对|端到端边界|数据与状态|留痕|当前停点|影响|实施|时间|约束|排班|结果|边界|当前页面|后端边界|统一入口|接入入口与主接口|类型|长度|删除|历史影响|权限|研发|多任务|权重)\s*[：:]\s*/u, '').trim();
       if (next === normalized) break;
       normalized = next;
     }
@@ -3438,7 +3471,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const chainFactLabels = new Map();
   const normalizeAndRememberChainFact = value => {
     const raw = String(value || '').replace(/^\s*(?:[-*+]\s+|[1-9]\d*[.、．]\s+)/u, '').trim();
-    const label = raw.match(/^(业务结论|产品|入口|接口|任务和警示|外部依赖|生成记录|停止|前端证据边界|实施只读清单|端到端边界|数据与状态|留痕|当前停点|影响|实施|时间|约束|排班|结果|边界|当前页面|后端边界|统一入口|接入入口与主接口)\s*[：:]/u)?.[1] || '';
+    const label = raw.match(/^(业务结论|产品|入口|接口|任务和警示|外部依赖|生成记录|停止|前端证据边界|实施只读清单|实施只读核对|端到端边界|数据与状态|留痕|当前停点|影响|实施|时间|约束|排班|结果|边界|当前页面|后端边界|统一入口|接入入口与主接口|类型|长度|删除|历史影响|权限|研发|多任务|权重)\s*[：:]/u)?.[1] || '';
     const normalized = normalizeChainFact(value);
     if (normalized && label && !chainFactLabels.has(normalized)) chainFactLabels.set(normalized, label);
     return normalized;
@@ -3446,7 +3479,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   // 链路正文以 route answerFacts 为主；directEvidenceFacts 只在 answerFacts
   // 没覆盖用户点名的维度时补足。mustNotConfuse 是审计边界，不得混入链路。
   const chainDimensionSourceRules = [
-    ['entry', /(?:入口|提交|接入|XML|页面|详情|列表)/iu],
+    ['entry', /(?:入口|接入|XML|页面|详情|列表)/iu],
     ['interfaces', /(?:接口|\b(?:GET|POST|PUT|PATCH|DELETE)\b\s+\/)/iu],
     ['data', /(?:数据|字段|表|落库|写入|保存|更新|删除|Redis|队列|消费|超时|状态|去重|事务|重试|查询|回写|日志|请求|响应|XML|校验)/iu],
     ['state', /(?:状态|结果|处理|记录|回写|保存|更新|删除|事务|重试|查询)/iu],
@@ -3469,6 +3502,18 @@ function consultAnswerSemanticAudit(answer, question, route) {
     ...chainDirectFallbackFacts,
   ].map(normalizeAndRememberChainFact).filter(Boolean)));
   const chainSources = chainAvailableFacts;
+  const chainDimensionRule = id => chainDimensionSourceRules.find(item => item[0] === id)?.[1];
+  const chainDimensionLabelAllowed = (id, fact) => {
+    const label = chainFactLabels.get(fact);
+    if (!label || id !== 'entry') return true;
+    return ['入口', '当前页面', '统一入口', '接入入口与主接口'].includes(label);
+  };
+  const missingChainFactDimensions = chainDimensions
+    .filter(item => {
+      const rule = chainDimensionRule(item.id);
+      return rule && !chainAvailableFacts.some(fact => chainDimensionLabelAllowed(item.id, fact) && rule.test(fact));
+    })
+    .map(item => item.id);
   const chainInterfaceFacts = [];
   // “已确认主签名”只来自 answerFacts；contextRefs 里可能还有标题下拉、
   // 鉴权前缀等辅助接口，不能因“完整”反向塞进主链路。
@@ -3585,11 +3630,11 @@ function consultAnswerSemanticAudit(answer, question, route) {
     const entryChainFacts = chainFactsByLabelOrRule(
       chainDimensionFacts,
       ['入口', '当前页面', '统一入口', '接入入口与主接口'],
-      /(?:入口|提交|接入|XML|页面|详情|列表)/iu,
+      /(?:入口|接入|XML|页面|详情|列表)/iu,
     );
     const dataStateChainFacts = chainFactsByLabelOrRule(
       chainDimensionFacts,
-      ['任务和警示', '生成记录', '停止', '数据与状态', '留痕', '影响', '实施', '时间', '约束', '排班', '结果', '边界', '后端边界'],
+      ['任务和警示', '生成记录', '停止', '数据与状态', '留痕', '影响', '实施', '时间', '约束', '排班', '结果', '边界', '后端边界', '类型', '长度', '删除', '历史影响', '权限', '研发', '多任务', '权重', '实施只读核对'],
       /(?:数据|字段|表|落库|写入|保存|更新|删除|Redis|队列|消费|超时|状态|去重|事务|重试|查询|回写|日志|请求|响应|XML|校验)/iu,
     );
     const dependencyChainFacts = chainFactsByLabelOrRule(
@@ -3597,6 +3642,10 @@ function consultAnswerSemanticAudit(answer, question, route) {
       ['外部依赖'],
       /(?:外部依赖|HIS|用户中心|audit-server|Redis|redis2db|Socket|Dubbo|Dify)/iu,
     );
+    const addMissingChainDimension = (id, label) => {
+      if (!missingChainFactDimensions.includes(id)) return;
+      chainLines.push(`- ${label}：本轮 route 已核事实未提供可发布的${label}细节，当前停点，不补写。`);
+    };
     const usedChainFacts = new Set(chainBusinessFact ? [chainBusinessFact] : []);
     const addChainFacts = (label, candidates, fallback = '') => {
       const facts = Array.from(new Set((candidates.length ? candidates : (fallback ? [fallback] : []))
@@ -3607,16 +3656,27 @@ function consultAnswerSemanticAudit(answer, question, route) {
         chainLines.push(`- ${label}：${fact}`);
       }
     };
-    if (chainDimensions.some(item => item.id === 'entry')) addChainFacts('入口', entryChainFacts, chainEntryFact);
+    if (chainDimensions.some(item => item.id === 'entry')) {
+      addChainFacts('入口', entryChainFacts, missingChainFactDimensions.includes('entry') ? '' : chainEntryFact);
+      addMissingChainDimension('entry', '入口');
+    }
     if (chainDimensions.some(item => item.id === 'interfaces') && uniqueChainInterfaces.length) {
       for (const item of uniqueChainInterfaces) chainLines.push(`- 接口：\`${item.display}\`。`);
     }
-    if (chainDimensions.some(item => item.id === 'data' || item.id === 'state')) addChainFacts('数据与状态', dataStateChainFacts, dataChainFact);
+    if (chainDimensions.some(item => item.id === 'interfaces') && !uniqueChainInterfaces.length) addMissingChainDimension('interfaces', '接口');
+    if (chainDimensions.some(item => item.id === 'data' || item.id === 'state')) {
+      const dataStateLineBefore = chainLines.length;
+      addChainFacts('数据与状态', dataStateChainFacts, dataChainFact);
+      if (chainLines.length === dataStateLineBefore) {
+        addMissingChainDimension('data', '数据');
+        addMissingChainDimension('state', '状态');
+      }
+    }
     if (chainDimensions.some(item => item.id === 'dependencies')) {
       const dependencyLineBefore = chainLines.length;
       addChainFacts('外部依赖', dependencyChainFacts, compactDependencyChainFact);
       if (chainLines.length === dependencyLineBefore) {
-        chainLines.push('- 外部依赖：当前已核事实未提供外部依赖，本轮停在这里，不补写。');
+        addMissingChainDimension('dependencies', '外部依赖');
       }
     }
     const gapBlock = compactChainGapFacts.length ? ['当前停点（只列资料明确的未知）：', ...compactChainGapFacts.map(fact => `- ${fact}`)] : [];
@@ -3824,6 +3884,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
     if (!hasUnknownBoundary) violations.push('incomplete_verified_facts');
   }
   if (missingVerifiedFactCoverage.length && !violations.includes('incomplete_verified_facts')) violations.push('incomplete_verified_facts');
+  if (missingImplementationFactCoverage.length && !violations.includes('incomplete_verified_facts')) violations.push('incomplete_verified_facts');
   if (cardinalityMismatches.length) violations.push('inconsistent_structured_cardinality');
   if (incompleteResultBranchTables.length) violations.push('incomplete_result_branch_set');
   if (conflictingCountDeclarations.length) violations.push('conflicting_count_declaration');
@@ -3913,7 +3974,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
     // 模型额外写出的“建议删除/重新提交”等动作不满足该条件，继续拦截。
     const chainFallbackText = String(safeChainFallback || '').trim();
     const routeFactTraceText = value => String(value || '')
-      .replace(/^\s*(?:业务结论|产品|入口|接口|任务和警示|外部依赖|生成记录|停止|前端证据边界|实施只读清单|端到端边界|数据与状态|留痕|当前停点|影响|实施|时间|约束|排班|结果|边界|当前页面|后端边界|统一入口|接入入口与主接口)\s*[：:]\s*/u, '')
+      .replace(/^\s*(?:业务结论|产品|入口|接口|任务和警示|外部依赖|生成记录|停止|前端证据边界|实施只读清单|实施只读核对|端到端边界|数据与状态|留痕|当前停点|影响|实施|时间|约束|排班|结果|边界|当前页面|后端边界|统一入口|接入入口与主接口|多任务|权重)\s*[：:]\s*/u, '')
       .trim();
     // 不能让 every([]) 绕过动作门：任一检测器命中动作时，所有直接动作和
     // 角色动作片段都必须同时能追溯到确定性 route 兜底和本轮 route 事实。
@@ -4155,7 +4216,18 @@ function consultAnswerSafeFallback(draft, audit) {
         .slice(0, 3)
         .sort((left, right) => left.index - right.index)
         .map(item => item.fact);
-      const publishedRouteFacts = partialEvidenceFacts.length ? partialEvidenceFacts : routeFacts.slice(0, 1);
+      // 只有一个主路径时，受限证据终稿仍须带上该路径，否则发布审计会把
+      // “没有数据库权限”的局部未知误判成“连请求边界也没回答”。将它作为
+      // 最少的一条补入，不扩张到其它接口。
+      const minimumPathFact = audit.minimumRoutePath
+        ? routeFacts.find(fact => consultConcretePaths(fact).includes(audit.minimumRoutePath.path))
+        : '';
+      const publishedRouteFacts = Array.from(new Set([
+        ...(partialEvidenceFacts.length ? partialEvidenceFacts : routeFacts.slice(0, 1)),
+        ...(minimumPathFact ? [minimumPathFact] : []),
+      ]));
+      const technicalEvidenceFacts = publishedRouteFacts.filter(fact => /(?:\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/|\b[A-Z][A-Za-z0-9_$]*(?:Controller|Service|Mapper|Repository|DAO|DTO|VO)\b|\b[a-z][A-Za-z0-9_]{2,}\s*=|`\/[A-Za-z0-9_./{}?=&:%-]+`)/i.test(fact));
+      const businessEvidenceFacts = publishedRouteFacts.filter(fact => !technicalEvidenceFacts.includes(fact));
       const routeHasEvidenceVerdict = routeFacts.some(fact =>
         /(?:只够|足够|够(?:用|判断|固定|完成)|不够|不足|不能单独|不能替代|尚不能|只能固定|只能证明|只能确认|最多(?:只能|能|可))/u.test(fact)
       );
@@ -4174,7 +4246,9 @@ function consultAnswerSafeFallback(draft, audit) {
       return consultNormalizeSafeMarkdown([
         evidenceVerdict,
         '业务结论',
-        ...publishedRouteFacts.map(fact => `- ${fact}`),
+        ...businessEvidenceFacts.map(fact => `- ${fact}`),
+        technicalEvidenceFacts.length ? '研发参考' : '',
+        ...technicalEvidenceFacts.map(fact => `- ${fact}`),
         '本轮未知',
         `- ${unknown}`,
       ].filter(Boolean).join('\n'));

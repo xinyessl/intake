@@ -1944,6 +1944,67 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     assert.deepEqual(fallback.finalAudit.violations, [], `${questionId} facts fallback 终审必须全绿`);
   }
 
+  const q0011AiQuestion = Object.keys(browserRequirements).find(question => question.includes('另一轮独立复测（11）里，AI 审方生成现在是怎么实现的？'));
+  assert.ok(q0011AiQuestion, 'Q0011 真实 fixture 题目应存在');
+  const q0011AiRoute = runtimeRouteWithContext(routeQuestion(productionRouteMap, q0011AiQuestion));
+  const q0011GenericAnswer = [
+    '两边的入口和行为先对齐：门诊处方审核页、住院医嘱审核页上都有“AI 解读”按钮，点开后看到的是一段流式滚动出来的辅助文字。',
+    '它不会自动变成审核意见，只有药师点“立即加入审核建议”才会追加到当前意见框。',
+    '系统按本次患者/就诊、当前任务、门诊或住院来源整理上下文，门诊还会带上处方信息，再交给配置好的 AI 工作流以流式方式返回页面。',
+    '生成过程会留记录：请求发出前先记一条生成记录，首个有效内容块回来时回写任务标识，全部结束后回写完整内容。',
+    '只看页面和网络请求时，只能确认页面发了请求、收到了什么响应；复测留证时记录当前来源、任务/患者上下文、脱敏请求内容、HTTP 状态和流式首末块。',
+  ].join('\n');
+  const q0011GenericAudit = bundle.audit(q0011GenericAnswer, q0011AiQuestion, q0011AiRoute);
+  assert.ok(q0011GenericAudit.violations.includes('incomplete_verified_facts'), 'Q0011 只给产品概括时必须被实现事实覆盖门拦住');
+  const q0011GenericFallback = bundle.fallback(q0011GenericAnswer, q0011GenericAudit);
+  assert.match(q0011GenericFallback, /POST \/auditapi\/comm\/ai\/generate/);
+  assert.match(q0011GenericFallback, /getIptCurrentTask|listOrderCautionByGroupNo/);
+  assert.match(q0011GenericFallback, /sceneCode|audit_ai_scene/);
+  assert.match(q0011GenericFallback, /audit_ai_generate/);
+  assert.match(q0011GenericFallback, /generate\/stop\?generateId/);
+  assert.match(q0011GenericFallback, /requestId/);
+  assert.deepEqual(bundle.audit(q0011GenericFallback, q0011AiQuestion, q0011AiRoute).violations, [], 'Q0011 实现事实覆盖不足时应完整回落到 route facts 且终审全绿');
+
+  const q0029Question = Object.keys(browserRequirements).find(question => question.includes('把评语常用语维护从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。'));
+  assert.ok(q0029Question, 'Q0029 真实 fixture 题目应存在');
+  const q0029Route = runtimeRouteWithContext(routeQuestion(productionRouteMap, q0029Question));
+  const q0029InitialAudit = bundle.audit('', q0029Question, q0029Route);
+  const q0029FallbackAudit = bundle.audit(q0029InitialAudit.safeChainFallback, q0029Question, q0029Route);
+  const q0029Fallback = bundle.modelFailureFallback(q0029Question, q0029Route, { status: 429, message: 'rate limit' });
+  assert.ok(q0029Fallback, `Q0029 HTTP429 链路 fallback 必须可发布；violations=${JSON.stringify(q0029FallbackAudit.violations)}`);
+  assert.match(q0029Fallback.reply, /audit_reply_template|评语常用语/);
+  assert.match(q0029Fallback.reply, /\/auditapi\/audit\/templates|\/auditapi\/audit\/template/);
+  assert.match(q0029Fallback.reply, /当前停点|本轮停在这里|未定义|明确停住/);
+  assert.deepEqual(q0029Fallback.finalAudit.violations, [], 'Q0029 CFG-02 链路 fallback 终审必须全绿');
+
+  const q0033Question = Object.keys(browserRequirements).find(question => question.includes('审核方案配置这条链路只确认前端发出了请求，服务端后续日志还没拿到。先说能确定的，未知项请单独标出来。'));
+  assert.ok(q0033Question, 'Q0033 真实 fixture 题目应存在');
+  const q0033Route = runtimeRouteWithContext(routeQuestion(productionRouteMap, q0033Question));
+  const q0033InitialAudit = bundle.audit('', q0033Question, q0033Route);
+  const q0033FallbackAudit = bundle.audit(q0033InitialAudit.safeDiagnosticFallback, q0033Question, q0033Route);
+  const q0033DeterministicReply = bundle.fallback('', q0033InitialAudit);
+  const q0033DeterministicAudit = bundle.audit(q0033DeterministicReply, q0033Question, q0033Route);
+  const q0033Fallback = bundle.modelFailureFallback(q0033Question, q0033Route, { status: 429, message: 'rate limit' });
+  assert.ok(q0033Fallback, `Q0033 HTTP429 partial evidence fallback 必须可发布；mode=${q0033InitialAudit.fallbackAnswerMode}; safe=${JSON.stringify(q0033InitialAudit.safeDiagnosticFallback)}; safeViolations=${JSON.stringify(q0033FallbackAudit.violations)}; deterministic=${JSON.stringify(q0033DeterministicReply)}; deterministicViolations=${JSON.stringify(q0033DeterministicAudit.violations)}`);
+  assert.equal(q0033Fallback.initialAudit.fallbackAnswerMode, 'partial_evidence');
+  assert.match(q0033Fallback.reply, /现有受限证据|本轮未知/);
+  assert.doesNotMatch(q0033Fallback.reply, /当前回答未通过发布前|AI 暂时连不上/);
+  assert.deepEqual(q0033Fallback.finalAudit.violations, [], 'Q0033 CFG-01 partial evidence fallback 终审必须全绿');
+
+  const q0039Question = Object.keys(browserRequirements).find(question => question.includes('把药师个人审核方案从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。'));
+  assert.ok(q0039Question, 'Q0039 真实 fixture 题目应存在');
+  const q0039Route = runtimeRouteWithContext(routeQuestion(productionRouteMap, q0039Question));
+  const q0039InitialAudit = bundle.audit('', q0039Question, q0039Route);
+  const q0039FallbackAudit = bundle.audit(q0039InitialAudit.safeChainFallback, q0039Question, q0039Route);
+  const q0039Fallback = bundle.modelFailureFallback(q0039Question, q0039Route, { status: 429, message: 'rate limit' });
+  assert.ok(q0039Fallback, `Q0039 HTTP429 链路 fallback 必须可发布；route=${q0039Route.route?.id}; safeViolations=${JSON.stringify(q0039FallbackAudit.violations)}`);
+  assert.match(q0039Fallback.reply, /入口：本轮 route 已核事实未提供可发布的入口细节/);
+  assert.match(q0039Fallback.reply, /接口：本轮 route 已核事实未提供可发布的接口细节/);
+  assert.match(q0039Fallback.reply, /外部依赖：本轮 route 已核事实未提供可发布的外部依赖细节/);
+  assert.doesNotMatch(q0039Fallback.reply, /GET |POST |PUT |DELETE /, 'route 未提供接口时不能臆造方法和路径');
+  assert.match(q0039Fallback.reply, /当前停点|本轮停在这里|未定义|明确停住/);
+  assert.deepEqual(q0039Fallback.finalAudit.violations, [], 'Q0039 个人审核方案链路 fallback 终审必须全绿');
+
   const qCfgEvidenceQuestion = '审核方案配置现场暂时不能改数据、重放消息或重提任务。仅用已有记录应该怎样缩小范围？';
   const qCfgMatchedRoute = routeQuestion(productionRouteMap, qCfgEvidenceQuestion);
   assert.equal(qCfgMatchedRoute.route.id, 'AUD-QR-CFG-01', 'C004 真实 route matcher 必须命中 CFG-01');
