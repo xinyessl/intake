@@ -3365,9 +3365,14 @@ function consultAnswerSemanticAudit(answer, question, route) {
   // 直接放行。这里只检查带有明确“日期/时段→前置门槛→人工审”结构的
   // 边界事实，并要求保留其关键条件词；不要求逐字复述其它 answerFacts，
   // 以免把每个普通问法都强制扩写成整张 route 卡。
+  // “异常/故障”这类主题词会让诊断信号命中，但只要问句本身是简单的
+  // as-built 实现问法，就仍应按完整事实覆盖门处理；明确的现场/证据/只读
+  // 追问不在此范围内，避免把诊断题扩写成整张 route 卡。
+  const plainImplementationQuestion = /(?:怎么实现|如何实现|实现方式)/u.test(intentQuestionText)
+    && !/(?:只(?:能|确认)|仅(?:能|确认)|只读|现场|排查|留证|证据|未知|能确定|能判断到哪|下一步|怎么查|如何查|怎么判断|如何判断|只用|仅用|已有记录|现有记录)/iu.test(intentQuestionText);
   const verifiedFactCoverageQuestion = verifiedFactsFallback
     && !focusedFactQuestion
-    && !diagnosticQuestion
+    && (!diagnosticQuestion || plainImplementationQuestion)
     && /(?:怎么实现|如何实现|涉及哪些|包含哪些|覆盖哪些|分别说明|介绍)/u.test(questionText);
   const verifiedFactCoverageText = String(text || '').replace(/[*_`#]/g, '');
   const missingVerifiedFactCoverage = verifiedFactCoverageQuestion
@@ -3387,7 +3392,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   // 原有标签提取每组的技术锚点；只有至少两组锚点的丰富 route 才启用此门，
   // 普通单事实功能不会因此被强制技术化或堆满无关事实。
   const implementationFactCoverageQuestion = verifiedFactsFallback
-    && !diagnosticQuestion
+    && (!diagnosticQuestion || plainImplementationQuestion)
     && !evidenceSufficiencyQuestion
     && !focusedFactQuestion
     && /(?:怎么|如何)实现/u.test(intentQuestionText)
@@ -3419,11 +3424,31 @@ function consultAnswerSemanticAudit(answer, question, route) {
     anchorRe.lastIndex = 0;
     return { label, anchors };
   }).filter(group => group.anchors.length >= 2);
+  // 没有统一标签的 route 也可能把生产启用、支持范围和重复调用授权写在
+  // 普通事实句中。用事实语义识别这些高风险边界，并只在该 route 明确提供
+  // 对应事实时要求覆盖；不绑定具体模块、接口或题号。
+  const implementationFactCoverageSemanticGroups = [
+    {
+      label: '生产启用与支持边界',
+      factRe: /(?:代码存在不等于|生产[^。！？；\n]{0,24}(?:部署|启用)|发布记录|支持能力|运维确认)/iu,
+      answerRe: /(?:生产(?:包|环境|部署|启用)|发布记录|已部署|支持能力|运维确认)/iu,
+    },
+    {
+      label: '授权与重复调用边界',
+      factRe: /(?:未经[^。！？；\n]{0,16}授权|不得[^。！？；\n]{0,32}(?:重新)?调用|安全重复(?:调用|补发)|重复(?:调用|补发))/iu,
+      answerRe: /(?:运维(?:确认|授权)|未经[^。！？；\n]{0,16}授权|不得[^。！？；\n]{0,32}(?:重新)?调用|重复(?:调用|补发))/iu,
+    },
+  ].filter(group => currentRouteFacts.some(fact => group.factRe.test(fact)));
   const missingImplementationFactCoverage = implementationFactCoverageQuestion
-    ? implementationFactCoverageGroups.filter(group => {
+    ? [
+        ...implementationFactCoverageGroups.filter(group => {
         const matched = group.anchors.filter(anchor => implementationFactCoverageText.toLowerCase().includes(anchor.toLowerCase()));
         return matched.length < Math.min(2, group.anchors.length);
-      }).map(group => group.label)
+        }).map(group => group.label),
+        ...implementationFactCoverageSemanticGroups
+          .filter(group => !group.answerRe.test(implementationFactCoverageText))
+          .map(group => group.label),
+      ]
     : [];
   const currentRoutePathFacts = currentRouteFacts.flatMap(fact => {
     const method = fact.match(/\b(GET|POST|PUT|PATCH|DELETE)\b/i)?.[1]?.toUpperCase() || '';
@@ -4292,7 +4317,7 @@ function consultAnswerSafeFallback(draft, audit) {
         .map((fact, index) => ({ fact, index, score: [
           /(?:只能确认|证据边界|前端证据)/iu,
           /(?:现有记录|已有记录|只读|核对|日志|失败记录|生产包|发布记录)/iu,
-          /(?:不得|未经|授权|不能代替|不等于|不支持|不能据此)/iu,
+          /(?:不得|未经|授权|不能代替|不等于|不支持|不能据此|另一套(?:错误)?机制|不由[^。！？；\n]{0,32}统一处理|相邻(?:机制|功能)|机制隔离)/iu,
           /(?:页面|响应|状态|结果|记录)/iu,
         ].reduce((score, re) => score + (re.test(fact) ? 1 : 0), 0)}))
         .filter(item => item.score > 0)
@@ -4300,6 +4325,13 @@ function consultAnswerSafeFallback(draft, audit) {
         .slice(0, 3)
         .sort((left, right) => left.index - right.index)
         .map(item => item.fact);
+      // 受限证据回答还必须保住 route 明确的机制隔离边界（例如某条
+      // 处方采集链路不由当前补发入口统一处理）。这类事实可能不含日志/记录
+      // 等观测词，不能因为相关性排序的前三条而被吞掉；仅补入显式隔离句，
+      // 不把 mustNotConfuse 或其它未点名上下文整段搬入正文。
+      const partialEvidenceBoundaryFacts = routeFacts.filter(fact =>
+        /(?:另一套(?:错误)?机制|不由[^。！？；\n]{0,32}统一处理|相邻(?:机制|功能)|机制隔离)/iu.test(fact)
+      );
       // 只有一个主路径时，受限证据终稿仍须带上该路径，否则发布审计会把
       // “没有数据库权限”的局部未知误判成“连请求边界也没回答”。将它作为
       // 最少的一条补入，不扩张到其它接口。
@@ -4308,6 +4340,7 @@ function consultAnswerSafeFallback(draft, audit) {
         : '';
       const publishedRouteFacts = Array.from(new Set([
         ...(partialEvidenceFacts.length ? partialEvidenceFacts : routeFacts.slice(0, 1)),
+        ...partialEvidenceBoundaryFacts,
         ...(minimumPathFact ? [minimumPathFact] : []),
       ]));
       const technicalEvidenceFacts = publishedRouteFacts.filter(fact => /(?:\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/|\b[A-Z][A-Za-z0-9_$]*(?:Controller|Service|Mapper|Repository|DAO|DTO|VO)\b|\b[a-z][A-Za-z0-9_]{2,}\s*=|`\/[A-Za-z0-9_./{}?=&:%-]+`)/i.test(fact));

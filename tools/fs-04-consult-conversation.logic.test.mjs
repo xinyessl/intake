@@ -2158,6 +2158,56 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(q0015Fallback.reply, /另一套|不由.*统一处理/);
   assert.deepEqual(q0015Fallback.finalAudit.violations, [], 'Q0015 DI-07 只读清单 fallback 终审必须全绿');
 
+  const q0106Question = Object.keys(browserRequirements).find(question => question === '采集异常处理现在是怎么实现的？');
+  assert.ok(q0106Question, 'Q0106 应从真实浏览器题目 fixture 取到原问题');
+  const q0106Route = runtimeRouteWithRepositoryContext(routeQuestion(productionRuntimeRouteMap, q0106Question), '2.7.260828-2');
+  assert.equal(q0106Route.route.id, 'AUD-QR-DI-07', 'Q0106 必须命中 DI-07');
+  assert.equal(q0106Route.answerFacts.length, 5, 'Q0106 必须保留 DI-07 全部已核事实');
+  const q0106Fallback = bundle.modelFailureFallback(q0106Question, q0106Route, { status: 429, message: 'rate limit' });
+  assert.ok(q0106Fallback, 'Q0106 普通实现问法 HTTP429 时必须使用完整事实兜底');
+  assert.match(q0106Fallback.reply, /生产包|发布记录/);
+  assert.match(q0106Fallback.reply, /访问.*日志|访问日志|失败记录/);
+  assert.match(q0106Fallback.reply, /运维确认|运维授权/);
+  assert.match(q0106Fallback.reply, /未经运维授权不得|未经.*授权.*重新调用/);
+  assert.match(q0106Fallback.reply, /audit_sync_error_flow/);
+  assert.match(q0106Fallback.reply, /另一套|不由.*统一处理/);
+  assert.deepEqual(q0106Fallback.finalAudit.violations, [], 'Q0106 DI-07 普通实现事实 fallback 终审必须全绿');
+  const q0106IncompleteDraft = '采集异常处理在审方页面没有菜单或一键补发按钮；调用 GET /comm/deal/error，当前无定时自动重试；住院/门诊处方采集的 audit_sync_error_flow 属于另一套错误机制，不由这个 HC1015 补发入口统一处理。';
+  const q0106IncompleteAudit = bundle.audit(q0106IncompleteDraft, q0106Question, q0106Route);
+  assert.ok(q0106IncompleteAudit.violations.includes('incomplete_verified_facts'), 'Q0106 普通实现草稿漏掉生产/授权边界时必须被覆盖门拦截');
+  const q0106IncompleteFallback = bundle.fallback(q0106IncompleteDraft, q0106IncompleteAudit);
+  assert.match(q0106IncompleteFallback, /生产包|发布记录/);
+  assert.match(q0106IncompleteFallback, /运维确认|运维授权/);
+  assert.match(q0106IncompleteFallback, /未经运维授权不得|未经.*授权.*重新调用/);
+  assert.deepEqual(bundle.audit(q0106IncompleteFallback, q0106Question, q0106Route).violations, [], 'Q0106 普通实现草稿修订后必须完整覆盖 DI-07 关键边界并终审全绿');
+
+  const q0108Question = Object.keys(browserRequirements).find(question => question === '采集异常处理这条链路只确认前端发出了请求，服务端后续日志还没拿到。先说能确定的，未知项请单独标出来。');
+  assert.ok(q0108Question, 'Q0108 应从真实浏览器题目 fixture 取到原问题');
+  const q0108Route = runtimeRouteWithRepositoryContext(routeQuestion(productionRuntimeRouteMap, q0108Question), '2.7.260828-2');
+  assert.equal(q0108Route.route.id, 'AUD-QR-DI-07', 'Q0108 必须命中 DI-07');
+  const q0108Fallback = bundle.modelFailureFallback(q0108Question, q0108Route, { code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限' });
+  assert.ok(q0108Fallback, 'Q0108 partial evidence 截断时必须使用已核事实兜底');
+  assert.equal(q0108Fallback.initialAudit.fallbackAnswerMode, 'partial_evidence');
+  assert.match(q0108Fallback.reply, /现有受限证据|本轮未知/);
+  assert.match(q0108Fallback.reply, /audit_sync_error_flow/);
+  assert.match(q0108Fallback.reply, /另一套|不由.*统一处理/);
+  assert.match(q0108Fallback.reply, /请求|响应|前端/);
+  assert.doesNotMatch(q0108Fallback.reply, /AI 暂时连不上|当前回答未通过发布前/);
+  assert.deepEqual(q0108Fallback.finalAudit.violations, [], 'Q0108 DI-07 partial evidence fallback 终审必须全绿');
+
+  const q0118Question = Object.keys(browserRequirements).find(question => question === '采集异常处理现场暂时不能改数据、重放消息或重提任务。仅用已有记录应该怎样缩小范围？');
+  assert.ok(q0118Question, 'Q0118 应从真实浏览器题目 fixture 取到原问题');
+  const q0118Route = runtimeRouteWithRepositoryContext(routeQuestion(productionRuntimeRouteMap, q0118Question), '2.7.260828-2');
+  assert.equal(q0118Route.route.id, 'AUD-QR-DI-07', 'Q0118 必须命中 DI-07');
+  const q0118Fallback = bundle.modelFailureFallback(q0118Question, q0118Route, { status: 429, message: 'rate limit' });
+  assert.ok(q0118Fallback, 'Q0118 只读已有记录 HTTP429 时必须使用已核事实兜底');
+  assert.equal(q0118Fallback.initialAudit.fallbackAnswerMode, 'partial_evidence');
+  assert.match(q0118Fallback.reply, /生产包|发布记录|访问.*日志|失败记录/);
+  assert.match(q0118Fallback.reply, /audit_sync_error_flow/);
+  assert.match(q0118Fallback.reply, /另一套|不由.*统一处理/);
+  assert.match(q0118Fallback.reply, /不改数据|不重放消息|不重提任务/);
+  assert.deepEqual(q0118Fallback.finalAudit.violations, [], 'Q0118 DI-07 只读已有记录 fallback 终审必须全绿');
+
   const q0030Question = Object.keys(browserRequirements).find(question => question === '评语常用语维护这一步只能确认现象稳定复现，不能做写操作。现在应停在哪个边界并交给谁继续？');
   assert.ok(q0030Question, 'Q0030 应从真实浏览器题目 fixture 取到原问题');
   const q0030Route = runtimeRouteWithRepositoryContext(routeQuestion(productionRuntimeRouteMap, q0030Question), '2.7.260828-2');
