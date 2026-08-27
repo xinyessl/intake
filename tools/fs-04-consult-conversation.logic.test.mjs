@@ -2078,6 +2078,30 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   const q0068PositiveReplay = bundle.audit('建议让现场重新提交业务数据以补日志。', q0068Question, q0068Route);
   assert.ok(q0068PositiveReplay.violations.includes('cross_actor_side_effect'), '明确建议重提仍必须拦截');
 
+  const q0069ChainQuestion = Object.keys(browserRequirements).find(question => question === '把XML报文解析集成从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。');
+  assert.ok(q0069ChainQuestion, 'Q0069 应从真实浏览器题目 fixture 取到原问题');
+  const q0069ChainHistory = [
+    { role: 'user', content: 'XML报文解析集成现在是怎么实现的？' },
+    { role: 'assistant', content: '前一轮已答复 XML 解析业务事实。' },
+    { role: 'user', content: 'XML报文解析集成涉及哪些接口、数据和边界？' },
+    { role: 'assistant', content: '前一轮已答复 XML 接口、数据和边界。' },
+    { role: 'user', content: q0069ChainQuestion },
+  ];
+  const q0069ChainMatchedRoute = contextualRouteQuestion(productionRuntimeRouteMap, q0069ChainHistory, q0069ChainQuestion);
+  assert.equal(q0069ChainMatchedRoute.route.id, 'AUD-QR-DI-03', 'C014 Q0069 历史会话当前 route 必须命中 DI-03');
+  assert.equal(q0069ChainMatchedRoute.answerFacts.length, 8, 'C014 Q0069 不能因历史上下文丢失 DI-03 facts');
+  const q0069ChainRoute = runtimeRouteWithRepositoryContext(q0069ChainMatchedRoute, '2.7.260828-2');
+  const q0069ChainInitial = bundle.audit('', q0069ChainQuestion, q0069ChainRoute);
+  const q0069ChainFallbackAudit = bundle.audit(q0069ChainInitial.safeChainFallback, q0069ChainQuestion, q0069ChainRoute);
+  const q0069ChainFallback = bundle.modelFailureFallback(q0069ChainQuestion, q0069ChainRoute, { status: 429, message: 'rate limit' });
+  assert.ok(q0069ChainFallback, `C014 Q0069 HTTP429 链路 fallback 必须可发布；mode=${q0069ChainInitial.fallbackAnswerMode}; safeViolations=${JSON.stringify(q0069ChainFallbackAudit.violations)}`);
+  assert.match(q0069ChainFallback.reply, /XML|格式合法|节点/);
+  assert.match(q0069ChainFallback.reply, /接口：本轮 route 已核事实未提供可发布的接口细节|接口/);
+  assert.match(q0069ChainFallback.reply, /外部依赖：本轮 route 已核事实未提供可发布的外部依赖细节|外部依赖/);
+  assert.match(q0069ChainFallback.reply, /当前停点|本轮停在这里|未定义|明确停住/);
+  assert.doesNotMatch(q0069ChainFallback.reply, /XmlParserActuator|getNodeList|NodeList|Java/);
+  assert.deepEqual(q0069ChainFallback.finalAudit.violations, [], 'C014 Q0069 DI-03 链路 fallback 终审必须全绿');
+
   const q0078Question = Object.keys(browserRequirements).find(question => question === '关于住院医嘱自动通过，我现在只有一次既有请求和响应，没有数据库权限。现有证据最多能判断到哪？');
   assert.ok(q0078Question, 'Q0078 应从真实浏览器题目 fixture 取到原问题');
   const q0078Route = runtimeRouteWithRepositoryContext(routeQuestion(productionRuntimeRouteMap, q0078Question), '2.7.260828-2');

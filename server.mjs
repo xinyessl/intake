@@ -1973,10 +1973,12 @@ function consultHasLikelihoodEvidence(question, route, claim = '') {
   if (!String(claim || '').trim()) return evidenceTexts.length > 0;
   const normalizeClaimText = value => String(value || '').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
   const normalizedClaim = normalizeClaimText(claim);
+  const normalizeRoutedClause = value => normalizeClaimText(value)
+    .replace(/^(?:业务结论|产品|入口|当前页面|统一入口|接入入口与主接口|接口|数据与状态|状态|任务和警示|生成记录|停止|前端证据边界|实施只读清单|实施只读核对|端到端边界|外部依赖|留痕|当前停点|影响|实施|时间|约束|排班|结果|边界|后端边界)*/u, '');
   // A route fact is already reviewed evidence. Preserve a probability/status
   // boundary when the answer quotes that fact verbatim, without authorizing
   // a model-invented variant merely because it shares a few tokens.
-  if (normalizedClaim.length >= 6 && routeFactClauses.some(source => normalizeClaimText(source) === normalizedClaim)) return true;
+  if (normalizedClaim.length >= 6 && routeFactClauses.some(source => normalizeRoutedClause(source) === normalizeRoutedClause(claim))) return true;
   if (!evidenceTexts.length) return false;
   if (normalizedClaim.length >= 6 && evidenceTexts.some(source => normalizeClaimText(source).includes(normalizedClaim))) return true;
   const claimTokens = (value) => {
@@ -3730,7 +3732,13 @@ function consultAnswerSemanticAudit(answer, question, route) {
     if (chainDimensions.some(item => item.id === 'interfaces') && !uniqueChainInterfaces.length) addMissingChainDimension('interfaces', '接口');
     if (chainDimensions.some(item => item.id === 'data' || item.id === 'state')) {
       const dataStateLineBefore = chainLines.length;
-      addChainFacts('数据与状态', dataStateChainFacts, dataChainFact);
+      // Keep the first route fact that defines concrete data markers even when
+      // other data/state facts were selected before it; otherwise the audit
+      // sees a missing marker and rejects the otherwise deterministic chain.
+      const dataMarkerFallbackFact = dataChainFact
+        && chainFactLabels.get(normalizeChainFact(dataChainFact)) !== '外部依赖'
+        ? dataChainFact : '';
+      addChainFacts('数据与状态', [...dataStateChainFacts, ...(dataMarkerFallbackFact ? [dataMarkerFallbackFact] : [])]);
       if (chainLines.length === dataStateLineBefore) {
         addMissingChainDimension('data', '数据');
         addMissingChainDimension('state', '状态');
