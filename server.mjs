@@ -3915,20 +3915,19 @@ function consultAnswerSemanticAudit(answer, question, route) {
     const routeFactTraceText = value => String(value || '')
       .replace(/^\s*(?:业务结论|产品|入口|接口|任务和警示|外部依赖|生成记录|停止|前端证据边界|实施只读清单|端到端边界|数据与状态|留痕|当前停点|影响|实施|时间|约束|排班|结果|边界|当前页面|后端边界|统一入口|接入入口与主接口)\s*[：:]\s*/u, '')
       .trim();
-    // Do not let every([]) waive the action gate: if either detector found an
-    // action, every detected direct/actor fragment must be traceable to the
-    // deterministic route-derived fallback and to a current route fact.
+    // 不能让 every([]) 绕过动作门：任一检测器命中动作时，所有直接动作和
+    // 角色动作片段都必须同时能追溯到确定性 route 兜底和本轮 route 事实。
     const chainFallbackActionStatements = [...unsafeDirectActions, ...unsafeActorActions];
     const chainFallbackActionsAreRouteFacts = chainFallbackActionStatements.length > 0
       && chainFallbackActionStatements.every(statement => {
-      const line = String(statement || '').trim();
-      const body = line.replace(/^\s*(?:[-*+]\s+)?(?:[^：:\n]{1,24})\s*[：:]\s*/u, '').trim();
-      const appearsInFallback = chainFallbackText.includes(line) || (body && chainFallbackText.includes(body));
-      const appearsInRoute = currentRouteFacts.some(fact => {
-        const routeText = routeFactTraceText(fact);
-        return routeText && (routeText.includes(body) || body.includes(routeText));
-      });
-      return appearsInFallback && appearsInRoute;
+        const line = String(statement || '').trim();
+        const body = line.replace(/^\s*(?:[-*+]\s+)?(?:[^：:\n]{1,24})\s*[：:]\s*/u, '').trim();
+        const appearsInFallback = chainFallbackText.includes(line) || (body && chainFallbackText.includes(body));
+        const appearsInRoute = currentRouteFacts.some(fact => {
+          const routeText = routeFactTraceText(fact);
+          return routeText && (routeText.includes(body) || body.includes(routeText));
+        });
+        return appearsInFallback && appearsInRoute;
       });
     if (chainFallbackActionsAreRouteFacts) {
       const actionIndex = violations.indexOf('cross_actor_side_effect');
