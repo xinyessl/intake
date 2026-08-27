@@ -3603,7 +3603,14 @@ function consultAnswerSemanticAudit(answer, question, route) {
       : [];
     const confirmedTechnicalFacts = audienceMode === 'implementation'
       ? allConfirmedFacts.filter(fact => sourceTechnicalRe.test(fact) || concreteInterfaceRe.test(fact)) : [];
-    const confirmedFacts = allConfirmedFacts.filter(fact => !confirmedTechnicalFacts.includes(fact));
+    // 实施只读兜底只发布可作为判断基线的事实。route fact 里的“新建前会删除/提交/重放”等
+    // 是对现状流程的描述，不是本轮允许执行的动作；原样搬进只读清单会被动作审计误判成现场指令，
+    // 进而让已核事实 fallback 自己拒答。此类带动作起句的事实留在 route/retrieval 供模型和审计追溯，
+    // 不作为本轮实施终稿正文发布；负向边界（“不得…”）不命中该规则，仍可保留。
+    const diagnosticActionFactRe = /(?:^|[，：:；;]\s*)(?:[-*]\s+|[1-9]\d*[.、．]\s*)?(?:新建|新增|创建|编辑|删除|修改|调整|保存|提交|发送|重放|重提|重试|重复|补发|复测|再点|点一次|重新(?:提交|发送|触发|执行))/iu;
+    const confirmedFacts = allConfirmedFacts
+      .filter(fact => !confirmedTechnicalFacts.includes(fact))
+      .filter(fact => audienceMode !== 'implementation' || !diagnosticActionFactRe.test(fact));
     const knownBlock = confirmedFacts.length
       ? ['已知事实（继续作为判断基线）：', ...confirmedFacts.map(fact => `- ${fact}`)].join('\n')
       : '当前没有已核证据确认具体按钮、接口、字段或状态值；下面只给不依赖这些未知事实的只读留证。';

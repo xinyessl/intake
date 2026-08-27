@@ -1820,6 +1820,49 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(q0003ChainFallback.reply, /当前停点|未定义|明确停住/);
   assert.doesNotMatch(q0003ChainFallback.reply, /医嘱标记|AI 暂时连不上/);
   assert.deepEqual(q0003ChainFallback.finalAudit.violations, [], 'Q0003 AI-01 chain fallback 终审必须全绿');
+  const q0009ChainQuestion = '把AI 审方生成从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。';
+  const q0009Requirement = JSON.parse(fs.readFileSync(
+    path.join(ROOT, 'tools/fixtures/audit-browser-1000.question-requirements.json'), 'utf8',
+  )).questionToRequirements[q0009ChainQuestion];
+  const q0009ProductionRoute = {
+    matched: true,
+    fallbackMode: 'verifiedFacts',
+    route: { id: q0009Requirement.requirementId, title: q0009Requirement.routeTitle, fallbackMode: 'verifiedFacts' },
+    answerFacts: q0009Requirement.answerFacts,
+    mustNotConfuse: q0009Requirement.mustNotConfuse,
+    primaryRefs: q0009Requirement.primaryRefs,
+    contextRefs: q0009Requirement.contextRefs,
+  };
+  assert.equal(q0009Requirement.answerFacts.length, 9, 'Q0009 应使用生产 route 的 9 条 AI-01 facts');
+  assert.equal(q0009Requirement.mustNotConfuse.length, 4, 'Q0009 应使用生产 route 的 4 条边界');
+  const q0009ProductionFallback = bundle.modelFailureFallback(q0009ChainQuestion, q0009ProductionRoute, { status: 429, message: 'rate limit' });
+  assert.ok(q0009ProductionFallback, 'Q0009 生产 AI-01 route+HTTP429 必须使用已核链路兜底');
+  assert.match(q0009ProductionFallback.reply, /入口|接口/);
+  assert.match(q0009ProductionFallback.reply, /数据/);
+  assert.match(q0009ProductionFallback.reply, /外部依赖|Dify/);
+  assert.match(q0009ProductionFallback.reply, /当前停点|未定义|明确停住/);
+  assert.doesNotMatch(q0009ProductionFallback.reply, /医嘱标记|AI 暂时连不上/);
+  assert.deepEqual(q0009ProductionFallback.finalAudit.violations, [], 'Q0009 生产 AI-01 chain fallback 终审必须全绿');
+
+  const qCfgEvidenceQuestion = '审核方案配置现场暂时不能改数据、重放消息或重提任务。仅用已有记录应该怎样缩小范围？';
+  const qCfgRequirement = JSON.parse(fs.readFileSync(
+    path.join(ROOT, 'tools/fixtures/audit-browser-1000.question-requirements.json'), 'utf8',
+  )).questionToRequirements[qCfgEvidenceQuestion];
+  const qCfgProductionRoute = {
+    matched: true,
+    fallbackMode: 'verifiedFacts',
+    route: { id: qCfgRequirement.requirementId, title: qCfgRequirement.routeTitle, fallbackMode: 'verifiedFacts' },
+    answerFacts: qCfgRequirement.answerFacts,
+    mustNotConfuse: qCfgRequirement.mustNotConfuse,
+    primaryRefs: qCfgRequirement.primaryRefs,
+    contextRefs: qCfgRequirement.contextRefs,
+  };
+  assert.equal(qCfgRequirement.requirementId, 'AUD-QR-CFG-01');
+  const qCfgFallback = bundle.modelFailureFallback(qCfgEvidenceQuestion, qCfgProductionRoute, { status: 429, message: 'rate limit' });
+  assert.ok(qCfgFallback, 'CFG-01 只读已有记录问法+HTTP429 必须使用已核事实兜底');
+  assert.match(qCfgFallback.reply, /已核事实|现有记录|只读|未知|不能确认/);
+  assert.doesNotMatch(qCfgFallback.reply, /AI 暂时连不上/);
+  assert.deepEqual(qCfgFallback.finalAudit.violations, [], 'CFG-01 只读已有记录 fallback 终审必须全绿');
 
   const q0021Question = '审核方案配置现在是怎么实现的？';
   const q0021Route = {
