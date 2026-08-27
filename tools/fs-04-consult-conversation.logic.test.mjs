@@ -1805,6 +1805,11 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(q0003Fallback.reply, /只能确认页面发起的请求/);
   assert.doesNotMatch(q0003Fallback.reply, /当前回答未通过发布前事实与动作安全校验/);
   assert.deepEqual(q0003Fallback.finalAudit.violations, [], 'Q0003 两轮模型失败后最终必须为已确认事实+未知边界，而非安全拒答占位');
+  const q0003ExactQuestion = '另一轮独立复测（6）里，AI 审方生成现在是怎么实现的？';
+  const q0003ExactFallback = bundle.modelFailureFallback(q0003ExactQuestion, q0003Route, { status: 429, message: 'rate limit' });
+  assert.ok(q0003ExactFallback, 'Q0003 exact route+HTTP429 不能因“独立复测”实施受众误判而放弃事实兜底');
+  assert.doesNotMatch(q0003ExactFallback.reply, /AI 暂时连不上/);
+  assert.deepEqual(q0003ExactFallback.finalAudit.violations, [], 'Q0003 exact route+HTTP429 fallback 终审必须全绿');
 
   const q0021Question = '审核方案配置现在是怎么实现的？';
   const q0021Route = {

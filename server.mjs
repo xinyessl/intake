@@ -3607,8 +3607,20 @@ function consultAnswerSemanticAudit(answer, question, route) {
     const knownBlock = confirmedFacts.length
       ? ['已知事实（继续作为判断基线）：', ...confirmedFacts.map(fact => `- ${fact}`)].join('\n')
       : '当前没有已核证据确认具体按钮、接口、字段或状态值；下面只给不依赖这些未知事实的只读留证。';
-    const audienceReferenceBlock = confirmedTechnicalFacts.length
-      ? ['研发参考', ...confirmedTechnicalFacts.map(fact => `- ${fact}`)].join('\n') : '';
+    // 实施兜底最多保留一条已核研发事实：优先能帮助定位入口的接口事实，
+    // 再选技术 token 最少的一条。这样既不丢掉单接口诊断题的必要路径，
+    // 也不会把整张 route 的字段/调用链搬进“研发参考”造成技术倾倒。
+    const confirmedTechnicalReference = confirmedTechnicalFacts
+      .slice()
+      .sort((left, right) => {
+        const leftHasPath = concreteInterfaceRe.test(left) ? 1 : 0;
+        const rightHasPath = concreteInterfaceRe.test(right) ? 1 : 0;
+        return rightHasPath - leftHasPath
+          || consultScopeTechnicalTokens(left).length - consultScopeTechnicalTokens(right).length;
+      })
+      .find(fact => consultScopeTechnicalTokens(fact).length <= 8) || '';
+    const audienceReferenceBlock = confirmedTechnicalReference
+      ? ['研发参考', `- ${confirmedTechnicalReference}`].join('\n') : '';
     const safeSteps = singleStepQuestion
       ? ['1. 先只读对照一份已有页面原文与同一次已有请求/响应原文；没有既有请求时只记录“未取得请求证据”，不要为抓包重复未知业务操作。']
       : [
@@ -3641,8 +3653,11 @@ function consultAnswerSemanticAudit(answer, question, route) {
       } else {
         minimumEvidenceSteps.push(`${minimumEvidenceSteps.length + 1}. 把这份响应与同一时刻的页面现象逐字对照；这一步不必先拿服务器日志。`);
       }
+      // 确定性实施兜底只保留业务事实、最小只读取证步骤和至多一条
+      // 必要研发参考，避免把路由事实整段搬运后触发 audience_technical_dump。
       safeDiagnosticFallback = [verdict, attachmentBoundary, knownBlock, '最小缺口：', ...minimumEvidenceSteps, audienceReferenceBlock].filter(Boolean).join('\n\n');
     } else {
+      // 同上：安全兜底不扩写未经本轮问句要求的接口/字段/调用链。
       safeDiagnosticFallback = [knownBlock, '最小只读排查：', ...safeSteps, audienceReferenceBlock].filter(Boolean).join('\n\n');
     }
   }
