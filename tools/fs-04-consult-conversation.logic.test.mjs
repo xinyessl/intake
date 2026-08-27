@@ -32,6 +32,30 @@ const guard = new Function(extractFn(SRC, 'consultConversationGuard') + '\nretur
 const safeDiagnosticIntent = new Function(extractFn(SRC, 'consultSafeDiagnosticIntent') + '\nreturn consultSafeDiagnosticIntent;')();
 const audienceMode = new Function('consultSafeDiagnosticIntent', extractFn(SRC, 'consultAudienceMode') + '\nreturn consultAudienceMode;')(safeDiagnosticIntent);
 const audienceGuard = new Function('consultAudienceMode', extractFn(SRC, 'consultAudienceGuard') + '\nreturn consultAudienceGuard;')(audienceMode);
+const routeConstants = ['ROUTE_MATCH_MIN', 'ROUTE_ALIAS_BONUS', 'ROUTE_EXACT_TITLE_MIN_RATIO', 'ROUTE_EXACT_TIER3']
+  .map(name => SRC.match(new RegExp(`const ${name} = [^;]+;`))?.[0] || '').join('\n');
+const routeQuestion = new Function(
+  routeConstants + '\n'
+    + extractFn(SRC, 'kbTokenize') + '\n'
+    + extractFn(SRC, 'routeScorer') + '\n'
+    + extractFn(SRC, 'routeQuestion') + '\nreturn routeQuestion;',
+)();
+const assembleConsultSpecHits = new Function(extractFn(SRC, 'assembleConsultSpecHits') + '\nreturn assembleConsultSpecHits;')();
+const loadRouteContext = new Function(
+  'safeRef', 'moduleMapRepo', 'specFileText',
+  extractFn(SRC, 'extractSection') + '\n'
+    + extractFn(SRC, 'routeEvidenceExcerpt') + '\n'
+    + extractFn(SRC, 'loadRouteContext') + '\nreturn loadRouteContext;',
+)(value => String(value || ''), () => path.resolve(ROOT, '../psp/audit'), () => '');
+
+function runtimeRouteWithContext(route) {
+  const context = loadRouteContext({}, '', route);
+  const assembled = assembleConsultSpecHits(true, context.specHits, [], 8, 7);
+  return {
+    ...route,
+    directEvidenceFacts: (assembled.directEvidenceHits || []).map(hit => String((hit && hit.text) || '')).filter(Boolean),
+  };
+}
 
 test('答疑受众按问句意图分层：普通业务默认产品，现场诊断归实施，明确技术契约才归研发', () => {
   for (const q of ['医嘱标记现在是怎么实现的？', '这个功能是什么？', '支持哪些业务场景？', '业务规则和状态边界是什么？']) {
@@ -1803,6 +1827,7 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.equal(q0003Fallback.initialAudit.fallbackAnswerMode, 'partial_evidence');
   assert.match(q0003Fallback.reply, /本轮未知/);
   assert.match(q0003Fallback.reply, /只能确认页面发起的请求/);
+  assert.doesNotMatch(q0003Fallback.reply, /本轮未知\s*本轮未知[：:]/, 'partial evidence fallback 不得重复未知标题');
   assert.doesNotMatch(q0003Fallback.reply, /当前回答未通过发布前事实与动作安全校验/);
   assert.deepEqual(q0003Fallback.finalAudit.violations, [], 'Q0003 两轮模型失败后最终必须为已确认事实+未知边界，而非安全拒答占位');
   const q0003ExactQuestion = '另一轮独立复测（6）里，AI 审方生成现在是怎么实现的？';
@@ -1821,20 +1846,15 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.doesNotMatch(q0003ChainFallback.reply, /医嘱标记|AI 暂时连不上/);
   assert.deepEqual(q0003ChainFallback.finalAudit.violations, [], 'Q0003 AI-01 chain fallback 终审必须全绿');
   const q0009ChainQuestion = '把AI 审方生成从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。';
-  const q0009Requirement = JSON.parse(fs.readFileSync(
-    path.join(ROOT, 'tools/fixtures/audit-browser-1000.question-requirements.json'), 'utf8',
-  )).questionToRequirements[q0009ChainQuestion];
-  const q0009ProductionRoute = {
-    matched: true,
-    fallbackMode: 'verifiedFacts',
-    route: { id: q0009Requirement.requirementId, title: q0009Requirement.routeTitle, fallbackMode: 'verifiedFacts' },
-    answerFacts: q0009Requirement.answerFacts,
-    mustNotConfuse: q0009Requirement.mustNotConfuse,
-    primaryRefs: q0009Requirement.primaryRefs,
-    contextRefs: q0009Requirement.contextRefs,
-  };
-  assert.equal(q0009Requirement.answerFacts.length, 9, 'Q0009 应使用生产 route 的 9 条 AI-01 facts');
-  assert.equal(q0009Requirement.mustNotConfuse.length, 4, 'Q0009 应使用生产 route 的 4 条边界');
+  const productionRouteMap = JSON.parse(fs.readFileSync(
+    path.resolve(ROOT, '../psp/audit/docs/specs/question-routes.json'), 'utf8',
+  ));
+  const q0009MatchedRoute = routeQuestion(productionRouteMap, q0009ChainQuestion);
+  assert.equal(q0009MatchedRoute.route.id, 'AUD-QR-AI-01', 'Q0009 真实 route matcher 必须命中 AI-01');
+  assert.equal(q0009MatchedRoute.answerFacts.length, 9, 'Q0009 应使用生产 route 的 9 条 AI-01 facts');
+  assert.equal(q0009MatchedRoute.mustNotConfuse.length, 4, 'Q0009 应使用生产 route 的 4 条边界');
+  const q0009ProductionRoute = runtimeRouteWithContext(q0009MatchedRoute);
+  assert.equal(q0009ProductionRoute.directEvidenceFacts.length, 1, 'Q0009 routeContext+assemble 应注入 answerFacts 证据块');
   const q0009ProductionFallback = bundle.modelFailureFallback(q0009ChainQuestion, q0009ProductionRoute, { status: 429, message: 'rate limit' });
   assert.ok(q0009ProductionFallback, 'Q0009 生产 AI-01 route+HTTP429 必须使用已核链路兜底');
   assert.match(q0009ProductionFallback.reply, /入口|接口/);
@@ -1844,25 +1864,51 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.doesNotMatch(q0009ProductionFallback.reply, /医嘱标记|AI 暂时连不上/);
   assert.deepEqual(q0009ProductionFallback.finalAudit.violations, [], 'Q0009 生产 AI-01 chain fallback 终审必须全绿');
 
+  const browserRequirements = JSON.parse(fs.readFileSync(
+    path.resolve(ROOT, 'tools/fixtures/audit-browser-1000.question-requirements.json'), 'utf8',
+  )).questionToRequirements;
+  for (const [questionId, prefix] of [['Q0006', '（6）'], ['Q0011', '（11）']]) {
+    const exactQuestion = Object.keys(browserRequirements).find(question => question.includes(`另一轮独立复测${prefix}里，AI 审方生成现在是怎么实现的？`));
+    assert.ok(exactQuestion, `${questionId} 应从真实浏览器题目 fixture 取到原问题`);
+    const matched = routeQuestion(productionRouteMap, exactQuestion);
+    assert.equal(matched.route.id, 'AUD-QR-AI-01', `${questionId} 真实 route matcher 必须命中 AI-01`);
+    assert.equal(matched.answerFacts.length, 9, `${questionId} 应使用生产 route 的 9 条 AI-01 facts`);
+    const runtimeRoute = runtimeRouteWithContext(matched);
+    const fallback = bundle.modelFailureFallback(exactQuestion, runtimeRoute, { status: 429, message: 'rate limit' });
+    assert.ok(fallback, `${questionId} HTTP429 时必须使用 facts 确定性兜底`);
+    assert.equal(fallback.initialAudit.audienceMode, 'product', `${questionId} 评测前缀不能覆盖核心事实问法的产品受众`);
+    assert.equal(fallback.initialAudit.fallbackAnswerMode, 'facts', `${questionId} 评测前缀不能把事实题降成 field_diagnostic`);
+    assert.match(fallback.reply, /任务和警示|getIptCurrentTask|listOrderCautionByGroupNo/);
+    assert.match(fallback.reply, /Dify/);
+    assert.match(fallback.reply, /audit_ai_generate/);
+    assert.match(fallback.reply, /generate\/stop|停止/);
+    assert.deepEqual(fallback.finalAudit.violations, [], `${questionId} facts fallback 终审必须全绿`);
+  }
+
   const qCfgEvidenceQuestion = '审核方案配置现场暂时不能改数据、重放消息或重提任务。仅用已有记录应该怎样缩小范围？';
-  const qCfgRequirement = JSON.parse(fs.readFileSync(
-    path.join(ROOT, 'tools/fixtures/audit-browser-1000.question-requirements.json'), 'utf8',
-  )).questionToRequirements[qCfgEvidenceQuestion];
-  const qCfgProductionRoute = {
-    matched: true,
-    fallbackMode: 'verifiedFacts',
-    route: { id: qCfgRequirement.requirementId, title: qCfgRequirement.routeTitle, fallbackMode: 'verifiedFacts' },
-    answerFacts: qCfgRequirement.answerFacts,
-    mustNotConfuse: qCfgRequirement.mustNotConfuse,
-    primaryRefs: qCfgRequirement.primaryRefs,
-    contextRefs: qCfgRequirement.contextRefs,
-  };
-  assert.equal(qCfgRequirement.requirementId, 'AUD-QR-CFG-01');
+  const qCfgMatchedRoute = routeQuestion(productionRouteMap, qCfgEvidenceQuestion);
+  assert.equal(qCfgMatchedRoute.route.id, 'AUD-QR-CFG-01', 'C004 真实 route matcher 必须命中 CFG-01');
+  assert.equal(qCfgMatchedRoute.answerFacts.length, 10, 'C004 应使用生产 route 的 10 条 CFG-01 facts');
+  const qCfgProductionRoute = runtimeRouteWithContext(qCfgMatchedRoute);
   const qCfgFallback = bundle.modelFailureFallback(qCfgEvidenceQuestion, qCfgProductionRoute, { status: 429, message: 'rate limit' });
   assert.ok(qCfgFallback, 'CFG-01 只读已有记录问法+HTTP429 必须使用已核事实兜底');
   assert.match(qCfgFallback.reply, /已核事实|现有记录|只读|未知|不能确认/);
   assert.doesNotMatch(qCfgFallback.reply, /AI 暂时连不上/);
   assert.deepEqual(qCfgFallback.finalAudit.violations, [], 'CFG-01 只读已有记录 fallback 终审必须全绿');
+
+  const q0015Question = Object.keys(browserRequirements).find(question => question === '我没完全听懂采集异常处理的排查建议，换成实施可以逐项照做的只读清单。');
+  assert.ok(q0015Question, 'Q0015 应从真实浏览器题目 fixture 取到原问题');
+  const q0015MatchedRoute = routeQuestion(productionRouteMap, q0015Question);
+  assert.equal(q0015MatchedRoute.route.id, 'AUD-QR-DI-07', 'Q0015 真实 route matcher 必须命中 DI-07');
+  assert.equal(q0015MatchedRoute.answerFacts.length, 5, 'Q0015 应使用生产 route 的 5 条 DI-07 facts');
+  const q0015ProductionRoute = runtimeRouteWithContext(q0015MatchedRoute);
+  const q0015Fallback = bundle.modelFailureFallback(q0015Question, q0015ProductionRoute, { status: 429, message: 'rate limit' });
+  assert.ok(q0015Fallback, 'Q0015 HTTP429 时必须使用 DI-07 只读清单兜底');
+  assert.match(q0015Fallback.reply, /生产包|发布记录/);
+  assert.match(q0015Fallback.reply, /运维确认|运维授权/);
+  assert.match(q0015Fallback.reply, /未经运维授权不得/);
+  assert.match(q0015Fallback.reply, /后续调用仍会命中/);
+  assert.deepEqual(q0015Fallback.finalAudit.violations, [], 'Q0015 DI-07 只读清单 fallback 终审必须全绿');
 
   const q0021Question = '审核方案配置现在是怎么实现的？';
   const q0021Route = {

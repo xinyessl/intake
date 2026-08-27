@@ -1781,7 +1781,11 @@ function consultConversationGuard(question, mode) {
 }
 
 function consultSafeDiagnosticIntent(question) {
-  const q = String(question || '').trim();
+  // 评测回放会在原问题前加“另一轮独立复测（N）里，”。这是题目来源标记，
+  // 不是本轮要解决的业务动作；先去掉它，避免把“怎么实现”误判为现场复测。
+  const q = String(question || '').trim()
+    .replace(/^另一轮独立复测\s*[（(]\s*\d+\s*[）)]\s*里\s*[，,：:；;]?\s*/iu, '')
+    .trim();
   if (!q || q.length > 1000) return false;
   const direct = /(?:现场(?:要|怎么)?复现|怎么复现|如何复现|复现(?:步骤|条件)|怎么排查|如何排查|先查什么|从哪查起|哪里出问题|怎么留证|如何留证|现场留证|转开发前|交给开发前|(?:最少|至少)(?:要|需)?(?:补|提供|收集|记录)(?:什么|哪些)|抓什么|需要什么证据|只有(?:一张)?图|只有截图|拿不到\s*spec|没有\s*spec|先别让我找\s*spec)/i.test(q);
   const symptom = /(?:列表为空|查不到|没数据|没有数据|一个都看不到|不显示|看不到|没反应|没变化|对不上|失败|异常|错误|页码|分页|筛选|保存后|患者端|医生端|药师端|详情|下钻)/i.test(q);
@@ -1794,7 +1798,9 @@ function consultSafeDiagnosticIntent(question) {
 // 在问产品规则或替研发查调用链。只有明确点名技术契约才展开研发细节；普通
 // “是什么/怎么实现/业务规则”默认按产品问题回答，避免把 Java/表字段堆到首屏。
 function consultAudienceMode(question) {
-  const q = String(question || '').trim();
+  const q = String(question || '').trim()
+    .replace(/^另一轮独立复测\s*[（(]\s*\d+\s*[）)]\s*里\s*[，,：:；;]?\s*/iu, '')
+    .trim();
   const developer = /(?:接口(?:路径|地址|契约|入参|出参|返回)?|字段(?:名|类型|长度|取值)?|列(?:名|类型|长度|取值)?|column(?:s)?(?:\s*(?:name|type|length|value))?|哪张表|表名|数据库表|SQL|源码|代码|开发链路|调用链|调用关系|Java\s*类|类名|方法名|Controller|Service|Mapper|Repository|DAO|DTO|VO)(?:[^。！？\n]{0,28}(?:什么|哪些|哪个|哪里|在哪|怎么|如何|实现|定义|调用|读写|保存|返回|排查|看|查))?|(?:什么|哪些|哪个|哪里|在哪|怎么|如何|看|查)[^。！？\n]{0,28}(?:接口|字段|列|column|哪张表|表名|SQL|源码|代码|开发链路|调用链|Java\s*类|Controller|Service|Mapper|DTO|VO)/i.test(q);
   if (developer) return 'developer';
   const implementation = consultSafeDiagnosticIntent(q)
@@ -2395,6 +2401,10 @@ async function consultStreamFinalAnswer(answer, writeChunk, options = {}) {
 
 function consultAnswerSemanticAudit(answer, question, route) {
   const text = String(answer || '').trim();
+  const questionText = String(question || '');
+  const intentQuestionText = questionText.trim()
+    .replace(/^另一轮独立复测\s*[（(]\s*\d+\s*[）)]\s*里\s*[，,：:；;]?\s*/iu, '')
+    .trim();
   const documentLines = text.split('\n');
   // 圈号经常用来跨表格/段落引用观测点。模型删句或修订后若只剩“③/④”这类
   // 未定义引用，实施无法照做；定义必须出现在结构起点（行首/表格单元格）或
@@ -2520,7 +2530,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   // “按结果分支判断”是至少两个分支的结构承诺。模型修订/删句后若表格只剩
   // 一条数据行，即使表格列数正确也不能称为“分支”；实施会不知道其余结果怎么走。
   const incompleteResultBranchTables = [];
-  const branchDiagnosticQuestion = /(?:排查|不一致|对不上|异常|故障|现场|验证|复测|下一步|怎么判断|如何判断|怎么确认|检查|留证|只能确认|能确定|不知道|未知|走到哪|还缺什么|够不够)/i.test(String(question || ''));
+  const branchDiagnosticQuestion = /(?:排查|不一致|对不上|异常|故障|现场|验证|复测|下一步|怎么判断|如何判断|怎么确认|检查|留证|只能确认|能确定|不知道|未知|走到哪|还缺什么|够不够)/i.test(intentQuestionText);
   const resultBranchLeadRe = /(?:(?:按|根据|依照)[^。！？\n]{0,18}(?:结果|情况|观测)[^。！？\n]{0,18}(?:分支|分类|分别|判断|走)|(?:怎么|如何)判断|判断如下)/u;
   for (let index = 0; index < documentLines.length; index++) {
     const leadMatched = resultBranchLeadRe.test(documentLines[index]);
@@ -3075,17 +3085,16 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const unsafeActorActions = controlled ? [] : text.split(/(?<=[。！？；\n])/u)
     .map(x => x.trim()).filter(statement => statement && Array.from(statement.matchAll(actorAction))
       .some(match => !negatedActorPrefix.test(statement.slice(0, match.index))));
-  const questionText = String(question || '');
-  const fullHandoffMaterialQuestion = /(?:(?:完整|全部|全套|正式)[^。！？\n]{0,16}(?:提单|工单|转开发|交接|材料包|留证包)|(?:提单|工单|转开发|交接)[^。！？\n]{0,16}(?:完整|全部|全套|材料清单|最少补哪些信息))/u.test(questionText);
+  const fullHandoffMaterialQuestion = /(?:(?:完整|全部|全套|正式)[^。！？\n]{0,16}(?:提单|工单|转开发|交接|材料包|留证包)|(?:提单|工单|转开发|交接)[^。！？\n]{0,16}(?:完整|全部|全套|材料清单|最少补哪些信息))/u.test(intentQuestionText);
   const evidenceSufficiencyQuestion = !fullHandoffMaterialQuestion
-    && (/(?:只有|仅有|只(?:有|拿得到|拿到|能拿到)|没有|拿不到)[^。！？\n]{0,48}(?:够不够|够吗|是否足够|足不足够|能不能判断|能否判断|可以判断吗)/u.test(questionText)
-      || /(?:现有|当前|已有|这些?)?证据[^。！？\n]{0,24}(?:最多|至多)(?:能|可(?:以)?)?(?:判断|确认|证明)到哪/u.test(questionText));
-  const diagnosticQuestion = /(?:排查|不一致|对不上|异常|故障|现场|验证|复测|下一步|怎么判断|如何判断|怎么确认|检查|留证|只能确认|能确定|能判断到哪|最多(?:能|可)?判断|不知道|未知|走到哪|还缺什么|够不够|够吗|是否足够|能不能判断|能否判断)/i.test(questionText);
+    && (/(?:只有|仅有|只(?:有|拿得到|拿到|能拿到)|没有|拿不到)[^。！？\n]{0,48}(?:够不够|够吗|是否足够|足不足够|能不能判断|能否判断|可以判断吗)/u.test(intentQuestionText)
+      || /(?:现有|当前|已有|这些?)?证据[^。！？\n]{0,24}(?:最多|至多)(?:能|可(?:以)?)?(?:判断|确认|证明)到哪/u.test(intentQuestionText));
+  const diagnosticQuestion = /(?:排查|不一致|对不上|异常|故障|现场|验证|复测|下一步|怎么判断|如何判断|怎么确认|检查|留证|只能确认|能确定|能判断到哪|最多(?:能|可)?判断|不知道|未知|走到哪|还缺什么|够不够|够吗|是否足够|能不能判断|能否判断)/i.test(intentQuestionText);
   // 受众层级也必须过发布前确定性终审，不能只相信模型遵守 prompt。
   // 普通“怎么实现”仍是产品问法；只有显式技术契约才进入 developer。
   const audienceDeveloperQuestion = /(?:接口(?:路径|地址|契约|入参|出参|返回)?|字段(?:名|类型|长度|取值)?|列(?:名|类型|长度|取值)?|column(?:s)?(?:\s*(?:name|type|length|value))?|哪张表|表名|数据库表|SQL|源码|代码|开发链路|调用链|调用关系|Java\s*类|类名|方法名|Controller|Service|Mapper|Repository|DAO|DTO|VO)(?:[^。！？\n]{0,28}(?:什么|哪些|哪个|哪里|在哪|怎么|如何|实现|定义|调用|读写|保存|返回|排查|看|查))?|(?:什么|哪些|哪个|哪里|在哪|怎么|如何|看|查)[^。！？\n]{0,28}(?:接口|字段|列|column|哪张表|表名|SQL|源码|代码|开发链路|调用链|Java\s*类|Controller|Service|Mapper|DTO|VO)/i.test(questionText);
   const audienceImplementationQuestion = !audienceDeveloperQuestion && (diagnosticQuestion
-    || /(?:实施(?:口径|步骤|清单|排查|复测|核对|留证)|回归|转开发|只读(?:步骤|清单|检查|核)|抓包|抓到|抓取|重点核|核什么|核对|请求(?:和|与|\/)?响应|日志|截图|怎么查|如何查|排查|留证)/i.test(questionText));
+    || /(?:实施(?:口径|步骤|清单|排查|复测|核对|留证)|回归|转开发|只读(?:步骤|清单|检查|核)|抓包|抓到|抓取|重点核|核什么|核对|请求(?:和|与|\/)?响应|日志|截图|怎么查|如何查|排查|留证)/i.test(intentQuestionText));
   const audienceMode = audienceDeveloperQuestion ? 'developer' : audienceImplementationQuestion ? 'implementation' : 'product';
   const sourceTechnicalRe = /(?:[A-Za-z0-9_./-]+\.java\b|(?:^|[\s`/])src\/(?:main|test)\/|\b[A-Z][A-Za-z0-9_$]*(?:Controller|Service|Mapper|Repository|DAO|DTO|VO)\b|(?:Controller|Service|Mapper|Repository|DAO|DTO|VO)\s*[.#：:]|(?:表名|数据库表|写入表|读取表|落到表|查询表)\s*(?:是|为|[:：])?\s*[`'“”]?\s*[a-z][a-z0-9_]{2,}|(?:字段名?|参数名?)\s*(?:是|为|[:：])\s*[`'“”]?\s*[a-z][A-Za-z0-9_]{2,}|\b[a-z][A-Za-z0-9_]{2,}\s*=|`[a-z][A-Za-z0-9_]{2,}`)/i;
   const concreteInterfaceRe = /(?:\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/[A-Za-z0-9_./{}?=&:%-]+|`\/[A-Za-z0-9_./{}?=&:%-]+`)/i;
@@ -3404,7 +3413,9 @@ function consultAnswerSemanticAudit(answer, question, route) {
   ].filter(([, , re]) => re.test(questionText)).map(([id, label]) => ({ id, label })) : [];
   const chainSources = route && route.matched ? Array.from(new Set([
     ...(route.answerFacts || []), ...(route.directEvidenceFacts || []), ...(route.mustNotConfuse || []),
-  ].map(value => String(value || '').replace(/^[-*+]\s+/u, '').trim()).filter(Boolean))) : [];
+  ].flatMap(value => String(value || '').split(/\r?\n/u))
+    .map(value => value.replace(/^\s*(?:[-*+]\s+|[1-9]\d*[.、．]\s+)/u, '').trim())
+    .filter(Boolean))) : [];
   const chainAnswerFacts = route && route.matched
     ? (route.answerFacts || []).map(value => String(value || '').trim()).filter(Boolean) : [];
   const chainInterfaceFacts = [];
@@ -3598,8 +3609,16 @@ function consultAnswerSemanticAudit(answer, question, route) {
       ? (route.mustNotConfuse || []).map(String).map(x => x.trim()).filter(Boolean)
         .filter(fact => !/(?:current route|路由事实|最小缺口模板|内部措辞)/iu.test(fact)).slice(0, 1)
       : [];
+    // 只读清单不能固定截前 3 条：同一 route 的后段经常才是生产核对、授权
+    // 和重复调用边界。按本轮实施/排查意图优先保留与观测、安全、生产状态
+    // 直接相关的 facts，同时保留首条业务基线；技术细节稍后仍按受众收敛。
+    const diagnosticFactRelevanceRe = /(?:实施|只读|排查|留证|核对|记录|日志|生产包|发布记录|访问|失败记录|支持能力|授权|未经|不得|不能|后续调用|重复|重发|重提|异常|现状|状态|证据|响应|返回|日期|星期|时间|页面|业务|功能|范围|对象|结果|条件)/iu;
+    const diagnosticFactQuestion = /(?:实施|只读|排查|留证|复测|现场|清单|证据|缩小范围|转开发|怎么查|如何查|核对|怎么判断|如何判断)/iu.test(intentQuestionText);
     const allConfirmedFacts = route && route.matched
-      ? [...currentRouteFacts.slice(0, 3), ...publicMustNotConfuse].map(String).map(x => x.trim()).filter(Boolean)
+      ? Array.from(new Set([
+          ...currentRouteFacts.filter((fact, index) => index === 0 || !diagnosticFactQuestion || diagnosticFactRelevanceRe.test(fact)),
+          ...publicMustNotConfuse,
+        ].map(String).map(x => x.trim()).filter(Boolean)))
       : [];
     const confirmedTechnicalFacts = audienceMode === 'implementation'
       ? allConfirmedFacts.filter(fact => sourceTechnicalRe.test(fact) || concreteInterfaceRe.test(fact)) : [];
@@ -3609,7 +3628,15 @@ function consultAnswerSemanticAudit(answer, question, route) {
     // 不作为本轮实施终稿正文发布；负向边界（“不得…”）不命中该规则，仍可保留。
     const diagnosticActionFactRe = /(?:^|[，：:；;]\s*)(?:[-*]\s+|[1-9]\d*[.、．]\s*)?(?:新建|新增|创建|编辑|删除|修改|调整|保存|提交|发送|重放|重提|重试|重复|补发|复测|再点|点一次|重新(?:提交|发送|触发|执行))/iu;
     const confirmedFacts = allConfirmedFacts
-      .filter(fact => !confirmedTechnicalFacts.includes(fact))
+      .flatMap(fact => {
+        if (audienceMode !== 'implementation'
+          || (!sourceTechnicalRe.test(fact) && !concreteInterfaceRe.test(fact))) return [fact];
+        // 混合事实里的业务边界（例如“日期来自服务端当前时区”“失败状态不回写”）
+        // 仍是实施判断基线；只把接口/实现片段移到研发参考，不能整条 fact 丢掉。
+        const businessClauses = String(fact).split(/[，,；;]/u).map(clause => clause.trim())
+          .filter(clause => clause && !sourceTechnicalRe.test(clause) && !concreteInterfaceRe.test(clause));
+        return businessClauses.length ? [businessClauses.join('，')] : [];
+      })
       .filter(fact => audienceMode !== 'implementation' || !diagnosticActionFactRe.test(fact));
     const knownBlock = confirmedFacts.length
       ? ['已知事实（继续作为判断基线）：', ...confirmedFacts.map(fact => `- ${fact}`)].join('\n')
@@ -3996,6 +4023,22 @@ function consultAnswerSafeFallback(draft, audit) {
     }
     if (audit.fallbackAnswerMode === 'partial_evidence') {
       const routeFacts = audit.currentRouteFacts.map(fact => String(fact || '').trim()).filter(Boolean);
+      // 受限证据题要说明“已确认到哪里”，不是把整张 route 卡原样搬进
+      // 一个实施段落。按证据边界/现状/只读核对相关性保留少量事实，避免
+      // 技术 facts 形成 audience dump，同时让生产/权限/状态边界不被漏掉。
+      const partialEvidenceFacts = routeFacts
+        .map((fact, index) => ({ fact, index, score: [
+          /(?:只能确认|证据边界|前端证据)/iu,
+          /(?:现有记录|已有记录|只读|核对|日志|失败记录|生产包|发布记录)/iu,
+          /(?:不得|未经|授权|不能代替|不等于|不支持|不能据此)/iu,
+          /(?:页面|响应|状态|结果|记录)/iu,
+        ].reduce((score, re) => score + (re.test(fact) ? 1 : 0), 0)}))
+        .filter(item => item.score > 0)
+        .sort((left, right) => right.score - left.score || left.index - right.index)
+        .slice(0, 3)
+        .sort((left, right) => left.index - right.index)
+        .map(item => item.fact);
+      const publishedRouteFacts = partialEvidenceFacts.length ? partialEvidenceFacts : routeFacts.slice(0, 1);
       const routeHasEvidenceVerdict = routeFacts.some(fact =>
         /(?:只够|足够|够(?:用|判断|固定|完成)|不够|不足|不能单独|不能替代|尚不能|只能固定|只能证明|只能确认|最多(?:只能|能|可))/u.test(fact)
       );
@@ -4010,11 +4053,11 @@ function consultAnswerSafeFallback(draft, audit) {
       // 证据受限问法未必同时点名“接口/数据/边界”，但用户仍需要知道
       // 本轮没有确认什么；这里只列通用的证据边界，不生成任何业务事实。
       if (!unavailable.size) for (const label of ['接口', '数据', '后续状态']) unavailable.add(label);
-      const unknown = `本轮未知：${Array.from(unavailable).join('、')}的具体细节；当前只有上述已核事实，不能补写未核实实现。`;
+      const unknown = `${Array.from(unavailable).join('、')}的具体细节待补充；本轮回答仅依据上述已核事实。`;
       return consultNormalizeSafeMarkdown([
         evidenceVerdict,
         '业务结论',
-        ...routeFacts.map(fact => `- ${fact}`),
+        ...publishedRouteFacts.map(fact => `- ${fact}`),
         '本轮未知',
         `- ${unknown}`,
       ].filter(Boolean).join('\n'));
