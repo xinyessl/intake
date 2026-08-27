@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -40,6 +41,11 @@ const routeQuestion = new Function(
     + extractFn(SRC, 'routeScorer') + '\n'
     + extractFn(SRC, 'routeQuestion') + '\nreturn routeQuestion;',
 )();
+const contextualRouteQuestion = new Function(
+  'routeQuestion',
+  extractFn(SRC, 'consultContextFollowupIntent') + '\n'
+    + extractFn(SRC, 'contextualRouteQuestion') + '\nreturn contextualRouteQuestion;',
+)(routeQuestion);
 const assembleConsultSpecHits = new Function(extractFn(SRC, 'assembleConsultSpecHits') + '\nreturn assembleConsultSpecHits;')();
 const loadRouteContext = new Function(
   'safeRef', 'moduleMapRepo', 'specFileText',
@@ -47,9 +53,34 @@ const loadRouteContext = new Function(
     + extractFn(SRC, 'routeEvidenceExcerpt') + '\n'
     + extractFn(SRC, 'loadRouteContext') + '\nreturn loadRouteContext;',
 )(value => String(value || ''), () => path.resolve(ROOT, '../psp/audit'), () => '');
+const loadRouteContextWithRepository = new Function(
+  'safeRef', 'moduleMapRepo', 'specFileText',
+  extractFn(SRC, 'extractSection') + '\n'
+    + extractFn(SRC, 'routeEvidenceExcerpt') + '\n'
+    + extractFn(SRC, 'loadRouteContext') + '\nreturn loadRouteContext;',
+)(
+  value => String(value || ''),
+  () => path.resolve(ROOT, '../psp/audit'),
+  (repoPath, ref, rel) => {
+    try {
+      return ref
+        ? execFileSync('git', ['-c', 'core.quotepath=false', 'show', `${ref}:${rel}`], { cwd: repoPath, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 })
+        : fs.readFileSync(path.join(repoPath, rel), 'utf8');
+    } catch { return ''; }
+  },
+);
 
 function runtimeRouteWithContext(route) {
   const context = loadRouteContext({}, '', route);
+  const assembled = assembleConsultSpecHits(true, context.specHits, [], 8, 7);
+  return {
+    ...route,
+    directEvidenceFacts: (assembled.directEvidenceHits || []).map(hit => String((hit && hit.text) || '')).filter(Boolean),
+  };
+}
+
+function runtimeRouteWithRepositoryContext(route, ref = '') {
+  const context = loadRouteContextWithRepository({}, ref, route);
   const assembled = assembleConsultSpecHits(true, context.specHits, [], 8, 7);
   return {
     ...route,
@@ -1850,6 +1881,12 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   const productionRouteMap = JSON.parse(fs.readFileSync(
     path.resolve(ROOT, '../psp/audit/docs/specs/question-routes.json'), 'utf8',
   ));
+  // 线上 loadModuleMap 读取的是带路径/章节引用的功能地图，而不是只含
+  // route 摘要的 question-routes.json；真实回放必须把这些章节也装入 directEvidenceFacts。
+  const productionRuntimeRouteMap = JSON.parse(execFileSync(
+    'git', ['show', '2.7.260828-2:docs/specs/00-功能模块地图.json'],
+    { cwd: path.resolve(ROOT, '../psp/audit'), encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 },
+  ));
   const q0009MatchedRoute = routeQuestion(productionRouteMap, q0009ChainQuestion);
   assert.equal(q0009MatchedRoute.route.id, 'AUD-QR-AI-01', 'Q0009 真实 route matcher 必须命中 AI-01');
   assert.equal(q0009MatchedRoute.answerFacts.length, 9, 'Q0009 应使用生产 route 的 9 条 AI-01 facts');
@@ -1967,7 +2004,7 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
 
   const q0029Question = Object.keys(browserRequirements).find(question => question.includes('把评语常用语维护从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。'));
   assert.ok(q0029Question, 'Q0029 真实 fixture 题目应存在');
-  const q0029Route = runtimeRouteWithContext(routeQuestion(productionRouteMap, q0029Question));
+  const q0029Route = runtimeRouteWithRepositoryContext(routeQuestion(productionRuntimeRouteMap, q0029Question), '2.7.260828-2');
   const q0029InitialAudit = bundle.audit('', q0029Question, q0029Route);
   const q0029FallbackAudit = bundle.audit(q0029InitialAudit.safeChainFallback, q0029Question, q0029Route);
   const q0029Fallback = bundle.modelFailureFallback(q0029Question, q0029Route, { status: 429, message: 'rate limit' });
@@ -1977,9 +2014,30 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(q0029Fallback.reply, /当前停点|本轮停在这里|未定义|明确停住/);
   assert.deepEqual(q0029Fallback.finalAudit.violations, [], 'Q0029 CFG-02 链路 fallback 终审必须全绿');
 
+  // 真实 C006 不是新会话：前三轮已经回答过，Q0029 的模型 429 仍必须
+  // 使用当前链路题的 route facts，不能被历史回答改写或退成连接错误。
+  const q0029ConversationHistory = [
+    { role: 'user', content: '评语常用语维护现在是怎么实现的？' },
+    { role: 'assistant', content: '前一轮已答复业务范围。' },
+    { role: 'user', content: '评语常用语维护涉及哪些接口、数据和边界？' },
+    { role: 'assistant', content: '前一轮已答复接口、数据和边界。' },
+    { role: 'user', content: '关于评语常用语维护，我现在只有一次既有请求和响应，没有数据库权限。现有证据最多能判断到哪？' },
+    { role: 'assistant', content: '前一轮已答复受限证据边界。' },
+    { role: 'user', content: q0029Question },
+  ];
+  const q0029HistoryMatchedRoute = contextualRouteQuestion(productionRuntimeRouteMap, q0029ConversationHistory, q0029Question);
+  const q0029HistoryRoute = runtimeRouteWithRepositoryContext(q0029HistoryMatchedRoute, '2.7.260828-2');
+  const q0029HistoryAudit = bundle.audit('', q0029Question, q0029HistoryRoute);
+  const q0029HistoryFallback = bundle.modelFailureFallback(q0029Question, q0029HistoryRoute, { status: 429, message: 'rate limit' });
+  assert.equal(q0029HistoryMatchedRoute.route?.id, 'AUD-QR-CFG-02', 'C006 历史会话的当前 Q0029 仍必须命中 CFG-02');
+  assert.equal(q0029HistoryMatchedRoute.answerFacts.length, 7, 'C006 历史会话不能丢失 CFG-02 route facts');
+  assert.ok(q0029HistoryFallback, `C006 Q0029 历史会话 HTTP429 必须使用 facts fallback；mode=${q0029HistoryAudit.fallbackAnswerMode}; violations=${JSON.stringify(bundle.audit(q0029HistoryAudit.safeChainFallback, q0029Question, q0029HistoryRoute).violations)}`);
+  assert.doesNotMatch(q0029HistoryFallback.reply, /AI 暂时连不上/);
+  assert.deepEqual(q0029HistoryFallback.finalAudit.violations, [], 'C006 Q0029 历史会话 fallback 终审必须全绿');
+
   const q0033Question = Object.keys(browserRequirements).find(question => question.includes('审核方案配置这条链路只确认前端发出了请求，服务端后续日志还没拿到。先说能确定的，未知项请单独标出来。'));
   assert.ok(q0033Question, 'Q0033 真实 fixture 题目应存在');
-  const q0033Route = runtimeRouteWithContext(routeQuestion(productionRouteMap, q0033Question));
+  const q0033Route = runtimeRouteWithRepositoryContext(routeQuestion(productionRuntimeRouteMap, q0033Question), '2.7.260828-2');
   const q0033InitialAudit = bundle.audit('', q0033Question, q0033Route);
   const q0033FallbackAudit = bundle.audit(q0033InitialAudit.safeDiagnosticFallback, q0033Question, q0033Route);
   const q0033DeterministicReply = bundle.fallback('', q0033InitialAudit);
@@ -1993,7 +2051,7 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
 
   const q0039Question = Object.keys(browserRequirements).find(question => question.includes('把药师个人审核方案从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。'));
   assert.ok(q0039Question, 'Q0039 真实 fixture 题目应存在');
-  const q0039Route = runtimeRouteWithContext(routeQuestion(productionRouteMap, q0039Question));
+  const q0039Route = runtimeRouteWithRepositoryContext(routeQuestion(productionRuntimeRouteMap, q0039Question), '2.7.260828-2');
   const q0039InitialAudit = bundle.audit('', q0039Question, q0039Route);
   const q0039FallbackAudit = bundle.audit(q0039InitialAudit.safeChainFallback, q0039Question, q0039Route);
   const q0039Fallback = bundle.modelFailureFallback(q0039Question, q0039Route, { status: 429, message: 'rate limit' });

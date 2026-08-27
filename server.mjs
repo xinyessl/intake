@@ -3491,11 +3491,23 @@ function consultAnswerSemanticAudit(answer, question, route) {
     .filter(([id, rule]) => chainDimensions.some(item => item.id === id)
       && !chainAnswerFacts.some(fact => rule.test(fact)))
     .map(([id]) => id);
+  // directEvidenceFacts 可能是完整 Spec 章节（含标题、Markdown 表格和通用
+  // 权限/安全说明），不能把“某维度缺事实”变成把整章重新塞进链路。只承接
+  // 已有明确维度标签的原子句；没有明确标签时由下方缺失维度停点收敛，避免
+  // 把相邻章节或表格碎片误当成当前功能的入口/外部依赖。
+  const chainDirectFactLabel = value => String(value || '').match(/^(入口|当前页面|统一入口|接入入口与主接口|接口|外部依赖|数据|数据与状态|状态|任务和警示|生成记录|停止|前端证据边界|实施只读清单|实施只读核对|影响|实施|时间|约束|排班|结果|边界|后端边界|类型|长度|删除|历史影响|权限|研发|多任务|权重)\s*[：:]/u)?.[1] || '';
   const chainDirectFallbackFacts = chainMissingSourceDimensions.length
-    ? chainDirectEvidenceFacts.filter(fact => chainMissingSourceDimensions.some(id => {
-        const rule = chainDimensionSourceRules.find(item => item[0] === id)?.[1];
-        return rule ? rule.test(fact) : false;
-      }))
+    ? chainDirectEvidenceFacts.filter(fact => {
+        if (/^\s*(?:#|\||>|\*|`)/u.test(fact)) return false;
+        const label = chainDirectFactLabel(fact);
+        if (!label) return false;
+        return chainMissingSourceDimensions.some(id => (
+          id === 'entry' ? ['入口', '当前页面', '统一入口', '接入入口与主接口'].includes(label)
+            : id === 'interfaces' ? label === '接口'
+              : id === 'dependencies' ? label === '外部依赖'
+                : ['数据', '数据与状态', '状态', '任务和警示', '生成记录', '停止', '前端证据边界', '实施只读清单', '实施只读核对', '影响', '实施', '时间', '约束', '排班', '结果', '边界', '后端边界', '类型', '长度', '删除', '历史影响', '权限', '研发', '多任务', '权重'].includes(label)
+        ));
+      })
     : [];
   const chainAvailableFacts = Array.from(new Set([
     ...chainAnswerFacts,
@@ -3542,7 +3554,17 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const answerChainGapFacts = chainAnswerFacts.map(normalizeChainFact).filter(fact =>
     /(?:NEEDS-HUMAN|未定义|未覆盖|待确认|局部未知|需由业务负责人确认)/iu.test(fact)
     && !/(?:正文中的?\s*`?NEEDS-HUMAN|NEEDS-HUMAN[^.。！？]{0,30}(?:不得|不能|保持))/iu.test(fact));
-  const explicitChainGapFacts = (answerChainGapFacts.length ? answerChainGapFacts : chainDirectEvidenceFacts)
+  // Spec 章节的 directEvidenceFacts 可能把通用权限/幂等段和表格碎片一并
+  // 带进来；只有原本就是独立 NEEDS-HUMAN 行、且标点/Markdown 完整时，
+  // 才承接为链路停点。这样仍保留 route 明确的未知边界，不把相邻章节的
+  // 泛化待确认项或残缺括号发布给用户。
+  const directChainGapFacts = chainDirectEvidenceFacts.filter(fact =>
+    /^(?:NEEDS-HUMAN|数据权限)\s*[：:]/iu.test(fact)
+    && /(?:NEEDS-HUMAN|未定义|未覆盖|待确认|局部未知|需由业务负责人确认)/iu.test(fact)
+    && !consultMalformedMarkdownTokens(fact).length
+    && !consultMalformedProseTokens(fact).length
+  );
+  const explicitChainGapFacts = (answerChainGapFacts.length ? answerChainGapFacts : directChainGapFacts)
     .map(normalizeChainFact)
     .filter(fact =>
       /(?:NEEDS-HUMAN|未定义|未覆盖|待确认|局部未知|需由业务负责人确认)/iu.test(fact)
