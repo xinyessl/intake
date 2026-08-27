@@ -1232,6 +1232,7 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
       '主接口是 GET /auditapi/audit/ipt/tasks。',
       '审核任务记录写 audit_ipt_task；状态为 current。',
       '用户信息读取用户中心，当前链路未直接调用 HIS。',
+      'NEEDS-HUMAN：其它终端是否提供同组操作仍待确认。',
     ],
   };
   const explicitUnknownChainAudit = bundle.audit('业务上读取当前待审任务。', explicitUnknownChainQuestion, explicitUnknownChainRoute);
@@ -1860,7 +1861,11 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(q0009ProductionFallback.reply, /入口|接口/);
   assert.match(q0009ProductionFallback.reply, /数据/);
   assert.match(q0009ProductionFallback.reply, /外部依赖|Dify/);
+  assert.match(q0009ProductionFallback.reply, /生成记录/);
   assert.match(q0009ProductionFallback.reply, /当前停点|未定义|明确停住/);
+  assert.doesNotMatch(q0009ProductionFallback.reply, /入口：入口/);
+  assert.ok((q0009ProductionFallback.reply.match(/端到端边界/gu) || []).length <= 1, '端到端边界不能在链路和当前停点重复');
+  assert.doesNotMatch(q0009ProductionFallback.reply, /各写操作的角色|外部系统、调用方与数据源仅按/);
   assert.doesNotMatch(q0009ProductionFallback.reply, /医嘱标记|AI 暂时连不上/);
   assert.deepEqual(q0009ProductionFallback.finalAudit.violations, [], 'Q0009 生产 AI-01 chain fallback 终审必须全绿');
 

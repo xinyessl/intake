@@ -3411,38 +3411,87 @@ function consultAnswerSemanticAudit(answer, question, route) {
     ['dependencies', '外部依赖', /(?:外部依赖|依赖)/u],
     ['audit', '留痕', /留痕/u],
   ].filter(([, , re]) => re.test(questionText)).map(([id, label]) => ({ id, label })) : [];
-  const chainSources = route && route.matched ? Array.from(new Set([
-    ...(route.answerFacts || []), ...(route.directEvidenceFacts || []), ...(route.mustNotConfuse || []),
-  ].flatMap(value => String(value || '').split(/\r?\n/u))
-    .map(value => value.replace(/^\s*(?:[-*+]\s+|[1-9]\d*[.、．]\s+)/u, '').trim())
-    .filter(Boolean))) : [];
   const chainAnswerFacts = route && route.matched
     ? (route.answerFacts || []).map(value => String(value || '').trim()).filter(Boolean) : [];
+  const chainDirectEvidenceFacts = route && route.matched
+    ? (route.directEvidenceFacts || []).flatMap(value => String(value || '').split(/\r?\n/u))
+      .map(value => value.replace(/^\s*(?:[-*+]\s+|[1-9]\d*[.、．]\s+)/u, '').trim()).filter(Boolean) : [];
+  const normalizeChainFact = value => {
+    let normalized = String(value || '').replace(/^\s*(?:[-*+]\s+|[1-9]\d*[.、．]\s+)/u, '').trim();
+    for (let index = 0; index < 3; index++) {
+      const next = normalized.replace(/^\s*(?:业务结论|产品|入口|接口|任务和警示|外部依赖|生成记录|停止|前端证据边界|实施只读清单|端到端边界|数据与状态|留痕|当前停点)\s*[：:]\s*/u, '').trim();
+      if (next === normalized) break;
+      normalized = next;
+    }
+    return normalized;
+  };
+  const chainFactLabels = new Map();
+  const normalizeAndRememberChainFact = value => {
+    const raw = String(value || '').replace(/^\s*(?:[-*+]\s+|[1-9]\d*[.、．]\s+)/u, '').trim();
+    const label = raw.match(/^(业务结论|产品|入口|接口|任务和警示|外部依赖|生成记录|停止|前端证据边界|实施只读清单|端到端边界|数据与状态|留痕|当前停点)\s*[：:]/u)?.[1] || '';
+    const normalized = normalizeChainFact(value);
+    if (normalized && label && !chainFactLabels.has(normalized)) chainFactLabels.set(normalized, label);
+    return normalized;
+  };
+  // 链路正文以 route answerFacts 为主；directEvidenceFacts 只在 answerFacts
+  // 没覆盖用户点名的维度时补足。mustNotConfuse 是审计边界，不得混入链路。
+  const chainDimensionSourceRules = [
+    ['entry', /(?:入口|提交|接入|XML|页面|详情|列表)/iu],
+    ['interfaces', /(?:接口|\b(?:GET|POST|PUT|PATCH|DELETE)\b\s+\/)/iu],
+    ['data', /(?:数据|字段|表|落库|写入|保存|更新|删除|Redis|队列|消费|超时|状态|去重|事务|重试|查询|回写|日志|请求|响应|XML|校验)/iu],
+    ['state', /(?:状态|结果|处理|记录|回写|保存|更新|删除|事务|重试|查询)/iu],
+    ['permissions', /(?:权限|角色|鉴权|授权)/iu],
+    ['dependencies', /(?:外部依赖|HIS|用户中心|audit-server|Redis|redis2db|Socket|Dubbo|Dify)/iu],
+    ['audit', /(?:留痕|审计|记录|日志)/iu],
+  ];
+  const chainMissingSourceDimensions = chainDimensionSourceRules
+    .filter(([id, rule]) => chainDimensions.some(item => item.id === id)
+      && !chainAnswerFacts.some(fact => rule.test(fact)))
+    .map(([id]) => id);
+  const chainDirectFallbackFacts = chainMissingSourceDimensions.length
+    ? chainDirectEvidenceFacts.filter(fact => chainMissingSourceDimensions.some(id => {
+        const rule = chainDimensionSourceRules.find(item => item[0] === id)?.[1];
+        return rule ? rule.test(fact) : false;
+      }))
+    : [];
+  const chainAvailableFacts = Array.from(new Set([
+    ...chainAnswerFacts,
+    ...chainDirectFallbackFacts,
+  ].map(normalizeAndRememberChainFact).filter(Boolean)));
+  const chainSources = chainAvailableFacts;
   const chainInterfaceFacts = [];
   // “已确认主签名”只来自 answerFacts；contextRefs 里可能还有标题下拉、
   // 鉴权前缀等辅助接口，不能因“完整”反向塞进主链路。
-  for (const fact of chainAnswerFacts) {
+  for (const fact of chainAvailableFacts) {
     for (const match of fact.matchAll(/\b(GET|POST|PUT|PATCH|DELETE)\s+(\/[A-Za-z0-9_./{}?=&:%-]+)/giu)) {
       if (match[2].includes('*')) continue;
       chainInterfaceFacts.push({ method: match[1].toUpperCase(), path: match[2], display: `${match[1].toUpperCase()} ${match[2]}` });
     }
   }
   const uniqueChainInterfaces = Array.from(new Map(chainInterfaceFacts.map(item => [item.path, item])).values());
-  const businessChainFact = chainAnswerFacts.find(fact => !/\b(?:GET|POST|PUT|PATCH|DELETE)\s+\//iu.test(fact)
+  const businessChainFact = chainAvailableFacts.find(fact => !/\b(?:GET|POST|PUT|PATCH|DELETE)\s+\//iu.test(fact)
     && !/(?:Controller|Service|Mapper|Repository|DAO|DTO|VO|\b[a-z][a-z0-9_]+_[a-z0-9_]+\b|\bdeleted\s*=)/i.test(fact)) || '';
-  const entryChainFact = chainAnswerFacts.find(fact => /(?:入口|详情|列表|页面)/u.test(fact)
+  const entryChainFact = chainAvailableFacts.find(fact => /(?:入口|详情|列表|页面)/u.test(fact)
     && !/\b(?:GET|POST|PUT|PATCH|DELETE)\s+\//iu.test(fact)) || businessChainFact;
-  const dataChainFact = chainAnswerFacts.find(fact => /(?:\b[a-z][a-z0-9_]+_[a-z0-9_]+\b|\bdeleted\s*=|软删除|不物理删除|标记记录)/iu.test(fact))
+  const dataChainFact = chainAvailableFacts.find(fact => /(?:\b[a-z][a-z0-9_]+_[a-z0-9_]+\b|\bdeleted\s*=|软删除|不物理删除|标记记录)/iu.test(fact))
     || chainSources.find(fact => /(?:\b[a-z][a-z0-9_]+_[a-z0-9_]+\b|\bdeleted\s*=|软删除|不物理删除)/iu.test(fact)) || '';
-  const dependencyChainFactRaw = chainAnswerFacts.find(fact => /(?:外部依赖|用户中心|\bHIS\b|\bDubbo\b)/iu.test(fact))
+  const dependencyChainFactRaw = chainAvailableFacts.find(fact => /(?:外部依赖|用户中心|\bHIS\b|\bDubbo\b|Dify)/iu.test(fact))
     || chainSources.find(fact => /(?:外部依赖|用户中心|\bHIS\b|\bDubbo\b)/iu.test(fact)) || '';
   const compactDependencyChainFact = dependencyChainFactRaw
     .replace(/`?[A-Za-z_$][A-Za-z0-9_$]*(?:Service|Controller|Mapper|Repository|DAO|DTO|VO)(?:#[A-Za-z_$][A-Za-z0-9_$]*)?`?/g, '')
     .replace(/`?get[A-Z][A-Za-z0-9_$]*(?:Id|Info|List|Page|Detail)?`?/g, '')
     .replace(/\s{2,}/g, ' ').replace(/中心\s+补/gu, '中心补').trim();
-  const explicitChainGapFacts = chainSources.filter(fact =>
+  // 明确未知优先取 route.answerFacts 已发布的原子事实；只有该路由没有
+  // 任何显式 gap 时，才承接 directEvidenceFacts 的显式未知。mustNotConfuse
+  // 只参与审计，不应成为链路停点正文。
+  const answerChainGapFacts = chainAnswerFacts.map(normalizeChainFact).filter(fact =>
     /(?:NEEDS-HUMAN|未定义|未覆盖|待确认|局部未知|需由业务负责人确认)/iu.test(fact)
     && !/(?:正文中的?\s*`?NEEDS-HUMAN|NEEDS-HUMAN[^.。！？]{0,30}(?:不得|不能|保持))/iu.test(fact));
+  const explicitChainGapFacts = (answerChainGapFacts.length ? answerChainGapFacts : chainDirectEvidenceFacts)
+    .map(normalizeChainFact)
+    .filter(fact =>
+      /(?:NEEDS-HUMAN|未定义|未覆盖|待确认|局部未知|需由业务负责人确认)/iu.test(fact)
+      && !/(?:正文中的?\s*`?NEEDS-HUMAN|NEEDS-HUMAN[^.。！？]{0,30}(?:不得|不能|保持))/iu.test(fact));
   const businessGapText = value => {
     let plain = String(value || '').replace(/[*_`#]/g, '').replace(/^.*?NEEDS-HUMAN[：:]?\s*/iu, '').trim();
     const owner = plain.match(/((?:是否[^，。；;]{1,30}待确认)|(?:[^，。；;]{2,50}需由[^，。；;]{1,24}确认))/u);
@@ -3453,6 +3502,16 @@ function consultAnswerSemanticAudit(answer, question, route) {
     return plain && /[一-鿿]/u.test(plain) ? (/[。！？]$/u.test(plain) ? plain : `${plain}。`) : '';
   };
   const compactChainGapFacts = Array.from(new Set(explicitChainGapFacts.map(businessGapText).filter(Boolean))).slice(0, 4);
+  const chainGapFactSet = new Set(explicitChainGapFacts.map(normalizeChainFact));
+  const chainDimensionFacts = chainAvailableFacts.filter(fact => !chainGapFactSet.has(normalizeChainFact(fact)));
+  const chainFactsByLabelOrRule = (facts, labels, rule) => facts.filter(fact => {
+    const label = chainFactLabels.get(fact);
+    return label ? labels.includes(label) : rule.test(fact);
+  });
+  const chainBusinessFact = chainDimensionFacts.find(fact => !/\b(?:GET|POST|PUT|PATCH|DELETE)\s+\//iu.test(fact)
+    && !/(?:Controller|Service|Mapper|Repository|DAO|DTO|VO|\b[a-z][a-z0-9_]+_[a-z0-9_]+\b|\bdeleted\s*=)/i.test(fact)) || businessChainFact;
+  const chainEntryFact = chainDimensionFacts.find(fact => /(?:入口|详情|列表|页面)/u.test(fact)
+    && !/\b(?:GET|POST|PUT|PATCH|DELETE)\s+\//iu.test(fact)) || chainBusinessFact;
   const answerChainPaths = new Set(consultConcretePaths(text));
   const explicitlyRequestsInterfaces = /(?:接口|\bAPI\b|路径)/iu.test(questionText);
   const missingRequestedInterfaces = explicitlyRequestsInterfaces
@@ -3513,23 +3572,39 @@ function consultAnswerSemanticAudit(answer, question, route) {
     // 按 route 原句的语义维度组织链路。入口不能回退到第一条业务总述，
     // 否则“入口与主接口”事实会被总述遮住；数据/状态也保留 route 中
     // 已核的事务、重试、队列和落库边界，但不展开字段清单。
-    const entryChainFacts = chainAnswerFacts.filter(fact => /(?:入口|提交|接入|XML|页面|详情|列表)/iu.test(fact));
-    const dataStateChainFacts = chainAnswerFacts.filter(fact => /(?:数据|字段|表|落库|写入|保存|更新|删除|Redis|队列|消费|超时|状态|去重|事务|重试|查询|回写|日志|请求|响应|XML|校验)/iu.test(fact));
-    const dependencyChainFacts = chainAnswerFacts.filter(fact => /(?:外部依赖|HIS|用户中心|audit-server|Redis|redis2db|Socket|Dubbo)/iu.test(fact));
-    const usedChainFacts = new Set(businessChainFact ? [businessChainFact] : []);
+    const entryChainFacts = chainFactsByLabelOrRule(
+      chainDimensionFacts,
+      ['入口'],
+      /(?:入口|提交|接入|XML|页面|详情|列表)/iu,
+    );
+    const dataStateChainFacts = chainFactsByLabelOrRule(
+      chainDimensionFacts,
+      ['任务和警示', '生成记录', '停止', '数据与状态', '留痕'],
+      /(?:数据|字段|表|落库|写入|保存|更新|删除|Redis|队列|消费|超时|状态|去重|事务|重试|查询|回写|日志|请求|响应|XML|校验)/iu,
+    );
+    const dependencyChainFacts = chainFactsByLabelOrRule(
+      chainDimensionFacts,
+      ['外部依赖'],
+      /(?:外部依赖|HIS|用户中心|audit-server|Redis|redis2db|Socket|Dubbo|Dify)/iu,
+    );
+    const usedChainFacts = new Set(chainBusinessFact ? [chainBusinessFact] : []);
     const addChainFacts = (label, candidates, fallback = '') => {
       const facts = Array.from(new Set((candidates.length ? candidates : (fallback ? [fallback] : []))
-        .filter(fact => fact && !usedChainFacts.has(fact))));
+        .map(normalizeChainFact).filter(fact => fact && !usedChainFacts.has(fact))));
       if (!facts.length) return;
-      facts.forEach(fact => usedChainFacts.add(fact));
-      chainLines.push(`- ${label}：${facts.join('；')}`);
+      for (const fact of facts) {
+        usedChainFacts.add(fact);
+        chainLines.push(`- ${label}：${fact}`);
+      }
     };
-    if (chainDimensions.some(item => item.id === 'entry')) addChainFacts('入口', entryChainFacts, entryChainFact);
-    if (chainDimensions.some(item => item.id === 'interfaces') && uniqueChainInterfaces.length) chainLines.push(`- 接口：${uniqueChainInterfaces.map(item => `\`${item.display}\``).join('；')}。`);
+    if (chainDimensions.some(item => item.id === 'entry')) addChainFacts('入口', entryChainFacts, chainEntryFact);
+    if (chainDimensions.some(item => item.id === 'interfaces') && uniqueChainInterfaces.length) {
+      for (const item of uniqueChainInterfaces) chainLines.push(`- 接口：\`${item.display}\`。`);
+    }
     if (chainDimensions.some(item => item.id === 'data' || item.id === 'state')) addChainFacts('数据与状态', dataStateChainFacts, dataChainFact);
     if (chainDimensions.some(item => item.id === 'dependencies')) addChainFacts('外部依赖', dependencyChainFacts, compactDependencyChainFact);
     const gapBlock = compactChainGapFacts.length ? ['当前停点（只列资料明确的未知）：', ...compactChainGapFacts.map(fact => `- ${fact}`)] : [];
-    safeChainFallback = [businessChainFact ? `业务结论：${businessChainFact}` : '', '链路（按本轮点名维度）：', ...chainLines, ...gapBlock].filter(Boolean).join('\n');
+    safeChainFallback = [chainBusinessFact ? `业务结论：${normalizeChainFact(chainBusinessFact)}` : '', '链路（按本轮点名维度）：', ...chainLines, ...gapBlock].filter(Boolean).join('\n');
   }
   // “最小证据/只缺一项”本身也是一份输入契约：后面的判断表不能首次
   // 引入没有在用户已有证据或前序采集清单中定义的观测量。这里按观测
