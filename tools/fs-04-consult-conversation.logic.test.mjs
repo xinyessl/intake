@@ -1810,6 +1810,16 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.ok(q0003ExactFallback, 'Q0003 exact route+HTTP429 不能因“独立复测”实施受众误判而放弃事实兜底');
   assert.doesNotMatch(q0003ExactFallback.reply, /AI 暂时连不上/);
   assert.deepEqual(q0003ExactFallback.finalAudit.violations, [], 'Q0003 exact route+HTTP429 fallback 终审必须全绿');
+  const q0003ChainQuestion = '把AI 审方生成从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。';
+  const q0003ChainFallback = bundle.modelFailureFallback(q0003ChainQuestion, q0003Route, { status: 429, message: 'rate limit' });
+  assert.ok(q0003ChainFallback, 'Q0003 AI-01 chain+HTTP429 必须使用已核链路兜底');
+  assert.match(q0003ChainFallback.reply, /入口|接口/);
+  assert.match(q0003ChainFallback.reply, /数据/);
+  assert.match(q0003ChainFallback.reply, /外部依赖/);
+  assert.match(q0003ChainFallback.reply, /Dify/);
+  assert.match(q0003ChainFallback.reply, /当前停点|未定义|明确停住/);
+  assert.doesNotMatch(q0003ChainFallback.reply, /医嘱标记|AI 暂时连不上/);
+  assert.deepEqual(q0003ChainFallback.finalAudit.violations, [], 'Q0003 AI-01 chain fallback 终审必须全绿');
 
   const q0021Question = '审核方案配置现在是怎么实现的？';
   const q0021Route = {
