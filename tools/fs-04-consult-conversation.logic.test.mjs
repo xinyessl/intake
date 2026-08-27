@@ -1007,6 +1007,49 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(q0010Initial.safeDiagnosticFallback, /4\. 整理上述原文与脱敏截图/);
   assert.doesNotMatch(q0010Initial.safeDiagnosticFallback, /重做|新增或取消一次/);
   assert.deepEqual(bundle.audit(q0010Initial.safeDiagnosticFallback, q0010Question, q0010Route).violations, [], 'Q0010 确定性兜底必须是可发布的实施只读清单，不能退成安全停止');
+  const q0010VerifiedRoute = {
+    ...q0010Route,
+    fallbackMode: 'verifiedFacts',
+    route: { ...q0010Route.route, fallbackMode: 'verifiedFacts' },
+  };
+  const q0010VerifiedInitial = bundle.audit(q0010Draft, q0010Question, q0010VerifiedRoute);
+  const q0010Fallback = bundle.fallback(q0010Draft, q0010VerifiedInitial);
+  assert.equal(q0010VerifiedInitial.fallbackAnswerMode, 'field_diagnostic', '同主题实施追问应选择只读清单形态');
+  assert.match(q0010Fallback, /最小只读排查/);
+  assert.match(q0010Fallback, /1\. 原样记录当前页面/);
+  assert.match(q0010Fallback, /4\. 整理上述原文与脱敏截图/);
+  assert.doesNotMatch(q0010Fallback, /让实施再点一次新增/);
+  assert.deepEqual(bundle.audit(q0010Fallback, q0010Question, q0010VerifiedRoute).violations, [], 'Q0010 verifiedFacts fallback 必须发布只读清单并终审全绿');
+
+  const aiBroadQuestion = 'AI 审方涉及哪些接口、数据和边界？';
+  const aiBroadFact = 'AI 审方按 audit 场景读取当前门诊或住院任务上下文，结果须由药师主动采纳。';
+  const aiBroadRoute = {
+    matched: true,
+    fallbackMode: 'verifiedFacts',
+    route: { id: 'AUD-QR-AI-01', title: 'AI 审方生成', fallbackMode: 'verifiedFacts' },
+    answerFacts: [aiBroadFact],
+  };
+  const aiBroadInitial = bundle.audit(aiBroadFact, aiBroadQuestion, aiBroadRoute);
+  assert.equal(aiBroadInitial.fallbackAnswerMode, 'facts_with_unknowns', '单事实覆盖不了多维技术问法时必须显式进入未知边界');
+  assert.ok(aiBroadInitial.violations.includes('incomplete_verified_facts'));
+  const aiBroadFallback = bundle.fallback(aiBroadFact, aiBroadInitial);
+  assert.match(aiBroadFallback, /业务结论\n- AI 审方按 audit 场景/);
+  assert.match(aiBroadFallback, /本轮未知/);
+  assert.match(aiBroadFallback, /接口.*数据.*边界/);
+  assert.doesNotMatch(aiBroadFallback, /POST\s+\/|建议调用|请修改/);
+  assert.deepEqual(bundle.audit(aiBroadFallback, aiBroadQuestion, aiBroadRoute).violations, [], 'AI-01 单事实宽问法需明确停在已核事实并终审全绿');
+  for (const [questionId, question] of [
+    ['Q0002', 'AI 审方涉及哪些接口、数据和边界？'],
+    ['Q0007', 'AI 审方的接口、数据来源和边界是什么？'],
+    ['Q0012', '请说明 AI 审方包含哪些接口、数据和边界。'],
+  ]) {
+    const initial = bundle.audit(aiBroadFact, question, aiBroadRoute);
+    assert.equal(initial.fallbackAnswerMode, 'facts_with_unknowns', `${questionId} 应识别为多维事实问法`);
+    assert.ok(initial.violations.includes('incomplete_verified_facts'), `${questionId} 不能只回一条业务结论`);
+    const fallback = bundle.fallback(aiBroadFact, initial);
+    assert.match(fallback, /本轮未知/);
+    assert.deepEqual(bundle.audit(fallback, question, aiBroadRoute).violations, [], `${questionId} fallback 终审应全绿`);
+  }
 
   const q0011Question = '住院医嘱审核现在是怎么实现的？';
   const q0011Fact = '住院审核工作台读取当前或待审医嘱任务，并提供通过、打回、签名、移交、挂起、收藏和历史查询操作。';
@@ -1365,6 +1408,19 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.doesNotMatch(q0009Fallback, /ipt_collect_id|collect_title|institute_id|hospital_id|patient_id|event_no|order_doc_id|pharmacist_id|ipt_task_id|JwtFilter/);
   assert.doesNotMatch(q0009Fallback, /(?:^|\n)\s*除(?!非)[^。！？\n]*$/u, '终稿不得有“除……”半截句');
   assert.deepEqual(bundle.audit(q0009Fallback, q0009Question, q0009Route).violations, [], '确定性链路 fallback 必须终审全绿');
+  const q0019Question = '请把住院医嘱标记从入口、接口、数据到外部依赖串联起来，资料不足的地方明确停住。';
+  const q0019Route = {
+    ...q0009Route,
+    fallbackMode: 'verifiedFacts',
+    route: { ...q0009Route.route, fallbackMode: 'verifiedFacts' },
+  };
+  const q0019Fallback = bundle.verifiedFallback(q0019Question, q0019Route);
+  assert.ok(q0019Fallback, 'Q0019 chain 问法应使用 route 已核事实生成安全终稿');
+  assert.equal(q0019Fallback.initialAudit.fallbackAnswerMode, 'chain');
+  assert.match(q0019Fallback.reply, /链路（按本轮点名维度）/);
+  assert.match(q0019Fallback.reply, /GET \/auditapi\/audit\/ipt\/collects/);
+  assert.match(q0019Fallback.reply, /audit_ipt_collect/);
+  assert.deepEqual(q0019Fallback.finalAudit.violations, [], 'Q0019 chain fallback 只串 route 事实并终审全绿');
 
   const genericMultiInterfaceRoute = { matched: true, answerFacts: ['两个主接口：列表 GET /api/items；详情 GET /api/items/{id}。'] };
   const genericMultiInterfaceQuestion = '这个功能有哪些主接口？';
@@ -1701,10 +1757,24 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   const debugAiInitial = bundle.audit('', debugAiQuestion, debugAiRoute);
   const debugAiFallback = bundle.verifiedFallback(debugAiQuestion, debugAiRoute);
   assert.equal(debugAiInitial.verifiedFactsFallback, true);
+  assert.equal(debugAiInitial.fallbackAnswerMode, 'partial_evidence');
   assert.ok(debugAiFallback, 'AI-01 受限证据问法在模型失败时应发布已核事实兜底');
   assert.match(debugAiFallback.reply, /^结论：现有受限证据只够固定/);
   assert.match(debugAiFallback.reply, /业务结论\n- AI 审方按 audit 场景/);
+  assert.match(debugAiFallback.reply, /本轮未知/);
   assert.deepEqual(debugAiFallback.finalAudit.violations, []);
+  for (const [questionId, question] of [
+    ['Q0008', '我只有一次请求和响应，没有数据库权限，现有证据够不够判断 AI 审方是否落库？'],
+    ['Q0013', '只有这张截图，证据够不够判断 AI 审方已经完成后续处理？'],
+  ]) {
+    const initial = bundle.audit(aiBroadFact, question, debugAiRoute);
+    assert.equal(initial.fallbackAnswerMode, 'partial_evidence', `${questionId} 应识别为受限证据问法`);
+    const fallback = bundle.verifiedFallback(question, debugAiRoute);
+    assert.ok(fallback, `${questionId} 应有确定性安全 fallback`);
+    assert.match(fallback.reply, /业务结论/);
+    assert.match(fallback.reply, /本轮未知/);
+    assert.deepEqual(fallback.finalAudit.violations, [], `${questionId} fallback 终审应全绿`);
+  }
 
   const explicitFromToChainQuestion = '请把这个功能从入口、接口和数据状态到外部依赖完整串起来。';
   const explicitFromToChainAudit = bundle.audit('', explicitFromToChainQuestion, todayAtomicRoute);
