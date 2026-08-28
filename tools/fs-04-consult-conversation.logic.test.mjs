@@ -3387,6 +3387,72 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     assert.deepEqual(q0527ModelFailure.finalAudit.violations, []);
   }
 
+  const q0539Question = auditBrowserQuestions.questions.find(item => item.id === 'Q0539')?.question;
+  const q0540Question = auditBrowserQuestions.questions.find(item => item.id === 'Q0540')?.question;
+  assert.equal(q0540Question, '回到登录与鉴权这里，第一层核过没有异常，下一步按什么顺序继续只读排查？');
+  const q0540MatchedRoute = contextualRouteQuestion(auditTag3RouteMap, [
+    { role: 'user', content: q0539Question },
+    { role: 'assistant', content: '上一轮模型回答不作为事实源。' },
+    { role: 'user', content: q0540Question },
+  ], q0540Question, '');
+  const q0540Route = runtimeRouteWithRepositoryContext(q0540MatchedRoute, '2.7.260828-3');
+  assert.equal(q0540Route.route.id, 'AUD-QR-SH-01', 'Q0540 必须保持登录与鉴权 current route');
+  const q0540Initial = bundle.audit('', q0540Question, q0540Route);
+  const q0540Reply = bundle.fallback('', q0540Initial);
+  const q0540Final = bundle.audit(q0540Reply, q0540Question, q0540Route);
+  assert.equal(q0540Initial.fallbackAnswerMode, 'field_diagnostic');
+  assert.equal(q0540Initial.contextFollowupQuestion, true);
+  assert.match(q0540Initial.routeReadOnlySequenceFact, /登录只读排查/);
+  assert.deepEqual(q0540Initial.routeReadOnlySequenceSteps.map(step => step.text), [
+    '确认页面类型、医院/账号上下文和 token scope，只记录 token 是否存在并脱敏',
+    '读院区列表、多设备检测、登录响应',
+    '已登录后异常再读用户信息/菜单、动态路由和失败请求 HTTP 响应',
+  ]);
+  for (const expected of [
+    /页面类型、医院\/账号上下文和 token scope/,
+    /只记录 token 是否存在并脱敏/,
+    /院区列表、多设备检测、登录响应/,
+    /用户信息\/菜单、动态路由和失败请求 HTTP 响应/,
+    /禁止共享完整 token 或密码/,
+  ]) assert.match(q0540Reply, expected);
+  const q0540PageIndex = q0540Reply.indexOf('页面类型、医院/账号上下文和 token scope');
+  const q0540LoginIndex = q0540Reply.indexOf('院区列表、多设备检测、登录响应');
+  const q0540LoggedInIndex = q0540Reply.indexOf('用户信息/菜单、动态路由和失败请求 HTTP 响应');
+  assert.ok(q0540PageIndex >= 0 && q0540LoginIndex > q0540PageIndex && q0540LoggedInIndex > q0540LoginIndex, 'Q0540 必须保留登录 route 的三层只读顺序');
+  assert.deepEqual(q0540Final.missingRouteReadOnlySequenceSteps, []);
+  assert.deepEqual(q0540Final.violations, [], JSON.stringify({ reply: q0540Reply, violations: q0540Final.violations }, null, 2));
+  for (const modelError of [
+    { code: 'MODEL_FIRST_TOKEN_TIMEOUT', message: '模型首字等待超时' },
+    { code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束' },
+  ]) {
+    const q0540Fallback = bundle.modelFailureFallback(q0540Question, q0540Route, modelError);
+    assert.ok(q0540Fallback, JSON.stringify({
+      message: `Q0540 ${modelError.code} 应发布 current route 的只读顺序`,
+      initialViolations: q0540Initial.violations,
+      mode: q0540Initial.fallbackAnswerMode,
+      sequenceFact: q0540Initial.routeReadOnlySequenceFact,
+      sequenceSteps: q0540Initial.routeReadOnlySequenceSteps,
+      reply: q0540Reply,
+      finalViolations: q0540Final.violations,
+      missingSequence: q0540Final.missingRouteReadOnlySequenceSteps,
+    }, null, 2));
+    assert.equal(q0540Fallback.fallbackSource, 'verifiedFacts');
+    assert.deepEqual(q0540Fallback.finalAudit.violations, []);
+    assert.doesNotMatch(q0540Fallback.reply, /当前回答未通过发布前事实与动作安全校验|AI 暂时连不上/);
+  }
+  const q0540RouteMiss = { ...q0540Route, matched: false };
+  const q0540Stopped = bundle.modelFailureFallback(q0540Question, q0540RouteMiss, { code: 'MODEL_FIRST_TOKEN_TIMEOUT', message: '模型首字等待超时' });
+  assert.ok(q0540Stopped, 'Q0540 route miss 的诊断追问应安全停住而不是伪造登录顺序');
+  assert.equal(q0540Stopped.fallbackSource, 'evidenceStop');
+  assert.deepEqual(q0540Stopped.finalAudit.violations, []);
+  assert.doesNotMatch(q0540Stopped.reply, /院区列表|多设备检测|token scope|动态路由/);
+  const q0540UnsafeDraft = '请让实施人员修改接口配置后重新触发登录。';
+  const q0540UnsafeAudit = bundle.audit(q0540UnsafeDraft, q0540Question, q0540Route);
+  assert.ok(q0540UnsafeAudit.violations.includes('cross_actor_side_effect'), 'Q0540 不能因有 route 只读顺序而放宽真实写操作门');
+  const q0540SafeFromUnsafe = bundle.fallback(q0540UnsafeDraft, q0540UnsafeAudit);
+  assert.deepEqual(bundle.audit(q0540SafeFromUnsafe, q0540Question, q0540Route).violations, []);
+  assert.doesNotMatch(q0540SafeFromUnsafe, /修改接口配置后重新触发登录/);
+
   const chargeQuestions = [
     '收费时，提醒HIS收费发起失败，收费状态未确认成功，这个是什么问题需要怎么处理',
     '怎么撤销收费',
