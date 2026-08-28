@@ -2813,6 +2813,89 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(q0355Recovered.reply, /不重新登录|不重登录/);
   assert.deepEqual(q0355Recovered.audit.violations, [], 'Q0355 二次语义失败恢复出口终审应全绿');
 
+  const q0363Question = Object.keys(browserRequirements).find(question => question === '处方标记现场暂时不能改数据、重放消息或重提任务。仅用已有记录应该怎样缩小范围？');
+  assert.ok(q0363Question, 'Q0363 应从正式 Audit 浏览器 fixture 取到原问题');
+  const q0363Route = runtimeRouteWithContext(routeQuestion(productionRouteMap, q0363Question));
+  assert.equal(q0363Route.route.id, 'AUD-QR-MK-01');
+  const q0363GenericDraft = [
+    '结论：现有受限证据只能固定已有观测，暂时不能闭环原因。',
+    '只读核对已有请求、响应和记录，再按对象标识、状态和时间缩小范围。',
+    '本轮不改数据、不重放消息、不重提任务。',
+  ].join('\n');
+  const q0363Initial = bundle.audit(q0363GenericDraft, q0363Question, q0363Route);
+  assert.equal(q0363Initial.existingRecordNarrowingQuestion, true, 'Q0363 应识别为已有记录缩小范围问法');
+  assert.match(q0363Initial.existingRecordNarrowingFact, /列表与筛选/);
+  assert.deepEqual(q0363Initial.existingRecordFilterDimensions, ['标记时间', '审核状态', '标记标签', '警示等级', '科室', '医生', '患者', '处方号', '药品']);
+  assert.ok(q0363Initial.missingExistingRecordNarrowing.includes('标记时间'));
+  assert.ok(q0363Initial.missingExistingRecordNarrowing.includes('默认只看未删除记录'));
+  assert.ok(q0363Initial.missingExistingRecordNarrowing.includes('已有记录详情'));
+  assert.ok(q0363Initial.missingExistingRecordNarrowing.includes('每页 10 条'));
+  assert.ok(q0363Initial.violations.includes('incomplete_verified_facts'), '只说查已有记录而不列 route 已核筛选项必须被终审拦截');
+  const q0363Reply = bundle.fallback(q0363GenericDraft, q0363Initial);
+  for (const filter of ['标记时间', '审核状态', '标记标签', '警示等级', '科室', '医生', '患者', '处方号', '药品']) {
+    assert.match(q0363Reply, new RegExp(filter), `Q0363 确定性 fallback 必须保留筛选项“${filter}”`);
+  }
+  assert.match(q0363Reply, /默认每页 10 条/);
+  assert.match(q0363Reply, /只查未删除标记/);
+  assert.match(q0363Reply, /进入标记处方详情/);
+  assert.match(q0363Reply, /本轮只读边界：不改数据、不重放消息、不重提任务/);
+  assert.doesNotMatch(q0363Reply, /(?:建议|应当|应该|请|可以)[^。！？\n]{0,24}(?:添加|取消|导出|重放|重提|修改)/);
+  assert.doesNotMatch(q0363Reply, /新增与标题|取消与历史|标记处方记录表\.xls/);
+  assert.deepEqual(bundle.audit(q0363Reply, q0363Question, q0363Route).violations, [], 'Q0363 已有记录筛选 fallback 终审应全绿');
+
+  const q0369Question = Object.keys(browserRequirements).find(question => question === '把处方标记从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。');
+  assert.ok(q0369Question, 'Q0369 应从正式 Audit 浏览器 fixture 取到原问题');
+  const auditTag3RouteMap = JSON.parse(execFileSync(
+    'git', ['show', '2.7.260828-3:docs/specs/00-功能模块地图.json'],
+    { cwd: path.resolve(ROOT, '../psp/audit'), encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 },
+  ));
+  const q0369Route = runtimeRouteWithRepositoryContext(routeQuestion(auditTag3RouteMap, q0369Question), '2.7.260828-3');
+  assert.equal(q0369Route.route.id, 'AUD-QR-MK-01', 'Q0369 必须保持门诊处方标记 route');
+  assert.ok(q0369Route.directEvidenceFacts.some(fact => /接口签名/u.test(fact)), JSON.stringify(q0369Route.directEvidenceFacts));
+  const q0369CrossModuleDraft = [
+    '入口：住院医嘱详情页。',
+    '接口：GET /auditapi/audit/ipt/collects、POST /auditapi/audit/ipt/task/collect、DELETE /auditapi/audit/ipt/collect。',
+    '数据：写入 audit_ipt_collect。',
+  ].join('\n');
+  const q0369CrossModuleAudit = bundle.audit(q0369CrossModuleDraft, q0369Question, q0369Route);
+  assert.ok(q0369CrossModuleAudit.violations.includes('unexpected_concrete_path'), '相邻住院接口必须被 current route 路径作用域拦截');
+  assert.ok(q0369CrossModuleAudit.violations.includes('out_of_scope_entity'), '相邻住院数据表必须被 current route 实体作用域拦截');
+  const q0369Fallback = bundle.verifiedFallback(q0369Question, q0369Route);
+  assert.ok(q0369Fallback, 'Q0369 应从 current route 生成确定性链路终稿');
+  assert.equal(q0369Fallback.initialAudit.fallbackAnswerMode, 'chain');
+  assert.match(q0369Fallback.reply, /处方审核详情|处方详情/);
+  for (const signature of [
+    'GET /auditapi/audit/opt/collects',
+    'POST /auditapi/audit/opt/task/collect',
+    'DELETE /auditapi/audit/opt/collect',
+    'GET /auditapi/comm/opt/collects/excel',
+  ]) assert.match(q0369Fallback.reply, new RegExp(signature.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), signature);
+  assert.match(q0369Fallback.reply, /audit_opt_collect/);
+  assert.match(q0369Fallback.reply, /外部依赖[^。！？\n]*(?:当前停点|未提供|不补写)/);
+  assert.doesNotMatch(q0369Fallback.reply, /\/auditapi\/audit\/ipt\/|audit_ipt_collect|住院医嘱标记/);
+  assert.deepEqual(q0369Fallback.finalAudit.violations, [], 'Q0369 只能串 current route 的门诊入口、接口、数据与未知边界');
+
+  const q0373Question = Object.keys(browserRequirements).find(question => question === '关于处方标记，我现在只有一次既有请求和响应，没有数据库权限。现有证据最多能判断到哪？');
+  assert.ok(q0373Question, 'Q0373 应从正式 Audit 浏览器 fixture 取到原问题');
+  const q0373ContextRoute = contextualRouteQuestion(auditTag3RouteMap, [
+    { role: 'user', content: '另一轮独立复测（372）里，处方标记涉及哪些接口、数据和边界？' },
+    { role: 'assistant', content: '上一轮回答不作为事实源。' },
+    { role: 'user', content: q0373Question },
+  ], q0373Question, '');
+  assert.equal(q0373ContextRoute.route.id, 'AUD-QR-MK-01', 'Q0373 partial-evidence 必须继续锚定门诊处方标记 route');
+  const q0373Route = runtimeRouteWithRepositoryContext(q0373ContextRoute, '2.7.260828-3');
+  const q0373CrossModuleDraft = 'AI 生成结果会写入 audit_ai_generate，并由 Dify 返回生成内容；现有响应可证明这条生成链已完成。';
+  const q0373CrossModuleAudit = bundle.audit(q0373CrossModuleDraft, q0373Question, q0373Route);
+  assert.ok(q0373CrossModuleAudit.violations.includes('out_of_scope_entity'), 'partial-evidence 中相邻 AI 数据对象必须被 current route 拦截');
+  const q0373Fallback = bundle.modelFailureFallback(q0373Question, q0373Route, { status: 429, message: 'rate limit' });
+  assert.ok(q0373Fallback, 'Q0373 模型失败时必须发布 current route 的确定性受限证据终稿');
+  assert.equal(q0373Fallback.initialAudit.fallbackAnswerMode, 'partial_evidence');
+  assert.match(q0373Fallback.reply, /现有受限证据只够固定已经提供的观测/);
+  assert.match(q0373Fallback.reply, /门诊处方标记/);
+  assert.match(q0373Fallback.reply, /本轮未知/);
+  assert.doesNotMatch(q0373Fallback.reply, /audit_ai_generate|Dify|AI 生成|住院医嘱标记|audit_ipt_collect/);
+  assert.deepEqual(q0373Fallback.finalAudit.violations, [], 'Q0373 partial-evidence 确定性终稿只能使用处方标记 route 事实');
+
   const q0284Question = Object.keys(browserRequirements).find(question => question === '先切到另一个问题：“医嘱标记”当前实现的关键入口或处理链是什么？');
   const q0285Question = Object.keys(browserRequirements).find(question => question === '医嘱标记这一步只能确认现象稳定复现，不能做写操作。现在应停在哪个边界并交给谁继续？');
   assert.ok(q0284Question && q0285Question, 'Q0284/Q0285 应从真实浏览器题目 fixture 取到连续问题');
