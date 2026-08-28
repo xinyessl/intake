@@ -70,6 +70,7 @@
     <div class="form-group"><label>角色 <span class="req">*</span></label><select class="select" id="edRole"><option value="admin">管理员</option><option value="pm">产品经理</option><option value="impl">实施工程师</option></select></div>
     <div class="form-group" id="hospitalsGroup">
       <label>负责医院 <span class="text-tertiary" style="font-weight:400;font-size:12px">可选</span></label>
+      <div class="input-with-icon hosp-search" id="edHospSearchWrap" style="margin-bottom:6px"><i class="ti ti-search"></i><input class="input" id="edHospSearch" placeholder="按医院名称筛选…" autocomplete="off"></div>
       <div class="checklist" id="edHospitals"></div>
       <div class="form-hint">实施工程师只能看 / 操作自己负责医院的数据。</div>
     </div>
@@ -166,9 +167,39 @@ $('#btnReset').addEventListener('click',()=>{ $('#fRole').value=''; $('#fStatus'
 /* —— 多选盒渲染 —— */
 function renderHospitals(selected){
   const sel=new Set(selected||[]);
-  if(!CUSTOMERS.length){ $('#edHospitals').innerHTML='<div class="empty-line">暂无可选医院（先到「医院管理」维护）</div>'; return; }
+  // 每次打开/重渲染都重置搜索框 + 恢复无匹配提示，避免上次搜索词残留把新列表全过滤掉
+  const sb=$('#edHospSearch'); if(sb) sb.value='';
+  const noMatch=$('#edHospNoMatch'); if(noMatch) noMatch.style.display='none';
+  if(!CUSTOMERS.length){
+    $('#edHospitals').innerHTML='<div class="empty-line">暂无可选医院（先到「医院管理」维护）</div>';
+    // 无可选医院时搜索框无意义（AC）→ 隐藏
+    const w=$('#edHospSearchWrap'); if(w) w.style.display='none';
+    return;
+  }
+  const w=$('#edHospSearchWrap'); if(w) w.style.display='';
   $('#edHospitals').innerHTML=CUSTOMERS.map(c=>`<label class="checkbox"><input type="checkbox" value="${esc(c.name)}"${sel.has(c.name)?' checked':''}>${esc(c.name)}${c.region?`<span class="region">${esc(c.region)}</span>`:''}</label>`).join('');
 }
+/* —— 负责医院名称即输即过滤（客户端·纯显隐、绝不重渲染 innerHTML → 保住未保存的勾选态）—— */
+function filterHospitals(){
+  const box=$('#edHospitals'); if(!box) return;
+  const kw=($('#edHospSearch').value||'').trim().toLowerCase();
+  const labels=$$('#edHospitals > label.checkbox');
+  let shown=0;
+  labels.forEach(lb=>{
+    const inp=lb.querySelector('input[type=checkbox]');
+    const name=inp?String(inp.value||''):'';
+    const region=(lb.querySelector('.region')?lb.querySelector('.region').textContent:'')||'';
+    const hit=!kw || name.toLowerCase().includes(kw) || region.toLowerCase().includes(kw);
+    lb.style.display=hit?'':'none';   // 仅切显隐，不动 checked；checkedValues 读 input:checked 与 display 无关
+    if(hit) shown++;
+  });
+  // 无匹配提示：有搜索词且 0 命中 → 显灰提示（独立节点，不进 #edHospitals，避免被 renderHospitals 重渲染污染）
+  let nm=$('#edHospNoMatch');
+  if(!nm){ nm=document.createElement('div'); nm.id='edHospNoMatch'; nm.className='empty-line'; nm.textContent='无匹配医院'; nm.style.display='none'; box.insertAdjacentElement('afterend',nm); }
+  nm.style.display=(kw && labels.length && shown===0)?'':'none';
+}
+// input 事件在初始化时绑一次即可（#edHospSearch 是 #edHospitals 的兄弟、不随 renderHospitals 重渲染销毁）
+$('#edHospSearch').addEventListener('input',filterHospitals);
 function renderProjects(selected){
   const sel=new Set((selected||[]).map(String));
   if(!PROJECTS.length){ $('#edProjects').innerHTML='<div class="empty-line">暂无可选产品</div>'; return; }
