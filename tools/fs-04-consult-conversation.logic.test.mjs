@@ -3515,6 +3515,78 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   const q0549UnsafeAudit = bundle.audit(q0549UnsafeDraft, q0549Question, q0549Route);
   assert.ok(q0549UnsafeAudit.violations.includes('cross_actor_side_effect'), 'verified chain 只放行可追溯 route 原句，模型新增写操作仍须拦截');
 
+  const q0594Question = auditBrowserQuestions.questions.find(item => item.id === 'Q0594')?.question;
+  const q0595Question = auditBrowserQuestions.questions.find(item => item.id === 'Q0595')?.question;
+  assert.equal(q0595Question, '回到AI 审方生成这里，第一层核过没有异常，下一步按什么顺序继续只读排查？');
+  const q0595MatchedRoute = contextualRouteQuestion(auditTag3RouteMap, [
+    { role: 'user', content: q0594Question },
+    { role: 'assistant', content: '上一轮模型回答不作为事实源。' },
+    { role: 'user', content: q0595Question },
+  ], q0595Question, '');
+  const q0595Route = runtimeRouteWithRepositoryContext(q0595MatchedRoute, '2.7.260828-3');
+  assert.equal(q0595Route.route.id, 'AUD-QR-AI-01', 'Q0595 必须沿用刚切换后的 AI 审方生成 current route');
+  const q0595Initial = bundle.audit('', q0595Question, q0595Route);
+  const q0595Reply = bundle.fallback('', q0595Initial);
+  const q0595Final = bundle.audit(q0595Reply, q0595Question, q0595Route);
+  assert.equal(q0595Initial.fallbackAnswerMode, 'field_diagnostic');
+  assert.equal(q0595Initial.contextFollowupQuestion, true);
+  assert.match(q0595Initial.routeReadOnlySequenceFact, /实施只读清单/);
+  assert.deepEqual(q0595Initial.routeReadOnlySequenceSteps.map(step => step.text), [
+    '记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId',
+    '按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务',
+  ]);
+  for (const expected of [
+    /opt\/ipt 来源/,
+    /Dify/,
+    /生成记录 task_id\/content/,
+    /药师手动采纳|立即加入审核建议/,
+    /不得重复提交真实业务/,
+    /不得[^。\n]*改生成记录或审核状态/,
+    /不得凭空补 taskId、密钥或成功结论/,
+  ]) assert.match(q0595Reply, expected);
+  assert.deepEqual(q0595Final.missingRouteReadOnlySequenceSteps, []);
+  assert.deepEqual(q0595Final.violations, [], JSON.stringify({
+    reply: q0595Reply,
+    initialViolations: q0595Initial.violations,
+    finalViolations: q0595Final.violations,
+    sequenceFact: q0595Initial.routeReadOnlySequenceFact,
+    sequenceSteps: q0595Initial.routeReadOnlySequenceSteps,
+    missingSequence: q0595Final.missingRouteReadOnlySequenceSteps,
+    technicalDump: q0595Final.audienceTechnicalDumpParts,
+    unsafeActorActionCount: q0595Final.unsafeActorActionCount,
+    unsafeDirectActionCount: q0595Final.unsafeDirectActionCount,
+  }, null, 2));
+  for (const modelError of [
+    { code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束' },
+    { code: 'MODEL_FIRST_TOKEN_TIMEOUT', message: '模型首字等待超时' },
+  ]) {
+    const q0595Fallback = bundle.modelFailureFallback(q0595Question, q0595Route, modelError);
+    assert.ok(q0595Fallback, JSON.stringify({
+      message: `Q0595 ${modelError.code} 应发布 AI route 的只读续查顺序`,
+      reply: q0595Reply,
+      initialViolations: q0595Initial.violations,
+      finalViolations: q0595Final.violations,
+      sequenceFact: q0595Initial.routeReadOnlySequenceFact,
+      sequenceSteps: q0595Initial.routeReadOnlySequenceSteps,
+      missingSequence: q0595Final.missingRouteReadOnlySequenceSteps,
+    }, null, 2));
+    assert.equal(q0595Fallback.fallbackSource, 'verifiedFacts');
+    assert.deepEqual(q0595Fallback.finalAudit.violations, []);
+    assert.doesNotMatch(q0595Fallback.reply, /当前回答未通过发布前事实与动作安全校验|AI 暂时连不上/);
+  }
+  const q0595RouteMiss = { ...q0595Route, matched: false };
+  const q0595Stopped = bundle.modelFailureFallback(q0595Question, q0595RouteMiss, { code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限' });
+  assert.ok(q0595Stopped, 'Q0595 route miss 的只读追问应安全停住，不能发布相邻 AI route 事实');
+  assert.equal(q0595Stopped.fallbackSource, 'evidenceStop');
+  assert.deepEqual(q0595Stopped.finalAudit.violations, []);
+  assert.doesNotMatch(q0595Stopped.reply, /opt\/ipt|Dify|audit_ai_generate|药师手动采纳/);
+  const q0595UnsafeDraft = '请重新提交真实业务，手工修改生成记录和审核状态，并补一个 taskId 后重试。';
+  const q0595UnsafeAudit = bundle.audit(q0595UnsafeDraft, q0595Question, q0595Route);
+  assert.ok(q0595UnsafeAudit.violations.includes('cross_actor_side_effect'), 'Q0595 current route 不能放宽模型新增写操作');
+  const q0595SafeFromUnsafe = bundle.fallback(q0595UnsafeDraft, q0595UnsafeAudit);
+  assert.deepEqual(bundle.audit(q0595SafeFromUnsafe, q0595Question, q0595Route).violations, []);
+  assert.doesNotMatch(q0595SafeFromUnsafe, /请重新提交真实业务|手工修改生成记录和审核状态|补一个 taskId/);
+
   const chargeQuestions = [
     '收费时，提醒HIS收费发起失败，收费状态未确认成功，这个是什么问题需要怎么处理',
     '怎么撤销收费',

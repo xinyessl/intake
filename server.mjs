@@ -3984,10 +3984,11 @@ function consultAnswerSemanticAudit(answer, question, route) {
   // 具体模块、字段或题号；终审同时检查步骤覆盖与先后次序。
   const routeReadOnlySequenceQuestion = continuationDiagnosticQuestion || existingRecordNarrowingQuestion;
   // route 的人工事实既可能写成“现场只读排查顺序：”，也可能用业务主题
-  // 作前缀写成“登录只读排查：”。前缀本身不参与判断；只有同一句明确
-  // 出现“只读排查/核对 + 冒号”时才作为顺序锚点，避免从普通事实臆造步骤。
+  // 作前缀写成“登录只读排查：”，也可能直接标为“实施只读清单：”。
+  // 前缀本身不参与判断；只有同一句明确出现只读排查/核对/清单 + 冒号时
+  // 才作为顺序锚点，避免从普通事实臆造步骤。
   const routeReadOnlySequenceAnchorRe = continuationDiagnosticQuestion
-    ? /(?:^|[。！？；;])[^，,。！？；;：:\n]{0,20}只读(?:排查|核对)(?:顺序)?\s*[：:]/u
+    ? /(?:^|[。！？；;])(?:[^，,。！？；;：:\n]{0,20}只读(?:排查|核对)(?:顺序)?|实施只读(?:清单|步骤))\s*[：:]/u
     : /(?:^|[。！？；;])(?:现场|实施)?只读(?:排查|核对)顺序\s*[：:]/u;
   const isRouteReadOnlySequenceFact = fact => routeReadOnlySequenceAnchorRe.test(String(fact || ''));
   const routeReadOnlySequenceFact = routeReadOnlySequenceQuestion
@@ -4007,7 +4008,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
     // 只在明确顺序标记前切分，保留同一步内部的并列对象与“只记录…”边界。
     // 同时支持“已登录后异常再读…”这类带条件的后续只读步骤；禁止/不得
     // 后的句子是安全边界，不作为可执行步骤。
-    const sequenceMarkerSource = '(?:先|再|然后|随后|最后|按|确认|核对|查看|读|沿|(?:需|应)?单独确认|另行确认|分别确认|[^，,；;。！？\\n]{1,24}(?:需|应)单独确认|[^，,；;。！？\\n]{1,16}后(?:异常)?再)';
+    const sequenceMarkerSource = '(?:先|再|然后|随后|最后|按|记录|确认|核对|查看|读|沿|(?:需|应)?单独确认|另行确认|分别确认|[^，,；;。！？\\n]{1,24}(?:需|应)单独确认|[^，,；;。！？\\n]{1,16}后(?:异常)?再)';
     const sequenceSplitRe = new RegExp(`(?<=[，,；;。])(?=${sequenceMarkerSource})`, 'u');
     const stepMarkerRe = new RegExp(`^${sequenceMarkerSource}`, 'u');
     const nonSequenceTailRe = new RegExp(`[；;](?!${sequenceMarkerSource})[\\s\\S]*$`, 'u');
@@ -4677,15 +4678,24 @@ function consultAnswerSemanticAudit(answer, question, route) {
     const diagnosticFactRelevanceRe = /(?:实施|只读|排查|留证|核对|记录|日志|生产包|发布记录|访问|失败记录|支持能力|授权|未经|不得|不能|后续调用|重复|重发|重提|异常|现状|状态|证据|响应|返回|日期|星期|时间|页面|业务|功能|范围|对象|结果|条件|另一套(?:错误)?机制|不由[^。！？；\n]{0,32}统一处理|相邻(?:机制|功能)|机制隔离)/iu;
     const diagnosticFactQuestion = explicitReviewDiagnosticQuestion
       || /(?:实施|只读|排查|留证|复测|现场|清单|证据|缩小范围|转开发|怎么查|如何查|核对|怎么判断|如何判断)/iu.test(intentQuestionText);
+    // “上一层已核正常，下一层继续只读排查”不是再次复述完整 route。
+    // 若 route 已给专用只读顺序，只保留首条业务基线；顺序事实由下方
+    // routeReadOnlySequenceSteps 展开，避免长 route 全量搬运后形成技术倾倒。
+    // 这仍完全由 current route 派生，不会放入相邻 route 或模型新增事实。
+    const compactContinuationFacts = continuationDiagnosticQuestion
+      && /(?:^|[。！？；;])实施只读(?:清单|步骤)\s*[：:]/u.test(routeReadOnlySequenceFact);
+    const diagnosticSourceFacts = compactContinuationFacts
+      ? Array.from(new Set([currentRouteFacts[0], routeReadOnlySequenceFact].filter(Boolean)))
+      : currentRouteFacts;
     const allConfirmedFacts = route && route.matched
       ? Array.from(new Set([
           // “独立复测 + 接口/数据/边界”是宽盘点，不得用实施相关性过滤
           // 掉后段业务阶段（如分配）或事务/失败流水边界；仍只取 current
           // route facts，不能扩入相邻 route。其它 field diagnostic 继续按
           // 相关性精简，避免普通现场清单技术倾倒。
-          ...currentRouteFacts.filter((fact, index) => (explicitReviewDiagnosticQuestion || verifiedInterfaceDataBoundaryDiagnosticQuestion || continuationDiagnosticQuestion || dataReturnedNotRenderedQuestion || implementationChecklistQuestion || requestResultMismatchQuestion || multiStepTransactionDiagnosticQuestion || retryBoundaryChecklistQuestion || uiAuthorizationProofQuestion || minimalEvidenceQuestion)
+          ...diagnosticSourceFacts.filter((fact, index) => (explicitReviewDiagnosticQuestion || verifiedInterfaceDataBoundaryDiagnosticQuestion || (!compactContinuationFacts && continuationDiagnosticQuestion) || dataReturnedNotRenderedQuestion || implementationChecklistQuestion || requestResultMismatchQuestion || multiStepTransactionDiagnosticQuestion || retryBoundaryChecklistQuestion || uiAuthorizationProofQuestion || minimalEvidenceQuestion)
             || index === 0 || !diagnosticFactQuestion || diagnosticFactRelevanceRe.test(fact)),
-          ...publicMustNotConfuse,
+          ...(compactContinuationFacts && routeReadOnlySequenceBoundary ? [] : publicMustNotConfuse),
         ].map(String).map(x => x.trim()).filter(Boolean)))
       : [];
     // field diagnostic 是非写操作回答形态，不因问句同时点名接口而改变。
@@ -4715,8 +4725,11 @@ function consultAnswerSemanticAudit(answer, question, route) {
       // route 有时把只读顺序和“新增/取消会写数据”的禁止边界写在同一
       // 条 fact。动作过滤不能因此连前半段已核顺序一起删掉；续接诊断只
       // 发布冒号后的顺序子句，通用清单再负责统一写操作边界。
-      .flatMap(fact => routeReadOnlySequenceQuestion && isRouteReadOnlySequenceFact(fact)
-        ? [String(fact).split(/[；;]/u)[0].trim()].filter(Boolean)
+      .flatMap(fact => compactContinuationFacts
+        && routeReadOnlySequenceSteps.length && isRouteReadOnlySequenceFact(fact)
+        ? []
+        : routeReadOnlySequenceQuestion && isRouteReadOnlySequenceFact(fact)
+          ? [String(fact).split(/[；;]/u)[0].trim()].filter(Boolean)
         : [fact])
       .filter(fact => audienceMode !== 'implementation'
         || !diagnosticActionFactRe.test(fact)
