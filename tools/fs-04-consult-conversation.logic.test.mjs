@@ -2762,6 +2762,57 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.doesNotMatch(q0340Reply, /HTTP|业务码|服务端日志|数据库|当前操作请求|审核流水|接口分支/);
   assert.deepEqual(bundle.audit(q0340Reply, q0340Question, q0340Route).violations, [], 'Q0340 静态页专用 fallback 终审应全绿');
 
+  const q0355Question = Object.keys(browserRequirements).find(question => question === '关于登录与鉴权，如果接口返回有数据而页面没呈现，转开发前要整理哪些最小证据？');
+  assert.ok(q0355Question, 'Q0355 应从正式 Audit 浏览器 fixture 取到原问题');
+  const q0355Route = runtimeRouteWithContext(routeQuestion(productionRouteMap, q0355Question));
+  assert.equal(q0355Route.route.id, 'AUD-QR-SH-01');
+  const q0355Initial = bundle.audit('', q0355Question, q0355Route);
+  assert.deepEqual(q0355Initial.missingDataNotRenderedBoundaryGroups.sort(), ['会话作用域边界', '分阶段结果边界', '外部身份数据边界'].sort(), 'Q0355 空答应识别 current route 的三组已核业务边界');
+  const q0355EvidenceOnlyDraft = [
+    '1. 页面上下文：记录页面、筛选条件、账号角色、院区/科室、页面路由、对象范围、发生时间、版本和请求标识。',
+    '2. 同一次请求：只查看同一次已经发生的请求与响应，保留 URL、请求参数、HTTP/业务码和响应原文；接口返回有数据不代表页面一定应展示。',
+    '3. 会话作用域：只读对照 Cookie、token scope 和用户信息缓存；不重新登录，不清理 Cookie 或缓存。',
+    '4. 页面呈现：只读对照响应对象、页面路由、渲染结果和浏览器控制台的已有报错。',
+    '5. 交接边界：汇总时间、版本和请求标识；不关闭旧设备，不修改数据，不试越权。',
+  ].join('\n');
+  const q0355EvidenceOnlyAudit = bundle.audit(q0355EvidenceOnlyDraft, q0355Question, q0355Route);
+  assert.equal(q0355EvidenceOnlyAudit.dataNotRenderedEvidenceComplete, true, '完整的通用证据清单应先通过取证结构合同');
+  assert.ok(q0355EvidenceOnlyAudit.violations.includes('incomplete_verified_facts'), '只给通用证据而遗漏 current route 业务边界仍须触发确定性 fallback');
+  const q0355DeterministicReply = bundle.fallback('', q0355Initial);
+  const q0355DeterministicAudit = bundle.audit(q0355DeterministicReply, q0355Question, q0355Route);
+  const q0355RateLimitFallback = bundle.modelFailureFallback(q0355Question, q0355Route, { status: 429, message: 'rate limit' });
+  assert.ok(q0355RateLimitFallback, `Q0355 遇到 429 时必须发布 matched route 的确定性现场终稿：${JSON.stringify({ initial: q0355Initial.violations, reply: q0355DeterministicReply, final: q0355DeterministicAudit.violations })}`);
+  assert.match(q0355RateLimitFallback.reply, /default token/);
+  assert.match(q0355RateLimitFallback.reply, /message token/);
+  assert.match(q0355RateLimitFallback.reply, /用户中心/);
+  assert.match(q0355RateLimitFallback.reply, /审方本库无用户和 token 表/);
+  assert.match(q0355RateLimitFallback.reply, /状态 4/);
+  assert.match(q0355RateLimitFallback.reply, /本机登录|新设备登录/);
+  assert.match(q0355RateLimitFallback.reply, /旧设备.*分开核对|分开核对.*旧设备/s);
+  assert.match(q0355RateLimitFallback.reply, /同一次已经发生的请求与响应/);
+  assert.match(q0355RateLimitFallback.reply, /请求参数|HTTP\/业务码|响应原文/);
+  assert.match(q0355RateLimitFallback.reply, /账号角色.*院区|院区.*账号角色/s);
+  assert.match(q0355RateLimitFallback.reply, /Cookie.*缓存|缓存.*Cookie/s);
+  assert.match(q0355RateLimitFallback.reply, /页面路由|动态路由/);
+  assert.match(q0355RateLimitFallback.reply, /渲染/);
+  assert.match(q0355RateLimitFallback.reply, /浏览器控制台/);
+  assert.match(q0355RateLimitFallback.reply, /时间.*版本.*请求标识|请求标识.*时间.*版本/s);
+  assert.match(q0355RateLimitFallback.reply, /接口返回有数据[^。！？\n]{0,48}(?:不代表|不能证明)[^。！？\n]{0,48}页面/);
+  assert.match(q0355RateLimitFallback.reply, /不重新登录|不重登录/);
+  assert.match(q0355RateLimitFallback.reply, /不关闭[^。！？\n]{0,12}(?:旧设备|其他设备)/);
+  assert.match(q0355RateLimitFallback.reply, /不清理[^。！？\n]{0,12}(?:Cookie|缓存)/);
+  assert.match(q0355RateLimitFallback.reply, /不[^。！？\n]{0,8}(?:修改|改动)[^。！？\n]{0,8}数据/);
+  assert.deepEqual(q0355RateLimitFallback.finalAudit.violations, [], 'Q0355 429 确定性 fallback 终审应全绿');
+  const q0355SemanticFailureAudit = bundle.audit('当前回答未通过发布前事实与动作安全校验，请稍后重试。', q0355Question, q0355Route);
+  assert.ok(q0355SemanticFailureAudit.violations.length, 'Q0355 空泛拒答必须触发语义终审失败');
+  const q0355Recovered = bundle.recoverSafeDiagnostic(q0355SemanticFailureAudit, q0355Question, q0355Route);
+  assert.ok(q0355Recovered, 'Q0355 二次语义失败后必须恢复 matched route 确定性现场终稿');
+  assert.match(q0355Recovered.reply, /default token/);
+  assert.match(q0355Recovered.reply, /message token/);
+  assert.match(q0355Recovered.reply, /浏览器控制台/);
+  assert.match(q0355Recovered.reply, /不重新登录|不重登录/);
+  assert.deepEqual(q0355Recovered.audit.violations, [], 'Q0355 二次语义失败恢复出口终审应全绿');
+
   const q0284Question = Object.keys(browserRequirements).find(question => question === '先切到另一个问题：“医嘱标记”当前实现的关键入口或处理链是什么？');
   const q0285Question = Object.keys(browserRequirements).find(question => question === '医嘱标记这一步只能确认现象稳定复现，不能做写操作。现在应停在哪个边界并交给谁继续？');
   assert.ok(q0284Question && q0285Question, 'Q0284/Q0285 应从真实浏览器题目 fixture 取到连续问题');
