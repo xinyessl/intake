@@ -2955,6 +2955,27 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     assert.doesNotMatch(reply, /(?:^|[。！？；\n])\s*(?:建议|请|要求|让)实施[^。！？\n]{0,24}(?:调用|补全|写入)/u);
     assert.deepEqual(bundle.audit(reply, question, runtimeRoute).violations, [], `${label} 系统自动只读依赖表述终审应全绿`);
   }
+  const q0382FailureRoute = runtimeRouteWithRepositoryContext(routeQuestion(auditTag3RouteMap, q0382Question), '2.7.260828-3');
+  for (const modelError of [
+    { code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束' },
+    { status: 429, message: 'rate limit' },
+  ]) {
+    const fallback = bundle.modelFailureFallback(q0382Question, q0382FailureRoute, modelError);
+    assert.ok(fallback, `Q0382 ${modelError.code || modelError.status} 应发布 current route 的 verified fallback`);
+    assert.equal(fallback.fallbackSource, 'verifiedFacts');
+    assert.equal(fallback.modelDraftError.kind, modelError.status === 429 ? 'rate_limit' : 'length_limit');
+    assert.match(fallback.reply, /GET \/auditapi\/audit\/ipt\/collects/);
+    assert.match(fallback.reply, /audit_ipt_collect/);
+    assert.match(fallback.reply, /由系统自动只读调用用户中心 getHospitalInfoByHospitalId/);
+    assert.doesNotMatch(fallback.reply, /AI 暂时连不上|列表返回记录后，再通过用户中心/);
+    assert.deepEqual(fallback.finalAudit.violations, [], 'Q0382 模型失败的确定性终稿必须再次语义审计全绿');
+  }
+  assert.equal(bundle.modelFailureFallback(q0382Question, {
+    matched: false,
+    fallbackMode: 'verifiedFacts',
+    route: { id: 'MISS', title: '未命中', fallbackMode: 'verifiedFacts' },
+    answerFacts: q0382FailureRoute.answerFacts,
+  }, { code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束' }), null, '即使携带看似完整 facts，route miss 也不得在模型失败时伪造 Q0382 答案');
 
   const genericReadOnlyFactRoute = {
     ...genericImplementationRoute,

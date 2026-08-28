@@ -5139,8 +5139,11 @@ function consultAnswerSafeFallback(draft, audit) {
         `- ${missing}的具体细节没有已核事实；资料不足，不能补写未核实实现。`,
       ].join('\n'));
     }
-    const fallbackRouteFacts = audit.violations.includes('ambiguous_as_built_action')
-      && Array.isArray(audit.nonWritingRouteFacts) && audit.nonWritingRouteFacts.length
+    // 确定性 verified fallback 本身就是非写操作咨询答案；即使模型在首字
+    // 前已因长度/429 失败、初审没有草稿可标记措辞歧义，也必须从一开始
+    // 使用同源的系统自动只读表述。否则先按 route 原句组装、再被终审识别
+    // 为“再通过…补全”动作歧义，会错误退回模型错误气泡。
+    const fallbackRouteFacts = Array.isArray(audit.nonWritingRouteFacts) && audit.nonWritingRouteFacts.length
       ? audit.nonWritingRouteFacts
       : audit.currentRouteFacts;
     const [businessFact, ...implementationFacts] = fallbackRouteFacts;
