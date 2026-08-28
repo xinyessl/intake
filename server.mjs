@@ -994,8 +994,21 @@ function routeQuestion(map, query, subKey = '') {
         .replace(/^[“”"'‘’：:，,；;\s]+/u, '');
       return /^从[^。！？\n]{0,64}(?:入口|接口|数据)[^。！？\n]{0,64}外部依赖[^。！？\n]{0,40}(?:链路|串起来)/u.test(afterTitle);
     })();
+    // “关于<完整模块标题>，当前只有既有页面/请求/响应，现有证据最多能
+    // 判断到哪”同样把标题作为直接主语。这里使用封闭的证据材料词表并锚定
+    // 整个后缀；一旦夹入 Dify、生成记录、批量重试等专用业务实体就不会
+    // 命中，仍由对应高分专用 route 接管。
+    const exactTitlePartialEvidenceSubject = exactTitle && (() => {
+      const title = exactTitleText.toLowerCase();
+      const titleIndex = qLower.indexOf(title);
+      if (titleIndex < 0) return false;
+      const afterTitle = qLower.slice(titleIndex + title.length)
+        .replace(/^[“”"'‘’：:，,；;\s]+/u, '');
+      return /^(?:(?:我|我们|当前|现在|目前|现场|这边|本轮|这次)\s*){0,3}(?:只有|仅有|只拿到|仅拿到|只能看到|只能确认)\s*(?:一(?:次|份|条|张)\s*)?(?:(?:既有|已有|当前|现有)\s*)?(?:(?:页面|截图|请求|响应|记录|日志|requestid)\s*(?:和|与|、|及)?\s*){1,4}[，,；;。\s]*(?:(?:(?:暂时|当前)?\s*(?:没有|无|拿不到|无法(?:查看|查询|读取|访问)?))\s*(?:数据库|日志|源码|后台)(?:的)?(?:权限|查看权限|查询权限|读取权限|访问权限)[，,；;。\s]*)?(?:这些|现有|当前|已有)?\s*证据\s*(?:最多)?\s*(?:能|可以)?\s*(?:判断|确认|排除)\s*(?:到哪(?:一层|一步)?|哪些|什么|到什么范围)[？?。\s]*$/u.test(afterTitle);
+    })();
     const acceptedExactTitle = exactTitle && (specificExactTitle
       || exactTitleChainSubject
+      || exactTitlePartialEvidenceSubject
       || !scoreLeader
       || exactTitle === scoreLeader
       || exactTitle.sc >= scoreLeader.sc * ROUTE_EXACT_TITLE_MIN_RATIO)

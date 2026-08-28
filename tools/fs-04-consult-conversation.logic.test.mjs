@@ -3225,6 +3225,46 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.equal(q0699MatchedRoute.route.id, 'AUD-QR-WB-01', `带复测前缀的同构链路问法也应命中待审工作台，topN=${JSON.stringify(q0699MatchedRoute.topN)}`);
   assert.equal(q0699MatchedRoute.exactRouteTitle, true);
 
+  const q0693Question = auditBrowserQuestions.questions.find(item => item.id === 'Q0693')?.question;
+  assert.equal(q0693Question, '关于待审工作台，我现在只有一次既有请求和响应，没有数据库权限。现有证据最多能判断到哪？');
+  const q0693MatchedRoute = routeQuestion(auditTag3RouteMap, q0693Question);
+  assert.equal(q0693MatchedRoute.route.id, 'AUD-QR-WB-01', JSON.stringify({
+    message: 'Q0693 完整模块标题作为部分证据主语时必须命中待审工作台',
+    route: q0693MatchedRoute.route,
+    score: q0693MatchedRoute.score,
+    exactRouteTitle: q0693MatchedRoute.exactRouteTitle,
+    topN: q0693MatchedRoute.topN,
+  }, null, 2));
+  assert.equal(q0693MatchedRoute.exactRouteTitle, true);
+  const q0693RuntimeRoute = runtimeRouteWithRepositoryContext(q0693MatchedRoute, '2.7.260828-3');
+  for (const modelError of [
+    { code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限' },
+    { status: 429, message: 'rate limit' },
+  ]) {
+    const q0693Fallback = bundle.modelFailureFallback(q0693Question, q0693RuntimeRoute, modelError);
+    assert.ok(q0693Fallback, `Q0693 ${modelError.code || modelError.status} 应发布待审工作台的已核部分证据终稿`);
+    assert.match(q0693Fallback.reply, /待审工作总览|今日统计卡|快捷菜单|audit\/work\/table\/user/);
+    assert.doesNotMatch(q0693Fallback.reply, /audit_ai_generate|Dify|requestId|AI 审方生成|\/comm\/ai\/generate/);
+    assert.deepEqual(q0693Fallback.finalAudit.violations, []);
+  }
+
+  const q0693Variant = '关于待审工作台，当前仅有一次已有页面、请求和响应，暂时没有数据库查看权限；这些证据能确认到哪一层？';
+  const q0693VariantRoute = routeQuestion(auditTag3RouteMap, q0693Variant);
+  assert.equal(q0693VariantRoute.route.id, 'AUD-QR-WB-01', `同构的部分证据问法也应以完整模块标题切题，topN=${JSON.stringify(q0693VariantRoute.topN)}`);
+  assert.equal(q0693VariantRoute.exactRouteTitle, true);
+
+  for (const specializedAiQuestion of [
+    '关于待审工作台，我现在只有一次 AI 审方生成的 Dify 流式任务请求和响应，没有数据库权限。现有证据最多能判断到哪？',
+    '关于待审工作台，我现在只有一次 audit_ai_generate 生成记录和 task_id，没有数据库权限。现有证据最多能判断到哪？',
+  ]) {
+    const specializedAiRoute = routeQuestion(auditTag3RouteMap, specializedAiQuestion);
+    assert.equal(specializedAiRoute.route.id, 'AUD-QR-AI-01', `真正点名 AI 生成专用实体时必须由专用 route 接管，topN=${JSON.stringify(specializedAiRoute.topN)}`);
+  }
+
+  const adjacentPartialEvidenceQuestion = '关于住院医嘱标记，我现在只有一次既有请求和响应，没有数据库权限。现有证据最多能判断到哪？';
+  const adjacentPartialEvidenceRoute = routeQuestion(auditTag3RouteMap, adjacentPartialEvidenceQuestion);
+  assert.equal(adjacentPartialEvidenceRoute.route.id, 'AUD-QR-MK-02', `其它完整模块标题的部分证据问法仍应命中各自 route，topN=${JSON.stringify(adjacentPartialEvidenceRoute.topN)}`);
+
   const specificBatchQuestion = '把待审工作台的批量审核中途失败与重复重试边界从入口、接口或数据到外部依赖的链路串起来；同一批 taskId、审核流水、消息和 HIS 回调都要说明。';
   const specificBatchRoute = routeQuestion(auditTag3RouteMap, specificBatchQuestion);
   assert.equal(specificBatchRoute.route.id, 'AUD-QR-FLOW-BATCH-RETRY-01', `显式专用业务实体仍须压过通用场景标题，topN=${JSON.stringify(specificBatchRoute.topN)}`);
