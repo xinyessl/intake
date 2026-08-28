@@ -52,8 +52,7 @@ $('#u').addEventListener('keydown',e=>{ if(e.key==='Enter') $('#p').focus(); });
 // 若还没启用认证（没建过账号），提示去创建首个管理员
 (async()=>{ try{ const r=await (await fetch('/api/me')).json();
   if(r.me){ location.href='/'; return; }
-  if(r.defaultAdmin){ $('#foot').innerHTML='首次使用默认账号 · <b style="color:var(--pri)">admin</b> / <b style="color:var(--pri)">admin123</b>（登录后请立即修改密码）'; }
-  else if(!r.authEnabled){ $('#foot').innerHTML='还没有任何账号 · <a href="/accounts.html" style="color:var(--pri);font-weight:600">去创建第一个管理员</a>'; }
+  if(!r.authEnabled){ $('#foot').innerHTML='还没有任何账号 · <a href="/accounts.html" style="color:var(--pri);font-weight:600">去创建第一个管理员</a>'; }
 }catch(e){} })();
 </script>
 </body>
