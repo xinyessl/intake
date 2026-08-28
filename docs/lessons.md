@@ -1232,3 +1232,10 @@
 - 解法：对“独立复测/现场复测/现场复核”与接口、数据、边界组合启用 `field_diagnostic`，要求确定性 fallback 含四步只读顺序（请求响应、日志、任务状态、下游结果），并在终审检查步骤完整性；对“串起来/全链路/调用链/实现链路/从入口到外部依赖”显式排除，继续走研发 chain 合同。
 - 防复发：用真实 Q0177 断言 `fallbackAnswerMode=field_diagnostic`、四步与 `finalAudit.violations=[]`；用真实 Q0179 断言 `explicitReviewDiagnosticQuestion=false`、`fieldDiagnosticQuestion=false`、`chainRequested=true`。
 - 关联：`server.mjs`、`tools/fs-04-consult-conversation.logic.test.mjs`、`docs/changes/CHG-consult-独立复测宽问法进入只读诊断.md`。
+
+### L-128 端到端链路题要保留问句点名的业务阶段事实
+- 现象（2026-08-28）：审方 Q0179 的链路 fallback 已覆盖入口、接口、数据与外部依赖，但标题括号点名的“分配”阶段缺少在线药师与本院权限交集、1000 份平滑权重及多任务交集承接规则。
+- 根因：链路 fallback 只按研发维度分组，route fact 被维度去重后，未把问句括号/箭头中的业务阶段作为独立发布合同。
+- 解法：从链路问句的括号/箭头和阶段词提取通用阶段标签，按阶段信号从当前 route facts 选最多两条原句另行呈现；对复测宽盘点不再按相关性过滤 current route facts，保留后段分配、事务失败与 `sf_*` 未确认边界。
+- 防复发：真实 Q0179 断言阶段标签顺序和 fallback 的分配三层事实，且 `finalAudit.violations=[]`；真实 Q0177 断言候选交集、1000 份平滑轮询、多任务整批、无总事务、`audit_sync_error_flow` 与 `sf_*` 未知仍在四步只读终稿中。
+- 关联：`server.mjs`、`tools/fs-04-consult-conversation.logic.test.mjs`、`docs/changes/CHG-consult-链路阶段事实补全.md`。

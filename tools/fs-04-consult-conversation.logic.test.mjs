@@ -2002,6 +2002,12 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(q0177Fallback, /V1_OPT_AUDIT_QUERY|V1_IPT_AUDIT_QUERY|审核结果/);
   assert.match(q0177Fallback, /3\. 按“没有请求 \/ 请求失败 \/ 响应正常但页面不一致”/);
   assert.match(q0177Fallback, /4\. 整理上述原文与脱敏截图/);
+  assert.match(q0177Fallback, /在线药师与有本院权限药师的交集/);
+  assert.match(q0177Fallback, /1000 份权重.*平滑加权轮询/s);
+  assert.match(q0177Fallback, /共同候选.*承接整批.*(?:没有|无)共同候选.*逐任务各自分配/s);
+  assert.match(q0177Fallback, /没有总事务|失败类别不回滚/);
+  assert.match(q0177Fallback, /audit_sync_error_flow/);
+  assert.match(q0177Fallback, /sf_\* 表.*确认/);
   const q0177Final = bundle.audit(q0177Fallback, q0177Question, q0177Route);
   assert.equal(q0177Final.fallbackAnswerMode, 'field_diagnostic');
   assert.equal(q0177Final.diagnosticSequenceComplete, true, 'Q0177 兜底必须包含四步只读顺序');
@@ -2010,11 +2016,22 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   const q0179Question = Object.keys(browserRequirements).find(question => question.includes('另一轮独立复测（179）里，把处方审核端到端主流程（HIS 接入→落库→分配→审核→回写）从入口、接口或数据到外部依赖的链路串起来'));
   assert.ok(q0179Question, 'Q0179 真实 fixture 题目应存在');
   const q0179MatchedRoute = routeQuestion(productionRouteMap, q0179Question);
+  assert.equal(q0179MatchedRoute.route.id, 'AUD-QR-FLOW-01', 'Q0179 应命中处方审核端到端主流程');
   const q0179Route = runtimeRouteWithContext(q0179MatchedRoute);
   const q0179Initial = bundle.audit(q0179Route.answerFacts.join('\n'), q0179Question, q0179Route);
   assert.equal(q0179Initial.explicitReviewDiagnosticQuestion, false, 'Q0179 链路串题不得被复测诊断规则抢走');
   assert.equal(q0179Initial.fieldDiagnosticQuestion, false, 'Q0179 应保留研发链路问法');
   assert.equal(q0179Initial.chainRequested, true, 'Q0179 应继续使用链路完整性合同');
+  assert.deepEqual(q0179Initial.chainStageLabels, ['接入', '落库', '分配', '审核', '回写'], 'Q0179 应从标题括号/箭头提取业务阶段');
+  const q0179Fallback = bundle.modelFailureFallback(q0179Question, q0179Route, { status: 429, message: 'rate limit' });
+  assert.ok(q0179Fallback, 'Q0179 HTTP429 时必须使用链路事实兜底');
+  assert.match(q0179Fallback.reply, /业务阶段「分配」/);
+  assert.match(q0179Fallback.reply, /在线药师与有本院权限药师的交集/);
+  assert.match(q0179Fallback.reply, /1000 份权重.*平滑加权轮询/s);
+  assert.match(q0179Fallback.reply, /共同候选.*承接整批.*(?:没有|无)共同候选.*逐任务各自分配/s);
+  assert.match(q0179Fallback.reply, /入口|接口|数据与状态|外部依赖/);
+  assert.match(q0179Fallback.reply, /当前停点|NEEDS-HUMAN|资料明确的未知/);
+  assert.deepEqual(q0179Fallback.finalAudit.violations, [], 'Q0179 链路 fallback 必须保留点名阶段事实并终审全绿');
 
   const q0011AiQuestion = Object.keys(browserRequirements).find(question => question.includes('另一轮独立复测（11）里，AI 审方生成现在是怎么实现的？'));
   assert.ok(q0011AiQuestion, 'Q0011 真实 fixture 题目应存在');
