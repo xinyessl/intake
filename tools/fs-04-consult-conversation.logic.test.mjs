@@ -3237,6 +3237,56 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.equal(insufficientChainAudit.chainEvidenceSufficient, false, '只有模糊总述不构成可发布的多维链路证据');
   assert.equal(bundle.modelFailureFallback(insufficientChainQuestion, insufficientChainRoute, { status: 429, message: 'rate limit' }), null, '证据不足的 matched route 不得因模型失败而伪造 chain');
 
+  const q0513Question = auditBrowserQuestions.questions.find(item => item.id === 'Q0513')?.question;
+  assert.equal(q0513Question, '多数据库方言适配（MySQL/达梦/PostgreSQL 三库同逻辑不同 SQL）现场暂时不能改数据、重放消息或重提任务。仅用已有记录应该怎样缩小范围？');
+  const q0513Route = runtimeRouteWithRepositoryContext(routeQuestion(auditTag3RouteMap, q0513Question), '2.7.260828-3');
+  assert.equal(q0513Route.route.id, 'AUD-QR-SC-02', 'Q0513 必须命中多数据库方言 current route');
+  const q0513GenericDraft = [
+    '结论：现有受限证据只够固定已经提供的观测，不足以闭环原因。',
+    '只核对已有请求、响应和记录，拿不到的项标为未知。',
+    '本轮不改数据、不重放消息、不重提任务。',
+  ].join('\n');
+  const q0513Initial = bundle.audit(q0513GenericDraft, q0513Question, q0513Route);
+  assert.equal(q0513Initial.existingRecordNarrowingQuestion, true);
+  assert.match(q0513Initial.routeReadOnlySequenceFact, /现场只读排查顺序/);
+  assert.deepEqual(q0513Initial.routeReadOnlySequenceSteps.map(step => step.text), [
+    '看快照 updateTime 和 projectName',
+    '看定时任务',
+    '数据源 key 核对连接日志与产品名',
+    '确认 Mapper 分支及项目的数据源和医院范围',
+    '读该分支既有 SQL 日志',
+    '医生操作数需单独确认是否为 MySQL 已知缺项',
+  ]);
+  assert.ok(q0513Initial.missingRouteReadOnlySequenceSteps.length >= 5, '通用受限证据话术不能代替 route 明确的只读缩小顺序');
+  assert.ok(q0513Initial.violations.includes('incomplete_verified_facts'));
+  const q0513Reply = bundle.fallback(q0513GenericDraft, q0513Initial);
+  assert.match(q0513Reply, /已有记录只读缩小顺序/);
+  for (const expected of [
+    /快照 updateTime 和 projectName/,
+    /定时任务/,
+    /数据源 key 核对连接日志与产品名/,
+    /Mapper 分支及项目的数据源和医院范围/,
+    /该分支既有 SQL 日志/,
+    /医生操作数需单独确认是否为 MySQL 已知缺项/,
+  ]) assert.match(q0513Reply, expected);
+  assert.match(q0513Reply, /本轮只读边界：不改数据、不重放消息、不重提任务/);
+  const q0513Final = bundle.audit(q0513Reply, q0513Question, q0513Route);
+  assert.deepEqual(q0513Final.missingRouteReadOnlySequenceSteps, []);
+  assert.deepEqual(q0513Final.violations, [], JSON.stringify({ reply: q0513Reply, violations: q0513Final.violations }, null, 2));
+
+  const noSequenceQuestion = '库存历史现场不能改数据。仅用已有记录应该怎样缩小范围？';
+  const noSequenceRoute = {
+    matched: true,
+    fallbackMode: 'verifiedFacts',
+    route: { id: 'NO-SEQUENCE', title: '库存历史', fallbackMode: 'verifiedFacts' },
+    answerFacts: ['库存历史页只展示已有记录，不修改业务数据。'],
+  };
+  const noSequenceInitial = bundle.audit('', noSequenceQuestion, noSequenceRoute);
+  assert.equal(noSequenceInitial.routeReadOnlySequenceFact, '', '无 route 顺序锚点时不得臆造步骤');
+  assert.deepEqual(noSequenceInitial.routeReadOnlySequenceSteps, []);
+  const noSequenceReply = bundle.fallback('', noSequenceInitial);
+  assert.doesNotMatch(noSequenceReply, /已有记录只读缩小顺序|updateTime|projectName|Mapper|SQL 日志/);
+
   const genericChainCoverageQuestion = '把库存快照从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。';
   const genericChainCoverageRoute = {
     matched: true,

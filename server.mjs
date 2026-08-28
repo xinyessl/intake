@@ -3897,20 +3897,32 @@ function consultAnswerSemanticAudit(answer, question, route) {
   // 顺序时，通用请求/响应/日志清单不能替代这条 route 专用顺序。这里仅
   // 从 route 原句自动拆出“先/再/然后/随后”的步骤及并列对象，不认识
   // 具体模块、字段或题号；终审同时检查步骤覆盖与先后次序。
-  const routeReadOnlySequenceQuestion = continuationDiagnosticQuestion;
+  const routeReadOnlySequenceQuestion = continuationDiagnosticQuestion || existingRecordNarrowingQuestion;
   const routeReadOnlySequenceFact = routeReadOnlySequenceQuestion
     ? currentRouteFacts.find(fact => /(?:现场|实施)?只读(?:排查|核对)顺序\s*[：:]/u.test(fact)) || ''
     : '';
   const routeReadOnlySequenceSteps = (() => {
     if (!routeReadOnlySequenceFact) return [];
-    const body = routeReadOnlySequenceFact.split(/[：:]/u).slice(1).join('：').split(/[；;。]/u)[0] || '';
+    const body = routeReadOnlySequenceFact.split(/[：:]/u).slice(1).join('：');
+    const [mainSequence = '', ...tailClauses] = body.split(/[；;]/u);
     const stripActions = value => String(value || '')
-      .replace(/^(?:先|再|然后|随后)\s*/u, '')
+      .replace(/^(?:先|再|然后|随后|按)\s*/u, '')
       .replace(/(?:核对|查看|查验|检查|看|沿)/gu, '')
       .replace(/[\s，,。；;：:]/gu, '');
-    return Array.from(body.matchAll(/(?:^|，)\s*(?:先|再|然后|随后)([^，；。]+)/gu), match => match[1].trim())
+    // 主序列除“先/再”外，也可以用“按…核对/确认…”继续下一层；
+    // 分号后只承接明确的“需单独确认”只读分支，不把“未经授权不得…”
+    // 这类安全边界误当成排查步骤。
+    const mainSteps = mainSequence.split(/[，,]/u).map(clause => clause.trim())
+      .filter(clause => /^(?:先|再|然后|随后|按|确认|核对|查看|读|沿)/u.test(clause));
+    const tailSteps = tailClauses.map(clause => clause.replace(/[。！？\s]+$/gu, '').trim())
+      .filter(clause => /(?:需|应)?单独确认|另行确认|分别确认/u.test(clause)
+        && !/(?:不得|不能|不要|未经授权)/u.test(clause));
+    return [...mainSteps, ...tailSteps]
       .map(step => ({
-        text: step,
+        // text 保持旧审计合同（不含“先/再/按”），displayText 用于
+        // 确定性回答保留人能直接照做的顺序语义。
+        text: step.replace(/^(?:先|再|然后|随后|按)\s*/u, ''),
+        displayText: step,
         tokens: stripActions(step).split(/[、与和]/u).map(token => token.trim()).filter(Boolean),
       }))
       .filter(step => step.tokens.length);
@@ -4967,10 +4979,11 @@ function consultAnswerSemanticAudit(answer, question, route) {
   // 会把可追溯的“研发参考”再次拦掉。这里只对每一行都能追溯到当前
   // route 或固定安全模板的终稿放行技术倾倒；模型新增的任意一句仍失败。
   const partialEvidenceFallbackLines = documentLines.map(line => line
-    .replace(/^\s*[-*+]\s+/u, '').trim()).filter(Boolean);
+    .replace(/^\s*(?:[-*+]\s+|[1-9]\d*[.、．]\s*)/u, '').trim()).filter(Boolean);
   const partialEvidenceFixedLines = new Set([
     '业务结论',
     '研发参考',
+    '已有记录只读缩小顺序',
     '本轮未知',
     '结论：现有受限证据只够固定已经提供的观测，不能单独完成与已核规则的对照，也不足以闭环原因。',
     '结论：当前只能确认前端已经发出请求；这不等于服务端已经接收或完成后续处理。',
@@ -4980,12 +4993,17 @@ function consultAnswerSemanticAudit(answer, question, route) {
     '本轮只读边界：不改数据、不重复提交、不重试；只核对已有请求、响应、日志和记录。',
     '服务端处理结果、对应日志和后续业务状态均未取得，当前未知；不能由前端请求外推。',
   ]);
+  const normalizePartialEvidenceSequenceLine = value => String(value || '')
+    .replace(/[。！？\s]+$/gu, '').replace(/[\s，,。；;：:]/gu, '');
+  const partialEvidenceSequenceLine = line => Array.isArray(routeReadOnlySequenceSteps)
+    && routeReadOnlySequenceSteps.some(step => normalizePartialEvidenceSequenceLine(step.displayText || step.text)
+      === normalizePartialEvidenceSequenceLine(line));
   const partialEvidenceGenericUnknownRe = /^(?:接口|数据|后续状态)(?:、(?:接口|数据|后续状态))*的具体细节待补充；本轮回答仅依据上述已核事实。$/u;
   const verifiedPartialEvidenceFallback = verifiedFactsFallback
     && fallbackAnswerMode === 'partial_evidence'
-    && partialEvidenceFallbackLines.some(line => nonWritingRouteFacts.includes(line))
+    && partialEvidenceFallbackLines.some(line => nonWritingRouteFacts.includes(line) || partialEvidenceSequenceLine(line))
     && partialEvidenceFallbackLines.every(line => nonWritingRouteFacts.includes(line)
-      || partialEvidenceFixedLines.has(line) || partialEvidenceGenericUnknownRe.test(line))
+      || partialEvidenceFixedLines.has(line) || partialEvidenceSequenceLine(line) || partialEvidenceGenericUnknownRe.test(line))
     && /本轮未知/u.test(text)
     && /(?:现有受限证据|只能确认前端已经发出请求|这张截图只够固定)/u.test(text);
   if (verifiedPartialEvidenceFallback) {
@@ -5299,8 +5317,18 @@ function consultAnswerSafeFallback(draft, audit) {
         ...partialEvidenceBoundaryFacts,
         ...(minimumPathFact ? [minimumPathFact] : []),
       ]));
-      const technicalEvidenceFacts = publishedRouteFacts.filter(fact => /(?:\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/|\b[A-Z][A-Za-z0-9_$]*(?:Controller|Service|Mapper|Repository|DAO|DTO|VO)\b|\b[a-z][A-Za-z0-9_]{2,}\s*=|`\/[A-Za-z0-9_./{}?=&:%-]+`)/i.test(fact));
-      const businessEvidenceFacts = publishedRouteFacts.filter(fact => !technicalEvidenceFacts.includes(fact));
+      // “仅用已有记录缩小范围”若命中 route 明确的只读顺序，
+      // 将原句拆成可逐项照做的步骤；不再同时整句复述，避免业务人员
+      // 在长句与清单之间反复对照。步骤只来自本轮 route 事实。
+      const routeSequenceBlock = audit.existingRecordNarrowingQuestion
+        && Array.isArray(audit.routeReadOnlySequenceSteps) && audit.routeReadOnlySequenceSteps.length
+        ? ['已有记录只读缩小顺序', ...audit.routeReadOnlySequenceSteps.map((step, index) => `${index + 1}. ${String(step.displayText || step.text || '').replace(/[。！？]+$/u, '')}。`)]
+        : [];
+      const displayRouteFacts = routeSequenceBlock.length
+        ? publishedRouteFacts.filter(fact => fact !== audit.routeReadOnlySequenceFact)
+        : publishedRouteFacts;
+      const technicalEvidenceFacts = displayRouteFacts.filter(fact => /(?:\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/|\b[A-Z][A-Za-z0-9_$]*(?:Controller|Service|Mapper|Repository|DAO|DTO|VO)\b|\b[a-z][A-Za-z0-9_]{2,}\s*=|`\/[A-Za-z0-9_./{}?=&:%-]+`)/i.test(fact));
+      const businessEvidenceFacts = displayRouteFacts.filter(fact => !technicalEvidenceFacts.includes(fact));
       const routeHasEvidenceVerdict = routeFacts.some(fact =>
         /(?:只够|足够|够(?:用|判断|固定|完成)|不够|不足|不能单独|不能替代|尚不能|只能固定|只能证明|只能确认|最多(?:只能|能|可))/u.test(fact)
       );
@@ -5336,6 +5364,7 @@ function consultAnswerSafeFallback(draft, audit) {
         ...businessEvidenceFacts.map(fact => `- ${fact}`),
         technicalEvidenceFacts.length ? '研发参考' : '',
         ...technicalEvidenceFacts.map(fact => `- ${fact}`),
+        ...routeSequenceBlock,
         minimumReadOnlyEvidence,
         safetyBoundary,
         '本轮未知',
