@@ -3656,6 +3656,78 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.deepEqual(bundle.audit(q0615SafeFromUnsafe, q0615Question, q0615Route).violations, []);
   assert.doesNotMatch(q0615SafeFromUnsafe, /请重新提交真实业务|手工修改生成记录和审核状态|补一个 taskId 和密钥/);
 
+  const q0624Question = auditBrowserQuestions.questions.find(item => item.id === 'Q0624')?.question;
+  const q0625Question = auditBrowserQuestions.questions.find(item => item.id === 'Q0625')?.question;
+  assert.equal(q0625Question, 'AI 审方生成的请求是通的，但业务结果仍不符合预期。接下来重点对照哪一层？');
+  const q0625MatchedRoute = contextualRouteQuestion(auditTag3RouteMap, [
+    { role: 'user', content: q0624Question },
+    { role: 'assistant', content: '上一轮模型回答不作为事实源。' },
+    { role: 'user', content: q0625Question },
+  ], q0625Question, '');
+  const q0625Route = runtimeRouteWithRepositoryContext(q0625MatchedRoute, '2.7.260828-3');
+  assert.equal(q0625Route.route.id, 'AUD-QR-AI-01', 'Q0625 必须沿用刚切换后的 AI 审方生成 current route');
+  const q0625Initial = bundle.audit('', q0625Question, q0625Route);
+  const q0625Reply = bundle.fallback('', q0625Initial);
+  const q0625Final = bundle.audit(q0625Reply, q0625Question, q0625Route);
+  assert.equal(q0625Initial.fallbackAnswerMode, 'field_diagnostic');
+  assert.equal(q0625Initial.requestResultMismatchQuestion, true);
+  assert.equal(q0625Initial.continuationDiagnosticQuestion, false);
+  assert.equal(q0625Initial.implementationChecklistQuestion, false);
+  assert.equal(q0625Initial.contextFollowupQuestion, true);
+  assert.match(q0625Initial.routeReadOnlySequenceFact, /实施只读清单/);
+  assert.deepEqual(q0625Initial.routeReadOnlySequenceSteps.map(step => step.text), [
+    '记录当前页面和 opt/ipt 来源、任务/患者上下文、脱敏请求体、HTTP 状态与 Content-Type、流式首末块、时间和已有 requestId',
+    '按时间和标识只读对照场景配置、服务端日志、生成记录 task_id/content 和有权限的 Dify 任务',
+  ]);
+  for (const expected of [
+    /opt\/ipt 来源/,
+    /Dify/,
+    /生成记录 task_id\/content/,
+    /药师手动采纳|立即加入审核建议/,
+    /业务状态和已有流水/,
+    /页面刷新、列表\/摘要/,
+    /不得重复提交真实业务/,
+    /不得[^。\n]*改生成记录或审核状态/,
+    /不得凭空补 taskId、密钥或成功结论/,
+  ]) assert.match(q0625Reply, expected);
+  assert.deepEqual(q0625Final.missingRouteReadOnlySequenceSteps, []);
+  assert.deepEqual(q0625Final.violations, [], JSON.stringify({
+    reply: q0625Reply,
+    initialViolations: q0625Initial.violations,
+    finalViolations: q0625Final.violations,
+    sequenceFact: q0625Initial.routeReadOnlySequenceFact,
+    sequenceSteps: q0625Initial.routeReadOnlySequenceSteps,
+    missingSequence: q0625Final.missingRouteReadOnlySequenceSteps,
+    technicalDump: q0625Final.audienceTechnicalDumpParts,
+  }, null, 2));
+  for (const modelError of [
+    { code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束' },
+    { code: 'MODEL_FIRST_TOKEN_TIMEOUT', message: '模型首字等待超时' },
+  ]) {
+    const q0625Fallback = bundle.modelFailureFallback(q0625Question, q0625Route, modelError);
+    assert.ok(q0625Fallback, JSON.stringify({
+      message: `Q0625 ${modelError.code} 应发布 AI route 的分层只读对照`,
+      reply: q0625Reply,
+      initialViolations: q0625Initial.violations,
+      finalViolations: q0625Final.violations,
+      sequenceFact: q0625Initial.routeReadOnlySequenceFact,
+      sequenceSteps: q0625Initial.routeReadOnlySequenceSteps,
+      missingSequence: q0625Final.missingRouteReadOnlySequenceSteps,
+    }, null, 2));
+    assert.equal(q0625Fallback.fallbackSource, 'verifiedFacts');
+    assert.deepEqual(q0625Fallback.finalAudit.violations, []);
+    assert.doesNotMatch(q0625Fallback.reply, /当前回答未通过发布前事实与动作安全校验|AI 暂时连不上/);
+  }
+  const q0625RouteMiss = { ...q0625Route, matched: false };
+  const q0625Stopped = bundle.modelFailureFallback(q0625Question, q0625RouteMiss, { code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限' });
+  assert.equal(q0625Stopped, null, 'Q0625 route miss 不得把相邻 AI route 事实伪装成已核分层对照');
+  const q0625UnsafeDraft = '请重新提交真实业务，手工修改生成记录和审核状态，并补一个 taskId 和密钥后重试。';
+  const q0625UnsafeAudit = bundle.audit(q0625UnsafeDraft, q0625Question, q0625Route);
+  assert.ok(q0625UnsafeAudit.violations.includes('cross_actor_side_effect'), 'Q0625 current route 不能放宽模型新增写操作');
+  const q0625SafeFromUnsafe = bundle.fallback(q0625UnsafeDraft, q0625UnsafeAudit);
+  assert.deepEqual(bundle.audit(q0625SafeFromUnsafe, q0625Question, q0625Route).violations, []);
+  assert.doesNotMatch(q0625SafeFromUnsafe, /请重新提交真实业务|手工修改生成记录和审核状态|补一个 taskId 和密钥/);
+
   const chargeQuestions = [
     '收费时，提醒HIS收费发起失败，收费状态未确认成功，这个是什么问题需要怎么处理',
     '怎么撤销收费',

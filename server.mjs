@@ -3979,16 +3979,18 @@ function consultAnswerSemanticAudit(answer, question, route) {
     && (!!route.inherited || verifiedInterfaceDataBoundaryDiagnosticQuestion || continuationDiagnosticQuestion || dataReturnedNotRenderedQuestion || implementationChecklistQuestion || requestResultMismatchQuestion || multiStepTransactionDiagnosticQuestion || retryBoundaryChecklistQuestion || uiAuthorizationProofQuestion || externalStepFailureOutcomeQuestion || /(?:只读|排查|现场|复测|留证|怎么判断|如何判断|还缺什么|下一步|怎么查|如何查|核对|不能(?:做|进行)?写操作|交给谁|谁继续|转给谁|交由谁|由谁继续|谁负责)/iu.test(questionText));
   const contextFollowupQuestion = fieldDiagnosticQuestion && (!!route.inherited || continuationDiagnosticQuestion || dataReturnedNotRenderedQuestion || implementationChecklistQuestion || requestResultMismatchQuestion || externalStepFailureOutcomeQuestion);
   // current route 若已明确给出“现场只读排查顺序/实施只读清单”，用户
-  // 继续追问下一层或要求改成逐项清单时，通用清单不能替代 route 专用顺序。这里仅
-  // 从 route 原句自动拆出“先/再/然后/随后”的步骤及并列对象，不认识
+  // 继续追问下一层、要求改成逐项清单，或请求成功但结果不一致时，通用
+  // 清单不能替代 route 专用顺序。这里只从 route 原句自动拆出顺序步骤，不认识
   // 具体模块、字段或题号；终审同时检查步骤覆盖与先后次序。
   const routeReadOnlySequenceQuestion = continuationDiagnosticQuestion
-    || implementationChecklistQuestion || existingRecordNarrowingQuestion;
+    || implementationChecklistQuestion || requestResultMismatchQuestion
+    || existingRecordNarrowingQuestion;
   // route 的人工事实既可能写成“现场只读排查顺序：”，也可能用业务主题
   // 作前缀写成“登录只读排查：”，也可能直接标为“实施只读清单：”。
   // 前缀本身不参与判断；只有同一句明确出现只读排查/核对/清单 + 冒号时
   // 才作为顺序锚点，避免从普通事实臆造步骤。
-  const routeReadOnlySequenceAnchorRe = continuationDiagnosticQuestion || implementationChecklistQuestion
+  const routeReadOnlySequenceAnchorRe = continuationDiagnosticQuestion
+    || implementationChecklistQuestion || requestResultMismatchQuestion
     ? /(?:^|[。！？；;])(?:[^，,。！？；;：:\n]{0,20}只读(?:排查|核对)(?:顺序)?|实施只读(?:清单|步骤))\s*[：:]/u
     : /(?:^|[。！？；;])(?:现场|实施)?只读(?:排查|核对)顺序\s*[：:]/u;
   const isRouteReadOnlySequenceFact = fact => routeReadOnlySequenceAnchorRe.test(String(fact || ''));
@@ -4679,11 +4681,13 @@ function consultAnswerSemanticAudit(answer, question, route) {
     const diagnosticFactRelevanceRe = /(?:实施|只读|排查|留证|核对|记录|日志|生产包|发布记录|访问|失败记录|支持能力|授权|未经|不得|不能|后续调用|重复|重发|重提|异常|现状|状态|证据|响应|返回|日期|星期|时间|页面|业务|功能|范围|对象|结果|条件|另一套(?:错误)?机制|不由[^。！？；\n]{0,32}统一处理|相邻(?:机制|功能)|机制隔离)/iu;
     const diagnosticFactQuestion = explicitReviewDiagnosticQuestion
       || /(?:实施|只读|排查|留证|复测|现场|清单|证据|缩小范围|转开发|怎么查|如何查|核对|怎么判断|如何判断)/iu.test(intentQuestionText);
-    // “上一层已核正常，下一层继续只读排查”或“改成实施逐项只读清单”
-    // 都不是再次复述完整 route。若 route 已给专用只读顺序，只保留首条业务基线；顺序事实由下方
+    // “上一层已核正常，下一层继续只读排查”“改成实施逐项只读清单”或
+    // “请求成功但结果不一致”都不是再次复述完整 route。若 route 已给专用
+    // 只读顺序，只保留首条业务基线；顺序事实由下方
     // routeReadOnlySequenceSteps 展开，避免长 route 全量搬运后形成技术倾倒。
     // 这仍完全由 current route 派生，不会放入相邻 route 或模型新增事实。
     const compactRouteChecklistFacts = (continuationDiagnosticQuestion
+      || requestResultMismatchQuestion
       || (implementationChecklistQuestion && !stageAwareImplementationChecklist && !retryBoundaryChecklistQuestion))
       && /(?:^|[。！？；;])实施只读(?:清单|步骤)\s*[：:]/u.test(routeReadOnlySequenceFact);
     const diagnosticSourceFacts = compactRouteChecklistFacts
@@ -4903,6 +4907,10 @@ function consultAnswerSemanticAudit(answer, question, route) {
           '4. 按“请求失败 / 响应正常但业务状态或流水未变 / 状态已变但页面或摘要未同步 / 命中相邻状态入口边界”分支留证，记录观测和原始响应，不据此写死具体故障原因。',
         ]
       : safeSteps;
+    const compactResultMismatchSteps = compactRouteChecklistFacts && requestResultMismatchQuestion
+      ? [...routeContinuationStepBodies, ...resultMismatchSteps.slice(1).map(step => step.replace(/^\d+\.\s*/u, ''))]
+        .map((step, index) => `${index + 1}. ${step}`)
+      : resultMismatchSteps;
     const authorizationProofSteps = uiAuthorizationProofQuestion
       ? [
           '1. 页面层：只读记录当前账号、院区/科室、筛选条件、哪些对象不可选及对应提示；这只能说明当前页面限制生效，不能单独证明服务端授权安全。',
@@ -4929,7 +4937,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
       : dataReturnedNotRenderedQuestion
         ? dataNotRenderedSteps
         : requestResultMismatchQuestion
-          ? resultMismatchSteps
+          ? compactResultMismatchSteps
           : multiStageSideEffectDiagnosticQuestion
             ? multiStageSideEffectSteps
             : uiAuthorizationProofQuestion
