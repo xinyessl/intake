@@ -3379,12 +3379,26 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const audienceParts = text.split(/\n|(?<=[。！？；])/u).map(part => part.trim()).filter(Boolean);
   const referenceIndex = text.search(/(?:^|\n)\s*(?:#{1,6}\s*)?(?:\*\*)?研发参考(?:\*\*)?\s*[：:]?/mu);
   const textBeforeReference = referenceIndex >= 0 ? text.slice(0, referenceIndex) : text;
+  // status=0/state=pending 等 token 也可能是业务动作成立的必要条件，不能
+  // 仅因含技术形态就把“只有在…时才可…”从实施正文拆走。仅豁免 current
+  // route 已逐字提供的完整条件句；模型自造条件或普通接口技术句仍归研发参考。
+  const verifiedBusinessCondition = value => {
+    const plain = String(value || '').replace(/^\s*(?:[-*+]\s+|[1-9]\d*[.、．]\s+)?/u, '').trim();
+    if (!/(?:只有在|仅在|当|如果|若|除非)[^。！？；\n]{0,120}(?:时|才|才能|方可|允许|不得|不能|不再|只保留)/u.test(plain)
+      || !/(?:才可|才能|方可|允许|不得|不能|不再|只保留)/u.test(plain)) return false;
+    return !!(route && route.matched && (route.answerFacts || []).some(fact => {
+      const source = String(fact || '').trim();
+      return source === plain || source.includes(plain) || plain.includes(source);
+    }));
+  };
   const productTechnicalParts = audienceMode === 'product'
     ? audienceParts.filter(part => sourceTechnicalRe.test(part) || concreteInterfaceRe.test(part) || productTechnicalMetaRe.test(part)) : [];
   const implementationMisplacedTechnicalParts = audienceMode === 'implementation'
-    ? textBeforeReference.split(/\n|(?<=[。！？；])/u).map(part => part.trim()).filter(part => part && sourceTechnicalRe.test(part)) : [];
+    ? textBeforeReference.split(/\n|(?<=[。！？；])/u).map(part => part.trim())
+      .filter(part => part && sourceTechnicalRe.test(part) && !verifiedBusinessCondition(part)) : [];
   const firstAudiencePart = audienceParts.find(part => !/^(?:#{1,6}\s*)?(?:\*\*)?(?:结论|业务结论|当前结论|判断)(?:\*\*)?\s*[：:]?$/u.test(part)) || '';
-  const implementationTechnicalFirstParts = audienceMode === 'implementation' && (sourceTechnicalRe.test(firstAudiencePart) || concreteInterfaceRe.test(firstAudiencePart))
+  const implementationTechnicalFirstParts = audienceMode === 'implementation' && !verifiedBusinessCondition(firstAudiencePart)
+    && (sourceTechnicalRe.test(firstAudiencePart) || concreteInterfaceRe.test(firstAudiencePart))
     ? [firstAudiencePart] : [];
   const audienceTechnicalParts = Array.from(new Set([
     ...productTechnicalParts,
@@ -4747,7 +4761,8 @@ function consultAnswerSemanticAudit(answer, question, route) {
       ? allConfirmedFacts.map(normalizeNonWritingRouteFact)
       : allConfirmedFacts;
     const confirmedTechnicalFacts = audienceMode === 'implementation'
-      ? publishableConfirmedFacts.filter(fact => sourceTechnicalRe.test(fact) || concreteInterfaceRe.test(fact)) : [];
+      ? publishableConfirmedFacts.filter(fact => !verifiedBusinessCondition(fact)
+        && (sourceTechnicalRe.test(fact) || concreteInterfaceRe.test(fact))) : [];
     // 实施只读兜底只发布可作为判断基线的事实。route fact 里的“新建前会删除/提交/重放”等
     // 是对现状流程的描述，不是本轮允许执行的动作；原样搬进只读清单会被动作审计误判成现场指令，
     // 进而让已核事实 fallback 自己拒答。此类带动作起句的事实留在 route/retrieval 供模型和审计追溯，
@@ -4756,6 +4771,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
     const confirmedFacts = publishableConfirmedFacts
       .flatMap(fact => {
         if (audienceMode !== 'implementation'
+          || verifiedBusinessCondition(fact)
           || (!sourceTechnicalRe.test(fact) && !concreteInterfaceRe.test(fact))) return [fact];
         // 混合事实里的业务边界（例如“日期来自服务端当前时区”“失败状态不回写”）
         // 仍是实施判断基线；只把接口/实现片段移到研发参考，不能整条 fact 丢掉。

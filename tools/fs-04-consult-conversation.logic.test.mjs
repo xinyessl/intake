@@ -3377,6 +3377,41 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(mixedMethodBoundaryReply, /有副作用的生成\/写入入口（本轮不得调用）：GET \/comm\/inventory\/rebuild；GET \/comm\/inventory\/select；POST \/comm\/inventory\/snapshot/);
   assert.deepEqual(bundle.audit(mixedMethodBoundaryReply, mixedMethodBoundaryQuestion, mixedMethodBoundaryRoute).violations, []);
 
+  const q0760Question = auditBrowserQuestions.questions.find(item => item.id === 'Q0760')?.question;
+  assert.equal(q0760Question, '另一轮独立复测（760）里，我没完全听懂已打回任务调整的排查建议，换成实施可以逐项照做的只读清单。');
+  const q0760Route = runtimeRouteWithRepositoryContext(routeQuestion(auditTag3RouteMap, q0760Question), '2.7.260828-3');
+  assert.equal(q0760Route.route.id, 'AUD-QR-WB-BACK-01');
+  const q0760Initial = bundle.audit('', q0760Question, q0760Route);
+  assert.equal(q0760Initial.implementationChecklistQuestion, true);
+  assert.equal(q0760Initial.fallbackAnswerMode, 'field_diagnostic');
+  const q0760Reply = bundle.fallback('', q0760Initial);
+  assert.match(q0760Reply, /已打回记录只有在医生尚未处理、status=0 时，药师才可调整原审核建议/);
+  assert.doesNotMatch(q0760Reply, /门诊处方和住院医嘱规则一致，药师才可调整原审核建议/);
+  assert.deepEqual(bundle.audit(q0760Reply, q0760Question, q0760Route).violations, []);
+  const q0760ConditionFirstAudit = bundle.audit(
+    '已打回记录只有在医生尚未处理、status=0 时，药师才可调整原审核建议。',
+    q0760Question,
+    q0760Route,
+  );
+  assert.deepEqual(q0760ConditionFirstAudit.implementationTechnicalFirstParts, []);
+
+  const genericConditionalChecklistQuestion = '我没完全听懂库存备注调整的排查建议，换成实施可以逐项照做的只读清单。';
+  const genericConditionalChecklistRoute = {
+    matched: true,
+    fallbackMode: 'verifiedFacts',
+    route: { id: 'GENERIC-CONDITIONAL-CHECKLIST', title: '库存备注调整', fallbackMode: 'verifiedFacts' },
+    answerFacts: [
+      '产品：入库和出库规则一致；库存记录只有在复核尚未处理、state=pending 时，管理员才可调整原备注。',
+      '研发：GET /inventory/record 返回 status=0。',
+    ],
+    mustNotConfuse: [],
+  };
+  const genericConditionalChecklistInitial = bundle.audit('', genericConditionalChecklistQuestion, genericConditionalChecklistRoute);
+  const genericConditionalChecklistReply = bundle.fallback('', genericConditionalChecklistInitial);
+  assert.match(genericConditionalChecklistReply, /库存记录只有在复核尚未处理、state=pending 时，管理员才可调整原备注/);
+  assert.match(genericConditionalChecklistReply, /研发参考[\s\S]*GET \/inventory\/record 返回 status=0/);
+  assert.deepEqual(bundle.audit(genericConditionalChecklistReply, genericConditionalChecklistQuestion, genericConditionalChecklistRoute).violations, []);
+
   const specificBatchQuestion = '把待审工作台的批量审核中途失败与重复重试边界从入口、接口或数据到外部依赖的链路串起来；同一批 taskId、审核流水、消息和 HIS 回调都要说明。';
   const specificBatchRoute = routeQuestion(auditTag3RouteMap, specificBatchQuestion);
   assert.equal(specificBatchRoute.route.id, 'AUD-QR-FLOW-BATCH-RETRY-01', `显式专用业务实体仍须压过通用场景标题，topN=${JSON.stringify(specificBatchRoute.topN)}`);
