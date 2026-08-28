@@ -2701,6 +2701,32 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.doesNotMatch(q0303SemanticFallback, /重新提交一次|当前回答未通过发布前事实与动作安全校验/);
   assert.deepEqual(q0303SemanticFinalAudit.violations, [], 'Q0303 二次语义修订失败出口也必须收敛成可发布终稿');
 
+  const q0310Question = Object.keys(browserRequirements).find(question => question === '我没完全听懂审核业务场景与状态机（通过/自动通过/打回双签/打回修改/医生侧/移交/挂起）的排查建议，换成实施可以逐项照做的只读清单。');
+  assert.ok(q0310Question, 'Q0310 应从正式 Audit 浏览器 fixture 取到原问题');
+  const q0310Route = runtimeRouteWithContext(routeQuestion(productionRouteMap, q0310Question));
+  assert.equal(q0310Route.route.id, 'AUD-QR-FLOW-02');
+  const q0310OmittedDraft = [
+    '1. 记录页面、账号、版本和发生时间。',
+    '2. 只查看已有请求与响应，不重新提交。',
+    '3. 移交时核对目标药师在线状态、任务所属和挂起显示。',
+    '4. 整理已有状态与流水，拿不到的日志标成缺失。',
+  ].join('\n');
+  const q0310Initial = bundle.audit(q0310OmittedDraft, q0310Question, q0310Route);
+  assert.deepEqual(q0310Initial.checklistStageLabels, ['通过', '自动通过', '打回双签', '打回修改', '医生侧', '移交', '挂起']);
+  assert.ok(q0310Initial.missingChecklistRouteLabels.includes('有候选'));
+  assert.ok(q0310Initial.missingChecklistRouteLabels.includes('无候选'));
+  assert.ok(q0310Initial.violations.includes('incomplete_verified_facts'), 'Q0310 漏掉用户点名阶段和 route 分支的模型草稿必须触发 fallback');
+  const q0310Reply = bundle.fallback(q0310OmittedDraft, q0310Initial);
+  for (const stage of ['通过', '自动通过', '打回双签', '打回修改', '医生侧', '移交', '挂起']) {
+    assert.match(q0310Reply, new RegExp(stage), `Q0310 终稿必须逐项交代“${stage}”`);
+  }
+  assert.match(q0310Reply, /有候选[^。！？\n]*redistribution/);
+  assert.match(q0310Reply, /无候选[^。！？\n]*audit_pass/);
+  assert.match(q0310Reply, /通知医生|推送给新药师/);
+  assert.match(q0310Reply, /回调 HIS/);
+  assert.doesNotMatch(q0310Reply, /重放|重提|重新提交|修改业务数据/);
+  assert.deepEqual(bundle.audit(q0310Reply, q0310Question, q0310Route).violations, [], 'Q0310 确定性分阶段只读清单终审应全绿');
+
   const q0284Question = Object.keys(browserRequirements).find(question => question === '先切到另一个问题：“医嘱标记”当前实现的关键入口或处理链是什么？');
   const q0285Question = Object.keys(browserRequirements).find(question => question === '医嘱标记这一步只能确认现象稳定复现，不能做写操作。现在应停在哪个边界并交给谁继续？');
   assert.ok(q0284Question && q0285Question, 'Q0284/Q0285 应从真实浏览器题目 fixture 取到连续问题');
