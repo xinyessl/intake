@@ -5870,6 +5870,10 @@ function consultAnswerSafeFallback(draft, audit) {
 }
 
 function consultVerifiedFactsFallback(question, route) {
+  // verified fallback 的事实只能来自已命中的 current route。null / miss
+  // 在进入完整语义审计前直接停住，既避免后续审计新增字段访问时再次出现
+  // null.answerFacts，也防止把 Top-N 或相邻上下文误当成已核业务事实。
+  if (!route || !route.matched) return null;
   const initialAudit = consultAnswerSemanticAudit('', question, route);
   if (!initialAudit.verifiedFactsFallback) return null;
   if (initialAudit.chainRequested && !initialAudit.chainEvidenceSufficient) return null;

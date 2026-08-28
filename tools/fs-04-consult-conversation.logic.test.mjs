@@ -3839,8 +3839,19 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.equal(routeQuestion(negativeOnlyOperationMap, '怎么发起结算').matched, false, '只在否定边界出现的业务操作不得充当直接证据');
 
   const harmlessDraft = '当前只能确认页面出现了提示；具体业务原因、状态和操作路径仍未知。本轮不得重复提交。';
+  const verifiedNullGuardProbe = new Function(
+    'let auditCalls=0;'
+    + 'function consultAnswerSemanticAudit(){auditCalls++;throw new Error("audit must not run for null or miss route");}'
+    + 'function consultAnswerSafeFallback(){throw new Error("fallback must not run for null or miss route");}'
+    + extractFn(SRC, 'consultVerifiedFactsFallback')
+    + ';return {run:consultVerifiedFactsFallback,calls:()=>auditCalls};',
+  )();
+  assert.equal(verifiedNullGuardProbe.run(chargeQuestions[0], null), null, 'null route 必须在 verified fallback 入口直接停住');
+  assert.equal(verifiedNullGuardProbe.run(chargeQuestions[1], { matched: false }), null, 'route miss 必须在 verified fallback 入口直接停住');
+  assert.equal(verifiedNullGuardProbe.calls(), 0, 'null / miss route 不得进入可能读取 answerFacts 的完整语义审计');
   for (const question of [...chargeQuestions, q0527Question]) {
     assert.doesNotThrow(() => bundle.audit(harmlessDraft, question, null), `${question} 的 answer_audit 不得读取 null route facts`);
+    assert.equal(bundle.verifiedFallback(question, null), null, `${question} 的 verified fallback 不得从 null route 发布事实`);
     for (const modelError of [
       { code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束' },
       { status: 429, message: 'rate limit' },
@@ -3851,6 +3862,10 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
       assert.deepEqual(stopped.finalAudit.violations, [], JSON.stringify({ question, reply: stopped.reply, violations: stopped.finalAudit.violations }, null, 2));
       assert.doesNotMatch(stopped.reply, /AI 暂时连不上|错误编号|Cannot read properties/);
       assert.match(stopped.reply, /(?:不得|不能|未知|缺少|只读|已有)/);
+      if (modelError.status === 429) {
+        assert.equal(stopped.modelDraftError.kind, 'rate_limit');
+        assert.equal(stopped.modelDraftError.status, 429);
+      }
     }
   }
 
