@@ -2155,6 +2155,74 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   );
   assert.equal(ordinaryDisabledControlAudit.uiAuthorizationProofQuestion, false, '只问控件为何不可选时不得误扩成授权安全诊断');
 
+  const q0257Question = Object.keys(browserRequirements).find(question => question === '另一轮独立复测（257）里，任务状态流水消息和 HIS 回调是否在同一事务？');
+  assert.ok(q0257Question, 'Q0257 真实 fixture 题目应存在');
+  const q0257Route = runtimeRouteWithContext(routeQuestion(productionRouteMap, q0257Question));
+  assert.equal(q0257Route.route.id, 'AUD-QR-FLOW-BATCH-RETRY-01', 'Q0257 应命中批量失败与重复重试边界');
+  const q0257Initial = bundle.audit(q0257Route.answerFacts.join('\n'), q0257Question, q0257Route);
+  assert.equal(q0257Initial.multiStepTransactionDiagnosticQuestion, true, 'Q0257 多类副作用同一事务问法应进入通用现场诊断');
+  assert.equal(q0257Initial.fieldDiagnosticQuestion, true, 'Q0257 不应只给事务事实结论');
+  assert.equal(q0257Initial.fallbackAnswerMode, 'field_diagnostic');
+  assert.equal(q0257Initial.multiStageDiagnosticLayersComplete, false, 'Q0257 route facts 不能替代逐层只读步骤');
+  assert.equal(q0257Initial.diagnosticSequenceComplete, false);
+  const q0257Reply = bundle.fallback(q0257Route.answerFacts.join('\n'), q0257Initial);
+  assert.match(q0257Reply, /多步结果的逐对象只读核对顺序/);
+  assert.match(q0257Reply, /1\. 逐个对象核对主状态/);
+  assert.match(q0257Reply, /2\. 接着核对审核流水/);
+  assert.match(q0257Reply, /3\. 再核对 Redis 超时键或任务键/);
+  assert.match(q0257Reply, /4\. 然后核对医生消息或通知记录/);
+  assert.match(q0257Reply, /5\. 最后核对 HIS 或其它外部回调日志与结果/);
+  assert.match(q0257Reply, /全程不写入业务数据、不重放消息或回调/);
+  assert.match(q0257Reply, /不因页面或请求报错盲目整批重试/);
+  const q0257Final = bundle.audit(q0257Reply, q0257Question, q0257Route);
+  assert.equal(q0257Final.multiStageDiagnosticLayersComplete, true, 'Q0257 fallback 必须按状态、流水、键、消息、回调顺序完整覆盖');
+  assert.equal(q0257Final.diagnosticSequenceComplete, true);
+  assert.deepEqual(q0257Final.violations, [], 'Q0257 分层只读 fallback 终审必须全绿');
+
+  const q0260Question = Object.keys(browserRequirements).find(question => question === '另一轮独立复测（260）里，我没完全听懂批量审核中途失败与重复重试边界的排查建议，换成实施可以逐项照做的只读清单。');
+  assert.ok(q0260Question, 'Q0260 真实 fixture 题目应存在');
+  const q0260Route = runtimeRouteWithContext(routeQuestion(productionRouteMap, q0260Question));
+  assert.equal(q0260Route.route.id, 'AUD-QR-FLOW-BATCH-RETRY-01', 'Q0260 应命中批量失败与重复重试边界');
+  const q0260Initial = bundle.audit(q0260Route.answerFacts.join('\n'), q0260Question, q0260Route);
+  assert.equal(q0260Initial.implementationChecklistQuestion, true);
+  assert.equal(q0260Initial.retryBoundaryChecklistQuestion, true, 'Q0260 应启用批量失败重试边界完整性门');
+  assert.equal(q0260Initial.retryRiskFactsComplete, true, '原始 route facts 自身应完整覆盖四类重试风险');
+  assert.equal(q0260Initial.diagnosticSequenceComplete, false, '只有 route facts 仍缺可执行顺序');
+  const q0260Reply = bundle.fallback(q0260Route.answerFacts.join('\n'), q0260Initial);
+  assert.match(q0260Reply, /不校验操作前原状态，没有业务幂等键，也没有并发锁/);
+  assert.match(q0260Reply, /同一批对象再次进入处理可能重复产生审核流水、消息和外部回调/);
+  assert.match(q0260Reply, /Redis 键清理自身幂等，但不能保证整次业务操作幂等/);
+  assert.match(q0260Reply, /1\. 逐个对象核对主状态/);
+  assert.match(q0260Reply, /2\. 接着核对审核流水/);
+  assert.match(q0260Reply, /3\. 再核对 Redis 超时键或任务键/);
+  assert.match(q0260Reply, /4\. 然后核对医生消息或通知记录/);
+  assert.match(q0260Reply, /5\. 最后核对 HIS 或其它外部回调日志与结果/);
+  const q0260Final = bundle.audit(q0260Reply, q0260Question, q0260Route);
+  assert.equal(q0260Final.retryRiskFactsComplete, true);
+  assert.equal(q0260Final.multiStageDiagnosticLayersComplete, true);
+  assert.deepEqual(q0260Final.violations, [], 'Q0260 完整风险+只读清单 fallback 终审必须全绿');
+
+  const q0260MissingRiskDraft = [
+    '结论：先按已有记录逐项只读核对。',
+    '1. 逐个对象核对主状态，只读记录当前值。',
+    '2. 接着核对审核流水，记录数量和时间。',
+    '3. 再核对 Redis 超时键或任务键，只读记录是否存在。',
+    '4. 然后核对医生消息或通知记录，不补发消息。',
+    '5. 最后核对 HIS 回调日志；全程不写入数据，也不盲目重试。',
+  ].join('\n');
+  const q0260MissingRiskAudit = bundle.audit(q0260MissingRiskDraft, q0260Question, q0260Route);
+  assert.deepEqual(q0260MissingRiskAudit.missingRetryRiskCoverage, ['操作前状态校验', '幂等键与并发锁', '重复执行的外部副作用', '局部幂等不代表整体幂等']);
+  assert.equal(q0260MissingRiskAudit.diagnosticSequenceComplete, false, '仅有五层步骤但漏 route 重试风险时仍不得发布');
+  assert.ok(q0260MissingRiskAudit.violations.includes('incomplete_diagnostic_sequence'));
+
+  const ordinarySingleTransactionQuestion = '单条审核流水写入是否在一个事务里？';
+  const ordinarySingleTransactionAudit = bundle.audit(
+    genericUiAuthorizationRoute.answerFacts.join('\n'),
+    ordinarySingleTransactionQuestion,
+    genericUiAuthorizationRoute,
+  );
+  assert.equal(ordinarySingleTransactionAudit.multiStepTransactionDiagnosticQuestion, false, '普通单对象事务事实题不得误扩成五层现场诊断');
+
   const q0210Question = Object.keys(browserRequirements).find(question => question === '我没完全听懂待审列表批量通过与超时通过边界的排查建议，换成实施可以逐项照做的只读清单。');
   assert.ok(q0210Question, 'Q0210 真实 fixture 题目应存在');
   const q0210Route = runtimeRouteWithContext(routeQuestion(productionRouteMap, q0210Question));

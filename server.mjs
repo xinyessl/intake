@@ -3170,6 +3170,23 @@ function consultAnswerSemanticAudit(answer, question, route) {
   // 保留请求/响应、业务状态、页面刷新和相邻边界的只读对照顺序。
   const requestResultMismatchQuestion = /(?:接口|请求)[^。！？\n]{0,28}(?:是通的|正常|成功|有响应)[^。！？\n]{0,24}(?:但|可是|然而)[^。！？\n]{0,28}(?:业务)?结果[^。！？\n]{0,24}(?:不符合预期|不对|不一致|异常)/iu.test(intentQuestionText)
     && /(?:接下来|下一步|重点对照|哪一层|怎么查|如何查|排查|核对)/iu.test(intentQuestionText);
+  // 多步状态、流水、缓存/任务键、消息和外部回调是否在同一事务，不能
+  // 只答“是/否”：现场还需要沿副作用发生顺序只读核对，才能判断停在哪层。
+  // 维度数门避免普通单表事务问法被扩成跨系统排查。
+  const transactionSideEffectDimensions = [
+    /(?:任务|业务|对象|主)[^。！？\n]{0,12}状态|主状态/iu,
+    /(?:审核|操作|业务)?流水|审核记录|操作记录/iu,
+    /Redis|缓存|超时[^。！？\n]{0,12}(?:key|键)|任务键/iu,
+    /消息|通知/iu,
+    /HIS[^。！？\n]{0,12}回调|外部[^。！？\n]{0,12}回调|回调日志/iu,
+  ].filter(re => re.test(intentQuestionText)).length;
+  const multiStepTransactionDiagnosticQuestion = transactionSideEffectDimensions >= 3
+    && /(?:(?:是否|能否|是不是|有没有|有无)[^。！？\n]{0,24}(?:同一|一个|统一|整体|总)(?:个)?事务|(?:同一|一个|统一|整体|总)(?:个)?事务[^。！？\n]{0,24}(?:吗|是否|能否|是不是)?)/iu.test(intentQuestionText);
+  // “批量/多对象中途失败 + 重试边界”改写成实施只读清单时，既要有
+  // 可执行顺序，也必须保住 route 已核的原状态、幂等/锁与重复副作用事实。
+  const retryBoundaryChecklistQuestion = implementationChecklistQuestion
+    && /(?:批量|一批|同一批|多任务|多对象)/iu.test(intentQuestionText)
+    && /(?:中途|部分成功|失败|报错|重试|重复|幂等|补偿|重放)/iu.test(intentQuestionText);
   // 页面按钮、复选框、菜单等“不可操作”只证明前端限制生效，不能单独
   // 证明服务端授权安全。用户拿 UI 限制询问权限/越权安全时，本质是在问
   // 证据是否充分，必须转成页面→既有请求→服务端校验→既有流水的只读
@@ -3178,7 +3195,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const authorizationProofIntent = /(?:能否|是否|能不能|可否|是否足以|足以|可以|能够)[^。！？\n]{0,24}(?:证明|代表|说明|等于|意味着)|(?:证明|代表|说明|等于|意味着)[^。！？\n]{0,32}(?:权限|授权|归属|越权|安全)/iu.test(intentQuestionText)
     && /(?:权限|授权|归属|越权|安全)/iu.test(intentQuestionText);
   const uiAuthorizationProofQuestion = uiRestrictionEvidenceQuestion && authorizationProofIntent;
-  const diagnosticQuestion = explicitPartialEvidenceQuestion || minimalEvidenceQuestion || explicitReviewDiagnosticQuestion || continuationDiagnosticQuestion || dataReturnedNotRenderedQuestion || implementationChecklistQuestion || requestResultMismatchQuestion || uiAuthorizationProofQuestion || /(?:排查|定位|不一致|对不上|异常|故障|现场|验证|复测|下一步|怎么判断|如何判断|怎么确认|检查|留证|只能确认|能确定|能判断到哪|最多(?:能|可)?判断|不知道|未知|走到哪|还缺什么|够不够|够吗|是否足够|能不能判断|能否判断)/i.test(intentQuestionText);
+  const diagnosticQuestion = explicitPartialEvidenceQuestion || minimalEvidenceQuestion || explicitReviewDiagnosticQuestion || continuationDiagnosticQuestion || dataReturnedNotRenderedQuestion || implementationChecklistQuestion || requestResultMismatchQuestion || multiStepTransactionDiagnosticQuestion || retryBoundaryChecklistQuestion || uiAuthorizationProofQuestion || /(?:排查|定位|不一致|对不上|异常|故障|现场|验证|复测|下一步|怎么判断|如何判断|怎么确认|检查|留证|只能确认|能确定|能判断到哪|最多(?:能|可)?判断|不知道|未知|走到哪|还缺什么|够不够|够吗|是否足够|能不能判断|能否判断)/i.test(intentQuestionText);
   // 受众层级也必须过发布前确定性终审，不能只相信模型遵守 prompt。
   // 普通“怎么实现”仍是产品问法；只有显式技术契约才进入 developer。
   const audienceDeveloperQuestion = /(?:接口(?:路径|地址|契约|入参|出参|返回)?|字段(?:名|类型|长度|取值)?|列(?:名|类型|长度|取值)?|column(?:s)?(?:\s*(?:name|type|length|value))?|哪张表|表名|数据库表|SQL|源码|代码|开发链路|调用链|调用关系|Java\s*类|类名|方法名|Controller|Service|Mapper|Repository|DAO|DTO|VO)(?:[^。！？\n]{0,28}(?:什么|哪些|哪个|哪里|在哪|怎么|如何|实现|定义|调用|读写|保存|返回|排查|看|查))?|(?:什么|哪些|哪个|哪里|在哪|怎么|如何|看|查)[^。！？\n]{0,28}(?:接口|字段|列|column|哪张表|表名|SQL|源码|代码|开发链路|调用链|Java\s*类|Controller|Service|Mapper|DTO|VO)/i.test(questionText);
@@ -3537,27 +3554,74 @@ function consultAnswerSemanticAudit(answer, question, route) {
       || /(?:收集|核对|整理|补充|提供)[^。！？\n]{0,64}(?:哪些|证据|材料|请求|响应|日志|方法|路径)/u.test(questionText)
   );
   const partialEvidenceQuestion = evidenceSufficiencyQuestion && !broadEvidenceQuestion;
+  // 实施清单不能只满足“有四步”的排版合同，还要覆盖 current route 已明确
+  // 的重复执行安全边界。每组要求只在当前 route 真的提供相应事实时启用，
+  // 不向其它业务 route 注入幂等、锁或消息/回调假设。
+  const retryRiskCoverageGroups = retryBoundaryChecklistQuestion ? [
+    {
+      label: '操作前状态校验',
+      factRe: /(?:不(?:检查|校验)|未(?:检查|校验)|缺少[^。！？；\n]{0,12}校验)[^。！？；\n]{0,20}(?:原状态|前置状态|操作前状态)/iu,
+      covered: /(?:不(?:检查|校验)|未(?:检查|校验)|缺少[^。！？；\n]{0,12}校验)[^。！？；\n]{0,20}(?:原状态|前置状态|操作前状态)/iu.test(text),
+    },
+    {
+      label: '幂等键与并发锁',
+      factRe: /幂等[^。！？；\n]{0,24}(?:并发)?锁|(?:并发)?锁[^。！？；\n]{0,24}幂等/iu,
+      covered: /(?:没有|无|缺少|未见)[^。！？；\n]{0,20}幂等/iu.test(text)
+        && /(?:没有|无|缺少|未见)[^。！？；\n]{0,20}(?:并发)?锁/iu.test(text),
+    },
+    {
+      label: '重复执行的外部副作用',
+      factRe: /(?:再次|重复|重提|再提交)[^。！？\n]{0,80}(?:流水|消息|通知)[^。！？\n]{0,48}回调/iu,
+      covered: /(?:再次|重复|重提|再提交|同一批)[^。！？\n]{0,96}(?:流水|审核记录)/iu.test(text)
+        && /(?:再次|重复|重提|再提交|同一批)[^。！？\n]{0,128}(?:消息|通知)/iu.test(text)
+        && /(?:再次|重复|重提|再提交|同一批)[^。！？\n]{0,160}回调/iu.test(text),
+    },
+    {
+      label: '局部幂等不代表整体幂等',
+      factRe: /Redis[^。！？\n]{0,48}幂等[^。！？\n]{0,64}(?:不能|不代表|不等于|无法|不保证)[^。！？\n]{0,36}(?:整次|整体|整条)/iu,
+      covered: /Redis[^。！？\n]{0,64}幂等/iu.test(text)
+        && /(?:不能|不代表|不等于|无法|不保证)[^。！？\n]{0,48}(?:整次|整体|整条)[^。！？\n]{0,24}幂等|(?:整次|整体|整条)[^。！？\n]{0,24}(?:不能|不代表|不等于|无法|不保证)[^。！？\n]{0,24}幂等/iu.test(text),
+    },
+  ].filter(group => currentRouteFacts.some(fact => group.factRe.test(fact))) : [];
+  const missingRetryRiskCoverage = retryRiskCoverageGroups.filter(group => !group.covered).map(group => group.label);
+  const retryRiskFactsComplete = !retryBoundaryChecklistQuestion || missingRetryRiskCoverage.length === 0;
   const fieldDiagnosticQuestion = diagnosticQuestion
-    && (!broadFactQuestion || explicitReviewDiagnosticQuestion || continuationDiagnosticQuestion || dataReturnedNotRenderedQuestion || implementationChecklistQuestion || requestResultMismatchQuestion || uiAuthorizationProofQuestion)
+    && (!broadFactQuestion || explicitReviewDiagnosticQuestion || continuationDiagnosticQuestion || dataReturnedNotRenderedQuestion || implementationChecklistQuestion || requestResultMismatchQuestion || multiStepTransactionDiagnosticQuestion || retryBoundaryChecklistQuestion || uiAuthorizationProofQuestion)
     && !partialEvidenceQuestion
     && !broadEvidenceQuestion
     && !!(route && route.matched)
-    && (!!route.inherited || continuationDiagnosticQuestion || dataReturnedNotRenderedQuestion || implementationChecklistQuestion || requestResultMismatchQuestion || uiAuthorizationProofQuestion || /(?:只读|排查|现场|复测|留证|怎么判断|如何判断|还缺什么|下一步|怎么查|如何查|核对|不能(?:做|进行)?写操作|交给谁|谁继续|转给谁|交由谁|由谁继续|谁负责)/iu.test(questionText));
+    && (!!route.inherited || continuationDiagnosticQuestion || dataReturnedNotRenderedQuestion || implementationChecklistQuestion || requestResultMismatchQuestion || multiStepTransactionDiagnosticQuestion || retryBoundaryChecklistQuestion || uiAuthorizationProofQuestion || /(?:只读|排查|现场|复测|留证|怎么判断|如何判断|还缺什么|下一步|怎么查|如何查|核对|不能(?:做|进行)?写操作|交给谁|谁继续|转给谁|交由谁|由谁继续|谁负责)/iu.test(questionText));
   const contextFollowupQuestion = fieldDiagnosticQuestion && (!!route.inherited || continuationDiagnosticQuestion || dataReturnedNotRenderedQuestion || implementationChecklistQuestion || requestResultMismatchQuestion);
   // 现场复测下的 broad facts 仍须给出可执行的只读核对顺序；仅把 route
   // facts 原样列出不能替代诊断步骤。这个门只作用于显式复测宽问法，普通
   // 产品事实题和一般实施问法不因此强制扩写。
   const diagnosticSequenceQuestion = fieldDiagnosticQuestion
-    && (explicitReviewDiagnosticQuestion || continuationDiagnosticQuestion || dataReturnedNotRenderedQuestion || implementationChecklistQuestion || requestResultMismatchQuestion || uiAuthorizationProofQuestion);
+    && (explicitReviewDiagnosticQuestion || continuationDiagnosticQuestion || dataReturnedNotRenderedQuestion || implementationChecklistQuestion || requestResultMismatchQuestion || multiStepTransactionDiagnosticQuestion || retryBoundaryChecklistQuestion || uiAuthorizationProofQuestion);
   const authorizationDiagnosticLayersComplete = !uiAuthorizationProofQuestion
     || (/(?:页面|界面|前端)[^。！？\n]{0,80}(?:不可选|不能选|禁选|禁用|不可用|隐藏|限制|不能点击|无法点击)/iu.test(text)
       && /(?:同一次|既有|已经发生)[^。！？\n]{0,48}(?:请求[^。！？\n]{0,32}响应|响应[^。！？\n]{0,32}请求)/iu.test(text)
       && /(?:服务端|后端|后台)[^。！？\n]{0,96}(?:归属|所属人|责任人|授权范围|租户|院区|科室|病区|操作前状态|原状态|前置状态)/iu.test(text)
       && /(?:任务状态|业务状态|审核流水|操作流水|审计记录|留痕记录)/iu.test(text));
+  const multiStageSideEffectDiagnosticQuestion = multiStepTransactionDiagnosticQuestion || retryBoundaryChecklistQuestion;
+  const multiStageDiagnosticStepText = topLevelSteps.map(step => step.line).join('\n');
+  const multiStageDiagnosticLayerIndexes = [
+    /(?:任务|业务|对象|主)[^。！？\n]{0,16}状态|主状态/iu,
+    /(?:审核|操作|业务)?流水|审核记录|操作记录/iu,
+    /Redis|缓存|超时[^。！？\n]{0,12}(?:key|键)|任务键/iu,
+    /消息|通知/iu,
+    /HIS[^。！？\n]{0,16}回调|外部[^。！？\n]{0,16}回调|回调日志/iu,
+  ].map(re => multiStageDiagnosticStepText.search(re));
+  const multiStageDiagnosticLayersComplete = !multiStageSideEffectDiagnosticQuestion
+    || (multiStageDiagnosticLayerIndexes.every(index => index >= 0)
+      && multiStageDiagnosticLayerIndexes.every((index, position) => position === 0 || index > multiStageDiagnosticLayerIndexes[position - 1])
+      && /(?:只读|不(?:做|进行)?写入|不改数据|不得写入)/iu.test(multiStageDiagnosticStepText)
+      && /(?:不|不得|不要|不能)[^。！？\n]{0,24}(?:盲目|整批|直接|重复)?重试|不能盲目整批重试/iu.test(multiStageDiagnosticStepText));
   const diagnosticSequenceComplete = !diagnosticSequenceQuestion
     || (topLevelSteps.length >= 4
       && /(?:只读|核对|记录|请求|响应|任务|日志)/iu.test(text)
       && authorizationDiagnosticLayersComplete
+      && multiStageDiagnosticLayersComplete
+      && retryRiskFactsComplete
       && (!continuationDiagnosticQuestion
         || (/(?:下一步|下一层|第二层|接下来|观测|分支)/iu.test(text)
           && /(?:没有请求|请求失败|响应正常|未取得|缺失)/iu.test(text))));
@@ -3982,7 +4046,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
           // 掉后段业务阶段（如分配）或事务/失败流水边界；仍只取 current
           // route facts，不能扩入相邻 route。其它 field diagnostic 继续按
           // 相关性精简，避免普通现场清单技术倾倒。
-          ...currentRouteFacts.filter((fact, index) => (explicitReviewDiagnosticQuestion || continuationDiagnosticQuestion || dataReturnedNotRenderedQuestion || implementationChecklistQuestion || requestResultMismatchQuestion || uiAuthorizationProofQuestion || minimalEvidenceQuestion)
+          ...currentRouteFacts.filter((fact, index) => (explicitReviewDiagnosticQuestion || continuationDiagnosticQuestion || dataReturnedNotRenderedQuestion || implementationChecklistQuestion || requestResultMismatchQuestion || multiStepTransactionDiagnosticQuestion || retryBoundaryChecklistQuestion || uiAuthorizationProofQuestion || minimalEvidenceQuestion)
             || index === 0 || !diagnosticFactQuestion || diagnosticFactRelevanceRe.test(fact)),
           ...publicMustNotConfuse,
         ].map(String).map(x => x.trim()).filter(Boolean)))
@@ -4005,8 +4069,20 @@ function consultAnswerSemanticAudit(answer, question, route) {
         return businessClauses.length ? [businessClauses.join('，')] : [];
       })
       .filter(fact => audienceMode !== 'implementation' || !diagnosticActionFactRe.test(fact));
-    const knownBlock = confirmedFacts.length
-      ? ['已知事实（继续作为判断基线）：', ...confirmedFacts.map(fact => `- ${fact}`)].join('\n')
+    // 多步副作用诊断把 route 原句收敛成业务可读的三条判断基线，避免原句
+    // 中“再提交/发消息/触发回调”等 as-built 描述被读成现场执行指令。
+    // 每条只在 current route 已明确相应事实时生成，不补造 route 外结论。
+    const multiStageKnownFacts = multiStageSideEffectDiagnosticQuestion ? [
+      currentRouteFacts.some(fact => /(?:没有|无|不在)[^。！？\n]{0,20}(?:统一|同一|总)?事务|不会统一回滚/iu.test(fact))
+        ? '业务结论：这些步骤没有统一事务，后一步失败不会统一回滚前一步，不能承诺全部成功或全部失败。' : '',
+      currentRouteFacts.some(fact => /(?:部分完成|部分成功|状态[^。！？\n]{0,24}流水|流水[^。！？\n]{0,40}(?:消息|回调)|不能反推[^。！？\n]{0,24}全部失败)/iu.test(fact))
+        ? '结果边界：中途失败可能形成主状态、流水、Redis 超时键或任务键、消息、外部回调之间不一致；页面或请求报错不能证明所有步骤都失败。' : '',
+      retryRiskCoverageGroups.length
+        ? '重试边界：当前处理不校验操作前原状态，没有业务幂等键，也没有并发锁；同一批对象再次进入处理可能重复产生审核流水、消息和外部回调。Redis 键清理自身幂等，但不能保证整次业务操作幂等。' : '',
+      ...publicMustNotConfuse,
+    ].filter(Boolean) : confirmedFacts;
+    const knownBlock = multiStageKnownFacts.length
+      ? ['已知事实（继续作为判断基线）：', ...multiStageKnownFacts.map(fact => `- ${fact}`)].join('\n')
       : '当前没有已核证据确认具体按钮、接口、字段或状态值；下面只给不依赖这些未知事实的只读留证。';
     // 实施兜底最多保留一条已核研发事实：优先能帮助定位入口的接口事实，
     // 再选技术 token 最少的一条。这样既不丢掉单接口诊断题的必要路径，
@@ -4027,15 +4103,19 @@ function consultAnswerSemanticAudit(answer, question, route) {
     const layeredDiagnosticQuestion = continuationDiagnosticQuestion
       || dataReturnedNotRenderedQuestion
       || requestResultMismatchQuestion
+      || multiStepTransactionDiagnosticQuestion
+      || retryBoundaryChecklistQuestion
       || uiAuthorizationProofQuestion;
     const layeredDiagnosticTechnicalReferences = layeredDiagnosticQuestion
       ? confirmedTechnicalFacts.filter(fact => concreteInterfaceRe.test(fact)
         || (/(?:状态|边界|另一组|另一套|不同|分别|不能|不得)/iu.test(fact)
           && /(?:状态|通过|失败|超时|正常|异常|=)/iu.test(fact))).slice(0, 3)
       : [];
-    const audienceReferenceFacts = layeredDiagnosticTechnicalReferences.length
-      ? layeredDiagnosticTechnicalReferences
-      : (confirmedTechnicalReference ? [confirmedTechnicalReference] : []);
+    const audienceReferenceFacts = multiStageSideEffectDiagnosticQuestion
+      ? []
+      : (layeredDiagnosticTechnicalReferences.length
+        ? layeredDiagnosticTechnicalReferences
+        : (confirmedTechnicalReference ? [confirmedTechnicalReference] : []));
     const audienceReferenceBlock = audienceReferenceFacts.length
       ? ['研发参考', ...audienceReferenceFacts.map(fact => `- ${fact}`)].join('\n') : '';
     const handoffRequested = /(?:交给谁|谁继续|转给谁|交由谁|由谁继续|谁负责)/u.test(intentQuestionText);
@@ -4090,33 +4170,46 @@ function consultAnswerSemanticAudit(answer, question, route) {
           '4. 留痕层：只读核对同一对象已有的操作前后任务状态、审核流水和记录时间；按“请求被拒绝 / 请求成功但归属或状态校验缺失 / 已有状态或流水与响应不一致”分支记录，不在生产用真实业务对象试越权。',
         ]
       : safeSteps;
+    const multiStageSideEffectSteps = multiStageSideEffectDiagnosticQuestion
+      ? [
+          '1. 逐个对象核对主状态：只读记录每个任务或业务对象的当前状态、对象标识和更新时间，不用页面报错或 HTTP 结果代替真实状态。',
+          '2. 接着核对审核流水：按同一对象查看流水数量、操作时间、操作人和结果，标出“主状态已变但流水缺失”或“流水重复”等实际差异。',
+          '3. 再核对 Redis 超时键或任务键：只读记录对应键仍存在、已清理或未取得证据；不做清理或补写，也不把单个键清理的幂等性等同于整次业务操作幂等。',
+          '4. 然后核对医生消息或通知记录：查看同一对象已有的消息请求、响应和记录，只记录缺失、失败或重复，不补发消息。',
+          '5. 最后核对 HIS 或其它外部回调日志与结果，并把五层结果按同一对象和时间线汇总；全程不写入业务数据、不重放消息或回调，也不因页面或请求报错盲目整批重试。',
+        ]
+      : safeSteps;
     const diagnosticSteps = continuationDiagnosticQuestion
       ? continuationSteps
       : dataReturnedNotRenderedQuestion
         ? dataNotRenderedSteps
         : requestResultMismatchQuestion
           ? resultMismatchSteps
-          : uiAuthorizationProofQuestion
-            ? authorizationProofSteps
-            : implementationChecklistQuestion
-              ? [
-                  '1. 原样记录当前页面、筛选条件、账号角色、版本、发生时间和复现前后条件。',
-                  '2. 只查看这次已经发生的请求与响应，保留完整 URL、请求参数、HTTP/业务码和响应原文；不为抓包重复未知业务操作。',
-                  '3. 按“没有请求 / 请求失败 / 响应正常但页面或业务结果不一致”三种观测结果分开记录，不把未核原因写成结论。',
-                  '4. 整理上述原文与脱敏截图；拿不到的项明确标成缺失，不用找 spec 代替现场证据。',
-                ]
-              : safeSteps;
+          : multiStageSideEffectDiagnosticQuestion
+            ? multiStageSideEffectSteps
+            : uiAuthorizationProofQuestion
+              ? authorizationProofSteps
+              : implementationChecklistQuestion
+                ? [
+                    '1. 原样记录当前页面、筛选条件、账号角色、版本、发生时间和复现前后条件。',
+                    '2. 只查看这次已经发生的请求与响应，保留完整 URL、请求参数、HTTP/业务码和响应原文；不为抓包重复未知业务操作。',
+                    '3. 按“没有请求 / 请求失败 / 响应正常但页面或业务结果不一致”三种观测结果分开记录，不把未核原因写成结论。',
+                    '4. 整理上述原文与脱敏截图；拿不到的项明确标成缺失，不用找 spec 代替现场证据。',
+                  ]
+                : safeSteps;
     const diagnosticStepsHeading = continuationDiagnosticQuestion
       ? '下一层只读排查顺序：'
       : dataReturnedNotRenderedQuestion
         ? '转开发前最小只读证据顺序：'
         : requestResultMismatchQuestion
           ? '分层只读对照顺序：'
-          : uiAuthorizationProofQuestion
-            ? '权限安全的分层只读核对顺序：'
-            : implementationChecklistQuestion
-              ? '最小只读排查：'
-              : '最小只读排查：';
+          : multiStageSideEffectDiagnosticQuestion
+            ? '多步结果的逐对象只读核对顺序：'
+            : uiAuthorizationProofQuestion
+              ? '权限安全的分层只读核对顺序：'
+              : implementationChecklistQuestion
+                ? '最小只读排查：'
+                : '最小只读排查：';
     if (evidenceSufficiencyQuestion) {
       const mentionsScreenshot = /(?:截图|图片|附图|这张图|图里)/u.test(questionText);
       // “请求时间/发生时间”是通用留证字段，不等于用户在核对日期、星期或时区。
@@ -4302,7 +4395,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
       if (actionIndex >= 0) violations.splice(actionIndex, 1);
     }
   }
-  return { checked: true, diagnosticQuestion, audienceMode, audienceTechnicalParts, productTechnicalParts, implementationMisplacedTechnicalParts, implementationTechnicalFirstParts, currentRouteFacts, routeFallbackMode: routeFallbackMode || '', verifiedFactsFallback, chainRequested, chainDimensions, chainStageLabels, missingRequestedInterfaces, missingChainDimensions, audienceTechnicalDumpParts: uniqueChainTechnicalDetailParts, safeChainFallback, evidenceSufficiencyQuestion, fullHandoffMaterialQuestion, broadEvidenceQuestion, partialEvidenceQuestion, partialEvidenceInventoryQuestion, broadFactQuestion, fieldDiagnosticQuestion, contextFollowupQuestion, explicitReviewDiagnosticQuestion, continuationDiagnosticQuestion, dataReturnedNotRenderedQuestion, implementationChecklistQuestion, requestResultMismatchQuestion, uiAuthorizationProofQuestion, minimalEvidenceQuestion, diagnosticSequenceQuestion, authorizationDiagnosticLayersComplete, diagnosticSequenceComplete, fallbackAnswerMode, factQuestionDimensions, missingRouteFactDimensions, verifiedFactCoverageQuestion, missingVerifiedFactCoverage, implementationFactCoverageQuestion, missingImplementationFactCoverage, implementationFactCoverageGroups, hasEvidenceSufficiencyVerdict, minimumRoutePath, missingEvidenceMinimumPath, observationInputContract, undefinedObservationVariables, symbolicDefinitions: Object.fromEntries(symbolicDefinitions), undefinedSymbolicComparisons, focusedFactQuestion, focusedTypeOrLengthQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, focusedRelationshipFacts, missingFocusedRelationshipFacts, safeDiagnosticFallback, explicitNonDestructiveBoundaryQuestion, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsupportedEvidenceNegations, unsupportedEvidenceAbsenceClaims, evidenceAbsenceCorrectionFacts, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, optionCardinalityMismatches, nonSequentialOptionSets, undefinedGroupReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, emptyNumberedSections, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, emptyDiagnosticBranchHeadings, emptyListStepItems, danglingClosingPunctuationLines, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
+  return { checked: true, diagnosticQuestion, audienceMode, audienceTechnicalParts, productTechnicalParts, implementationMisplacedTechnicalParts, implementationTechnicalFirstParts, currentRouteFacts, routeFallbackMode: routeFallbackMode || '', verifiedFactsFallback, chainRequested, chainDimensions, chainStageLabels, missingRequestedInterfaces, missingChainDimensions, audienceTechnicalDumpParts: uniqueChainTechnicalDetailParts, safeChainFallback, evidenceSufficiencyQuestion, fullHandoffMaterialQuestion, broadEvidenceQuestion, partialEvidenceQuestion, partialEvidenceInventoryQuestion, broadFactQuestion, fieldDiagnosticQuestion, contextFollowupQuestion, explicitReviewDiagnosticQuestion, continuationDiagnosticQuestion, dataReturnedNotRenderedQuestion, implementationChecklistQuestion, requestResultMismatchQuestion, multiStepTransactionDiagnosticQuestion, retryBoundaryChecklistQuestion, retryRiskCoverageGroups, missingRetryRiskCoverage, retryRiskFactsComplete, multiStageSideEffectDiagnosticQuestion, multiStageDiagnosticLayersComplete, uiAuthorizationProofQuestion, minimalEvidenceQuestion, diagnosticSequenceQuestion, authorizationDiagnosticLayersComplete, diagnosticSequenceComplete, fallbackAnswerMode, factQuestionDimensions, missingRouteFactDimensions, verifiedFactCoverageQuestion, missingVerifiedFactCoverage, implementationFactCoverageQuestion, missingImplementationFactCoverage, implementationFactCoverageGroups, hasEvidenceSufficiencyVerdict, minimumRoutePath, missingEvidenceMinimumPath, observationInputContract, undefinedObservationVariables, symbolicDefinitions: Object.fromEntries(symbolicDefinitions), undefinedSymbolicComparisons, focusedFactQuestion, focusedTypeOrLengthQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, focusedRelationshipFacts, missingFocusedRelationshipFacts, safeDiagnosticFallback, explicitNonDestructiveBoundaryQuestion, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsupportedEvidenceNegations, unsupportedEvidenceAbsenceClaims, evidenceAbsenceCorrectionFacts, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, optionCardinalityMismatches, nonSequentialOptionSets, undefinedGroupReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, emptyNumberedSections, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, emptyDiagnosticBranchHeadings, emptyListStepItems, danglingClosingPunctuationLines, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
