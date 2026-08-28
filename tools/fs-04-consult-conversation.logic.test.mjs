@@ -2096,6 +2096,65 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.equal(q0205Final.diagnosticSequenceComplete, true, 'Q0205 兜底必须保留四步证据顺序');
   assert.deepEqual(q0205Final.violations, [], 'Q0205 最小证据 fallback 终审必须全绿');
 
+  for (const [fixtureId, exactQuestion] of [
+    ['Q0227', '另一轮独立复测（227）里，页面复选框不可选能否证明批量审核权限安全？'],
+    ['Q0237', '另一轮独立复测（237）里，页面复选框不可选能否证明批量审核权限安全？'],
+  ]) {
+    const question = Object.keys(browserRequirements).find(item => item === exactQuestion);
+    assert.ok(question, `${fixtureId} 真实 fixture 题目应存在`);
+    const route = runtimeRouteWithContext(routeQuestion(productionRouteMap, question));
+    assert.equal(route.route.id, 'AUD-QR-FLOW-BATCH-AUTH-01', `${fixtureId} 应命中批量审核页面归属与授权边界`);
+    const initial = bundle.audit(route.answerFacts.join('\n'), question, route);
+    assert.equal(initial.uiAuthorizationProofQuestion, true, `${fixtureId} 应识别“页面限制不能单独证明授权安全”证据题`);
+    assert.equal(initial.fieldDiagnosticQuestion, true, `${fixtureId} 不应只复述权限风险 facts`);
+    assert.equal(initial.fallbackAnswerMode, 'field_diagnostic', `${fixtureId} 应进入现场诊断兜底`);
+    assert.equal(initial.authorizationDiagnosticLayersComplete, false, `${fixtureId} 只有风险 facts 时仍缺四层只读证据合同`);
+    assert.equal(initial.diagnosticSequenceComplete, false, `${fixtureId} 只有 route facts 时应要求分层只读顺序`);
+    const reply = bundle.fallback(route.answerFacts.join('\n'), initial);
+    assert.match(reply, /页面控件不可操作只能证明当前页面限制生效，不能单独证明服务端授权安全/);
+    assert.match(reply, /1\. 页面层：/);
+    assert.match(reply, /2\. 请求层：/);
+    assert.match(reply, /同一次已经发生的批量操作请求与响应/);
+    assert.match(reply, /3\. 服务端授权层：/);
+    assert.match(reply, /登录人归属、授权院区\/科室（病区）和操作前状态/);
+    assert.match(reply, /4\. 留痕层：/);
+    assert.match(reply, /任务状态、审核流水和记录时间/);
+    assert.match(reply, /POST \/audit\/opt\|ipt\/task\/pass/);
+    assert.match(reply, /owner、院区和 start_audit/);
+    assert.doesNotMatch(reply, /(?:建议|应当|应该|让现场|直接)[^。！？\n]{0,24}(?:重新点击|提交|拼入|试越权)/);
+    const final = bundle.audit(reply, question, route);
+    assert.equal(final.authorizationDiagnosticLayersComplete, true, `${fixtureId} fallback 必须覆盖页面、请求、授权与流水四层`);
+    assert.equal(final.diagnosticSequenceComplete, true, `${fixtureId} 分层只读兜底必须满足顺序门`);
+    assert.deepEqual(final.violations, [], `${fixtureId} 分层只读兜底终审必须全绿`);
+  }
+
+  const genericUiAuthorizationQuestion = '界面上的操作按钮被禁用，是否足以说明服务端授权没有越权风险？';
+  const genericUiAuthorizationRoute = {
+    matched: true,
+    route: { id: 'GENERIC-AUTH', title: '通用授权边界' },
+    answerFacts: [
+      '业务结论：页面限制只能约束正常操作入口。',
+      '风险结论：服务端是否安全仍须核对当前请求对应的归属、授权范围和原状态校验。',
+      '实施边界：只查看既有请求、响应、业务状态和审核流水，不用真实业务对象试越权。',
+    ],
+    mustNotConfuse: [],
+    directEvidenceFacts: [],
+  };
+  const genericUiAuthorizationInitial = bundle.audit(
+    genericUiAuthorizationRoute.answerFacts.join('\n'),
+    genericUiAuthorizationQuestion,
+    genericUiAuthorizationRoute,
+  );
+  assert.equal(genericUiAuthorizationInitial.uiAuthorizationProofQuestion, true, '通用按钮禁用+授权证明问法也应进入同一规则');
+  assert.equal(genericUiAuthorizationInitial.fallbackAnswerMode, 'field_diagnostic', '通用权限证据题不应绑定审方 route');
+  const ordinaryDisabledControlQuestion = '页面复选框为什么不可选？';
+  const ordinaryDisabledControlAudit = bundle.audit(
+    genericUiAuthorizationRoute.answerFacts.join('\n'),
+    ordinaryDisabledControlQuestion,
+    genericUiAuthorizationRoute,
+  );
+  assert.equal(ordinaryDisabledControlAudit.uiAuthorizationProofQuestion, false, '只问控件为何不可选时不得误扩成授权安全诊断');
+
   const q0210Question = Object.keys(browserRequirements).find(question => question === '我没完全听懂待审列表批量通过与超时通过边界的排查建议，换成实施可以逐项照做的只读清单。');
   assert.ok(q0210Question, 'Q0210 真实 fixture 题目应存在');
   const q0210Route = runtimeRouteWithContext(routeQuestion(productionRouteMap, q0210Question));
