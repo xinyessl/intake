@@ -4535,7 +4535,13 @@ function consultAnswerSemanticAudit(answer, question, route) {
       }
     };
     if (chainDimensions.some(item => item.id === 'entry')) {
-      addChainFacts('入口', entryChainFacts, missingChainFactDimensions.includes('entry') ? '' : chainEntryFact);
+      // 有些 route 用“登录后/进入后/打开后……”描述真实起点，而没有另写
+      // “入口：”标签。这条业务总述既是结论也是链路入口，需在入口段明确
+      // 复用；其它 route 继续沿用显式入口/页面事实，不把任意首条当入口。
+      const businessEntryFact = /(?:登录后|进入后|打开后|访问后|从[^。！？\n]{1,32}(?:进入|打开|访问))/u.test(chainBusinessFact)
+        ? chainBusinessFact : '';
+      if (businessEntryFact) chainLines.push(`- 入口：${normalizeChainFact(businessEntryFact)}`);
+      else addChainFacts('入口', entryChainFacts, missingChainFactDimensions.includes('entry') ? '' : chainEntryFact);
       addMissingChainDimension('entry', '入口');
     }
     if (chainDimensions.some(item => item.id === 'interfaces') && uniqueChainInterfaces.length) {
@@ -4560,6 +4566,12 @@ function consultAnswerSemanticAudit(answer, question, route) {
     if (chainDimensions.some(item => item.id === 'dependencies')) {
       const dependencyLineBefore = chainLines.length;
       addChainFacts('外部依赖', dependencyChainFacts, compactDependencyChainFact);
+      // 一条 route fact 可能同时充当开头业务结论和外部依赖说明。全局
+      // 去重不能让用户点名的“外部依赖”维度消失；只在该维度没有输出时
+      // 复用已核依赖事实，并保留其客观 As-built 描述。
+      if (chainLines.length === dependencyLineBefore && compactDependencyChainFact) {
+        chainLines.push(`- 外部依赖：${normalizeChainFact(compactDependencyChainFact)}`);
+      }
       if (chainLines.length === dependencyLineBefore) {
         addMissingChainDimension('dependencies', '外部依赖');
       }
@@ -4572,7 +4584,13 @@ function consultAnswerSemanticAudit(answer, question, route) {
         .map(normalizeChainFact).filter(Boolean)));
       for (const fact of facts) chainLines.push(`- 业务阶段「${label}」：${fact}`);
     }
-    const gapBlock = compactChainGapFacts.length ? ['当前停点（只列资料明确的未知）：', ...compactChainGapFacts.map(fact => `- ${fact}`)] : [];
+    const explicitChainStopQuestion = /(?:资料|说明|文档|规格|Spec)[^。！？\n]{0,32}(?:没定义|未定义|没有定义|未说明|没说明|未覆盖)[^。！？\n]{0,24}(?:停住|停止|不补|明确)/iu.test(questionText)
+      || /(?:没定义|未定义|未覆盖)[^。！？\n]{0,32}(?:停住|停止|不补|明确)/iu.test(questionText);
+    const gapBlock = compactChainGapFacts.length
+      ? ['当前停点（只列资料明确的未知）：', ...compactChainGapFacts.map(fact => `- ${fact}`)]
+      : explicitChainStopQuestion
+        ? ['当前停点：本轮到上述已核链路为止，不补写其它入口、数据、依赖或结果。']
+        : [];
     safeChainFallback = [chainBusinessFact ? `业务结论：${normalizeChainFact(chainBusinessFact)}` : '', '链路（按本轮点名维度）：', ...chainLines, ...gapBlock].filter(Boolean).join('\n');
   }
   // “最小证据/只缺一项”本身也是一份输入契约：后面的判断表不能首次
@@ -5168,6 +5186,29 @@ function consultAnswerSemanticAudit(answer, question, route) {
     const routeFactTraceText = value => String(value || '')
       .replace(/^\s*(?:业务结论|产品|入口|接口|任务和警示|外部依赖|生成记录|停止|前端证据边界|实施只读清单|实施只读核对|端到端边界|数据与状态|留痕|当前停点|影响|实施|时间|约束|排班|结果|边界|当前页面|后端边界|统一入口|接入入口与主接口|多任务|权重)\s*[：:]\s*/u, '')
       .trim();
+    const chainFallbackStatementIsRouteFact = statement => {
+      const body = String(statement || '')
+        .replace(/^\s*(?:[-*+]\s+)?(?:[^：:\n]{1,24})\s*[：:]\s*/u, '')
+        .replace(/[。！？；;\s]+$/gu, '')
+        .trim();
+      if (!body) return false;
+      const normalizedBody = normalizeRouteActionText(body);
+      return normalizedBody.length >= 8 && currentRouteFacts.some(fact =>
+        normalizeRouteActionText(routeFactTraceText(fact)).includes(normalizedBody));
+    };
+    // 确定性 safeChain 可能逐字发布 route 的否定边界（如“不可见不等于
+    // 后端一定拒绝”）。通用概率门只看到“一定”会误判；仅当全部命中句
+    // 都能逐句回溯到 current route 时放行，模型自行新增的概率/因果仍拦。
+    const chainFallbackLikelihoodStatements = [
+      ...unsupportedLikelihoodClaims,
+      ...unsupportedCausalLocalizationClaims,
+      ...unsupportedDeterministicFailureClaims,
+    ];
+    if (chainFallbackLikelihoodStatements.length
+      && chainFallbackLikelihoodStatements.every(chainFallbackStatementIsRouteFact)) {
+      const likelihoodIndex = violations.indexOf('unsupported_likelihood');
+      if (likelihoodIndex >= 0) violations.splice(likelihoodIndex, 1);
+    }
     // 不能让 every([]) 绕过动作门：任一检测器命中动作时，所有直接动作和
     // 角色动作片段都必须同时能追溯到确定性 route 兜底和本轮 route 事实。
     const chainFallbackActionStatements = [...unsafeDirectActions, ...unsafeActorActions];

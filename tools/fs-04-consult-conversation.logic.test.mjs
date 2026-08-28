@@ -3453,6 +3453,68 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.deepEqual(bundle.audit(q0540SafeFromUnsafe, q0540Question, q0540Route).violations, []);
   assert.doesNotMatch(q0540SafeFromUnsafe, /修改接口配置后重新触发登录/);
 
+  const q0548Question = auditBrowserQuestions.questions.find(item => item.id === 'Q0548')?.question;
+  const q0549Question = auditBrowserQuestions.questions.find(item => item.id === 'Q0549')?.question;
+  assert.equal(q0549Question, '把权限·动态菜单·路由守卫从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。');
+  const q0549MatchedRoute = contextualRouteQuestion(auditTag3RouteMap, [
+    { role: 'user', content: q0548Question },
+    { role: 'assistant', content: '上一轮模型回答不作为事实源。' },
+    { role: 'user', content: q0549Question },
+  ], q0549Question, '');
+  const q0549Route = runtimeRouteWithRepositoryContext(q0549MatchedRoute, '2.7.260828-3');
+  assert.equal(q0549Route.route.id, 'AUD-QR-SH-02', 'Q0549 必须保持权限·动态菜单·路由守卫 current route');
+  const q0549Initial = bundle.audit('', q0549Question, q0549Route);
+  const q0549Reply = bundle.fallback('', q0549Initial);
+  const q0549Final = bundle.audit(q0549Reply, q0549Question, q0549Route);
+  assert.equal(q0549Initial.fallbackAnswerMode, 'chain');
+  assert.equal(q0549Initial.chainEvidenceSufficient, true);
+  for (const expected of [
+    /入口：登录后左侧菜单由用户中心/,
+    /GET \/api\/user\/menu\/model\/v3/,
+    /modelId=7/,
+    /前端转为动态路由/,
+    /外部依赖：[^\n]*用户中心/,
+    /当前停点：本轮到上述已核链路为止/,
+  ]) assert.match(q0549Reply, expected);
+  const q0549EntryIndex = q0549Reply.indexOf('- 入口：');
+  const q0549InterfaceIndex = q0549Reply.indexOf('- 接口：');
+  const q0549DataIndex = q0549Reply.indexOf('- 数据与状态：');
+  const q0549DependencyIndex = q0549Reply.indexOf('- 外部依赖：');
+  const q0549StopIndex = q0549Reply.indexOf('当前停点：');
+  assert.ok(q0549EntryIndex >= 0
+    && q0549InterfaceIndex > q0549EntryIndex
+    && q0549DataIndex > q0549InterfaceIndex
+    && q0549DependencyIndex > q0549DataIndex
+    && q0549StopIndex > q0549DependencyIndex, 'Q0549 确定性链路必须按入口→接口/数据→外部依赖→停点组织');
+  assert.deepEqual(q0549Final.violations, [], JSON.stringify({ reply: q0549Reply, violations: q0549Final.violations }, null, 2));
+  for (const modelError of [
+    { code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束' },
+    { code: 'MODEL_FIRST_TOKEN_TIMEOUT', message: '模型首字等待超时' },
+  ]) {
+    const q0549Fallback = bundle.modelFailureFallback(q0549Question, q0549Route, modelError);
+    assert.ok(q0549Fallback, JSON.stringify({
+      message: `Q0549 ${modelError.code} 应发布已核链路 fallback`,
+      mode: q0549Initial.fallbackAnswerMode,
+      chainDimensions: q0549Initial.chainDimensions,
+      chainKnownFactDimensions: q0549Initial.chainKnownFactDimensions,
+      chainEvidenceSufficient: q0549Initial.chainEvidenceSufficient,
+      safeChainFallback: q0549Initial.safeChainFallback,
+      safeViolations: q0549Final.violations,
+      unsupportedLikelihoodClaims: q0549Final.unsupportedLikelihoodClaims,
+      unsupportedCausalLocalizationClaims: q0549Final.unsupportedCausalLocalizationClaims,
+      unsupportedDeterministicFailureClaims: q0549Final.unsupportedDeterministicFailureClaims,
+      missingDimensions: q0549Final.missingChainDimensions,
+      missingFacts: q0549Final.missingChainKeyBusinessFacts,
+    }, null, 2));
+    assert.equal(q0549Fallback.fallbackSource, 'verifiedFacts');
+    assert.deepEqual(q0549Fallback.finalAudit.violations, []);
+    assert.doesNotMatch(q0549Fallback.reply, /当前回答未通过发布前事实与动作安全校验|AI 暂时连不上/);
+  }
+  assert.equal(bundle.modelFailureFallback(q0549Question, { ...q0549Route, matched: false }, { code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限' }), null, 'Q0549 route miss 不得把相邻 route facts 当已核链路发布');
+  const q0549UnsafeDraft = `${q0549Reply}\n请让实施人员修改接口配置后重试。`;
+  const q0549UnsafeAudit = bundle.audit(q0549UnsafeDraft, q0549Question, q0549Route);
+  assert.ok(q0549UnsafeAudit.violations.includes('cross_actor_side_effect'), 'verified chain 只放行可追溯 route 原句，模型新增写操作仍须拦截');
+
   const chargeQuestions = [
     '收费时，提醒HIS收费发起失败，收费状态未确认成功，这个是什么问题需要怎么处理',
     '怎么撤销收费',
