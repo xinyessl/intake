@@ -3201,6 +3201,39 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   const auditBrowserQuestions = JSON.parse(fs.readFileSync(
     path.join(ROOT, 'tools/fixtures/audit-browser-1000.questions.json'), 'utf8',
   ));
+  const q0689Question = auditBrowserQuestions.questions.find(item => item.id === 'Q0689')?.question;
+  assert.equal(q0689Question, '把待审工作台从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。');
+  const q0689MatchedRoute = routeQuestion(auditTag3RouteMap, q0689Question);
+  assert.equal(q0689MatchedRoute.route.id, 'AUD-QR-WB-01', JSON.stringify({
+    message: 'Q0689 明确以完整模块标题作为链路主语时必须命中待审工作台',
+    route: q0689MatchedRoute.route,
+    score: q0689MatchedRoute.score,
+    exactRouteTitle: q0689MatchedRoute.exactRouteTitle,
+    topN: q0689MatchedRoute.topN,
+  }, null, 2));
+  assert.equal(q0689MatchedRoute.exactRouteTitle, true);
+  const q0689RuntimeRoute = runtimeRouteWithRepositoryContext(q0689MatchedRoute, '2.7.260828-3');
+  const q0689Fallback = bundle.modelFailureFallback(q0689Question, q0689RuntimeRoute, { code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限' });
+  assert.ok(q0689Fallback, 'Q0689 正确路由后模型截断应发布待审工作台已核链路');
+  assert.match(q0689Fallback.reply, /GET \/auditapi\/audit\/work\/table\/user\?userId=\{userId\}/);
+  assert.match(q0689Fallback.reply, /GET \/auditapi\/audit\/work\/table\/fast\/menu/);
+  assert.doesNotMatch(q0689Fallback.reply, /\/auditapi\/audit\/ipt\/collects|audit_ipt_collect|住院医嘱标记/);
+  assert.deepEqual(q0689Fallback.finalAudit.violations, []);
+
+  const q0699Question = auditBrowserQuestions.questions.find(item => item.id === 'Q0699')?.question;
+  const q0699MatchedRoute = routeQuestion(auditTag3RouteMap, q0699Question);
+  assert.equal(q0699MatchedRoute.route.id, 'AUD-QR-WB-01', `带复测前缀的同构链路问法也应命中待审工作台，topN=${JSON.stringify(q0699MatchedRoute.topN)}`);
+  assert.equal(q0699MatchedRoute.exactRouteTitle, true);
+
+  const specificBatchQuestion = '把待审工作台的批量审核中途失败与重复重试边界从入口、接口或数据到外部依赖的链路串起来；同一批 taskId、审核流水、消息和 HIS 回调都要说明。';
+  const specificBatchRoute = routeQuestion(auditTag3RouteMap, specificBatchQuestion);
+  assert.equal(specificBatchRoute.route.id, 'AUD-QR-FLOW-BATCH-RETRY-01', `显式专用业务实体仍须压过通用场景标题，topN=${JSON.stringify(specificBatchRoute.topN)}`);
+  assert.equal(specificBatchRoute.exactRouteTitle, true, '完整出现专用 route title 时仍应标记为显式切题');
+
+  const adjacentModuleQuestion = '把住院医嘱标记从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。';
+  const adjacentModuleRoute = routeQuestion(auditTag3RouteMap, adjacentModuleQuestion);
+  assert.equal(adjacentModuleRoute.route.id, 'AUD-QR-MK-02', `其它完整模块标题的链路问法仍应命中各自 route，topN=${JSON.stringify(adjacentModuleRoute.topN)}`);
+
   const q0509Question = auditBrowserQuestions.questions.find(item => item.id === 'Q0509')?.question;
   assert.equal(q0509Question, '把多数据库方言适配（MySQL/达梦/PostgreSQL 三库同逻辑不同 SQL）从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。');
   const q0509Route = runtimeRouteWithRepositoryContext(routeQuestion(auditTag3RouteMap, q0509Question), '2.7.260828-3');

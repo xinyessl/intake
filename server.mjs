@@ -983,7 +983,19 @@ function routeQuestion(map, query, subKey = '') {
       // 四字标题仍由下方 genericExactTitleRe 排除。
       && Array.from(exactTitleText).length >= 4
       && !genericExactTitleRe.test(exactTitleText);
+    // 通用短标题若直接充当“从入口/接口/数据到外部依赖”的链路主语，
+    // 仍是明确切题，而不是专用问题的场景前缀。只检查标题后的紧邻语法，
+    // 中间插入“批量通过/重试”等其它业务实体时不会命中，仍交给高分专用 route。
+    const exactTitleChainSubject = exactTitle && (() => {
+      const title = exactTitleText.toLowerCase();
+      const titleIndex = qLower.indexOf(title);
+      if (titleIndex < 0) return false;
+      const afterTitle = qLower.slice(titleIndex + title.length)
+        .replace(/^[“”"'‘’：:，,；;\s]+/u, '');
+      return /^从[^。！？\n]{0,64}(?:入口|接口|数据)[^。！？\n]{0,64}外部依赖[^。！？\n]{0,40}(?:链路|串起来)/u.test(afterTitle);
+    })();
     const acceptedExactTitle = exactTitle && (specificExactTitle
+      || exactTitleChainSubject
       || !scoreLeader
       || exactTitle === scoreLeader
       || exactTitle.sc >= scoreLeader.sc * ROUTE_EXACT_TITLE_MIN_RATIO)
