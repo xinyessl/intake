@@ -1246,3 +1246,10 @@
 - 解法：通用识别上一层已核结果与下一步只读动作的组合，进入 `field_diagnostic`/`contextFollowup`，确定性兜底保留当前 route facts，再给四步请求/响应、结果留痕、页面刷新与缺失/失败/不一致分支；直接入口和相邻状态边界只按当前 route facts 的路径/状态信号放入研发参考，不把业务 token 写进规则。
 - 防复发：用真实续问回归 route、`fallbackAnswerMode`、四步顺序、原有入口及状态边界和 `finalAudit.violations=[]`；另用普通切题事实问法确认不误扩写。检查“不要重新提交/调用未被证明的接口”等否定边界不能被副作用审计误判。
 - 关联：`server.mjs`、`tools/fs-04-consult-conversation.logic.test.mjs`、`docs/changes/CHG-consult-续接只读排查顺序.md`。
+
+### L-130 三类现场追问都要从事实复述切到只读证据合同
+- 现象（2026-08-28）：审方 Q0205 的“接口有数据但页面没呈现、转开发前补证据”、Q0210 的“换成实施逐项照做只读清单”和 Q0220 的“请求通但业务结果不符”可能只复述当前 route facts，未给现场可执行顺序；Q0210 还可能在安全清理后只剩标题。
+- 根因：诊断分类只依赖少数“排查/下一步”等词，漏掉页面呈现差异、实施清单改写和请求成功/业务结果分离等自然问法；安全 fallback 也没有为这些语义保留独立的四步合同。
+- 解法：通用识别三类问法，进入 `field_diagnostic`/`contextFollowup` 与序列完整性门；fallback 分别给最小证据、实施只读清单和请求→状态/流水→页面/摘要→相邻边界的分层对照，并按观测结果分支。路径、状态和身份字段只从当前 route facts 取，禁止试越权、重提或改数据。
+- 防复发：用真实 Q0205/Q0210/Q0220 断言分类标记、四步顺序、原有 route facts 与 `finalAudit.violations=[]`；用普通事实题（Q0194/Q0206）确认不误扩写。不要用业务题号或具体模块名写入通用识别正则。
+- 关联：`server.mjs`、`tools/fs-04-consult-conversation.logic.test.mjs`、`docs/changes/CHG-consult-三类现场诊断漏答补全.md`。
