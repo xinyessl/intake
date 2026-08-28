@@ -3324,6 +3324,59 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.doesNotMatch(q0705SafeFromUnsafe, /请新增、编辑并删除|保存并重试/);
   assert.deepEqual(bundle.audit(q0705SafeFromUnsafe, q0705Question, q0705Route).violations, []);
 
+  for (const questionId of ['Q0702', 'Q0707']) {
+    const question = auditBrowserQuestions.questions.find(item => item.id === questionId)?.question;
+    const matchedRoute = routeQuestion(auditTag3RouteMap, question);
+    assert.equal(matchedRoute.route.id, 'AUD-QR-WB-02', `${questionId} 必须命中门诊处方审核`);
+    const runtimeRoute = runtimeRouteWithRepositoryContext(matchedRoute, '2.7.260828-3');
+    const initial = bundle.audit('', question, runtimeRoute);
+    const templateSelect = initial.interfaceDataBoundaryInterfaces.find(item => item.signature === 'GET /audit/template/select');
+    assert.deepEqual(templateSelect, {
+      signature: 'GET /audit/template/select',
+      sideEffect: false,
+      readOnly: true,
+    }, `${questionId} 常用语查询只会返回内容并插入页面输入框，不得误标业务写入`);
+    const reply = bundle.fallback('', initial);
+    assert.match(reply, /只读查询入口[^\n]*GET \/audit\/template\/select/);
+    assert.doesNotMatch(reply, /有副作用的生成\/写入入口[^\n]*GET \/audit\/template\/select/);
+    assert.deepEqual(bundle.audit(reply, question, runtimeRoute).violations, []);
+    for (const modelError of [
+      { code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束' },
+      { status: 429, message: 'rate limit' },
+    ]) {
+      const modelFallback = bundle.modelFailureFallback(question, runtimeRoute, modelError);
+      assert.ok(modelFallback, `${questionId} ${modelError.code || modelError.status} 应发布 route-aware 确定性终稿`);
+      assert.match(modelFallback.reply, /只读查询入口[^\n]*GET \/audit\/template\/select/);
+      assert.doesNotMatch(modelFallback.reply, /有副作用的生成\/写入入口[^\n]*GET \/audit\/template\/select/);
+      assert.deepEqual(modelFallback.finalAudit.violations, []);
+    }
+  }
+
+  const mixedMethodBoundaryQuestion = '库存快照涉及哪些接口、数据和边界？';
+  const mixedMethodBoundaryRoute = {
+    matched: true,
+    fallbackMode: 'verifiedFacts',
+    route: { id: 'GENERIC-MIXED-METHOD', title: '库存快照', fallbackMode: 'verifiedFacts' },
+    answerFacts: [
+      '只读列表：GET /comm/inventory/list 查询并返回已有快照。',
+      '遗留生成：GET /comm/inventory/rebuild 会扫描数据源、生成并写入 inventory_snapshot，不是普通只读接口。',
+      '伪装成选择接口的写操作：GET /comm/inventory/select 读取结果，写入数据库业务表后再填入输入框。',
+      '新增快照：POST /comm/inventory/snapshot 会生成并写入新记录。',
+    ],
+    mustNotConfuse: [],
+  };
+  const mixedMethodBoundaryAudit = bundle.audit('', mixedMethodBoundaryQuestion, mixedMethodBoundaryRoute);
+  assert.deepEqual(mixedMethodBoundaryAudit.interfaceDataBoundaryInterfaces, [
+    { signature: 'GET /comm/inventory/list', sideEffect: false, readOnly: true },
+    { signature: 'GET /comm/inventory/rebuild', sideEffect: true, readOnly: false },
+    { signature: 'GET /comm/inventory/select', sideEffect: true, readOnly: false },
+    { signature: 'POST /comm/inventory/snapshot', sideEffect: true, readOnly: false },
+  ], 'GET 不能一律按只读处理，写入数据库后再填入输入框也不能被客户端呈现规则洗成只读');
+  const mixedMethodBoundaryReply = bundle.fallback('', mixedMethodBoundaryAudit);
+  assert.match(mixedMethodBoundaryReply, /只读查询入口：GET \/comm\/inventory\/list/);
+  assert.match(mixedMethodBoundaryReply, /有副作用的生成\/写入入口（本轮不得调用）：GET \/comm\/inventory\/rebuild；GET \/comm\/inventory\/select；POST \/comm\/inventory\/snapshot/);
+  assert.deepEqual(bundle.audit(mixedMethodBoundaryReply, mixedMethodBoundaryQuestion, mixedMethodBoundaryRoute).violations, []);
+
   const specificBatchQuestion = '把待审工作台的批量审核中途失败与重复重试边界从入口、接口或数据到外部依赖的链路串起来；同一批 taskId、审核流水、消息和 HIS 回调都要说明。';
   const specificBatchRoute = routeQuestion(auditTag3RouteMap, specificBatchQuestion);
   assert.equal(specificBatchRoute.route.id, 'AUD-QR-FLOW-BATCH-RETRY-01', `显式专用业务实体仍须压过通用场景标题，topN=${JSON.stringify(specificBatchRoute.topN)}`);

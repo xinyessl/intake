@@ -3670,8 +3670,13 @@ function consultAnswerSemanticAudit(answer, question, route) {
   }
   const interfaceDataBoundaryInterfaces = Array.from(interfaceDataBoundaryInterfaceEvidence, ([signature, evidenceLines]) => {
     const evidenceText = evidenceLines.join('\n');
-    const sideEffect = /(?:副作用|写入|插入|生成|扫描[^。！？\n]{0,24}数据源|新增[^。！？\n]{0,16}快照|不是普通只读)/iu.test(evidenceText);
-    const readOnly = !sideEffect && /(?:查询|读取|只读|最新|返回|展示)/iu.test(evidenceText);
+    // “把查询结果插入页面输入框/文本框”只改变当前页面展示，不是接口
+    // 写业务数据。先剥离这类明确的客户端呈现短语，再判断 route 是否
+    // 直接声明写入、生成、扫描或其它副作用；遗留 GET 若确有这些事实
+    // 仍会被标为副作用，不能简单按 HTTP 方法放行。
+    const sideEffectEvidenceText = evidenceText.replace(/(?:插入|填入|追加到)(?:(?!(?:数据库|业务表|数据表|持久化|保存|落库))[^。！？；;\n]){0,40}(?:输入框|文本框|意见框|展示区|页面(?:控件|字段|表单|内容|光标位置))/giu, '');
+    const sideEffect = /(?:副作用|写入|插入|生成|持久化|落库|保存[^。！？\n]{0,24}(?:数据库|业务表|数据表|记录|状态|快照)|扫描[^。！？\n]{0,24}数据源|新增[^。！？\n]{0,16}快照|不是普通只读)/iu.test(sideEffectEvidenceText);
+    const readOnly = !sideEffect && /(?:查询|读取|获取|只读|最新|返回|展示)/iu.test(evidenceText);
     return { signature, sideEffect, readOnly };
   });
   const requiredInterfaceDataBoundarySignatures = interfaceDataBoundaryInterfaces.map(item => item.signature);
