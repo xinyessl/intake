@@ -2621,6 +2621,54 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.doesNotMatch(q0282Reply, /应定向补消息|再决定是否重做/);
   assert.deepEqual(bundle.audit(q0282Reply, q0282Question, q0282Route).violations, [], 'Q0282 只读兜底不得把处置事实发布成现场动作');
 
+  const q0292Question = Object.keys(browserRequirements).find(question => question === '另一轮独立复测（292）里，创建会话失败后门诊处方还会继续打回吗？');
+  assert.ok(q0292Question, 'Q0292 应从真实浏览器题目 fixture 取到原问题');
+  const q0292Route = runtimeRouteWithContext(routeQuestion(productionRouteMap, q0292Question));
+  assert.equal(q0292Route.route.id, 'AUD-QR-FLOW-REJECT-MESSAGE-01');
+  const q0292MissingInpatientDraft = [
+    '结论：门诊和住院结果不一致；门诊创建会话失败后仍可能继续打回，因为门诊不等待消息结果。',
+    '门诊表现：消息接口失败时，打回接口仍可能成功，任务会变更并写入审核流水，页面仍可能提示“打回成功”，但医生没有收到审核卡片。',
+    '1. 只读核对任务状态和审核流水。',
+    '2. 查看已经发生的会话和消息请求响应。',
+    '3. 按现有记录区分消息失败和打回结果。',
+    '4. 整理时间、对象和日志证据，不重复操作。',
+  ].join('\n');
+  const q0292Initial = bundle.audit(q0292MissingInpatientDraft, q0292Question, q0292Route);
+  assert.deepEqual(q0292Initial.missingFailureBranchCoverage, ['住院'], 'Q0292 不能只回答门诊而漏掉同一路由的住院故障结果');
+  assert.ok(q0292Initial.violations.includes('incomplete_verified_facts'));
+  const q0292Reply = bundle.fallback(q0292MissingInpatientDraft, q0292Initial);
+  assert.match(q0292Reply, /住院表现/);
+  assert.match(q0292Reply, /住院打回接口不会被调用/);
+  assert.match(q0292Reply, /页面表现为请求报错或操作没有完成/);
+  assert.match(q0292Reply, /任务通常仍保持原审核状态/);
+  assert.match(q0292Reply, /倒计时超时|超时/);
+  assert.match(q0292Reply, /他人并发处理|并发/);
+  assert.deepEqual(bundle.audit(q0292Reply, q0292Question, q0292Route).violations, [], 'Q0292 fallback 应完整恢复两端故障差异并终审全绿');
+
+  const q0299Question = Object.keys(browserRequirements).find(question => question === '另一轮独立复测（299）里，把当前审方打回与医生消息故障的门诊住院差异从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。');
+  assert.ok(q0299Question, 'Q0299 应从真实浏览器题目 fixture 取到原问题');
+  const q0299Route = runtimeRouteWithContext(routeQuestion(productionRouteMap, q0299Question));
+  assert.equal(q0299Route.route.id, 'AUD-QR-FLOW-REJECT-MESSAGE-01');
+  const q0299Initial = bundle.audit(q0299Route.answerFacts.join('\n'), q0299Question, q0299Route);
+  assert.equal(q0299Initial.fallbackAnswerMode, 'chain');
+  assert.match(q0299Initial.safeChainFallback, /只记录(?:该|上述)?差异.*接口\/业务负责人评估/s);
+  assert.match(q0299Initial.safeChainFallback, /另行授权.*定向补偿/s);
+  assert.match(q0299Initial.safeChainFallback, /本轮不补发、不重做、不重试/);
+  assert.doesNotMatch(q0299Initial.safeChainFallback, /应定向补消息|再决定是否重做/);
+  assert.deepEqual(bundle.audit(q0299Initial.safeChainFallback, q0299Question, q0299Route).violations, [], 'Q0299 确定性链路兜底不得发布副作用建议');
+
+  const q0293Question = Object.keys(browserRequirements).find(question => question === '先别把当前审方打回与医生消息故障的门诊住院差异的原因说死：当前只有接口状态和业务返回，哪些结论成立，哪些仍需确认？');
+  assert.ok(q0293Question, 'Q0293 应从真实浏览器题目 fixture 取到受限证据问法');
+  const q0293Route = runtimeRouteWithContext(routeQuestion(productionRouteMap, q0293Question));
+  const q0293Fallback = bundle.modelFailureFallback(q0293Question, q0293Route, { status: 429, message: 'rate limit' });
+  assert.ok(q0293Fallback, 'Q0293 partial evidence 模型失败时必须使用已核事实兜底');
+  assert.equal(q0293Fallback.initialAudit.fallbackAnswerMode, 'partial_evidence');
+  assert.match(q0293Fallback.reply, /只记录(?:该|上述)?差异.*接口\/业务负责人评估/s);
+  assert.match(q0293Fallback.reply, /另行授权.*定向补偿/s);
+  assert.match(q0293Fallback.reply, /本轮不补发、不重做、不重试/);
+  assert.doesNotMatch(q0293Fallback.reply, /应定向补消息|再决定是否重做/);
+  assert.deepEqual(q0293Fallback.finalAudit.violations, [], 'partial evidence 也必须复用同一非写操作事实转换');
+
   const q0284Question = Object.keys(browserRequirements).find(question => question === '先切到另一个问题：“医嘱标记”当前实现的关键入口或处理链是什么？');
   const q0285Question = Object.keys(browserRequirements).find(question => question === '医嘱标记这一步只能确认现象稳定复现，不能做写操作。现在应停在哪个边界并交给谁继续？');
   assert.ok(q0284Question && q0285Question, 'Q0284/Q0285 应从真实浏览器题目 fixture 取到连续问题');
