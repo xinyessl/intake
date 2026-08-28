@@ -2727,6 +2727,41 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.doesNotMatch(q0310Reply, /重放|重提|重新提交|修改业务数据/);
   assert.deepEqual(bundle.audit(q0310Reply, q0310Question, q0310Route).violations, [], 'Q0310 确定性分阶段只读清单终审应全绿');
 
+  const q0340Question = Object.keys(browserRequirements).find(question => question === '回到药学公式计算器这里，第一层核过没有异常，下一步按什么顺序继续只读排查？');
+  assert.ok(q0340Question, 'Q0340 应从正式 Audit 浏览器 fixture 取到原问题');
+  const q0340Route = runtimeRouteWithContext(routeQuestion(productionRouteMap, q0340Question));
+  assert.equal(q0340Route.route.id, 'AUD-QR-MED-01');
+  const q0340WrongGenericDraft = [
+    '1. 先核对当前操作请求与返回。',
+    '2. 再查看 HTTP 状态和业务码。',
+    '3. 然后查看服务端日志与数据库记录。',
+    '4. 最后按接口分支整理审核流水。',
+  ].join('\n');
+  const q0340Initial = bundle.audit(q0340WrongGenericDraft, q0340Question, q0340Route);
+  assert.equal(q0340Initial.staticClientOnlyRoute, true, 'Q0340 应从 current route 事实识别为纯静态浏览器内计算');
+  assert.ok(q0340Initial.violations.includes('static_route_scope_overreach'), '纯静态页套用请求/服务端清单必须被发布前审计拦截');
+  const q0340MaskedOverreach = bundle.audit('第一层没有异常，下一步继续核对 HTTP 业务码和服务端日志。', q0340Question, q0340Route);
+  assert.ok(q0340MaskedOverreach.violations.includes('static_route_scope_overreach'), '无异常等普通否定词不得掩盖静态页继续查服务端的越界动作');
+  const q0340ExplicitBoundary = bundle.audit([
+    '1. 入口与新标签页：只读记录已有页面观测。',
+    '2. 输入与必填：只读记录已有输入和提示。',
+    '3. 计算结果：只读记录结果区内容。',
+    '4. 重置：只读对照已有重置前后观测。',
+    '5. 浏览器控制台与静态资源：只查看本次已有报错和加载结果。',
+    '6. 不适用项：无需核对 HTTP、业务码和服务端日志，到此停止。',
+  ].join('\n'), q0340Question, q0340Route);
+  assert.equal(q0340ExplicitBoundary.staticClientScopeOverreach.length, 0, '明确说明服务端观测不适用时应允许边界说明');
+  const q0340Reply = bundle.fallback(q0340WrongGenericDraft, q0340Initial);
+  assert.match(q0340Reply, /入口.*新标签页|新标签页.*入口/s);
+  assert.match(q0340Reply, /输入.*必填|必填.*输入/s);
+  assert.match(q0340Reply, /计算结果|结果区/);
+  assert.match(q0340Reply, /重置/);
+  assert.match(q0340Reply, /浏览器控制台/);
+  assert.match(q0340Reply, /静态资源/);
+  assert.match(q0340Reply, /不适用|到此停止|不再扩展/);
+  assert.doesNotMatch(q0340Reply, /HTTP|业务码|服务端日志|数据库|当前操作请求|审核流水|接口分支/);
+  assert.deepEqual(bundle.audit(q0340Reply, q0340Question, q0340Route).violations, [], 'Q0340 静态页专用 fallback 终审应全绿');
+
   const q0284Question = Object.keys(browserRequirements).find(question => question === '先切到另一个问题：“医嘱标记”当前实现的关键入口或处理链是什么？');
   const q0285Question = Object.keys(browserRequirements).find(question => question === '医嘱标记这一步只能确认现象稳定复现，不能做写操作。现在应停在哪个边界并交给谁继续？');
   assert.ok(q0284Question && q0285Question, 'Q0284/Q0285 应从真实浏览器题目 fixture 取到连续问题');
