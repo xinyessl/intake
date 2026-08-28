@@ -3195,7 +3195,12 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const authorizationProofIntent = /(?:能否|是否|能不能|可否|是否足以|足以|可以|能够)[^。！？\n]{0,24}(?:证明|代表|说明|等于|意味着)|(?:证明|代表|说明|等于|意味着)[^。！？\n]{0,32}(?:权限|授权|归属|越权|安全)/iu.test(intentQuestionText)
     && /(?:权限|授权|归属|越权|安全)/iu.test(intentQuestionText);
   const uiAuthorizationProofQuestion = uiRestrictionEvidenceQuestion && authorizationProofIntent;
-  const diagnosticQuestion = explicitPartialEvidenceQuestion || minimalEvidenceQuestion || explicitReviewDiagnosticQuestion || continuationDiagnosticQuestion || dataReturnedNotRenderedQuestion || implementationChecklistQuestion || requestResultMismatchQuestion || multiStepTransactionDiagnosticQuestion || retryBoundaryChecklistQuestion || uiAuthorizationProofQuestion || /(?:排查|定位|不一致|对不上|异常|故障|现场|验证|复测|下一步|怎么判断|如何判断|怎么确认|检查|留证|只能确认|能确定|能判断到哪|最多(?:能|可)?判断|不知道|未知|走到哪|还缺什么|够不够|够吗|是否足够|能不能判断|能否判断)/i.test(intentQuestionText);
+  // 外部会话、消息、通知或回调失败后，业务步骤是否仍会继续，是典型的
+  // 跨步骤故障结果题。即使问句没有再写“排查/现场”，连续会话中仍应按
+  // 只读诊断回答，避免把 route 里的补发、重做等处置建议直接发布成动作。
+  const externalStepFailureOutcomeQuestion = /(?:创建|发送|调用|推送)?(?:会话|消息|通知|回调|外部服务)[^。！？\n]{0,24}(?:失败|异常|报错|中断)[^。！？\n]{0,48}(?:还会|是否还|能否继续|会不会继续|是否继续|结果|状态)/iu.test(intentQuestionText)
+    || /(?:失败|异常|报错|中断)[^。！？\n]{0,40}(?:会话|消息|通知|回调|外部服务)[^。！？\n]{0,40}(?:还会|是否还|能否继续|会不会继续|是否继续|结果|状态)/iu.test(intentQuestionText);
+  const diagnosticQuestion = explicitPartialEvidenceQuestion || minimalEvidenceQuestion || explicitReviewDiagnosticQuestion || continuationDiagnosticQuestion || dataReturnedNotRenderedQuestion || implementationChecklistQuestion || requestResultMismatchQuestion || multiStepTransactionDiagnosticQuestion || retryBoundaryChecklistQuestion || uiAuthorizationProofQuestion || externalStepFailureOutcomeQuestion || /(?:排查|定位|不一致|对不上|异常|故障|现场|验证|复测|下一步|怎么判断|如何判断|怎么确认|检查|留证|只能确认|能确定|能判断到哪|最多(?:能|可)?判断|不知道|未知|走到哪|还缺什么|够不够|够吗|是否足够|能不能判断|能否判断)/i.test(intentQuestionText);
   // 受众层级也必须过发布前确定性终审，不能只相信模型遵守 prompt。
   // 普通“怎么实现”仍是产品问法；只有显式技术契约才进入 developer。
   const audienceDeveloperQuestion = /(?:接口(?:路径|地址|契约|入参|出参|返回)?|字段(?:名|类型|长度|取值)?|列(?:名|类型|长度|取值)?|column(?:s)?(?:\s*(?:name|type|length|value))?|哪张表|表名|数据库表|SQL|源码|代码|开发链路|调用链|调用关系|Java\s*类|类名|方法名|Controller|Service|Mapper|Repository|DAO|DTO|VO)(?:[^。！？\n]{0,28}(?:什么|哪些|哪个|哪里|在哪|怎么|如何|实现|定义|调用|读写|保存|返回|排查|看|查))?|(?:什么|哪些|哪个|哪里|在哪|怎么|如何|看|查)[^。！？\n]{0,28}(?:接口|字段|列|column|哪张表|表名|SQL|源码|代码|开发链路|调用链|Java\s*类|Controller|Service|Mapper|DTO|VO)/i.test(questionText);
@@ -3586,17 +3591,17 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const missingRetryRiskCoverage = retryRiskCoverageGroups.filter(group => !group.covered).map(group => group.label);
   const retryRiskFactsComplete = !retryBoundaryChecklistQuestion || missingRetryRiskCoverage.length === 0;
   const fieldDiagnosticQuestion = diagnosticQuestion
-    && (!broadFactQuestion || explicitReviewDiagnosticQuestion || continuationDiagnosticQuestion || dataReturnedNotRenderedQuestion || implementationChecklistQuestion || requestResultMismatchQuestion || multiStepTransactionDiagnosticQuestion || retryBoundaryChecklistQuestion || uiAuthorizationProofQuestion)
+    && (!broadFactQuestion || explicitReviewDiagnosticQuestion || continuationDiagnosticQuestion || dataReturnedNotRenderedQuestion || implementationChecklistQuestion || requestResultMismatchQuestion || multiStepTransactionDiagnosticQuestion || retryBoundaryChecklistQuestion || uiAuthorizationProofQuestion || externalStepFailureOutcomeQuestion)
     && !partialEvidenceQuestion
     && !broadEvidenceQuestion
     && !!(route && route.matched)
-    && (!!route.inherited || continuationDiagnosticQuestion || dataReturnedNotRenderedQuestion || implementationChecklistQuestion || requestResultMismatchQuestion || multiStepTransactionDiagnosticQuestion || retryBoundaryChecklistQuestion || uiAuthorizationProofQuestion || /(?:只读|排查|现场|复测|留证|怎么判断|如何判断|还缺什么|下一步|怎么查|如何查|核对|不能(?:做|进行)?写操作|交给谁|谁继续|转给谁|交由谁|由谁继续|谁负责)/iu.test(questionText));
-  const contextFollowupQuestion = fieldDiagnosticQuestion && (!!route.inherited || continuationDiagnosticQuestion || dataReturnedNotRenderedQuestion || implementationChecklistQuestion || requestResultMismatchQuestion);
+    && (!!route.inherited || continuationDiagnosticQuestion || dataReturnedNotRenderedQuestion || implementationChecklistQuestion || requestResultMismatchQuestion || multiStepTransactionDiagnosticQuestion || retryBoundaryChecklistQuestion || uiAuthorizationProofQuestion || externalStepFailureOutcomeQuestion || /(?:只读|排查|现场|复测|留证|怎么判断|如何判断|还缺什么|下一步|怎么查|如何查|核对|不能(?:做|进行)?写操作|交给谁|谁继续|转给谁|交由谁|由谁继续|谁负责)/iu.test(questionText));
+  const contextFollowupQuestion = fieldDiagnosticQuestion && (!!route.inherited || continuationDiagnosticQuestion || dataReturnedNotRenderedQuestion || implementationChecklistQuestion || requestResultMismatchQuestion || externalStepFailureOutcomeQuestion);
   // 现场复测下的 broad facts 仍须给出可执行的只读核对顺序；仅把 route
   // facts 原样列出不能替代诊断步骤。这个门只作用于显式复测宽问法，普通
   // 产品事实题和一般实施问法不因此强制扩写。
   const diagnosticSequenceQuestion = fieldDiagnosticQuestion
-    && (explicitReviewDiagnosticQuestion || continuationDiagnosticQuestion || dataReturnedNotRenderedQuestion || implementationChecklistQuestion || requestResultMismatchQuestion || multiStepTransactionDiagnosticQuestion || retryBoundaryChecklistQuestion || uiAuthorizationProofQuestion);
+    && (explicitReviewDiagnosticQuestion || continuationDiagnosticQuestion || dataReturnedNotRenderedQuestion || implementationChecklistQuestion || requestResultMismatchQuestion || multiStepTransactionDiagnosticQuestion || retryBoundaryChecklistQuestion || uiAuthorizationProofQuestion || externalStepFailureOutcomeQuestion);
   const authorizationDiagnosticLayersComplete = !uiAuthorizationProofQuestion
     || (/(?:页面|界面|前端)[^。！？\n]{0,80}(?:不可选|不能选|禁选|禁用|不可用|隐藏|限制|不能点击|无法点击)/iu.test(text)
       && /(?:同一次|既有|已经发生)[^。！？\n]{0,48}(?:请求[^。！？\n]{0,32}响应|响应[^。！？\n]{0,32}请求)/iu.test(text)
@@ -4051,14 +4056,45 @@ function consultAnswerSemanticAudit(answer, question, route) {
           ...publicMustNotConfuse,
         ].map(String).map(x => x.trim()).filter(Boolean)))
       : [];
+    // current route 同时承载“系统现在怎么做”和“负责人之后可怎么处置”两类事实。
+    // 在现场只读终稿里，前者要明确标成系统既有行为，后者只能保留条件和
+    // 差异，补偿/重做方案须另行授权，不能原样变成实施现场指令。
+    const normalizeDiagnosticRouteFact = fact => {
+      let recoveryGuidanceFound = false;
+      const normalized = String(fact || '').split(/(?<=[。！？；;])/u).map(rawClause => {
+        const punctuation = rawClause.match(/[。！？；;]$/u)?.[0] || '';
+        const clause = punctuation ? rawClause.slice(0, -punctuation.length).trim() : rawClause.trim();
+        if (!clause) return rawClause;
+        const systemSequence = clause.match(/^(.+?(?:返回|取得|读取|查得)(?:记录|结果|数据)?后)[，,]?\s*(?:再|然后|随后)\s*(?:通过|调用)\s*(.+?)\s+(?:补|补充|补全)(.+)$/u);
+        if (systemSequence) {
+          return `当前实现会在${systemSequence[1]}，由系统通过${systemSequence[2]} 读取并补全${systemSequence[3]}${punctuation}`;
+        }
+        const recoveryGuidance = clause.match(/(?:应|应该|可|可以|需|需要|建议|再决定是否|决定是否)[^。！？；\n]{0,36}(?:定向)?(?:补(?:发|消息|通知|偿|写)?|重做|重试|重放|重新(?:执行|提交|发送|触发))/u);
+        if (!recoveryGuidance) return rawClause;
+        const guidancePrefix = clause.slice(Math.max(0, recoveryGuidance.index - 4), recoveryGuidance.index);
+        if (/(?:不|未|无|禁止|不得|不能|不要|不可)\s*$/u.test(guidancePrefix)) return rawClause;
+        recoveryGuidanceFound = true;
+        const observedCondition = clause.slice(0, recoveryGuidance.index).replace(/[，,：:]\s*$/u, '').trim();
+        const safeObservation = observedCondition
+          ? `${observedCondition}，本轮只记录该差异和既有证据，并交对应接口/业务负责人评估`
+          : '本轮只记录已出现的差异和既有证据，并交对应接口/业务负责人评估';
+        return `${safeObservation}${punctuation}`;
+      }).join('');
+      return recoveryGuidanceFound
+        ? `${normalized} 经另行授权后才可制定定向补偿方案；本轮不补发、不重做、不重试。`.trim()
+        : normalized;
+    };
+    const publishableConfirmedFacts = audienceMode === 'implementation' && fieldDiagnosticQuestion
+      ? allConfirmedFacts.map(normalizeDiagnosticRouteFact)
+      : allConfirmedFacts;
     const confirmedTechnicalFacts = audienceMode === 'implementation'
-      ? allConfirmedFacts.filter(fact => sourceTechnicalRe.test(fact) || concreteInterfaceRe.test(fact)) : [];
+      ? publishableConfirmedFacts.filter(fact => sourceTechnicalRe.test(fact) || concreteInterfaceRe.test(fact)) : [];
     // 实施只读兜底只发布可作为判断基线的事实。route fact 里的“新建前会删除/提交/重放”等
     // 是对现状流程的描述，不是本轮允许执行的动作；原样搬进只读清单会被动作审计误判成现场指令，
     // 进而让已核事实 fallback 自己拒答。此类带动作起句的事实留在 route/retrieval 供模型和审计追溯，
     // 不作为本轮实施终稿正文发布；负向边界（“不得…”）不命中该规则，仍可保留。
     const diagnosticActionFactRe = /(?:^|[，：:；;]\s*)(?:[-*]\s+|[1-9]\d*[.、．]\s*)?(?:新建|新增|创建|编辑|删除|修改|调整|保存|提交|发送|重放|重提|重试|重复|补发|复测|再点|点一次|重新(?:提交|发送|触发|执行))/iu;
-    const confirmedFacts = allConfirmedFacts
+    const confirmedFacts = publishableConfirmedFacts
       .flatMap(fact => {
         if (audienceMode !== 'implementation'
           || (!sourceTechnicalRe.test(fact) && !concreteInterfaceRe.test(fact))) return [fact];
@@ -4128,7 +4164,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
     const handoffBlock = handoffRequested
       ? (verifiedHandoffRole
         ? `后续交接：将本轮只读证据交给已核实的${verifiedHandoffRole}继续确认；本轮不做写操作。`
-        : '后续交接：将本轮只读证据交给对应功能的产品负责人和研发/接口负责人继续确认；本轮不指定具体人名或组织，也不做写操作。')
+        : '后续交接：将本轮只读证据交给对应功能的产品负责人和研发/接口负责人继续确认；本轮不做写操作，也不指定具体人名或组织。')
       : '';
     const safeSteps = singleStepQuestion
       ? ['1. 先只读对照一份已有页面原文与同一次已有请求/响应原文；没有既有请求时只记录“未取得请求证据”，不要为抓包重复未知业务操作。']

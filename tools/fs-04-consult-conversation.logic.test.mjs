@@ -2602,6 +2602,74 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.doesNotMatch(q0030Fallback.reply, /张三|李四|某某医院/);
   assert.deepEqual(q0030Fallback.finalAudit.violations, [], 'Q0030 只读边界与责任交接终稿必须终审全绿');
 
+  const q0281Question = Object.keys(browserRequirements).find(question => question === '打回时消息中心失败，门诊和住院结果一致吗？');
+  const q0282Question = Object.keys(browserRequirements).find(question => question === '创建会话失败后门诊处方还会继续打回吗？');
+  assert.ok(q0281Question && q0282Question, 'Q0281/Q0282 应从真实浏览器题目 fixture 取到连续问题');
+  const q0282MatchedRoute = contextualRouteQuestion(productionRouteMap, [
+    { role: 'user', content: q0281Question },
+    { role: 'assistant', content: '门诊和住院的消息失败结果不同。' },
+    { role: 'user', content: q0282Question },
+  ], q0282Question, '');
+  const q0282Route = runtimeRouteWithContext(q0282MatchedRoute);
+  assert.equal(q0282Route.route.id, 'AUD-QR-FLOW-REJECT-MESSAGE-01', 'Q0282 应沿当前消息故障 route 回答');
+  const q0282Initial = bundle.audit(q0282Route.answerFacts.join('\n'), q0282Question, q0282Route);
+  assert.equal(q0282Initial.fieldDiagnosticQuestion, true, '外部会话/消息失败后业务是否继续的续问应进入现场只读诊断');
+  const q0282Reply = bundle.fallback(q0282Route.answerFacts.join('\n'), q0282Initial);
+  assert.match(q0282Reply, /只记录(?:该|上述)?差异.*接口\/业务负责人评估/s);
+  assert.match(q0282Reply, /另行授权.*定向补偿/s);
+  assert.match(q0282Reply, /本轮不补发、不重做、不重试/);
+  assert.doesNotMatch(q0282Reply, /应定向补消息|再决定是否重做/);
+  assert.deepEqual(bundle.audit(q0282Reply, q0282Question, q0282Route).violations, [], 'Q0282 只读兜底不得把处置事实发布成现场动作');
+
+  const q0284Question = Object.keys(browserRequirements).find(question => question === '先切到另一个问题：“医嘱标记”当前实现的关键入口或处理链是什么？');
+  const q0285Question = Object.keys(browserRequirements).find(question => question === '医嘱标记这一步只能确认现象稳定复现，不能做写操作。现在应停在哪个边界并交给谁继续？');
+  assert.ok(q0284Question && q0285Question, 'Q0284/Q0285 应从真实浏览器题目 fixture 取到连续问题');
+  const q0285MatchedRoute = contextualRouteQuestion(productionRouteMap, [
+    { role: 'user', content: q0284Question },
+    { role: 'assistant', content: '医嘱标记的当前入口和处理链如下。' },
+    { role: 'user', content: q0285Question },
+  ], q0285Question, '');
+  const q0285Route = runtimeRouteWithContext(q0285MatchedRoute);
+  assert.equal(q0285Route.route.id, 'AUD-QR-MK-02', 'Q0285 应保持医嘱标记 route');
+  const q0285Initial = bundle.audit(q0285Route.answerFacts.join('\n'), q0285Question, q0285Route);
+  assert.equal(q0285Initial.fallbackAnswerMode, 'field_diagnostic');
+  const q0285Reply = bundle.fallback(q0285Route.answerFacts.join('\n'), q0285Initial);
+  assert.match(q0285Reply, /当前实现会在列表返回记录后，由系统通过用户中心 getHospitalInfoByHospitalId 读取并补全医院和机构名称/);
+  assert.doesNotMatch(q0285Reply, /列表返回记录后，再通过用户中心[^。！？\n]*补医院和机构名称/);
+  assert.match(q0285Reply, /本轮不做写操作/);
+  assert.deepEqual(bundle.audit(q0285Reply, q0285Question, q0285Route).violations, [], 'Q0285 应区分系统既有实现与现场动作');
+
+  const genericReadOnlyHandoffQuestion = '这一步只能确认现象稳定复现，不能做写操作。现在应停在哪个边界并交给谁继续？';
+  const genericImplementationRoute = {
+    matched: true,
+    inherited: true,
+    route: { id: 'GENERIC-DISPLAY', title: '通用展示补全' },
+    answerFacts: [
+      '查询返回记录后，再通过资料服务 resolveOwnerName 补负责人名称；这是页面展示补全。',
+      '记录已处理但通知缺失时应定向补通知；任务未变后再决定是否重做。',
+    ],
+    mustNotConfuse: [],
+    directEvidenceFacts: [],
+  };
+  const genericImplementationInitial = bundle.audit(genericImplementationRoute.answerFacts.join('\n'), genericReadOnlyHandoffQuestion, genericImplementationRoute);
+  const genericImplementationReply = genericImplementationInitial.safeDiagnosticFallback;
+  assert.match(genericImplementationReply, /当前实现会在查询返回记录后，由系统通过资料服务 resolveOwnerName 读取并补全负责人名称/);
+  assert.doesNotMatch(genericImplementationReply, /应定向补通知|再决定是否重做/);
+  assert.match(genericImplementationReply, /另行授权.*定向补偿/s);
+  assert.deepEqual(bundle.audit(genericImplementationReply, genericReadOnlyHandoffQuestion, genericImplementationRoute).violations, [], '通用实现顺序和补偿建议也应安全收口');
+
+  const genericReadOnlyFactRoute = {
+    ...genericImplementationRoute,
+    answerFacts: ['系统当前只读取已有记录并展示结果；未经授权不应重试或补发。'],
+  };
+  const genericReadOnlyFactInitial = bundle.audit(genericReadOnlyFactRoute.answerFacts.join('\n'), genericReadOnlyHandoffQuestion, genericReadOnlyFactRoute);
+  const genericReadOnlyFactReply = genericReadOnlyFactInitial.safeDiagnosticFallback;
+  assert.doesNotMatch(genericReadOnlyFactReply, /另行授权.*定向补偿/s, '没有补偿/重做建议的 route 不应凭空追加补偿边界');
+
+  const ordinaryExternalResultQuestion = '会话创建成功后返回什么状态？';
+  const ordinaryExternalResultAudit = bundle.audit(genericReadOnlyFactRoute.answerFacts.join('\n'), ordinaryExternalResultQuestion, genericReadOnlyFactRoute);
+  assert.equal(ordinaryExternalResultAudit.fieldDiagnosticQuestion, false, '没有失败结果或现场语境的普通状态题不得误扩成只读诊断');
+
   const q0041Question = Object.keys(browserRequirements).find(question => question === '另一轮独立复测（41）里，评语常用语维护现在是怎么实现的？');
   assert.ok(q0041Question, 'Q0041 应从真实浏览器题目 fixture 取到原问题');
   const q0041Route = runtimeRouteWithRepositoryContext(routeQuestion(productionRuntimeRouteMap, q0041Question), '2.7.260828-2');
