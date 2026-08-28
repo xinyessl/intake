@@ -3143,7 +3143,13 @@ function consultAnswerSemanticAudit(answer, question, route) {
     // “从入口到外部依赖串起来”是显式研发链路题，沿用 chain fallback
     // 的入口/接口/数据/依赖合同，不应被复测诊断四步门改写为 field_diagnostic。
     && !/(?:串起来|串联|全链路|调用链|实现链路|从[^.。！？\n，,；;]{1,80}到[^.。！？\n，,；;]{1,40})/iu.test(questionText);
-  const diagnosticQuestion = explicitPartialEvidenceQuestion || explicitReviewDiagnosticQuestion || /(?:排查|定位|不一致|对不上|异常|故障|现场|验证|复测|下一步|怎么判断|如何判断|怎么确认|检查|留证|只能确认|能确定|能判断到哪|最多(?:能|可)?判断|不知道|未知|走到哪|还缺什么|够不够|够吗|是否足够|能不能判断|能否判断)/i.test(intentQuestionText);
+  // “上一层已经核过且正常，下一步继续怎么查”是上下文续问：它仍需
+  // 只读、分层、可执行的排查顺序，不能因为没有再次点名“接口/字段”
+  // 就退回只复述 route facts。匹配按问句语义而非题号/具体业务模块，
+  // 并要求前一层的已核结果与下一步只读动作同时出现，避免普通事实题误扩写。
+  const continuationDiagnosticQuestion = /(?:第一层|上一步|前一步|前一层|上一层)[^。！？\n]{0,80}(?:核过|核对过|确认过|看过|检查过|验证过)[^。！？\n]{0,32}(?:没(?:有)?异常|无异常|正常|没问题|未见异常)/iu.test(intentQuestionText)
+    && /(?:下一步|接下来|继续|往下)[^。！？\n]{0,64}(?:按什么顺序|顺序|只读|排查|核对|检查|留证|怎么查|如何查)/iu.test(intentQuestionText);
+  const diagnosticQuestion = explicitPartialEvidenceQuestion || explicitReviewDiagnosticQuestion || continuationDiagnosticQuestion || /(?:排查|定位|不一致|对不上|异常|故障|现场|验证|复测|下一步|怎么判断|如何判断|怎么确认|检查|留证|只能确认|能确定|能判断到哪|最多(?:能|可)?判断|不知道|未知|走到哪|还缺什么|够不够|够吗|是否足够|能不能判断|能否判断)/i.test(intentQuestionText);
   // 受众层级也必须过发布前确定性终审，不能只相信模型遵守 prompt。
   // 普通“怎么实现”仍是产品问法；只有显式技术契约才进入 developer。
   const audienceDeveloperQuestion = /(?:接口(?:路径|地址|契约|入参|出参|返回)?|字段(?:名|类型|长度|取值)?|列(?:名|类型|长度|取值)?|column(?:s)?(?:\s*(?:name|type|length|value))?|哪张表|表名|数据库表|SQL|源码|代码|开发链路|调用链|调用关系|Java\s*类|类名|方法名|Controller|Service|Mapper|Repository|DAO|DTO|VO)(?:[^。！？\n]{0,28}(?:什么|哪些|哪个|哪里|在哪|怎么|如何|实现|定义|调用|读写|保存|返回|排查|看|查))?|(?:什么|哪些|哪个|哪里|在哪|怎么|如何|看|查)[^。！？\n]{0,28}(?:接口|字段|列|column|哪张表|表名|SQL|源码|代码|开发链路|调用链|Java\s*类|Controller|Service|Mapper|DTO|VO)/i.test(questionText);
@@ -3500,18 +3506,22 @@ function consultAnswerSemanticAudit(answer, question, route) {
   );
   const partialEvidenceQuestion = evidenceSufficiencyQuestion && !broadEvidenceQuestion;
   const fieldDiagnosticQuestion = diagnosticQuestion
-    && (!broadFactQuestion || explicitReviewDiagnosticQuestion)
+    && (!broadFactQuestion || explicitReviewDiagnosticQuestion || continuationDiagnosticQuestion)
     && !partialEvidenceQuestion
     && !broadEvidenceQuestion
     && !!(route && route.matched)
-    && (!!route.inherited || /(?:只读|排查|现场|复测|留证|怎么判断|如何判断|还缺什么|下一步|怎么查|如何查|核对|不能(?:做|进行)?写操作|交给谁|谁继续|转给谁|交由谁|由谁继续|谁负责)/iu.test(questionText));
-  const contextFollowupQuestion = fieldDiagnosticQuestion && !!route.inherited;
+    && (!!route.inherited || continuationDiagnosticQuestion || /(?:只读|排查|现场|复测|留证|怎么判断|如何判断|还缺什么|下一步|怎么查|如何查|核对|不能(?:做|进行)?写操作|交给谁|谁继续|转给谁|交由谁|由谁继续|谁负责)/iu.test(questionText));
+  const contextFollowupQuestion = fieldDiagnosticQuestion && (!!route.inherited || continuationDiagnosticQuestion);
   // 现场复测下的 broad facts 仍须给出可执行的只读核对顺序；仅把 route
   // facts 原样列出不能替代诊断步骤。这个门只作用于显式复测宽问法，普通
   // 产品事实题和一般实施问法不因此强制扩写。
-  const diagnosticSequenceQuestion = fieldDiagnosticQuestion && explicitReviewDiagnosticQuestion;
+  const diagnosticSequenceQuestion = fieldDiagnosticQuestion && (explicitReviewDiagnosticQuestion || continuationDiagnosticQuestion);
   const diagnosticSequenceComplete = !diagnosticSequenceQuestion
-    || (topLevelSteps.length >= 4 && /(?:只读|核对|记录|请求|响应|任务|日志)/iu.test(text));
+    || (topLevelSteps.length >= 4
+      && /(?:只读|核对|记录|请求|响应|任务|日志)/iu.test(text)
+      && (!continuationDiagnosticQuestion
+        || (/(?:下一步|下一层|第二层|接下来|观测|分支)/iu.test(text)
+          && /(?:没有请求|请求失败|响应正常|未取得|缺失)/iu.test(text))));
   const routeFactText = currentRouteFacts.join(' ');
   const routeFactDimensionRules = [
     ['接口', /(?:接口|\bAPI\b|HTTP|\b(?:GET|POST|PUT|PATCH|DELETE)\b\s+\/)/iu],
@@ -3933,7 +3943,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
           // 掉后段业务阶段（如分配）或事务/失败流水边界；仍只取 current
           // route facts，不能扩入相邻 route。其它 field diagnostic 继续按
           // 相关性精简，避免普通现场清单技术倾倒。
-          ...currentRouteFacts.filter((fact, index) => explicitReviewDiagnosticQuestion
+          ...currentRouteFacts.filter((fact, index) => (explicitReviewDiagnosticQuestion || continuationDiagnosticQuestion)
             || index === 0 || !diagnosticFactQuestion || diagnosticFactRelevanceRe.test(fact)),
           ...publicMustNotConfuse,
         ].map(String).map(x => x.trim()).filter(Boolean)))
@@ -3971,8 +3981,20 @@ function consultAnswerSemanticAudit(answer, question, route) {
           || consultScopeTechnicalTokens(left).length - consultScopeTechnicalTokens(right).length;
       })
       .find(fact => consultScopeTechnicalTokens(fact).length <= 8) || '';
-    const audienceReferenceBlock = confirmedTechnicalReference
-      ? ['研发参考', `- ${confirmedTechnicalReference}`].join('\n') : '';
+    // 上一层已核、下一步继续排查时，普通实施正文仍只保留业务基线；
+    // 但当前 route 的直接入口/相邻状态边界不能因技术句被清洗而消失。
+    // 将同一 route 的少量直接技术事实集中放在“研发参考”末尾，既可供
+    // 实施按已核入口核对，也不会把源码细节散落在只读步骤首屏。
+    const continuationTechnicalReferences = continuationDiagnosticQuestion
+      ? confirmedTechnicalFacts.filter(fact => concreteInterfaceRe.test(fact)
+        || (/(?:状态|边界|另一组|另一套|不同|分别|不能|不得)/iu.test(fact)
+          && /(?:状态|通过|失败|超时|正常|异常|=)/iu.test(fact))).slice(0, 3)
+      : [];
+    const audienceReferenceFacts = continuationTechnicalReferences.length
+      ? continuationTechnicalReferences
+      : (confirmedTechnicalReference ? [confirmedTechnicalReference] : []);
+    const audienceReferenceBlock = audienceReferenceFacts.length
+      ? ['研发参考', ...audienceReferenceFacts.map(fact => `- ${fact}`)].join('\n') : '';
     const handoffRequested = /(?:交给谁|谁继续|转给谁|交由谁|由谁继续|谁负责)/u.test(intentQuestionText);
     const verifiedHandoffRole = handoffRequested
       ? currentRouteFacts
@@ -3993,6 +4015,14 @@ function consultAnswerSemanticAudit(answer, question, route) {
           '3. 按“没有请求 / 请求失败 / 响应正常但页面不一致”三种观测结果分开记录，不把未核原因写成结论。',
           '4. 整理上述原文与脱敏截图；拿不到的项明确标成缺失，不用找 spec 代替现场证据。',
         ];
+    const continuationSteps = continuationDiagnosticQuestion
+      ? [
+          '1. 先沿用第一层“无异常”的范围，只读核对同一组已选对象的页面选择、对象标识、当前状态与本次已经发生的请求/响应；不重新点击或提交。',
+          '2. 再只读对照已经发生的当前操作请求与返回：核对请求是否到达、是否仍是同一组对象、HTTP/业务码和响应原文；按当前 route 已核入口与相邻但不同的状态接口分别核对，不调用未被本次操作证明的接口。',
+          '3. 继续核对已有结果与页面刷新：逐条对照业务状态/流水、列表和摘要是否与响应一致；只记录观测，不把差异直接归因。',
+          '4. 按“没有当前操作请求 / 请求失败或业务码异常 / 响应正常但结果或列表不一致”分支留证，保留请求标识、对象标识、发生时间及原始响应；拿不到的日志或状态明确标成缺失。',
+        ]
+      : safeSteps;
     if (evidenceSufficiencyQuestion) {
       const mentionsScreenshot = /(?:截图|图片|附图|这张图|图里)/u.test(questionText);
       // “请求时间/发生时间”是通用留证字段，不等于用户在核对日期、星期或时区。
@@ -4022,7 +4052,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
       safeDiagnosticFallback = [verdict, attachmentBoundary, knownBlock, '最小缺口：', ...minimumEvidenceSteps, handoffBlock, audienceReferenceBlock].filter(Boolean).join('\n\n');
     } else {
       // 同上：安全兜底不扩写未经本轮问句要求的接口/字段/调用链。
-      safeDiagnosticFallback = [knownBlock, '最小只读排查：', ...safeSteps, handoffBlock, audienceReferenceBlock].filter(Boolean).join('\n\n');
+      safeDiagnosticFallback = [knownBlock, continuationDiagnosticQuestion ? '下一层只读排查顺序：' : '最小只读排查：', ...continuationSteps, handoffBlock, audienceReferenceBlock].filter(Boolean).join('\n\n');
     }
   }
   const violations = [];
@@ -4175,7 +4205,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
       if (actionIndex >= 0) violations.splice(actionIndex, 1);
     }
   }
-  return { checked: true, diagnosticQuestion, audienceMode, audienceTechnicalParts, productTechnicalParts, implementationMisplacedTechnicalParts, implementationTechnicalFirstParts, currentRouteFacts, routeFallbackMode: routeFallbackMode || '', verifiedFactsFallback, chainRequested, chainDimensions, chainStageLabels, missingRequestedInterfaces, missingChainDimensions, audienceTechnicalDumpParts: uniqueChainTechnicalDetailParts, safeChainFallback, evidenceSufficiencyQuestion, fullHandoffMaterialQuestion, broadEvidenceQuestion, partialEvidenceQuestion, partialEvidenceInventoryQuestion, broadFactQuestion, fieldDiagnosticQuestion, contextFollowupQuestion, explicitReviewDiagnosticQuestion, diagnosticSequenceQuestion, diagnosticSequenceComplete, fallbackAnswerMode, factQuestionDimensions, missingRouteFactDimensions, verifiedFactCoverageQuestion, missingVerifiedFactCoverage, implementationFactCoverageQuestion, missingImplementationFactCoverage, implementationFactCoverageGroups, hasEvidenceSufficiencyVerdict, minimumRoutePath, missingEvidenceMinimumPath, observationInputContract, undefinedObservationVariables, symbolicDefinitions: Object.fromEntries(symbolicDefinitions), undefinedSymbolicComparisons, focusedFactQuestion, focusedTypeOrLengthQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, focusedRelationshipFacts, missingFocusedRelationshipFacts, safeDiagnosticFallback, explicitNonDestructiveBoundaryQuestion, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsupportedEvidenceNegations, unsupportedEvidenceAbsenceClaims, evidenceAbsenceCorrectionFacts, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, optionCardinalityMismatches, nonSequentialOptionSets, undefinedGroupReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, emptyNumberedSections, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, emptyDiagnosticBranchHeadings, emptyListStepItems, danglingClosingPunctuationLines, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
+  return { checked: true, diagnosticQuestion, audienceMode, audienceTechnicalParts, productTechnicalParts, implementationMisplacedTechnicalParts, implementationTechnicalFirstParts, currentRouteFacts, routeFallbackMode: routeFallbackMode || '', verifiedFactsFallback, chainRequested, chainDimensions, chainStageLabels, missingRequestedInterfaces, missingChainDimensions, audienceTechnicalDumpParts: uniqueChainTechnicalDetailParts, safeChainFallback, evidenceSufficiencyQuestion, fullHandoffMaterialQuestion, broadEvidenceQuestion, partialEvidenceQuestion, partialEvidenceInventoryQuestion, broadFactQuestion, fieldDiagnosticQuestion, contextFollowupQuestion, explicitReviewDiagnosticQuestion, continuationDiagnosticQuestion, diagnosticSequenceQuestion, diagnosticSequenceComplete, fallbackAnswerMode, factQuestionDimensions, missingRouteFactDimensions, verifiedFactCoverageQuestion, missingVerifiedFactCoverage, implementationFactCoverageQuestion, missingImplementationFactCoverage, implementationFactCoverageGroups, hasEvidenceSufficiencyVerdict, minimumRoutePath, missingEvidenceMinimumPath, observationInputContract, undefinedObservationVariables, symbolicDefinitions: Object.fromEntries(symbolicDefinitions), undefinedSymbolicComparisons, focusedFactQuestion, focusedTypeOrLengthQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, focusedRelationshipFacts, missingFocusedRelationshipFacts, safeDiagnosticFallback, explicitNonDestructiveBoundaryQuestion, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsupportedEvidenceNegations, unsupportedEvidenceAbsenceClaims, evidenceAbsenceCorrectionFacts, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, optionCardinalityMismatches, nonSequentialOptionSets, undefinedGroupReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, emptyNumberedSections, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, emptyDiagnosticBranchHeadings, emptyListStepItems, danglingClosingPunctuationLines, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {

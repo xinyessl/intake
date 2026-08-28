@@ -1239,3 +1239,10 @@
 - 解法：从链路问句的括号/箭头和阶段词提取通用阶段标签，按阶段信号从当前 route facts 选最多两条原句另行呈现；对复测宽盘点不再按相关性过滤 current route facts，保留后段分配、事务失败与 `sf_*` 未确认边界。
 - 防复发：真实 Q0179 断言阶段标签顺序和 fallback 的分配三层事实，且 `finalAudit.violations=[]`；真实 Q0177 断言候选交集、1000 份平滑轮询、多任务整批、无总事务、`audit_sync_error_flow` 与 `sf_*` 未知仍在四步只读终稿中。
 - 关联：`server.mjs`、`tools/fs-04-consult-conversation.logic.test.mjs`、`docs/changes/CHG-consult-链路阶段事实补全.md`。
+
+### L-129 已核上一层的续问仍需给下一层只读顺序
+- 现象（2026-08-28）：审方 Q0195 先说明“第一层核过没有异常”，再问“下一步按什么顺序继续只读排查”，模型答复却只重复批量通过/超时通过 route facts，没有可执行的下一层顺序和观测分支。
+- 根因：诊断识别依赖当前问句直接出现接口、数据或边界等盘点词；“上一层已核正常 + 下一步继续只读排查”被当作普通事实续问，未触发诊断序列完整性门。
+- 解法：通用识别上一层已核结果与下一步只读动作的组合，进入 `field_diagnostic`/`contextFollowup`，确定性兜底保留当前 route facts，再给四步请求/响应、结果留痕、页面刷新与缺失/失败/不一致分支；直接入口和相邻状态边界只按当前 route facts 的路径/状态信号放入研发参考，不把业务 token 写进规则。
+- 防复发：用真实续问回归 route、`fallbackAnswerMode`、四步顺序、原有入口及状态边界和 `finalAudit.violations=[]`；另用普通切题事实问法确认不误扩写。检查“不要重新提交/调用未被证明的接口”等否定边界不能被副作用审计误判。
+- 关联：`server.mjs`、`tools/fs-04-consult-conversation.logic.test.mjs`、`docs/changes/CHG-consult-续接只读排查顺序.md`。

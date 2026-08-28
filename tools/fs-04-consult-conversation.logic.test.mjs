@@ -2033,6 +2033,45 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(q0179Fallback.reply, /当前停点|NEEDS-HUMAN|资料明确的未知/);
   assert.deepEqual(q0179Fallback.finalAudit.violations, [], 'Q0179 链路 fallback 必须保留点名阶段事实并终审全绿');
 
+  const q0195Question = Object.keys(browserRequirements).find(question => question === '回到待审列表批量通过与超时通过边界这里，第一层核过没有异常，下一步按什么顺序继续只读排查？');
+  assert.ok(q0195Question, 'Q0195 真实 fixture 题目应存在');
+  const q0195MatchedRoute = routeQuestion(productionRouteMap, q0195Question);
+  assert.equal(q0195MatchedRoute.route.id, 'AUD-QR-FLOW-BATCH-PASS-01', 'Q0195 应命中批量通过与超时通过边界');
+  const q0195Route = runtimeRouteWithContext(q0195MatchedRoute);
+  const q0195Facts = q0195Route.answerFacts.join('\n');
+  const q0195Initial = bundle.audit(q0195Facts, q0195Question, q0195Route);
+  assert.equal(q0195Initial.continuationDiagnosticQuestion, true, 'Q0195 的上一层已核+下一步只读问法应进入通用续接诊断');
+  assert.equal(q0195Initial.fieldDiagnosticQuestion, true, 'Q0195 不应只复述 route facts');
+  assert.equal(q0195Initial.contextFollowupQuestion, true, 'Q0195 应标记为当前主题的上下文续问');
+  assert.equal(q0195Initial.fallbackAnswerMode, 'field_diagnostic', 'Q0195 应使用现场诊断兜底');
+  assert.equal(q0195Initial.diagnosticSequenceComplete, false, 'Q0195 只有 route facts 时应要求下一层四步只读顺序');
+  const q0195FallbackReply = bundle.fallback(q0195Facts, q0195Initial);
+  assert.match(q0195FallbackReply, /下一层只读排查顺序/);
+  assert.match(q0195FallbackReply, /1\. 先沿用第一层/);
+  assert.match(q0195FallbackReply, /2\. 再只读对照已经发生的当前操作请求与返回/);
+  assert.match(q0195FallbackReply, /3\. 继续核对已有结果与页面刷新/);
+  assert.match(q0195FallbackReply, /4\. 按“没有当前操作请求 \/ 请求失败或业务码异常 \/ 响应正常但结果或列表不一致”/);
+  assert.match(q0195FallbackReply, /POST \/audit\/opt\/task\/pass/);
+  assert.match(q0195FallbackReply, /POST \/audit\/ipt\/task\/pass/);
+  assert.match(q0195FallbackReply, /\/audit\/opt\/tasks\/time\/over/);
+  assert.match(q0195FallbackReply, /\/audit\/ipt\/tasks\/time\/over/);
+  assert.match(q0195FallbackReply, /audit_pass/);
+  assert.match(q0195FallbackReply, /time_over_pass/);
+  assert.match(q0195FallbackReply, /不重新点击或提交/);
+  assert.match(q0195FallbackReply, /不调用未被本次操作证明的接口/);
+  assert.doesNotMatch(q0195FallbackReply, /(?:建议|应当|应该|让现场|直接)[^。！？\n]{0,20}(?:点击|提交|调用|触发|重试)/);
+  const q0195Final = bundle.audit(q0195FallbackReply, q0195Question, q0195Route);
+  assert.equal(q0195Final.diagnosticSequenceComplete, true, 'Q0195 兜底必须满足续接诊断顺序与观测分支');
+  assert.deepEqual(q0195Final.violations, [], 'Q0195 续接诊断 fallback 终审必须全绿');
+
+  const q0194Question = Object.keys(browserRequirements).find(question => question === '先切到另一个问题：“待审列表批量通过与超时通过边界”当前实现的关键入口或处理链是什么？');
+  assert.ok(q0194Question, 'Q0194 真实 fixture 题目应存在');
+  const q0194Route = runtimeRouteWithContext(routeQuestion(productionRouteMap, q0194Question));
+  const q0194Initial = bundle.audit(q0194Route.answerFacts.join('\n'), q0194Question, q0194Route);
+  assert.equal(q0194Initial.continuationDiagnosticQuestion, false, '普通切题事实问法不得误判为续接诊断');
+  assert.equal(q0194Initial.contextFollowupQuestion, false, '普通切题事实问法不得误标上下文续问');
+  assert.notEqual(q0194Initial.fallbackAnswerMode, 'field_diagnostic', '普通切题事实问法不应扩写只读排查顺序');
+
   const q0011AiQuestion = Object.keys(browserRequirements).find(question => question.includes('另一轮独立复测（11）里，AI 审方生成现在是怎么实现的？'));
   assert.ok(q0011AiQuestion, 'Q0011 真实 fixture 题目应存在');
   const q0011AiRoute = runtimeRouteWithContext(routeQuestion(productionRouteMap, q0011AiQuestion));
