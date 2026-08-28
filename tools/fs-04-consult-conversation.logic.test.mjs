@@ -955,7 +955,8 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     + extractFn(SRC, 'consultVerifiedFactsFallback') + '\n'
     + extractFn(SRC, 'consultModelErrorInfo') + '\n'
     + extractFn(SRC, 'consultModelFailureFallback') + '\n'
-    + 'return { audit:consultAnswerSemanticAudit, revision:consultAnswerRevisionPrompt, fallback:consultAnswerSafeFallback, verifiedFallback:consultVerifiedFactsFallback, modelErrorInfo:consultModelErrorInfo, modelFailureFallback:consultModelFailureFallback };',
+    + extractFn(SRC, 'consultRecoverSafeDiagnostic') + '\n'
+    + 'return { audit:consultAnswerSemanticAudit, revision:consultAnswerRevisionPrompt, fallback:consultAnswerSafeFallback, verifiedFallback:consultVerifiedFactsFallback, modelErrorInfo:consultModelErrorInfo, modelFailureFallback:consultModelFailureFallback, recoverSafeDiagnostic:consultRecoverSafeDiagnostic };',
   )();
   const auditAiInterfaceQuestion = 'AI 审方开始生成和停止生成分别调用哪个接口？请只给出两个 HTTP 方法与完整路径，并说明停止接口的 generateId 放在哪里。';
   const auditAiInterfaceRoute = {
@@ -2668,6 +2669,37 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(q0293Fallback.reply, /本轮不补发、不重做、不重试/);
   assert.doesNotMatch(q0293Fallback.reply, /应定向补消息|再决定是否重做/);
   assert.deepEqual(q0293Fallback.finalAudit.violations, [], 'partial evidence 也必须复用同一非写操作事实转换');
+
+  const q0303Question = Object.keys(browserRequirements).find(question => question === '审核业务场景与状态机（通过/自动通过/打回双签/打回修改/医生侧/移交/挂起）这条链路只确认前端发出了请求，服务端后续日志还没拿到。先说能确定的，未知项请单独标出来。');
+  assert.ok(q0303Question, 'Q0303 应从正式 Audit 浏览器 fixture 取到原问题');
+  const q0303Route = runtimeRouteWithContext(routeQuestion(productionRouteMap, q0303Question));
+  assert.equal(q0303Route.route.id, 'AUD-QR-FLOW-02');
+  const q0303EmptyAudit = bundle.audit('', q0303Question, q0303Route);
+  const q0303DirectReply = bundle.fallback('', q0303EmptyAudit);
+  const q0303DirectFinalAudit = bundle.audit(q0303DirectReply, q0303Question, q0303Route);
+  const q0303RateLimitFallback = bundle.modelFailureFallback(q0303Question, q0303Route, { status: 429, message: 'rate limit' });
+  assert.ok(q0303RateLimitFallback, `Q0303 长 route 遇到 429 仍应发布 verifiedFacts partial-evidence 终稿：${JSON.stringify({ initial: q0303EmptyAudit.violations, reply: q0303DirectReply, final: q0303DirectFinalAudit.violations })}`);
+  assert.match(q0303RateLimitFallback.reply, /只能确认前端(?:已经|已)?发出(?:了)?请求/);
+  assert.match(q0303RateLimitFallback.reply, /移交和 AI 挂起是两个业务动作/);
+  assert.match(q0303RateLimitFallback.reply, /服务端[^。！？\n]*(?:处理|日志)[^。！？\n]*(?:后续|业务)?状态[^。！？\n]*(?:未知|未取得|待确认)/);
+  assert.match(q0303RateLimitFallback.reply, /只读/);
+  assert.match(q0303RateLimitFallback.reply, /不重复提交/);
+  assert.match(q0303RateLimitFallback.reply, /不重试/);
+  assert.deepEqual(q0303RateLimitFallback.finalAudit.violations, [], 'Q0303 429 兜底终审应全绿');
+
+  const q0303UnsafeDraft = '前端已经发出请求，说明服务端处理成功并完成状态变更；建议重新提交一次确认。';
+  const q0303UnsafeAudit = bundle.audit(q0303UnsafeDraft, q0303Question, q0303Route);
+  assert.ok(q0303UnsafeAudit.violations.length, 'Q0303 不合格模型草稿必须触发确定性安全兜底');
+  const q0303Recovered = bundle.recoverSafeDiagnostic(q0303UnsafeAudit, q0303Question, q0303Route);
+  assert.ok(q0303Recovered, 'Q0303 初稿与二次修订均不合格时，最终恢复出口仍须返回确定性 partial-evidence 终稿');
+  const q0303SemanticFallback = q0303Recovered.reply;
+  const q0303SemanticFinalAudit = q0303Recovered.audit;
+  assert.match(q0303SemanticFallback, /只能确认前端(?:已经|已)?发出(?:了)?请求/);
+  assert.match(q0303SemanticFallback, /服务端[^。！？\n]*(?:处理|日志)[^。！？\n]*(?:后续|业务)?状态[^。！？\n]*(?:未知|未取得|待确认)/);
+  assert.match(q0303SemanticFallback, /不重复提交/);
+  assert.match(q0303SemanticFallback, /不重试/);
+  assert.doesNotMatch(q0303SemanticFallback, /重新提交一次|当前回答未通过发布前事实与动作安全校验/);
+  assert.deepEqual(q0303SemanticFinalAudit.violations, [], 'Q0303 二次语义修订失败出口也必须收敛成可发布终稿');
 
   const q0284Question = Object.keys(browserRequirements).find(question => question === '先切到另一个问题：“医嘱标记”当前实现的关键入口或处理链是什么？');
   const q0285Question = Object.keys(browserRequirements).find(question => question === '医嘱标记这一步只能确认现象稳定复现，不能做写操作。现在应停在哪个边界并交给谁继续？');
