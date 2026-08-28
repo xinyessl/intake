@@ -3056,6 +3056,54 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(genericSequenceReply, /已有记录核对详情与处理记录/);
   assert.deepEqual(bundle.audit(genericSequenceReply, genericSequenceQuestion, genericSequenceRoute).violations, [], '任意 route 的明确只读顺序都应可确定性保留');
 
+  const q0402Question = Object.keys(browserRequirements).find(question => question === '标记管理涉及哪些接口、数据和边界？');
+  assert.ok(q0402Question, 'Q0402 应从正式 Audit 浏览器 fixture 取到原问题');
+  const q0402Route = runtimeRouteWithRepositoryContext(routeQuestion(auditTag3RouteMap, q0402Question), '2.7.260828-3');
+  assert.equal(q0402Route.route.id, 'AUD-QR-MK-03', 'Q0402 必须命中标记管理 current route');
+  const q0402FactsOnlyDraft = q0402Route.answerFacts.join('\n');
+  const q0402Initial = bundle.audit(q0402FactsOnlyDraft, q0402Question, q0402Route);
+  assert.equal(q0402Initial.interfaceDataBoundaryDiagnosticQuestion, true, '接口、数据与边界宽问法应使用 field diagnostic 合同');
+  assert.equal(q0402Initial.fieldDiagnosticQuestion, true);
+  assert.equal(q0402Initial.fallbackAnswerMode, 'field_diagnostic');
+  assert.equal(q0402Initial.interfaceDataBoundaryDiagnosticComplete, false, '只罗列 route facts 不能替代分层只读排查');
+  assert.ok(q0402Initial.violations.includes('incomplete_diagnostic_sequence'));
+  const q0402Reply = bundle.fallback(q0402FactsOnlyDraft, q0402Initial);
+  assert.match(q0402Reply, /接口、数据与边界的分层只读排查顺序/);
+  assert.match(q0402Reply, /页面与范围[^\n]*筛选或查询条件[^\n]*账号角色/);
+  assert.match(q0402Reply, /同一次请求与响应[^\n]*同一次已经发生的请求和响应/);
+  assert.match(q0402Reply, /服务端与业务记录[^\n]*服务端日志[^\n]*已有业务记录/);
+  assert.match(q0402Reply, /取不到时明确标为缺失/);
+  assert.match(q0402Reply, /页面呈现与权限边界/);
+  assert.match(q0402Reply, /没有请求 \/ 请求失败 \/ 响应正常但业务记录或页面呈现不一致/);
+  assert.match(q0402Reply, /只补会改变判断的最少原文/);
+  assert.match(q0402Reply, /不要为抓包新增、编辑、删除或重做业务动作/);
+  assert.doesNotMatch(q0402Reply, /(?:^|[。！？；\n])\s*(?:建议|请|要求|让实施)[^。！？\n]{0,28}(?:新增|创建|编辑|删除|提交)/u);
+  const q0402Final = bundle.audit(q0402Reply, q0402Question, q0402Route);
+  assert.equal(q0402Final.interfaceDataBoundaryDiagnosticComplete, true);
+  assert.deepEqual(q0402Final.violations, [], 'Q0402 facts 后必须追加 route 安全的四层只读证据分支并终审全绿');
+
+  const genericBoundaryQuestion = '库存规则包含哪些接口、数据和边界？';
+  const genericBoundaryRoute = {
+    matched: true,
+    fallbackMode: 'verifiedFacts',
+    route: { id: 'GENERIC-BOUNDARY', title: '库存规则', fallbackMode: 'verifiedFacts' },
+    answerFacts: [
+      '当前列表只展示账号范围内已有的规则和状态，不会据此改变库存数据。',
+      '现场仅允许读取现有页面、同一次请求响应和已经形成的业务记录。',
+    ],
+    mustNotConfuse: [],
+  };
+  const genericBoundaryInitial = bundle.audit(genericBoundaryRoute.answerFacts.join('\n'), genericBoundaryQuestion, genericBoundaryRoute);
+  assert.equal(genericBoundaryInitial.interfaceDataBoundaryDiagnosticQuestion, true, '通用合同不能依赖标记管理题名或字段');
+  assert.equal(genericBoundaryInitial.diagnosticSequenceComplete, false);
+  const genericBoundaryReply = bundle.fallback('', genericBoundaryInitial);
+  assert.match(genericBoundaryReply, /页面与范围/);
+  assert.match(genericBoundaryReply, /服务端与业务记录/);
+  assert.match(genericBoundaryReply, /证据分支/);
+  assert.doesNotMatch(genericBoundaryReply, /标记管理|个人标签|共享标签/);
+  assert.deepEqual(bundle.audit(genericBoundaryReply, genericBoundaryQuestion, genericBoundaryRoute).violations, [], '其它 route 也应得到相同的最小只读分层');
+  assert.equal(bundle.modelFailureFallback(genericBoundaryQuestion, { ...genericBoundaryRoute, matched: false }, { status: 429, message: 'rate limit' }), null, '接口数据边界宽问法不能让 route miss 绕过证据门');
+
   const genericReadOnlyFactRoute = {
     ...genericImplementationRoute,
     answerFacts: ['系统当前只读取已有记录并展示结果；未经授权不应重试或补发。'],
