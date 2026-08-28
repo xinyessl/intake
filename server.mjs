@@ -3644,12 +3644,17 @@ function consultAnswerSemanticAudit(answer, question, route) {
       if (systemSequence) {
         return `当前实现会在${systemSequence[1]}，由系统自动只读调用${systemSequence[2]}，读取并用于展示补全${systemSequence[3]}；这是系统已有的展示流程，不是要求实施手工调用，也不写业务数据${punctuation}`;
       }
-      const recoveryGuidance = clause.match(/(?:应|应该|可|可以|需|需要|建议|再决定是否|决定是否)[^。！？；\n]{0,36}(?:定向)?(?:补(?:发|消息|通知|偿|写)?|重做|重试|重放|重新(?:执行|提交|发送|触发))/u);
+      // 单字“应/可/需”只有处于动作情态词位置时才算处置建议，不能从
+      // “列表响应”“业务需求”等词内部起匹配，再把已核事实截成残句。
+      // 中文通常不在“时应/失败后应”之间留空格，因此同时接受时/后/则
+      // 作为语法边界；捕获边界后用 modalIndex 保留原条件正文。
+      const recoveryGuidance = clause.match(/(^|[，,：:；;\s]|[时后则])((?:应该|应当|可以|需要|建议|再决定是否|决定是否|应(?!用|答|响)|可(?!用)|需(?!求))[^。！？；\n]{0,36}(?:定向)?(?:补(?:发|消息|通知|偿|写)?|重做|重试|重放|重新(?:执行|提交|发送|触发)))/u);
       if (!recoveryGuidance) return rawClause;
-      const guidancePrefix = clause.slice(Math.max(0, recoveryGuidance.index - 4), recoveryGuidance.index);
+      const modalIndex = recoveryGuidance.index + recoveryGuidance[1].length;
+      const guidancePrefix = clause.slice(Math.max(0, modalIndex - 4), modalIndex);
       if (/(?:不|未|无|禁止|不得|不能|不要|不可)\s*$/u.test(guidancePrefix)) return rawClause;
       recoveryGuidanceFound = true;
-      const observedCondition = clause.slice(0, recoveryGuidance.index).replace(/[，,：:]\s*$/u, '').trim();
+      const observedCondition = clause.slice(0, modalIndex).replace(/[，,：:]\s*$/u, '').trim();
       const safeObservation = observedCondition
         ? `${observedCondition}，本轮只记录该差异和既有证据，并交对应接口/业务负责人评估`
         : '本轮只记录已出现的差异和既有证据，并交对应接口/业务负责人评估';
@@ -4842,7 +4847,10 @@ function consultAnswerSemanticAudit(answer, question, route) {
       ...(interfaceDataBoundaryOtherInterfaces.length
         ? [`- 其它已核接口入口：${interfaceDataBoundaryOtherInterfaces.join('；')}；只按本轮既有请求留证。`]
         : []),
-      ...interfaceDataBoundaryDataFacts.map(fact => `- 数据与选择条件：${fact}`),
+      // 外层已经明确这是“数据与选择条件”，不要再把 route 的“实施：”
+      // 受众标签嵌进句中。否则动作审计会把该标签误认成执行主体，并将
+      // 后面的“完成列表”等 As-built 名词误判为要求实施去完成操作。
+      ...interfaceDataBoundaryDataFacts.map(fact => `- 数据与选择条件：${String(fact).replace(/^(?:产品|实施|研发|开发|技术)\s*[：:]\s*/u, '')}`),
       ...(interfaceDataBoundaryChecklistFact
         ? [`- route 已核只读日志/记录锚点：${interfaceDataBoundaryChecklistFact}`]
         : []),

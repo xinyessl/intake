@@ -3395,6 +3395,31 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   );
   assert.deepEqual(q0760ConditionFirstAudit.implementationTechnicalFirstParts, []);
 
+  const q0762Question = auditBrowserQuestions.questions.find(item => item.id === 'Q0762')?.question;
+  assert.equal(q0762Question, '已审查看涉及哪些接口、数据和边界？');
+  const q0762Route = runtimeRouteWithRepositoryContext(routeQuestion(auditTag3RouteMap, q0762Question), '2.7.260828-3');
+  assert.equal(q0762Route.route.id, 'AUD-QR-WB-04');
+  const q0762Initial = bundle.audit('', q0762Question, q0762Route);
+  assert.equal(q0762Initial.verifiedInterfaceDataBoundaryDiagnosticQuestion, true);
+  assert.equal(q0762Initial.fallbackAnswerMode, 'field_diagnostic');
+  const q0762Reply = bundle.fallback('', q0762Initial);
+  const q0762Final = bundle.audit(q0762Reply, q0762Question, q0762Route);
+  assert.deepEqual(q0762Final.violations, [], JSON.stringify({ reply: q0762Reply, audit: q0762Final }, null, 2));
+  assert.ok(q0762Reply.length > 300 && q0762Reply.length < 5000, `Q0762 确定性终稿长度异常：${q0762Reply.length}`);
+  assert.match(q0762Reply, /缺记录时先只读核对筛选条件、列表响应、task 落库和消费错误/);
+  assert.doesNotMatch(q0762Reply, /列表响，本轮/);
+  assert.match(q0762Reply, /GET \/auditapi\/audit\/opt\/task\/complete/);
+  assert.match(q0762Reply, /GET \/auditapi\/audit\/ipt\/task\/complete/);
+  for (const modelError of [
+    { code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束' },
+    { status: 429, message: 'rate limit' },
+  ]) {
+    const q0762ModelFallback = bundle.modelFailureFallback(q0762Question, q0762Route, modelError);
+    assert.ok(q0762ModelFallback, `Q0762 ${modelError.code || modelError.status} 应发布 route-aware 终稿`);
+    assert.equal(q0762ModelFallback.reply, q0762Reply);
+    assert.deepEqual(q0762ModelFallback.finalAudit.violations, []);
+  }
+
   const genericConditionalChecklistQuestion = '我没完全听懂库存备注调整的排查建议，换成实施可以逐项照做的只读清单。';
   const genericConditionalChecklistRoute = {
     matched: true,
