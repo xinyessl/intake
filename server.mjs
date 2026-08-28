@@ -890,6 +890,13 @@ function consultExplicitOperationContracts(question) {
     const key = `${entity}|${actionValue}`;
     if (!contracts.some(item => item.key === key)) contracts.push({ key, entity, action: actionValue });
   };
+  // “某业务发起失败”同时表达“发起”与“失败”。普通全局 match 会先消费
+  // “业务发起”，从而漏掉同一实体的失败结果；显式补抓连续动作，避免
+  // 半成功/失败类问法只能靠“状态、HIS”等泛词路由。
+  for (const match of source.matchAll(new RegExp(`([\\p{Script=Han}]{2,10}?)(${action})(${action})`, 'gu'))) {
+    add(match[1], match[2], match.index + match[1].length);
+    add(match[1], match[3], match.index + match[1].length + match[2].length);
+  }
   for (const match of source.matchAll(new RegExp(`([\\p{Script=Han}]{2,10}?)(${action})`, 'gu'))) add(match[1], match[2], match.index + match[1].length);
   for (const match of source.matchAll(new RegExp(`(${action})([\\p{Script=Han}]{2,10}?)`, 'gu'))) add(match[2], match[1], match.index);
   return contracts;
@@ -3560,6 +3567,20 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const hasEvidenceSufficiencyVerdict = !evidenceSufficiencyQuestion
     || /(?:只够|足够|够(?:用|判断|固定|完成)|不够|不足|不能单独|尚不能|只能固定|只能证明|只能确认|最多(?:只能|能|可))/u.test(firstMeaningfulLine);
   const currentRouteFacts = route && route.matched ? (route.answerFacts || []).map(String).map(item => item.trim()).filter(Boolean) : [];
+  // 模型即使命中了正确业务 route，也不能把“问到了某个操作”偷换成
+  // “可以执行该操作”。只有 current route 的 answerFacts 在同一条事实中
+  // 正向支持相同实体+动作时，才允许给肯定操作/等价关系；否则终审删掉。
+  const unsupportedExplicitOperationParts = explicitOperationContracts.length ? text.split(/[。！？；;\n，,]/u)
+    .map(part => part.trim()).filter(Boolean)
+    .filter(part => /(?:可以|可直接|建议|应当|应该|需要|需|直接|继续|再次|重新|然后|再|就是|等于)/u.test(part))
+    .filter(part => !currentRouteFacts.some(fact => fact === part || fact.includes(part)))
+    .filter(part => !/(?:不得|不能|不要|禁止|不可|不应|先别|停止)[^。！？；;\n]{0,32}(?:发起|撤销|取消|退回|提交|删除|新增|创建|审批|签名|补发|重放|重提|重试)/u.test(part))
+    .filter(part => {
+      const claims = consultExplicitOperationContracts(part);
+      return claims.length && claims.some(contract => !currentRouteFacts.some(fact =>
+        routeHasDirectOperationEvidence({ answerFacts: [fact] }, [contract])
+      ));
+    }) : [];
   // 单条事实不足以支撑“接口、数据、边界”三维现场盘点，仍走既有
   // facts_with_unknowns，不能用通用清单掩盖证据缺口。至少两条 current
   // route 已核事实时才启用分层 field diagnostic；route miss 自然为 false。
@@ -4908,6 +4929,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (explicitOperationEvidenceMissing) safeDiagnosticFallback = operationEvidenceStopReply;
   const violations = [];
   if (explicitOperationEvidenceMissing && text && !verifiedOperationEvidenceStop) violations.push('missing_explicit_operation_evidence');
+  if (unsupportedExplicitOperationParts.length) violations.push('unsupported_explicit_operation');
   if (likelihoodTerms.length || causalPriorityTerms.length) violations.push('unsupported_likelihood');
   if (contradictoryObservationOrderClaims.length) violations.push('contradictory_observation_order');
   if (unsupportedComponentClaims.length) violations.push('unsupported_component_fault');
@@ -5025,6 +5047,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
     const permittedViolations = [
       'unsupported_likelihood',
       'cross_actor_side_effect',
+      'unsupported_explicit_operation',
       // “产品 + 实施口径”混合问法可能同时包含已核状态值和只读核对项。
       // verifiedFacts 终稿已严格等于路由全部原句，不能再因通用实施排版门
       // 要求技术内容只出现在末段或强制 2~4 个编号步骤而退成机械拒答。
@@ -5481,6 +5504,16 @@ function consultAnswerSafeFallback(draft, audit) {
       ...fallbackImplementationFacts.map(fact => `- ${fact}`),
     ].filter(Boolean).join('\n'));
   }
+  if (audit && Array.isArray(audit.violations) && audit.violations.includes('unsupported_explicit_operation')) {
+    const supportedFacts = (audit.currentRouteFacts || []).filter(fact =>
+      (audit.explicitOperationContracts || []).some(contract =>
+        routeHasDirectOperationEvidence({ answerFacts: [fact] }, [contract])
+      )
+    );
+    return consultNormalizeSafeMarkdown(supportedFacts.length
+      ? ['业务结论', ...supportedFacts.map(fact => `- ${fact}`)].join('\n')
+      : consultOperationEvidenceStopReply());
+  }
   const actorAction = /(?:让|请|交给|通知|要求|转|压|催|催促|推动|协调)?\s*(?:实施|用户|患者|对接(?:方)?|接口方|第三方|厂商|供应商|院方|运维|开发)[^。！？；\n]{0,64}(?:(?:改|修改|调整|切换|对齐|校准|统一|转换|修(?:复)?)[^。！？；\n]{0,16}(?:参数|传参(?:方式)?|传输方式|接口入参|报文(?:类型)?|类型|序列化(?:口径|方式|规则)?|编码(?:口径|方式|规则)?|协议(?:口径|规则)?|映射|结构|关联|链路|配置|时区|系统时间|环境|产品口径|业务口径|日切要求|服务配置|字符串|数字(?:类型)?|字段格式|数据格式|值类型)|(?:按|以)[^。！？；\n]{0,12}(?:字符串|数字(?:类型)?|指定格式|文本格式|字段格式|数据格式|值类型)[^。！？；\n]{0,8}(?:传|发送)|对时|重试|复测|重跑|补跑|重新触发|再次触发|再点|点一次|提交|保存|发送|完成|签名|审批|星标|再传|重传|重新发送)/ig;
   const negatedActorPrefix = /(?:不得|不能|不要|禁止|不可|不应|先别|停止|未确认)\s*$/i;
   const negatedRiskyAction = (statement, matchIndex) => {
@@ -5743,6 +5776,50 @@ function consultVerifiedFactsFallback(question, route) {
   return { reply, initialAudit, finalAudit };
 }
 
+// 显式业务操作已命中 current route、但该 route 早期未声明 verifiedFacts 时，
+// 模型超时/截断仍不能直接退成错误气泡。只允许发布 answerFacts 中与本轮
+// “业务实体+动作/结果”同条直接对应的事实；没有这种事实（例如 route 仅靠
+// 别名命中“撤销”）就发布无操作步骤的 evidenceStop，不能把路由命中本身
+// 当成允许执行该操作的证据。
+function consultMatchedOperationFailureFallback(question, route) {
+  if (!route || !route.matched) return null;
+  const q = String(question || '').trim();
+  const contracts = consultExplicitOperationContracts(q);
+  if (!contracts.length) return null;
+  const directFacts = (Array.isArray(route.answerFacts) ? route.answerFacts : [])
+    .map(fact => String(fact || '').trim()).filter(Boolean)
+    .filter(fact => routeHasDirectOperationEvidence({ answerFacts: [fact] }, contracts));
+  if (directFacts.length) {
+    const verifiedRoute = {
+      ...route,
+      fallbackMode: 'verifiedFacts',
+      route: { ...(route.route || {}), fallbackMode: 'verifiedFacts' },
+      answerFacts: directFacts,
+    };
+    const verified = consultVerifiedFactsFallback(q, verifiedRoute);
+    if (verified) return { ...verified, fallbackSource: 'verifiedOperationFacts' };
+  }
+
+  const stopRoute = {
+    matched: false,
+    tier: 0,
+    score: 0,
+    topN: Array.isArray(route.topN) ? route.topN : [],
+    explicitOperationEvidenceMiss: contracts.map(({ entity, action }) => ({ entity, action })),
+  };
+  const initialAudit = consultAnswerSemanticAudit('', q, stopRoute);
+  let reply = consultOperationEvidenceStopReply();
+  let finalAudit = consultAnswerSemanticAudit(reply, q, stopRoute);
+  let passes = 0;
+  while (finalAudit.violations.length && passes < 2) {
+    reply = consultAnswerSafeFallback(reply, finalAudit);
+    finalAudit = consultAnswerSemanticAudit(reply, q, stopRoute);
+    passes += 1;
+  }
+  if (finalAudit.violations.length) return null;
+  return { reply, initialAudit, finalAudit, fallbackSource: 'evidenceStop' };
+}
+
 // 模型草稿失败仍要可观测：只把有限的错误分类/状态写入 retrieval，避免把
 // 上游返回体、密钥或完整异常栈回显给现场用户。真正的模型/协议错误在没有
 // 已核 route 事实可安全发布时仍由上层以 err 事件收口，不能被兜底静默吞掉。
@@ -5775,6 +5852,12 @@ function consultModelFailureFallback(question, route, error) {
     ...fallback,
     modelDraftError: consultModelErrorInfo(error),
     fallbackSource: 'verifiedFacts',
+  };
+
+  const operationFallback = consultMatchedOperationFailureFallback(question, route);
+  if (operationFallback) return {
+    ...operationFallback,
+    modelDraftError: consultModelErrorInfo(error),
   };
 
   // route miss 时不能把相邻上下文或 Top-N 检索片段伪装成业务答案；但现场

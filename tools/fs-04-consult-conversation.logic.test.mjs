@@ -961,6 +961,8 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     + extractFn(SRC, 'consultNormalizeSafeMarkdown') + '\n'
     + extractFn(SRC, 'consultAnswerSafeFallback') + '\n'
     + extractFn(SRC, 'consultVerifiedFactsFallback') + '\n'
+    + extractFn(SRC, 'routeHasDirectOperationEvidence') + '\n'
+    + extractFn(SRC, 'consultMatchedOperationFailureFallback') + '\n'
     + extractFn(SRC, 'consultModelErrorInfo') + '\n'
     + extractFn(SRC, 'consultSafeDiagnosticIntent') + '\n'
     + extractFn(SRC, 'consultModelFailureFallback') + '\n'
@@ -3423,6 +3425,61 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
       assert.equal(stopped.reply, safeReply);
     }
   }
+
+  const pwrsTag = '2.7.260826-1';
+  const pwrsRouteMap = JSON.parse(execFileSync(
+    'git', ['show', `${pwrsTag}:docs/specs/00-功能模块地图.json`],
+    { cwd: path.resolve(ROOT, '../psp/pwrs'), encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 },
+  ));
+  const pwrsChargeRoutes = chargeQuestions.map(question => routeQuestion(pwrsRouteMap, question));
+  assert.equal(pwrsChargeRoutes[0].route.id, 'DQ-011', 'PWRS 收费失败/状态未确认应命中收费半成功 current route');
+  assert.equal(pwrsChargeRoutes[1].route.id, 'DQ-011', 'PWRS 撤销收费应命中收费删除/撤销边界 current route');
+  assert.equal(pwrsChargeRoutes[2].matched, false, 'PWRS 发起收费问法没有可发布的直接步骤事实时保持 evidence miss');
+  for (const modelError of [
+    { code: 'MODEL_FIRST_TOKEN_TIMEOUT', message: '模型首字等待超时' },
+    { code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束' },
+  ]) {
+    const halfSuccess = bundle.modelFailureFallback(chargeQuestions[0], pwrsChargeRoutes[0], modelError);
+    assert.ok(halfSuccess, `PWRS 收费半成功 ${modelError.code} 必须发布确定性已核事实`);
+    assert.equal(halfSuccess.fallbackSource, 'verifiedOperationFacts');
+    assert.deepEqual(halfSuccess.finalAudit.violations, []);
+    assert.match(halfSuccess.reply, /PWRS 本地事务无法回滚 HIS/);
+    assert.match(halfSuccess.reply, /半成功风险/);
+    assert.match(halfSuccess.reply, /禁止重复收费/);
+    assert.match(halfSuccess.reply, /HIS 交易证据对账/);
+    assert.doesNotMatch(halfSuccess.reply, /允许重复收费|可以重复收费|自动重试/);
+
+    const revokeStop = bundle.modelFailureFallback(chargeQuestions[1], pwrsChargeRoutes[1], modelError);
+    assert.ok(revokeStop, `PWRS 撤销收费 ${modelError.code} 在无直接步骤事实时必须安全停住`);
+    assert.equal(revokeStop.fallbackSource, 'evidenceStop');
+    assert.deepEqual(revokeStop.finalAudit.violations, []);
+    assert.match(revokeStop.reply, /不得撤销/);
+    assert.doesNotMatch(revokeStop.reply, /删除本地记录|调用撤销接口|再次收费/);
+
+    const initiateStop = bundle.modelFailureFallback(chargeQuestions[2], pwrsChargeRoutes[2], modelError);
+    assert.ok(initiateStop, `PWRS 发起收费 ${modelError.code} 必须沿用 evidenceStop`);
+    assert.equal(initiateStop.fallbackSource, 'evidenceStop');
+    assert.deepEqual(initiateStop.finalAudit.violations, []);
+    assert.match(initiateStop.reply, /不得发起/);
+  }
+  const unsafePwrsDrafts = [
+    'HIS 提示失败就代表一定没有收费，可以直接再次发起收费。',
+    '撤销收费就是删除本地记录，直接删除后再收费即可。',
+  ];
+  for (let index = 0; index < unsafePwrsDrafts.length; index++) {
+    const unsafeAudit = bundle.audit(unsafePwrsDrafts[index], chargeQuestions[index], pwrsChargeRoutes[index]);
+    assert.ok(unsafeAudit.violations.length > 0, `PWRS 正常模型的危险收费串答 ${index + 1} 必须被终审拦截`);
+    assert.ok(unsafeAudit.violations.includes('unsupported_explicit_operation'));
+    const safeReply = bundle.fallback(unsafePwrsDrafts[index], unsafeAudit);
+    const safeAudit = bundle.audit(safeReply, chargeQuestions[index], pwrsChargeRoutes[index]);
+    assert.deepEqual(safeAudit.violations, [], JSON.stringify({ index, safeReply, violations: safeAudit.violations }, null, 2));
+    assert.doesNotMatch(safeReply, /可以直接再次发起收费|删除本地记录|再收费即可/);
+  }
+  for (const question of chargeQuestions) {
+    const auditRouteMiss = routeQuestion(auditTag3RouteMap, question);
+    assert.equal(auditRouteMiss.matched, false, '审方产品无收费直接事实时仍不得复用 PWRS 收费 route');
+  }
+
   const directOperationMap = {
     questionRoutes: [{
       id: 'DIRECT-SETTLE', title: '发起结算', aliases: [], keywords: ['发起结算'],
@@ -4952,6 +5009,8 @@ test('发布前事实作用域审计：相邻模块、通配路径不串入，�
     + extractFn(SRC, 'consultNormalizeSafeMarkdown') + '\n'
     + extractFn(SRC, 'consultAnswerSafeFallback') + '\n'
     + extractFn(SRC, 'consultVerifiedFactsFallback') + '\n'
+    + extractFn(SRC, 'routeHasDirectOperationEvidence') + '\n'
+    + extractFn(SRC, 'consultMatchedOperationFailureFallback') + '\n'
     + extractFn(SRC, 'consultModelErrorInfo') + '\n'
     + extractFn(SRC, 'consultModelFailureFallback') + '\n'
     + 'return { audit:consultAnswerSemanticAudit, revision:consultAnswerRevisionPrompt, fallback:consultAnswerSafeFallback, verifiedFallback:consultVerifiedFactsFallback, modelErrorInfo:consultModelErrorInfo, modelFailureFallback:consultModelFailureFallback };',
