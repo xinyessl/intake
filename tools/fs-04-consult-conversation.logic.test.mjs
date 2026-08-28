@@ -2909,7 +2909,8 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   const q0285Initial = bundle.audit(q0285Route.answerFacts.join('\n'), q0285Question, q0285Route);
   assert.equal(q0285Initial.fallbackAnswerMode, 'field_diagnostic');
   const q0285Reply = bundle.fallback(q0285Route.answerFacts.join('\n'), q0285Initial);
-  assert.match(q0285Reply, /当前实现会在列表返回记录后，由系统通过用户中心 getHospitalInfoByHospitalId 读取并补全医院和机构名称/);
+  assert.match(q0285Reply, /当前实现会在列表返回记录后，由系统自动只读调用用户中心 getHospitalInfoByHospitalId，读取并用于展示补全医院和机构名称/);
+  assert.match(q0285Reply, /不是要求实施手工调用，也不写业务数据/);
   assert.doesNotMatch(q0285Reply, /列表返回记录后，再通过用户中心[^。！？\n]*补医院和机构名称/);
   assert.match(q0285Reply, /本轮不做写操作/);
   assert.deepEqual(bundle.audit(q0285Reply, q0285Question, q0285Route).violations, [], 'Q0285 应区分系统既有实现与现场动作');
@@ -2928,10 +2929,32 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   };
   const genericImplementationInitial = bundle.audit(genericImplementationRoute.answerFacts.join('\n'), genericReadOnlyHandoffQuestion, genericImplementationRoute);
   const genericImplementationReply = genericImplementationInitial.safeDiagnosticFallback;
-  assert.match(genericImplementationReply, /当前实现会在查询返回记录后，由系统通过资料服务 resolveOwnerName 读取并补全负责人名称/);
+  assert.match(genericImplementationReply, /当前实现会在查询返回记录后，由系统自动只读调用资料服务 resolveOwnerName，读取并用于展示补全负责人名称/);
+  assert.match(genericImplementationReply, /不是要求实施手工调用，也不写业务数据/);
   assert.doesNotMatch(genericImplementationReply, /应定向补通知|再决定是否重做/);
   assert.match(genericImplementationReply, /另行授权.*定向补偿/s);
   assert.deepEqual(bundle.audit(genericImplementationReply, genericReadOnlyHandoffQuestion, genericImplementationRoute).violations, [], '通用实现顺序和补偿建议也应安全收口');
+
+  const q0381Question = Object.keys(browserRequirements).find(question => question === '医嘱标记现在是怎么实现的？');
+  const q0382Question = Object.keys(browserRequirements).find(question => question === '医嘱标记涉及哪些接口、数据和边界？');
+  assert.ok(q0381Question && q0382Question, 'Q0381/Q0382 应从正式 Audit 浏览器 fixture 取到原问题');
+  for (const [question, label] of [[q0381Question, 'Q0381'], [q0382Question, 'Q0382']]) {
+    const matchedRoute = routeQuestion(auditTag3RouteMap, question);
+    assert.equal(matchedRoute.route.id, 'AUD-QR-MK-02', `${label} 必须命中医嘱标记 route`);
+    const runtimeRoute = runtimeRouteWithRepositoryContext(matchedRoute, '2.7.260828-3');
+    const routeDraft = runtimeRoute.answerFacts.join('\n');
+    const initialAudit = bundle.audit(routeDraft, question, runtimeRoute);
+    assert.ok(initialAudit.violations.includes('ambiguous_as_built_action'), `${label} 裸“再通过…补全”必须触发客观系统行为改写`);
+    assert.match(initialAudit.ambiguousAsBuiltSystemActionParts.join('\n'), /列表返回记录后，再通过用户中心 getHospitalInfoByHospitalId 补医院和机构名称/);
+    const reply = bundle.fallback(routeDraft, initialAudit);
+    assert.match(reply, /由系统自动只读调用用户中心 getHospitalInfoByHospitalId/);
+    assert.match(reply, /读取并用于展示补全医院和机构名称/);
+    assert.match(reply, /不是要求实施手工调用，也不写业务数据/);
+    assert.match(reply, /添加方法没有直接调用 HIS/);
+    assert.doesNotMatch(reply, /列表返回记录后，再通过用户中心[^。！？\n]*补医院和机构名称/);
+    assert.doesNotMatch(reply, /(?:^|[。！？；\n])\s*(?:建议|请|要求|让)实施[^。！？\n]{0,24}(?:调用|补全|写入)/u);
+    assert.deepEqual(bundle.audit(reply, question, runtimeRoute).violations, [], `${label} 系统自动只读依赖表述终审应全绿`);
+  }
 
   const genericReadOnlyFactRoute = {
     ...genericImplementationRoute,
