@@ -56,6 +56,8 @@ function buildRoutingSandbox(deps) {
     `const MAP_TEXT_CACHE = new Map();\n`;
   const body = consts +
     extractFn(SRC, 'routeScorer') + '\n' +
+    extractFn(SRC, 'consultExplicitOperationContracts') + '\n' +
+    extractFn(SRC, 'routeHasDirectOperationEvidence') + '\n' +
     extractFn(SRC, 'routeQuestion') + '\n' +
     extractFn(SRC, 'consultContextFollowupIntent') + '\n' +
     extractFn(SRC, 'consultScopeTechnicalTokens') + '\n' +
@@ -1410,6 +1412,7 @@ test('PD-04修复 consult 端组装接线（源码级）：assembleConsultSpecHi
 test('AC-4 miss 固定话术：不调模型，SSE 固定文案（源码级断言）', () => {
   assert.match(SRC, /if \(noAnswer\) \{[\s\S]*?说明书里没有找到相关描述/, 'noAnswer → 固定话术');
   assert.match(SRC, /建议转成工单或联系开发确认/, '话术含转工单建议');
+  assert.match(SRC, /explicitOperationEvidenceMiss[\s\S]*?consultOperationEvidenceStopReply\(\)/, '显式业务操作缺直接证据时，noAnswer 应发布只读安全停点');
   // 固定话术分支在 callModelStream 之前、且自身不调用模型
   const start = SRC.indexOf('if (noAnswer) {');
   const call = SRC.indexOf('await callModelStream', start);

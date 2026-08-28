@@ -39,6 +39,8 @@ const routeQuestion = new Function(
   routeConstants + '\n'
     + extractFn(SRC, 'kbTokenize') + '\n'
     + extractFn(SRC, 'routeScorer') + '\n'
+    + extractFn(SRC, 'consultExplicitOperationContracts') + '\n'
+    + extractFn(SRC, 'routeHasDirectOperationEvidence') + '\n'
     + extractFn(SRC, 'routeQuestion') + '\nreturn routeQuestion;',
 )();
 const consultScopeTechnicalTokens = new Function(
@@ -732,6 +734,8 @@ test('发布前确定性语义校验：无证据概率词触发一次修订，�
     + extractFn(SRC, 'consultFocusedFactGuard') + '\n'
     + extractFn(SRC, 'consultFocusedFactOverreach') + '\n'
     + extractFn(SRC, 'consultFocusedRelationshipFacts') + '\n'
+    + extractFn(SRC, 'consultExplicitOperationContracts') + '\n'
+    + extractFn(SRC, 'consultOperationEvidenceStopReply') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + 'return consultAnswerSemanticAudit;',
   )();
@@ -887,6 +891,8 @@ test('发布前确定性语义校验：跨主体副作用触发，否定句和�
     + extractFn(SRC, 'consultFocusedFactGuard') + '\n'
     + extractFn(SRC, 'consultFocusedFactOverreach') + '\n'
     + extractFn(SRC, 'consultFocusedRelationshipFacts') + '\n'
+    + extractFn(SRC, 'consultExplicitOperationContracts') + '\n'
+    + extractFn(SRC, 'consultOperationEvidenceStopReply') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + 'return consultAnswerSemanticAudit;',
   )();
@@ -946,6 +952,8 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     + extractFn(SRC, 'consultFocusedFactGuard') + '\n'
     + extractFn(SRC, 'consultFocusedFactOverreach') + '\n'
     + extractFn(SRC, 'consultFocusedRelationshipFacts') + '\n'
+    + extractFn(SRC, 'consultExplicitOperationContracts') + '\n'
+    + extractFn(SRC, 'consultOperationEvidenceStopReply') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + extractFn(SRC, 'consultAnswerRevisionPrompt') + '\n'
     + extractFn(SRC, 'consultReplaceUnexpectedPath') + '\n'
@@ -3382,6 +3390,56 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     '怎么撤销收费',
     '怎么发起收费',
   ];
+  const crossModuleDrafts = [
+    '这是 HC1015 医院业务变化消息失败，应沿 RedisConsumer 和 DI-07 继续处理 15 类医院业务变化。',
+    '这是门诊自动通过流程，应检查 AUDIT:OPT:AUTO 和 RedisConsumer 后撤销。',
+    '这是门诊审方任务操作，按审核通过链路重新发起即可。',
+  ];
+  for (const [index, question] of chargeQuestions.entries()) {
+    const routeMiss = routeQuestion(auditTag3RouteMap, question);
+    assert.equal(routeMiss.matched, false, `${question} 没有收费直接证据时必须 route miss`);
+    assert.ok(routeMiss.explicitOperationEvidenceMiss.some(item => item.entity === '收费'), JSON.stringify(routeMiss));
+    const badAudit = bundle.audit(crossModuleDrafts[index], question, routeMiss);
+    assert.ok(badAudit.violations.includes('missing_explicit_operation_evidence'), `${question} 的正常模型串答必须被终审拦截`);
+    const safeReply = bundle.fallback(crossModuleDrafts[index], badAudit);
+    const finalAudit = bundle.audit(safeReply, question, routeMiss);
+    assert.deepEqual(finalAudit.violations, [], JSON.stringify({ question, safeReply, violations: finalAudit.violations }, null, 2));
+    assert.match(safeReply, /现有页面提示/);
+    assert.match(safeReply, /同一次已有请求与响应/);
+    assert.match(safeReply, /当前业务状态/);
+    assert.match(safeReply, /发生时间/);
+    assert.match(safeReply, /账号和院区/);
+    assert.match(safeReply, /不得发起/);
+    assert.match(safeReply, /不得撤销/);
+    assert.doesNotMatch(safeReply, /HC1015|DI-07|AUDIT:OPT:AUTO|RedisConsumer|门诊自动通过|审核通过/);
+    for (const modelError of [
+      { code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束' },
+      { status: 429, message: 'rate limit' },
+    ]) {
+      const stopped = bundle.modelFailureFallback(question, routeMiss, modelError);
+      assert.ok(stopped, `${question} ${modelError.code || modelError.status} 应发布收费证据安全停点`);
+      assert.equal(stopped.fallbackSource, 'evidenceStop');
+      assert.deepEqual(stopped.finalAudit.violations, []);
+      assert.equal(stopped.reply, safeReply);
+    }
+  }
+  const directOperationMap = {
+    questionRoutes: [{
+      id: 'DIRECT-SETTLE', title: '发起结算', aliases: [], keywords: ['发起结算'],
+      searchText: '发起结算 结算状态', answerFacts: ['发起结算的入口和状态均由当前流程明确。'], mustNotConfuse: [],
+    }],
+    specs: [], indexes: {},
+  };
+  assert.equal(routeQuestion(directOperationMap, '怎么发起结算').route.id, 'DIRECT-SETTLE', '同一 route 有直接操作证据时不得误杀');
+  const negativeOnlyOperationMap = {
+    questionRoutes: [{
+      id: 'NEGATIVE-SETTLE', title: '结算说明', aliases: [], keywords: ['结算'],
+      searchText: '结算说明', answerFacts: ['当前说明没有结算发起能力，不能外推发起步骤。'], mustNotConfuse: [],
+    }],
+    specs: [], indexes: {},
+  };
+  assert.equal(routeQuestion(negativeOnlyOperationMap, '怎么发起结算').matched, false, '只在否定边界出现的业务操作不得充当直接证据');
+
   const harmlessDraft = '当前只能确认页面出现了提示；具体业务原因、状态和操作路径仍未知。本轮不得重复提交。';
   for (const question of [...chargeQuestions, q0527Question]) {
     assert.doesNotThrow(() => bundle.audit(harmlessDraft, question, null), `${question} 的 answer_audit 不得读取 null route facts`);
@@ -4789,6 +4847,8 @@ test('发布前确定性语义校验：路径必须来自用户或route并逐字
     + extractFn(SRC, 'consultFocusedFactGuard') + '\n'
     + extractFn(SRC, 'consultFocusedFactOverreach') + '\n'
     + extractFn(SRC, 'consultFocusedRelationshipFacts') + '\n'
+    + extractFn(SRC, 'consultExplicitOperationContracts') + '\n'
+    + extractFn(SRC, 'consultOperationEvidenceStopReply') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + extractFn(SRC, 'consultAnswerRevisionPrompt') + '\n'
     + extractFn(SRC, 'consultReplaceUnexpectedPath') + '\n'
@@ -4883,6 +4943,8 @@ test('发布前事实作用域审计：相邻模块、通配路径不串入，�
     + extractFn(SRC, 'consultFocusedFactGuard') + '\n'
     + extractFn(SRC, 'consultFocusedFactOverreach') + '\n'
     + extractFn(SRC, 'consultFocusedRelationshipFacts') + '\n'
+    + extractFn(SRC, 'consultExplicitOperationContracts') + '\n'
+    + extractFn(SRC, 'consultOperationEvidenceStopReply') + '\n'
     + extractFn(SRC, 'consultAnswerSemanticAudit') + '\n'
     + extractFn(SRC, 'consultAnswerRevisionPrompt') + '\n'
     + extractFn(SRC, 'consultReplaceUnexpectedPath') + '\n'
