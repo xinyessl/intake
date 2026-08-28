@@ -2977,6 +2977,85 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     answerFacts: q0382FailureRoute.answerFacts,
   }, { code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束' }), null, '即使携带看似完整 facts，route miss 也不得在模型失败时伪造 Q0382 答案');
 
+  const q0387Question = Object.keys(browserRequirements).find(question => question === '另一轮独立复测（387）里，医嘱标记涉及哪些接口、数据和边界？');
+  assert.ok(q0387Question, 'Q0387 应从正式 Audit 浏览器 fixture 取到带复测前缀的原问题');
+  const q0387Route = runtimeRouteWithRepositoryContext(routeQuestion(auditTag3RouteMap, q0387Question), '2.7.260828-3');
+  assert.equal(q0387Route.route.id, 'AUD-QR-MK-02', 'Q0387 必须继续命中医嘱标记 route');
+  const q0387InitialAudit = bundle.audit('', q0387Question, q0387Route);
+  const q0387DeterministicReply = bundle.fallback('', q0387InitialAudit);
+  const q0387DeterministicAudit = bundle.audit(q0387DeterministicReply, q0387Question, q0387Route);
+  for (const modelError of [
+    { code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束' },
+    { status: 429, message: 'rate limit' },
+  ]) {
+    const fallback = bundle.modelFailureFallback(q0387Question, q0387Route, modelError);
+    assert.ok(fallback, `Q0387 ${modelError.code || modelError.status} 应发布复测语境 verified fallback：${JSON.stringify({ initialViolations: q0387InitialAudit.violations, fallbackAnswerMode: q0387InitialAudit.fallbackAnswerMode, reply: q0387DeterministicReply, finalViolations: q0387DeterministicAudit.violations, missingImplementationFactCoverage: q0387DeterministicAudit.missingImplementationFactCoverage, missingDiagnostic: q0387DeterministicAudit.missingDiagnosticSequence })}`);
+    assert.equal(fallback.fallbackSource, 'verifiedFacts');
+    assert.match(fallback.reply, /GET \/auditapi\/audit\/ipt\/collects/);
+    assert.match(fallback.reply, /audit_ipt_collect/);
+    assert.match(fallback.reply, /由系统自动只读调用用户中心 getHospitalInfoByHospitalId/);
+    assert.deepEqual(fallback.finalAudit.violations, []);
+  }
+  assert.equal(bundle.modelFailureFallback(q0387Question, { ...q0387Route, matched: false }, { status: 429, message: 'rate limit' }), null, 'Q0387 前缀不能让 route miss 绕过证据门');
+
+  const q0389Question = Object.keys(browserRequirements).find(question => question === '把医嘱标记从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。');
+  const q0390Question = Object.keys(browserRequirements).find(question => question === '回到医嘱标记这里，第一层核过没有异常，下一步按什么顺序继续只读排查？');
+  assert.ok(q0389Question && q0390Question, 'Q0389/Q0390 应从正式 Audit 浏览器 fixture 取到连续问题');
+  const q0390MatchedRoute = contextualRouteQuestion(auditTag3RouteMap, [
+    { role: 'user', content: q0389Question },
+    { role: 'assistant', content: '上一轮回答不作为事实源。' },
+    { role: 'user', content: q0390Question },
+  ], q0390Question, '');
+  assert.equal(q0390MatchedRoute.route.id, 'AUD-QR-MK-02', 'Q0390 上下文续问必须保持医嘱标记 current route');
+  const q0390Route = runtimeRouteWithRepositoryContext(q0390MatchedRoute, '2.7.260828-3');
+  const q0390GenericDraft = [
+    '第一层没有异常后，继续只读查看同一次请求和响应。',
+    '再按请求标识对照服务端日志、业务状态和页面结果。',
+    '本轮不改数据、不重试、不重放。',
+  ].join('\n');
+  const q0390Initial = bundle.audit(q0390GenericDraft, q0390Question, q0390Route);
+  assert.equal(q0390Initial.continuationDiagnosticQuestion, true, 'Q0390 应识别为下一层只读续接诊断');
+  assert.equal(q0390Initial.contextFollowupQuestion, true, 'Q0390 应保持 current route 上下文');
+  assert.match(q0390Initial.routeReadOnlySequenceFact, /现场只读排查顺序/);
+  assert.deepEqual(q0390Initial.routeReadOnlySequenceSteps.map(step => step.text), [
+    '核对页面当前筛选条件与分页',
+    '看既有列表请求和响应',
+    '沿既有记录核对详情、任务和标记记录',
+  ]);
+  assert.ok(q0390Initial.missingRouteReadOnlySequenceSteps.length >= 2, '通用清单漏掉 route 专用步骤时必须拦截');
+  assert.ok(q0390Initial.violations.includes('incomplete_verified_facts'));
+  const q0390Reply = bundle.fallback(q0390GenericDraft, q0390Initial);
+  assert.match(q0390Reply, /页面当前筛选条件与分页/);
+  assert.match(q0390Reply, /既有列表请求和响应/);
+  assert.match(q0390Reply, /沿既有记录核对详情、任务和标记记录/);
+  const q0390FilterIndex = q0390Reply.indexOf('页面当前筛选条件与分页');
+  const q0390RequestIndex = q0390Reply.indexOf('既有列表请求和响应');
+  const q0390RecordIndex = q0390Reply.indexOf('既有记录核对详情、任务和标记记录');
+  assert.ok(q0390FilterIndex >= 0 && q0390RequestIndex > q0390FilterIndex && q0390RecordIndex > q0390RequestIndex, 'Q0390 必须保留 current route 已核的先后顺序');
+  assert.match(q0390Reply, /下一层只读排查顺序/);
+  assert.match(q0390Reply, /不重新点击或提交/);
+  assert.doesNotMatch(q0390Reply, /(?:^|[。！？；\n])\s*(?:建议|请|要求|让实施)[^。！？\n]{0,24}(?:新增|取消|重试|重放|提交)/u);
+  const q0390Final = bundle.audit(q0390Reply, q0390Question, q0390Route);
+  assert.deepEqual(q0390Final.missingRouteReadOnlySequenceSteps, []);
+  assert.deepEqual(q0390Final.violations, [], 'Q0390 确定性终稿须先保留 route 专用顺序，再叠加通用分层且终审全绿');
+
+  const genericSequenceQuestion = '回到记录核对这里，第一层核过没有异常，下一步按什么顺序继续只读排查？';
+  const genericSequenceRoute = {
+    matched: true,
+    inherited: true,
+    route: { id: 'GENERIC-READONLY-SEQUENCE', title: '记录核对' },
+    answerFacts: [
+      '现场只读排查顺序：先核对页面筛选项与分页，再看既有查询请求和响应，再沿已有记录核对详情与处理记录；未经授权不得为留证重做。',
+    ],
+    mustNotConfuse: [],
+  };
+  const genericSequenceInitial = bundle.audit('继续对照请求和页面，不做写操作。', genericSequenceQuestion, genericSequenceRoute);
+  assert.ok(genericSequenceInitial.violations.includes('incomplete_verified_facts'), 'route 顺序合同不得依赖医嘱标记字段');
+  const genericSequenceReply = bundle.fallback('', genericSequenceInitial);
+  assert.match(genericSequenceReply, /页面筛选项与分页/);
+  assert.match(genericSequenceReply, /已有记录核对详情与处理记录/);
+  assert.deepEqual(bundle.audit(genericSequenceReply, genericSequenceQuestion, genericSequenceRoute).violations, [], '任意 route 的明确只读顺序都应可确定性保留');
+
   const genericReadOnlyFactRoute = {
     ...genericImplementationRoute,
     answerFacts: ['系统当前只读取已有记录并展示结果；未经授权不应重试或补发。'],
