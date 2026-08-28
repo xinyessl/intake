@@ -1984,6 +1984,38 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     assert.deepEqual(fallback.finalAudit.violations, [], `${questionId} facts fallback 终审必须全绿`);
   }
 
+  const q0177Question = Object.keys(browserRequirements).find(question => question.includes('另一轮独立复测（177）里，处方审核端到端主流程（HIS 接入→落库→分配→审核→回写）涉及哪些接口、数据和边界？'));
+  assert.ok(q0177Question, 'Q0177 真实 fixture 题目应存在');
+  const q0177MatchedRoute = routeQuestion(productionRouteMap, q0177Question);
+  assert.equal(q0177MatchedRoute.route.id, 'AUD-QR-FLOW-01', 'Q0177 应命中处方审核端到端主流程');
+  const q0177Route = runtimeRouteWithContext(q0177MatchedRoute);
+  const q0177Initial = bundle.audit(q0177Route.answerFacts.join('\n'), q0177Question, q0177Route);
+  assert.equal(q0177Initial.explicitReviewDiagnosticQuestion, true, 'Q0177 的独立复测前缀+接口/数据/边界应进入复测诊断');
+  assert.equal(q0177Initial.fieldDiagnosticQuestion, true, 'Q0177 不应被 broad facts 门压回普通事实答复');
+  assert.equal(q0177Initial.fallbackAnswerMode, 'field_diagnostic', 'Q0177 应使用现场诊断兜底');
+  assert.equal(q0177Initial.diagnosticSequenceComplete, false, '只有 route facts 时 Q0177 应要求四步只读排查');
+  const q0177Fallback = bundle.fallback(q0177Route.answerFacts.join('\n'), q0177Initial);
+  assert.match(q0177Fallback, /1\. 原样记录当前页面/);
+  assert.match(q0177Fallback, /2\. 只查看这次已经发生的请求与响应/);
+  assert.match(q0177Fallback, /任务状态|日志/);
+  assert.match(q0177Fallback, /audit-server|redis2db/);
+  assert.match(q0177Fallback, /V1_OPT_AUDIT_QUERY|V1_IPT_AUDIT_QUERY|审核结果/);
+  assert.match(q0177Fallback, /3\. 按“没有请求 \/ 请求失败 \/ 响应正常但页面不一致”/);
+  assert.match(q0177Fallback, /4\. 整理上述原文与脱敏截图/);
+  const q0177Final = bundle.audit(q0177Fallback, q0177Question, q0177Route);
+  assert.equal(q0177Final.fallbackAnswerMode, 'field_diagnostic');
+  assert.equal(q0177Final.diagnosticSequenceComplete, true, 'Q0177 兜底必须包含四步只读顺序');
+  assert.deepEqual(q0177Final.violations, [], 'Q0177 现场复测诊断兜底终审必须全绿');
+
+  const q0179Question = Object.keys(browserRequirements).find(question => question.includes('另一轮独立复测（179）里，把处方审核端到端主流程（HIS 接入→落库→分配→审核→回写）从入口、接口或数据到外部依赖的链路串起来'));
+  assert.ok(q0179Question, 'Q0179 真实 fixture 题目应存在');
+  const q0179MatchedRoute = routeQuestion(productionRouteMap, q0179Question);
+  const q0179Route = runtimeRouteWithContext(q0179MatchedRoute);
+  const q0179Initial = bundle.audit(q0179Route.answerFacts.join('\n'), q0179Question, q0179Route);
+  assert.equal(q0179Initial.explicitReviewDiagnosticQuestion, false, 'Q0179 链路串题不得被复测诊断规则抢走');
+  assert.equal(q0179Initial.fieldDiagnosticQuestion, false, 'Q0179 应保留研发链路问法');
+  assert.equal(q0179Initial.chainRequested, true, 'Q0179 应继续使用链路完整性合同');
+
   const q0011AiQuestion = Object.keys(browserRequirements).find(question => question.includes('另一轮独立复测（11）里，AI 审方生成现在是怎么实现的？'));
   assert.ok(q0011AiQuestion, 'Q0011 真实 fixture 题目应存在');
   const q0011AiRoute = runtimeRouteWithContext(routeQuestion(productionRouteMap, q0011AiQuestion));
