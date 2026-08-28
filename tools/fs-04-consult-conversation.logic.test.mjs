@@ -3265,6 +3265,65 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   const adjacentPartialEvidenceRoute = routeQuestion(auditTag3RouteMap, adjacentPartialEvidenceQuestion);
   assert.equal(adjacentPartialEvidenceRoute.route.id, 'AUD-QR-MK-02', `其它完整模块标题的部分证据问法仍应命中各自 route，topN=${JSON.stringify(adjacentPartialEvidenceRoute.topN)}`);
 
+  const q0705Question = auditBrowserQuestions.questions.find(item => item.id === 'Q0705')?.question;
+  assert.equal(q0705Question, '关于评语常用语维护，如果接口返回有数据而页面没呈现，转开发前要整理哪些最小证据？');
+  const q0705MatchedRoute = routeQuestion(auditTag3RouteMap, q0705Question);
+  assert.equal(q0705MatchedRoute.route.id, 'AUD-QR-CFG-02', `Q0705 必须命中评语常用语维护，topN=${JSON.stringify(q0705MatchedRoute.topN)}`);
+  const q0705Route = runtimeRouteWithRepositoryContext(q0705MatchedRoute, '2.7.260828-3');
+  const q0705Initial = bundle.audit('', q0705Question, q0705Route);
+  assert.equal(q0705Initial.dataReturnedNotRenderedQuestion, true);
+  assert.equal(q0705Initial.fallbackAnswerMode, 'field_diagnostic');
+  for (const modelError of [
+    { code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束' },
+    { status: 429, message: 'rate limit' },
+  ]) {
+    const q0705Fallback = bundle.modelFailureFallback(q0705Question, q0705Route, modelError);
+    const q0705Candidate = bundle.fallback('', q0705Initial);
+    const q0705CandidateAudit = bundle.audit(q0705Candidate, q0705Question, q0705Route);
+    assert.ok(q0705Fallback, JSON.stringify({
+      message: `Q0705 ${modelError.code || modelError.status} 应发布 route-aware 最小只读交接清单`,
+      initialViolations: q0705Initial.violations,
+      candidate: q0705Candidate,
+      candidateViolations: q0705CandidateAudit.violations,
+      unexpectedEntityTerms: q0705CandidateAudit.unexpectedEntityTerms,
+      unexpectedTechnicalTokens: q0705CandidateAudit.unexpectedTechnicalTokens,
+      missingDataNotRenderedBoundaryGroups: q0705CandidateAudit.missingDataNotRenderedBoundaryGroups,
+      dataNotRenderedEvidenceComplete: q0705CandidateAudit.dataNotRenderedEvidenceComplete,
+    }, null, 2));
+    assert.match(q0705Fallback.reply, /个人常用语[^。！？\n]*创建人|共享常用语[^。！？\n]*所有药师/);
+    assert.match(q0705Fallback.reply, /转开发前最小只读证据顺序/);
+    assert.match(q0705Fallback.reply, /同一次已经发生的请求与响应/);
+    assert.match(q0705Fallback.reply, /请求参数、HTTP\/业务码和响应原文/);
+    assert.match(q0705Fallback.reply, /页面路由、渲染结果和浏览器控制台/);
+    assert.match(q0705Fallback.reply, /请求标识[^。！？\n]*时间[^。！？\n]*版本|时间[^。！？\n]*版本[^。！？\n]*请求标识/);
+    assert.doesNotMatch(q0705Fallback.reply, /AI 暂时连不上|Dify|audit_ai_generate|住院医嘱标记/);
+    assert.doesNotMatch(q0705Fallback.reply, /(?:建议|请|需要|可以)[^。！？\n]{0,24}(?:新增|编辑|删除|保存|提交|重试)/u);
+    assert.deepEqual(q0705Fallback.finalAudit.violations, []);
+  }
+
+  const dataNotRenderedVariant = '关于评语常用语维护，请求已经返回内容但界面没有显示，交接开发前最少要保留哪些证据？';
+  const dataNotRenderedVariantRoute = runtimeRouteWithRepositoryContext(routeQuestion(auditTag3RouteMap, dataNotRenderedVariant), '2.7.260828-3');
+  assert.equal(dataNotRenderedVariantRoute.route.id, 'AUD-QR-CFG-02');
+  assert.ok(bundle.modelFailureFallback(dataNotRenderedVariant, dataNotRenderedVariantRoute, { status: 429, message: 'rate limit' }), '同构页面未呈现问法也应发布 current route 兜底');
+
+  const adjacentDataNotRenderedQuestion = '关于待审工作台，如果接口返回有数据而页面没呈现，转开发前要整理哪些最小证据？';
+  const adjacentDataNotRenderedRoute = runtimeRouteWithRepositoryContext(routeQuestion(auditTag3RouteMap, adjacentDataNotRenderedQuestion), '2.7.260828-3');
+  assert.equal(adjacentDataNotRenderedRoute.route.id, 'AUD-QR-WB-01');
+  const adjacentDataNotRenderedFallback = bundle.modelFailureFallback(adjacentDataNotRenderedQuestion, adjacentDataNotRenderedRoute, { status: 429, message: 'rate limit' });
+  assert.ok(adjacentDataNotRenderedFallback);
+  assert.doesNotMatch(adjacentDataNotRenderedFallback.reply, /评语常用语|audit_reply_template|back_reason/);
+
+  const q0705RouteMissFallback = bundle.modelFailureFallback(q0705Question, { ...q0705Route, matched: false }, { status: 429, message: 'rate limit' });
+  assert.ok(q0705RouteMissFallback, 'Q0705 route miss 的现场取证问法可发布不含业务事实的安全停点');
+  assert.equal(q0705RouteMissFallback.fallbackSource, 'evidenceStop');
+  assert.doesNotMatch(q0705RouteMissFallback.reply, /评语常用语|个人常用语|共享常用语|audit_reply_template|back_reason/);
+  const q0705UnsafeDraft = '请新增、编辑并删除一条常用语来补抓请求，然后保存并重试。';
+  const q0705UnsafeAudit = bundle.audit(q0705UnsafeDraft, q0705Question, q0705Route);
+  assert.ok(q0705UnsafeAudit.violations.includes('cross_actor_side_effect'));
+  const q0705SafeFromUnsafe = bundle.fallback(q0705UnsafeDraft, q0705UnsafeAudit);
+  assert.doesNotMatch(q0705SafeFromUnsafe, /请新增、编辑并删除|保存并重试/);
+  assert.deepEqual(bundle.audit(q0705SafeFromUnsafe, q0705Question, q0705Route).violations, []);
+
   const specificBatchQuestion = '把待审工作台的批量审核中途失败与重复重试边界从入口、接口或数据到外部依赖的链路串起来；同一批 taskId、审核流水、消息和 HIS 回调都要说明。';
   const specificBatchRoute = routeQuestion(auditTag3RouteMap, specificBatchQuestion);
   assert.equal(specificBatchRoute.route.id, 'AUD-QR-FLOW-BATCH-RETRY-01', `显式专用业务实体仍须压过通用场景标题，topN=${JSON.stringify(specificBatchRoute.topN)}`);

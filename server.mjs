@@ -3740,8 +3740,13 @@ function consultAnswerSemanticAudit(answer, question, route) {
   ].filter(group => group.enabled) : [];
   const missingDataNotRenderedBoundaryGroups = dataNotRenderedRouteBoundaryGroups
     .filter(group => !group.covered).map(group => group.label);
+  // 只有 current route 明确描述客户端会话载体及其作用域/缓存关系时，
+  // 页面未呈现清单才追加 Cookie/缓存核对。普通“后端校验 token 用户”
+  // 只是服务端身份校验，不能据此臆造客户端缓存层，否则确定性兜底会
+  // 因新增 route 外实体被终审拒绝。
   const routeHasClientSessionScope = dataReturnedNotRenderedQuestion
-    && /(?:token|Cookie|localStorage|sessionStorage|IndexedDB|用户信息缓存|会话缓存)/iu.test(currentRouteFactText);
+    && (/(?:token|Cookie|localStorage|sessionStorage|IndexedDB|用户信息缓存|会话缓存)[^。！？\n]{0,48}(?:作用域|scope|缓存|会话|本地存储|分开|独立|不互相替代)/iu.test(currentRouteFactText)
+      || /(?:作用域|scope|缓存|会话|本地存储|分开|独立|不互相替代)[^。！？\n]{0,48}(?:token|Cookie|localStorage|sessionStorage|IndexedDB|用户信息缓存|会话缓存)/iu.test(currentRouteFactText));
   const routeHasMultiDeviceSession = dataReturnedNotRenderedQuestion
     && /(?:关闭|踢下线)[^。！？\n]{0,24}(?:旧设备|其他设备)|(?:旧设备|其他设备)[^。！？\n]{0,24}(?:关闭|踢下线)/iu.test(currentRouteFactText);
   // 仅用已有记录缩小范围时，优先发布 current route 中真正描述“列表如何
