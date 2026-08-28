@@ -3104,6 +3104,108 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.deepEqual(bundle.audit(genericBoundaryReply, genericBoundaryQuestion, genericBoundaryRoute).violations, [], '其它 route 也应得到相同的最小只读分层');
   assert.equal(bundle.modelFailureFallback(genericBoundaryQuestion, { ...genericBoundaryRoute, matched: false }, { status: 429, message: 'rate limit' }), null, '接口数据边界宽问法不能让 route miss 绕过证据门');
 
+  const q0487Question = Object.keys(browserRequirements).find(question => question === '另一轮独立复测（487）里，大屏数据接口（各统计指标出数）涉及哪些接口、数据和边界？');
+  assert.ok(q0487Question, 'Q0487 应从正式 Audit 浏览器 fixture 取到原问题');
+  const q0487Route = runtimeRouteWithRepositoryContext(routeQuestion(auditTag3RouteMap, q0487Question), '2.7.260828-3');
+  assert.equal(q0487Route.route.id, 'AUD-QR-SC-01', 'Q0487 必须命中大屏 current route');
+  const q0487GenericDraft = [
+    ...q0487Route.answerFacts,
+    '1. 原样记录当前页面、筛选条件、账号角色和发生时间。',
+    '2. 只查看已经发生的请求与响应。',
+    '3. 按没有请求、请求失败、响应正常但页面不一致分开记录。',
+    '4. 整理原文与脱敏截图，拿不到的项标为缺失。',
+  ].join('\n');
+  const q0487Initial = bundle.audit(q0487GenericDraft, q0487Question, q0487Route);
+  assert.equal(q0487Initial.verifiedInterfaceDataBoundaryDiagnosticQuestion, true, 'route 已明确实施日志锚点时，带复测前缀也应升级为 route-aware 分层');
+  assert.ok(q0487Initial.requiredInterfaceDataBoundarySignatures.includes('GET /comm/screen/info?projectName=...'), '应从 current route 的精确接口契约恢复只读查询入口');
+  assert.ok(q0487Initial.requiredInterfaceDataBoundarySignatures.includes('GET /comm/screen/sc'), '应从 current route 恢复有副作用的生成入口');
+  assert.ok(q0487Initial.interfaceDataBoundaryChecklistItems.includes('快照 updateTime'));
+  assert.ok(q0487Initial.interfaceDataBoundaryChecklistItems.includes('screen_admin 定时任务日志'));
+  assert.ok(q0487Initial.interfaceDataBoundaryChecklistItems.includes('数据源连接日志'));
+  assert.ok(q0487Initial.interfaceDataBoundaryChecklistItems.includes('SQL 日志'));
+  assert.ok(q0487Initial.interfaceDataBoundaryChecklistItems.includes('projectName'));
+  assert.equal(q0487Initial.interfaceDataBoundaryRouteStructureComplete, false, '事实平铺加通用清单不能替代 route 入口/数据/日志分层');
+  assert.ok(q0487Initial.violations.includes('incomplete_diagnostic_sequence'));
+  const q0487Reply = bundle.fallback(q0487GenericDraft, q0487Initial);
+  assert.match(q0487Reply, /当前 route 的分层核对锚点/);
+  assert.match(q0487Reply, /只读查询入口：GET \/comm\/screen\/info\?projectName=\.\.\./);
+  assert.match(q0487Reply, /有副作用的生成\/写入入口（本轮不得调用）：GET \/comm\/screen\/sc/);
+  assert.match(q0487Reply, /数据与选择条件[^\n]*audit_screen_info[^\n]*(?:update_time|updateTime)/);
+  assert.match(q0487Reply, /数据与选择条件[^\n]*projectName/);
+  assert.match(q0487Reply, /route 已核只读日志\/记录锚点[^\n]*updateTime[^\n]*screen_admin[^\n]*连接日志[^\n]*SQL 日志[^\n]*projectName/);
+  assert.match(q0487Reply, /没有请求 \/ 请求失败 \/ 响应正常但业务记录或页面呈现不一致/);
+  assert.match(q0487Reply, /不要为抓包新增、编辑、删除或重做业务动作/);
+  assert.doesNotMatch(q0487Reply, /(?:建议|请|要求|让实施)[^。！？\n]{0,36}(?:调用[^。！？\n]*\/comm\/screen\/sc|断开|断库|反复生成)/u);
+  const q0487Final = bundle.audit(q0487Reply, q0487Question, q0487Route);
+  assert.deepEqual(q0487Final.missingInterfaceDataBoundarySignatures, []);
+  assert.deepEqual(q0487Final.missingInterfaceDataBoundaryChecklistItems, []);
+  assert.equal(q0487Final.interfaceDataBoundaryRouteStructureComplete, true);
+  assert.deepEqual(q0487Final.violations, [], 'Q0487 route-aware 分层终稿必须保留查询/生成入口、数据选择、日志和副作用边界');
+
+  const genericRouteAwareQuestion = '另一轮独立复测里，库存快照涉及哪些接口、数据和边界？';
+  const genericRouteAwareRoute = {
+    matched: true,
+    fallbackMode: 'verifiedFacts',
+    route: { id: 'GENERIC-SNAPSHOT', title: '库存快照', fallbackMode: 'verifiedFacts' },
+    answerFacts: [
+      '库存页读取 inventory_snapshot 最新快照，按 warehouseCode 精确匹配。',
+      'POST /comm/inventory/rebuild 会生成并写入新快照，是有副作用的入口，本轮不得调用。',
+      '实施排查先看快照时间、scheduler 定时任务日志、连接日志、SQL 日志和 warehouseCode；不得断库或重建快照复现。',
+    ],
+    directEvidenceFacts: [
+      '查询接口：GET /comm/inventory/info?warehouseCode=...，读取最新快照。',
+      '生成接口：POST /comm/inventory/rebuild，会生成并写入新快照。',
+    ],
+    mustNotConfuse: [],
+  };
+  const genericRouteAwareInitial = bundle.audit(genericRouteAwareRoute.answerFacts.join('\n'), genericRouteAwareQuestion, genericRouteAwareRoute);
+  assert.equal(genericRouteAwareInitial.verifiedInterfaceDataBoundaryDiagnosticQuestion, true, 'route-aware 分层不能依赖大屏模块或 SC-01 字段');
+  const genericRouteAwareReply = bundle.fallback('', genericRouteAwareInitial);
+  assert.match(genericRouteAwareReply, /只读查询入口：GET \/comm\/inventory\/info\?warehouseCode=\.\.\./);
+  assert.match(genericRouteAwareReply, /有副作用的生成\/写入入口（本轮不得调用）：POST \/comm\/inventory\/rebuild/);
+  assert.match(genericRouteAwareReply, /scheduler 定时任务日志/);
+  assert.deepEqual(bundle.audit(genericRouteAwareReply, genericRouteAwareQuestion, genericRouteAwareRoute).violations, [], '其它带 route 排查锚点的快照功能也应形成同一只读结构');
+
+  const q0499Question = Object.keys(browserRequirements).find(question => question === '另一轮独立复测（499）里，把大屏数据接口（各统计指标出数）从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。');
+  assert.ok(q0499Question, 'Q0499 应从正式 Audit 浏览器 fixture 取到原问题');
+  const q0499Route = runtimeRouteWithRepositoryContext(routeQuestion(auditTag3RouteMap, q0499Question), '2.7.260828-3');
+  assert.equal(q0499Route.route.id, 'AUD-QR-SC-01', 'Q0499 必须命中大屏 current route');
+  const q0499Initial = bundle.audit('', q0499Question, q0499Route);
+  assert.equal(q0499Initial.chainRequested, true);
+  assert.ok(q0499Initial.chainKeyBusinessFacts.length <= 3, '关键业务口径必须有固定上限，不能无条件堆全文');
+  assert.ok(q0499Initial.chainKeyBusinessFacts.some(fact => /最近\s*7\s*天[^。！？\n]*最近\s*12\s*个月/su.test(fact)), 'Q0499 中间的日/月趋势事实必须被识别为关键量化口径');
+  assert.match(q0499Initial.safeChainFallback, /关键业务口径[^\n]*最近 7 天[^\n]*最近 12 个月/);
+  assert.match(q0499Initial.safeChainFallback, /分别统计门诊和住院人工审核工作量/);
+  const q0499OmittedDraft = q0499Initial.safeChainFallback.split('\n')
+    .filter(line => !/(?:最近\s*7\s*天|最近\s*12\s*个月)/u.test(line)).join('\n');
+  const q0499OmittedAudit = bundle.audit(q0499OmittedDraft, q0499Question, q0499Route);
+  assert.ok(q0499OmittedAudit.missingChainKeyBusinessFacts.some(fact => /最近\s*7\s*天[^。！？\n]*最近\s*12\s*个月/su.test(fact)), '链路草稿漏掉量化中间事实时必须触发完整性审计');
+  assert.ok(q0499OmittedAudit.violations.includes('incomplete_requested_chain'));
+  const q0499Reply = bundle.fallback(q0499OmittedDraft, q0499OmittedAudit);
+  assert.match(q0499Reply, /最近 7 天/);
+  assert.match(q0499Reply, /最近 12 个月/);
+  assert.match(q0499Reply, /门诊和住院人工审核工作量/);
+  assert.deepEqual(bundle.audit(q0499Reply, q0499Question, q0499Route).violations, [], 'Q0499 确定性链路终稿必须恢复关键趋势范围并终审全绿');
+
+  const genericChainCoverageQuestion = '把库存快照从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。';
+  const genericChainCoverageRoute = {
+    matched: true,
+    fallbackMode: 'verifiedFacts',
+    route: { id: 'GENERIC-CHAIN-SCOPE', title: '库存快照', fallbackMode: 'verifiedFacts' },
+    answerFacts: [
+      '入口：库存页面读取已有快照。',
+      '业务口径：日趋势固定覆盖最近 14 天，月趋势固定覆盖最近 6 个月，分别统计入库和出库数量。',
+      '接口：GET /comm/inventory/info 查询当前快照。',
+      '数据与状态：inventory_snapshot 保存最新统计结果。',
+      '外部依赖：仓储系统提供只读库存来源。',
+    ],
+    mustNotConfuse: [],
+  };
+  const genericChainCoverageInitial = bundle.audit('', genericChainCoverageQuestion, genericChainCoverageRoute);
+  assert.deepEqual(genericChainCoverageInitial.chainKeyBusinessFacts, [genericChainCoverageRoute.answerFacts[1]], '通用规则应只选量化业务口径，不依赖大屏标题或固定天数');
+  assert.match(genericChainCoverageInitial.safeChainFallback, /关键业务口径[^\n]*最近 14 天[^\n]*最近 6 个月/);
+  assert.deepEqual(bundle.audit(genericChainCoverageInitial.safeChainFallback, genericChainCoverageQuestion, genericChainCoverageRoute).violations, [], '其它 implementation_chain 的中间量化事实也必须保留');
+
   const genericReadOnlyFactRoute = {
     ...genericImplementationRoute,
     answerFacts: ['系统当前只读取已有记录并展示结果；未经授权不应重试或补发。'],
