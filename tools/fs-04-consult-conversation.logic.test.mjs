@@ -2147,6 +2147,54 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.equal(q0206Initial.contextFollowupQuestion, false, '普通独立复测事实问法不得误标上下文续问');
   assert.notEqual(q0206Initial.fallbackAnswerMode, 'field_diagnostic', '普通事实问法不应扩写只读排查顺序');
 
+  const q0213Question = Object.keys(browserRequirements).find(question => question === '复测待审列表批量通过与超时通过边界时只有页面现象和 requestId，暂时没有原始日志。下一步最少还要补哪类只读证据？');
+  assert.ok(q0213Question, 'Q0213 真实 fixture 题目应存在');
+  const q0213Route = runtimeRouteWithContext(routeQuestion(productionRouteMap, q0213Question));
+  const q0213Initial = bundle.audit(q0213Route.answerFacts.join('\n'), q0213Question, q0213Route);
+  assert.equal(q0213Route.route.id, 'AUD-QR-FLOW-BATCH-PASS-01', 'Q0213 应命中批量通过与超时通过边界');
+  assert.equal(q0213Route.answerFacts.length, 4, 'Q0213 应使用紧凑 route 的四条完整事实');
+  assert.equal(q0213Initial.minimalEvidenceQuestion, true, 'Q0213 页面现象+原始日志缺口应识别为最小证据题');
+  assert.equal(q0213Initial.partialEvidenceQuestion, true, 'Q0213 应进入 partial_evidence');
+  assert.equal(q0213Initial.fieldDiagnosticQuestion, false, 'Q0213 不应退成没有正文的整体现场拒答');
+  assert.equal(q0213Initial.fallbackAnswerMode, 'partial_evidence');
+  assert.equal(q0213Initial.minimumRoutePath, null, '多入口 route 不应伪造单一 minimumRoutePath');
+  const q0213FallbackReply = bundle.fallback(q0213Route.answerFacts.join('\n'), q0213Initial);
+  for (const fact of q0213Route.answerFacts) {
+    if (/POST|time_over_pass|audit_pass|人工审核通过/u.test(fact)) assert.match(q0213FallbackReply, new RegExp(fact.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+  assert.match(q0213FallbackReply, /最少补证（只读）/);
+  assert.match(q0213FallbackReply, /同一次已经发生的请求及完整响应原文/);
+  assert.match(q0213FallbackReply, /已有记录中的对象标识、状态和时间/);
+  assert.match(q0213FallbackReply, /本轮只读边界：不改数据、不重放消息、不重提任务/);
+  assert.match(q0213FallbackReply, /本轮未知/);
+  const q0213Final = bundle.audit(q0213FallbackReply, q0213Question, q0213Route);
+  assert.deepEqual(q0213Final.focusedTechnicalOverreach, [], '“待审列表”不得因“列”字误启用字段 sibling-token 收窄');
+  assert.deepEqual(q0213Final.violations, [], 'Q0213 最小只读证据 fallback 终审必须全绿');
+
+  const q0218Question = Object.keys(browserRequirements).find(question => question === '待审列表批量通过与超时通过边界现场暂时不能改数据、重放消息或重提任务。仅用已有记录应该怎样缩小范围？');
+  assert.ok(q0218Question, 'Q0218 真实 fixture 题目应存在');
+  const q0218Route = runtimeRouteWithContext(routeQuestion(productionRouteMap, q0218Question));
+  const q0218Initial = bundle.audit(q0218Route.answerFacts.join('\n'), q0218Question, q0218Route);
+  assert.equal(q0218Route.route.id, 'AUD-QR-FLOW-BATCH-PASS-01', 'Q0218 应命中批量通过与超时通过边界');
+  assert.equal(q0218Route.answerFacts.length, 4, 'Q0218 应使用紧凑 route 的四条完整事实');
+  assert.equal(q0218Initial.partialEvidenceQuestion, true, 'Q0218 仅用已有记录问法应进入 partial_evidence');
+  assert.equal(q0218Initial.explicitNonDestructiveBoundaryQuestion, true, 'Q0218 应识别不改数据/不重放/不重提边界');
+  assert.equal(q0218Initial.fallbackAnswerMode, 'partial_evidence');
+  const q0218FallbackReply = bundle.fallback(q0218Route.answerFacts.join('\n'), q0218Initial);
+  for (const fact of q0218Route.answerFacts) {
+    if (/POST|time_over_pass|audit_pass|人工审核通过/u.test(fact)) assert.match(q0218FallbackReply, new RegExp(fact.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+  assert.match(q0218FallbackReply, /本轮只读边界：不改数据、不重放消息、不重提任务/);
+  assert.match(q0218FallbackReply, /当前门诊.*住院.*人工审核通过/);
+  assert.match(q0218FallbackReply, /POST \/audit\/opt\/task\/pass/);
+  assert.match(q0218FallbackReply, /POST \/audit\/ipt\/task\/pass/);
+  assert.match(q0218FallbackReply, /\/audit\/opt\/tasks\/time\/over/);
+  assert.match(q0218FallbackReply, /\/audit\/ipt\/tasks\/time\/over/);
+  assert.match(q0218FallbackReply, /audit_pass/);
+  assert.match(q0218FallbackReply, /time_over_pass/);
+  const q0218Final = bundle.audit(q0218FallbackReply, q0218Question, q0218Route);
+  assert.deepEqual(q0218Final.violations, [], 'Q0218 紧凑 route 只读范围 fallback 终审必须全绿');
+
   const q0011AiQuestion = Object.keys(browserRequirements).find(question => question.includes('另一轮独立复测（11）里，AI 审方生成现在是怎么实现的？'));
   assert.ok(q0011AiQuestion, 'Q0011 真实 fixture 题目应存在');
   const q0011AiRoute = runtimeRouteWithContext(routeQuestion(productionRouteMap, q0011AiQuestion));
@@ -2677,6 +2725,19 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(patientIdAtomicFallback, /patient_id 是 character varying\(50\)/);
   assert.doesNotMatch(patientIdAtomicFallback, /身份元组|缓存键/);
   assert.deepEqual(bundle.audit(patientIdAtomicFallback, 'pwrs_patient.patient_id 在 PostgreSQL 里是什么类型和长度？', patientIdAtomicRoute).violations, []);
+  const siblingFieldRoute = {
+    matched: true,
+    route: { title: '患者号字段类型' },
+    focusTechnicalTokens: ['patient_id'],
+    answerFacts: ['patient_id 是 character varying(50)', 'visit_id 是另一个标识字段'],
+  };
+  const siblingFieldAudit = bundle.audit(
+    'patient_id 是 character varying(50)，visit_id 是另一个标识字段。',
+    'patient_id 这一列是什么类型？',
+    siblingFieldRoute,
+  );
+  assert.deepEqual(siblingFieldAudit.focusedTechnicalOverreach, ['visit_id'], '真正的字段/列类型题仍须拦截 sibling token');
+  assert.ok(siblingFieldAudit.violations.includes('out_of_scope_entity'));
 
   assert.deepEqual(bundle.audit('已核规则明确写明：缺 hospitalId 会导致请求被拒绝。', '缺 hospitalId 会怎样？', {
     matched: true,
