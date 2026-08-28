@@ -3287,6 +3287,67 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   const noSequenceReply = bundle.fallback('', noSequenceInitial);
   assert.doesNotMatch(noSequenceReply, /已有记录只读缩小顺序|updateTime|projectName|Mapper|SQL 日志/);
 
+  const q0522Question = auditBrowserQuestions.questions.find(item => item.id === 'Q0522')?.question;
+  assert.equal(q0522Question, '登录与鉴权涉及哪些接口、数据和边界？');
+  const q0522Route = runtimeRouteWithRepositoryContext(routeQuestion(auditTag3RouteMap, q0522Question), '2.7.260828-3');
+  assert.equal(q0522Route.route.id, 'AUD-QR-SH-01', 'Q0522 必须命中登录与鉴权 current route');
+  const q0522Initial = bundle.audit('', q0522Question, q0522Route);
+  const q0522Reply = bundle.fallback('', q0522Initial);
+  const q0522Final = bundle.audit(q0522Reply, q0522Question, q0522Route);
+  assert.deepEqual(q0522Final.violations, [], JSON.stringify({
+    initialViolations: q0522Initial.violations,
+    mode: q0522Initial.fallbackAnswerMode,
+    verifiedInterfaceDiagnostic: q0522Initial.verifiedInterfaceDataBoundaryDiagnosticQuestion,
+    signatures: q0522Initial.requiredInterfaceDataBoundarySignatures,
+    checklistItems: q0522Initial.interfaceDataBoundaryChecklistItems,
+    reply: q0522Reply,
+    finalViolations: q0522Final.violations,
+    missingSignatures: q0522Final.missingInterfaceDataBoundarySignatures,
+    missingChecklist: q0522Final.missingInterfaceDataBoundaryChecklistItems,
+    structureComplete: q0522Final.interfaceDataBoundaryRouteStructureComplete,
+    diagnosticComplete: q0522Final.interfaceDataBoundaryDiagnosticComplete,
+    unsafeActions: [q0522Final.unsafeActorActionCount, q0522Final.unsafeDirectActionCount],
+    incompletePairedBranches: q0522Final.incompletePairedBranches,
+    unexpectedPaths: q0522Final.unexpectedPaths,
+    unexpectedEntities: q0522Final.unexpectedEntityTerms,
+    unexpectedTechnicalTokens: q0522Final.unexpectedTechnicalTokens,
+  }, null, 2));
+  for (const expected of [
+    /首次进入/,
+    /多设备/,
+    /用户中心签发的常规 token/,
+    /双 token/,
+    /退出：/,
+    /登录只读排查/,
+    /MD5 密码值/,
+    /禁止共享完整 token 或密码/,
+  ]) assert.match(q0522Reply, expected);
+  assert.deepEqual(q0522Initial.requiredInterfaceDataBoundarySignatures, [
+    'GET /api/comm/config?sysModel=1&sysFunction=login_page_config&configName=login_page_info',
+  ], '宽诊断只能从 current route 精确 contextRefs 恢复已核 HTTP 签名');
+  const q0522PublishedHttpSignatures = Array.from(q0522Reply.matchAll(/\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/[A-Za-z0-9_./{}?=&:%*\-]+/gu), match => match[0]);
+  assert.deepEqual(Array.from(new Set(q0522PublishedHttpSignatures)), q0522Initial.requiredInterfaceDataBoundarySignatures, '不得为登录宽诊断臆造 contextRefs 未提供的接口');
+  for (const modelError of [
+    { code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束' },
+    { status: 429, message: 'rate limit' },
+  ]) {
+    const q0522ModelFailureFallback = bundle.modelFailureFallback(q0522Question, q0522Route, modelError);
+    assert.ok(q0522ModelFailureFallback, `Q0522 ${modelError.code || modelError.status} 应发布已核 field-diagnostic fallback`);
+    assert.equal(q0522ModelFailureFallback.fallbackSource, 'verifiedFacts');
+    assert.equal(q0522ModelFailureFallback.initialAudit.fallbackAnswerMode, 'field_diagnostic');
+    assert.deepEqual(q0522ModelFailureFallback.finalAudit.violations, []);
+    assert.doesNotMatch(q0522ModelFailureFallback.reply, /AI 暂时连不上|当前回答未通过发布前事实与动作安全校验/);
+  }
+  assert.equal(bundle.modelFailureFallback(q0522Question, { ...q0522Route, matched: false }, { status: 429, message: 'rate limit' }), null, 'Q0522 route miss 不得绕过证据门');
+  assert.equal(bundle.modelFailureFallback(q0522Question, {
+    matched: true,
+    fallbackMode: 'verifiedFacts',
+    route: { id: 'EMPTY-LOGIN', title: '登录与鉴权', fallbackMode: 'verifiedFacts' },
+    answerFacts: [],
+    directEvidenceFacts: [],
+  }, { status: 429, message: 'rate limit' }), null, 'matched 但无已核业务 facts 时仍属证据不足');
+  assert.ok(bundle.audit('判断结果：\n- 成功：只记录成功分支。', q0522Question, q0522Route).violations.includes('incomplete_paired_branch'), '真正的成功/失败结构缺边仍必须拦截');
+
   const genericChainCoverageQuestion = '把库存快照从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。';
   const genericChainCoverageRoute = {
     matched: true,

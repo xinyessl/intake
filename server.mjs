@@ -4618,9 +4618,12 @@ function consultAnswerSemanticAudit(answer, question, route) {
       }),
     ].join('\n') : '';
     // “继续作为判断基线”会被结构审计当成成对分支引导；当后续 route
-    // 恰有“成功：”事实时会误报缺少“失败：”。页面未呈现交接题使用不含
-    // 分支引导词的业务标题，facts 内容与顺序不变。
-    const knownBlockHeading = dataReturnedNotRenderedQuestion ? '已核业务边界：' : '已知事实（继续作为判断基线）：';
+    // 恰有“成功：”事实时会误报缺少“失败：”。页面未呈现或接口/数据/
+    // 边界的宽诊断都是业务事实盘点，使用不含分支引导词的标题；
+    // facts 内容与顺序不变，真正的成对分支审计仍保持严格。
+    const knownBlockHeading = dataReturnedNotRenderedQuestion || verifiedInterfaceDataBoundaryDiagnosticQuestion
+      ? '已核业务边界：'
+      : '已知事实（继续作为判断基线）：';
     const knownBlock = stageChecklistKnownFacts.length
       ? [knownBlockHeading, ...stageChecklistKnownFacts.map(fact => `- ${fact}`)].join('\n')
       : '当前没有已核证据确认具体按钮、接口、字段或状态值；下面只给不依赖这些未知事实的只读留证。';
