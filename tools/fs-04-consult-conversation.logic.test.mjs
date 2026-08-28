@@ -954,6 +954,7 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     + extractFn(SRC, 'consultAnswerSafeFallback') + '\n'
     + extractFn(SRC, 'consultVerifiedFactsFallback') + '\n'
     + extractFn(SRC, 'consultModelErrorInfo') + '\n'
+    + extractFn(SRC, 'consultSafeDiagnosticIntent') + '\n'
     + extractFn(SRC, 'consultModelFailureFallback') + '\n'
     + extractFn(SRC, 'consultRecoverSafeDiagnostic') + '\n'
     + 'return { audit:consultAnswerSemanticAudit, revision:consultAnswerRevisionPrompt, fallback:consultAnswerSafeFallback, verifiedFallback:consultVerifiedFactsFallback, modelErrorInfo:consultModelErrorInfo, modelFailureFallback:consultModelFailureFallback, recoverSafeDiagnostic:consultRecoverSafeDiagnostic };',
@@ -3347,6 +3348,76 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     directEvidenceFacts: [],
   }, { status: 429, message: 'rate limit' }), null, 'matched 但无已核业务 facts 时仍属证据不足');
   assert.ok(bundle.audit('判断结果：\n- 成功：只记录成功分支。', q0522Question, q0522Route).violations.includes('incomplete_paired_branch'), '真正的成功/失败结构缺边仍必须拦截');
+
+  const q0527Question = '另一轮独立复测（527）里，登录与鉴权涉及哪些接口、数据和边界？';
+  const q0527Route = runtimeRouteWithRepositoryContext(routeQuestion(auditTag3RouteMap, q0527Question), '2.7.260828-3');
+  assert.equal(q0527Route.route.id, 'AUD-QR-SH-01', '独立复测前缀不得改变登录与鉴权 current route');
+  const q0527Initial = bundle.audit('', q0527Question, q0527Route);
+  const q0527Reply = bundle.fallback('', q0527Initial);
+  const q0527Final = bundle.audit(q0527Reply, q0527Question, q0527Route);
+  const q0527Fallback = bundle.verifiedFallback(q0527Question, q0527Route);
+  assert.ok(q0527Fallback, JSON.stringify({
+    message: 'Q0527 带复测前缀仍应发布登录与鉴权已核 fallback',
+    initialViolations: q0527Initial.violations,
+    mode: q0527Initial.fallbackAnswerMode,
+    reply: q0527Reply,
+    finalViolations: q0527Final.violations,
+    missingSignatures: q0527Final.missingInterfaceDataBoundarySignatures,
+    missingChecklist: q0527Final.missingInterfaceDataBoundaryChecklistItems,
+  }, null, 2));
+  assert.deepEqual(q0527Fallback.finalAudit.violations, []);
+  assert.doesNotMatch(q0527Fallback.reply, /当前回答未通过发布前事实与动作安全校验|AI 暂时连不上/);
+  for (const modelError of [
+    { code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束' },
+    { status: 429, message: 'rate limit' },
+  ]) {
+    const q0527ModelFailure = bundle.modelFailureFallback(q0527Question, q0527Route, modelError);
+    assert.ok(q0527ModelFailure, `Q0527 ${modelError.code || modelError.status} 应发布 route-aware 已核回答`);
+    assert.equal(q0527ModelFailure.fallbackSource, 'verifiedFacts');
+    assert.deepEqual(q0527ModelFailure.finalAudit.violations, []);
+  }
+
+  const chargeQuestions = [
+    '收费时，提醒HIS收费发起失败，收费状态未确认成功，这个是什么问题需要怎么处理',
+    '怎么撤销收费',
+    '怎么发起收费',
+  ];
+  const harmlessDraft = '当前只能确认页面出现了提示；具体业务原因、状态和操作路径仍未知。本轮不得重复提交。';
+  for (const question of [...chargeQuestions, q0527Question]) {
+    assert.doesNotThrow(() => bundle.audit(harmlessDraft, question, null), `${question} 的 answer_audit 不得读取 null route facts`);
+    for (const modelError of [
+      { code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束' },
+      { status: 429, message: 'rate limit' },
+    ]) {
+      const stopped = bundle.modelFailureFallback(question, null, modelError);
+      assert.ok(stopped, `${question} 在 route 对象缺失且模型失败时应给明确安全停点`);
+      assert.equal(stopped.fallbackSource, 'evidenceStop');
+      assert.deepEqual(stopped.finalAudit.violations, [], JSON.stringify({ question, reply: stopped.reply, violations: stopped.finalAudit.violations }, null, 2));
+      assert.doesNotMatch(stopped.reply, /AI 暂时连不上|错误编号|Cannot read properties/);
+      assert.match(stopped.reply, /(?:不得|不能|未知|缺少|只读|已有)/);
+    }
+  }
+
+  const adjacentContextMap = {
+    questionRoutes: [{
+      id: 'LOGIN-CONTEXT', title: '登录鉴权上下文',
+      aliases: ['登录鉴权 token 校验'], keywords: ['登录', '鉴权', 'token'],
+      searchText: '登录鉴权 token 校验', answerFacts: ['登录鉴权事实'], mustNotConfuse: [], fallbackMode: 'verifiedFacts',
+    }],
+    specs: [], indexes: {},
+  };
+  const switchedChargeRoute = contextualRouteQuestion(adjacentContextMap, [
+    { role: 'user', content: '登录鉴权 token 校验怎么做？' },
+    { role: 'assistant', content: '这里是上一主题的模型自由文本。' },
+    { role: 'user', content: '那怎么撤销收费' },
+  ], '那怎么撤销收费');
+  assert.equal(switchedChargeRoute.matched, false, '显式收费新实体不得继承相邻登录 route');
+  assert.equal(switchedChargeRoute.contextOverride, true);
+  const switchedStop = bundle.modelFailureFallback('那怎么撤销收费', switchedChargeRoute, { status: 429, message: 'rate limit' });
+  assert.ok(switchedStop, '相邻上下文切换后的 route miss 应给无业务事实安全停点');
+  assert.equal(switchedStop.fallbackSource, 'evidenceStop');
+  assert.deepEqual(switchedStop.finalAudit.violations, []);
+  assert.doesNotMatch(switchedStop.reply, /登录|token|鉴权/);
 
   const genericChainCoverageQuestion = '把库存快照从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。';
   const genericChainCoverageRoute = {

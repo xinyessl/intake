@@ -3505,7 +3505,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
     // route 自己进一步给出“实施/现场排查”锚点时，才升级为 route-aware
     // 分层，避免所有历史复测题被无差别扩成同一套技术清单。
     && (!explicitReviewDiagnosticQuestion
-      || currentRouteFacts.some(fact => /(?:实施|现场)[^。！？\n]{0,24}排查[^。！？\n]{0,120}(?:日志|记录|请求|响应)/iu.test(fact)));
+      || currentRouteFacts.some(fact => /(?:(?:实施|现场)[^。！？\n]{0,24}(?:排查|核对)|只读(?:排查|核对))[^。！？\n]{0,120}(?:日志|记录|请求|响应)/iu.test(fact)));
   // 非写操作咨询只允许发布两类内容：系统当前客观行为，以及本轮可做的
   // 只读留证。route 中面向负责人的补发/重做建议不能原样变成现场动作；
   // 同一转换供 field diagnostic、chain、partial evidence 和上下文续问复用。
@@ -4161,7 +4161,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   // 只读带“接口签名”标签的行，避免把同一章节里的辅助接口或源码碎片
   // 无条件扩成链路事实。
   const chainRouteTechnicalDiscriminators = Array.from(new Set(
-    [...(route.answerFacts || []), ...(route.mustNotConfuse || [])]
+    [...((route && route.answerFacts) || []), ...((route && route.mustNotConfuse) || [])]
       .flatMap(value => String(value || '').match(/\b[a-z][a-z0-9_]+_[a-z0-9_]+\b/giu) || [])
       .flatMap(token => token.toLowerCase().split('_'))
       .filter(segment => segment.length >= 3
@@ -5698,14 +5698,46 @@ function consultModelErrorInfo(error) {
 
 // 初稿 429、长度截断、空响应和其它暂时性模型失败都走同一个发布口：只有
 // 人工 route 显式开启 verifiedFacts 且最终语义审计全绿时才返回确定性答案。
-// route miss、普通 route 或审计失败一律返回 null，由调用方保留原错误事件。
+// 普通 route 或审计失败仍返回 null；route 对象缺失、或 route miss 后的现场
+// 诊断/副作用操作题只能发布无业务事实的安全停点，不能伪造确定性答案。
 function consultModelFailureFallback(question, route, error) {
   const fallback = consultVerifiedFactsFallback(question, route);
-  if (!fallback) return null;
-  return {
+  if (fallback) return {
     ...fallback,
     modelDraftError: consultModelErrorInfo(error),
     fallbackSource: 'verifiedFacts',
+  };
+
+  // route miss 时不能把相邻上下文或 Top-N 检索片段伪装成业务答案；但现场
+  // 诊断和带副作用的“怎么操作”问法也不能因模型截断/限流只剩错误气泡。
+  // 这里仅发布无业务事实的安全停点：明确未知、停止写操作、索取最小上下文。
+  // 普通 route miss 仍返回 null，保持“没有证据就不回答具体事实”的证据门。
+  if (route && route.matched) return null;
+  const missingRouteObject = route == null;
+  const q = String(question || '').trim();
+  const riskyOperationQuestion = /(?:怎么|如何)(?:发起|撤销|提交|保存|删除|新增|创建|审批|签名|收费|退费|重试|重做|重放|重提|修改|编辑|补发|补偿)/iu.test(q);
+  if (!missingRouteObject && !consultSafeDiagnosticIntent(q) && !riskyOperationQuestion) return null;
+  const initialAudit = consultAnswerSemanticAudit('', q, route);
+  let reply = String(initialAudit.safeDiagnosticFallback || '').trim();
+  if (!reply) reply = [
+    '当前缺少可核验的功能事实，不能安全确认具体操作入口、顺序或状态条件。',
+    '为避免误操作，本轮先停在这里：不得发起；不得撤销；不得提交；不得重试；不得修改业务状态。',
+    '请先补充当前系统与页面、功能名称、当前业务状态以及已有报错或请求响应；由对应业务负责人核对正式说明和授权边界后，再确定后续处理。',
+  ].join('\n\n');
+  let finalAudit = consultAnswerSemanticAudit(reply, q, route);
+  let passes = 0;
+  while (finalAudit.violations.length && passes < 2) {
+    reply = consultAnswerSafeFallback(reply, finalAudit);
+    finalAudit = consultAnswerSemanticAudit(reply, q, route);
+    passes += 1;
+  }
+  if (finalAudit.violations.length) return null;
+  return {
+    reply,
+    initialAudit,
+    finalAudit,
+    modelDraftError: consultModelErrorInfo(error),
+    fallbackSource: 'evidenceStop',
   };
 }
 
@@ -7950,7 +7982,7 @@ const server = http.createServer((req, res) => {
           const verifiedFallback = consultModelFailureFallback(qtext, route, firstError);
           if (retrieval) {
             retrieval.modelDraftError = modelDraftError;
-            retrieval.fallbackSource = verifiedFallback ? 'verifiedFacts' : 'model_error';
+            retrieval.fallbackSource = verifiedFallback ? verifiedFallback.fallbackSource : 'model_error';
           }
           if (verifiedFallback) {
             reply = verifiedFallback.reply;
