@@ -1537,6 +1537,15 @@ function ensureLifecycle(e) { if (e && !e.lifecycle) { e.lifecycle = deriveLifec
 // 兼容旧 status（看板粗粒度统计用）：待处理→待处理、已关闭/暂缓/已驳回→已处理（进「已关闭」聚合环）、其余→沟通中
 function lifecycleToStatus(lc) { if (lc === '待处理') return '待处理'; if (lc === '已关闭' || lc === '暂缓' || lc === '已驳回') return '已处理'; return '沟通中'; }
 function nowStamp() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; }
+// CU-01 激活文件生成（复刻产品 IRegistrationServiceImpl.generateLicense/calculateHash · 逐字校对 + 校验器 SystemActivationValidator 确认）：
+//   license = Base64_标准( SHA-256( UTF8(设备码 + VERIFY_KEY) ) )。VERIFY_KEY=固定 verify key（产品 CommonConstant.VERIFY_KEY），服务端常量，不暴露前端。
+//   Base64 用标准编码（含 + / = 填充、带 padding），即 crypto sha256 digest('base64')——与 Java 一致（黄金向量：4aea73e50cc4f679124cb68ac02942e → Kz3W2wXfWO9/NvRWxl7UCxLyyYcKh2WxMT+aeBSnxi8=）。
+//   校验器 SystemActivationValidator 用同样 SHA-256+Base64 + 同 key 比对本机 machineId，故设备码对则文件必过校验。纯计算、不落库、不写盘。
+const ACTIVATION_VERIFY_KEY = 'lingchuang@123';
+function activationLicense(deviceCode) { return crypto.createHash('sha256').update(String(deviceCode) + ACTIVATION_VERIFY_KEY, 'utf8').digest('base64'); }
+// 激活文件内容（Java Properties · VerifyConstant.LICENSE_FILE=.lc-activation.lic / ACTIVATION_KEY=activation_key）：
+//   首行注释 #System Activation License；base64 值里的 =/+// 直接写、不转义（Properties.load 取第一个 = 后全部为 value 字面量，读回正确）。
+function activationFileContent(deviceCode) { return '#System Activation License\nactivation_key=' + activationLicense(deviceCode) + '\n'; }
 const PRIORITY_SET = new Set(['紧急', '高', '中', '低']);   // 紧急程度四档（与后台 inbox.html/detail.html 配色一致）
 // 现场手选优先级规范化：合法四档→原值；非法/空→回落 fallback（AI 猜的 rec.priority 或默认「中」）。防脏值入 intakes.priority(VARCHAR(10))。
 function normPriority(v, fallback = '中') { const s = String(v == null ? '' : v).trim(); return PRIORITY_SET.has(s) ? s : (fallback || '中'); }
@@ -6028,6 +6037,19 @@ const server = http.createServer((req, res) => {
       if (i < 0) return send(res, 404, JSON.stringify({ ok: false, error: 'not found' }));
       list.splice(i, 1); saveCustomers(list);
       return send(res, 200, JSON.stringify({ ok: true, customers: custWithTicketCount(list) }));
+    });
+  }
+  // CU-01 激活文件生成（运营端「医院管理」：设备码 → .lc-activation.lic 激活文件内容，前端 Blob 下载）。
+  //   仅管理员：未进 FIELD_OK/LINK_OK/FS08_FIELD_API 白名单 → authGate deny-by-default 已对非 admin 返 403/401；field 域经 originGate deny→403。绝不进 field 白名单（运营端功能）。
+  //   纯计算：不落库、不写盘、无字段映射（算法见 activationLicense/activationFileContent）。设备码只做长度上限防滥用，不做格式强校验（machineId 各平台格式不同）。
+  if (url.pathname === '/api/activation/generate' && req.method === 'POST') {
+    return readBody(req, async (b, err) => {
+      if (!b) return send(res, 400, JSON.stringify({ ok: false, error: err }));
+      const deviceCode = String(b.deviceCode || '').trim();
+      if (!deviceCode) return send(res, 400, JSON.stringify({ ok: false, error: '设备码不能为空' }));
+      if (deviceCode.length > 200) return send(res, 400, JSON.stringify({ ok: false, error: '设备码过长（≤200）' }));
+      const license = activationLicense(deviceCode);
+      return send(res, 200, JSON.stringify({ ok: true, filename: '.lc-activation.lic', license, content: activationFileContent(deviceCode) }));
     });
   }
 

@@ -48,6 +48,7 @@
       <div class="filter-field"><label>状态</label><select class="select" id="fStatus"><option value="">全部状态</option><option value="已开通">已开通</option><option value="未开通">未开通</option></select></div>
       <div class="filter-field"><label>关键词</label><div class="input-with-icon"><i class="ti ti-search"></i><input class="input" id="fKw" placeholder="医院名，回车搜索"></div></div>
     </div>
+    <button class="btn" id="btnActivation"><i class="ti ti-key"></i>激活文件生成</button>
     <button class="btn btn-primary" id="btnAdd"><i class="ti ti-plus"></i>新增医院</button>
   </div>
 </div>
@@ -117,6 +118,26 @@
 </div>
 
 <!-- 2026-08-05 架构重构：删「标准部署清单模板」抽屉——部署清单改为跟随产品代码（各子系统仓 docs/deploy.json 按 tag 读）。 -->
+
+<!-- CU-01 激活文件生成抽屉（运营端；设备码 → .lc-activation.lic 下载）。工具条按钮 + 行内「激活文件」共用 openActivation(prefill)。 -->
+<div class="drawer" id="activationDrawer">
+  <div class="drawer-header">
+    <div><div class="drawer-title" id="actTitle">生成激活文件</div><div class="drawer-subtitle">输入设备码，生成并下载 <span class="mono">.lc-activation.lic</span> 激活文件</div></div>
+    <span class="modal-close" data-close-drawer="activationDrawer"><i class="ti ti-x"></i></span>
+  </div>
+  <div class="drawer-body">
+    <div class="form-group">
+      <label>设备码 <span class="req">*</span></label>
+      <input class="input mono" id="actDeviceCode" maxlength="200" placeholder="目标机器的设备码 / machineId">
+      <div class="text-tertiary" style="font-size:12px;margin-top:4px">从医院档案「设备码」预填，可修改；生成的激活文件用同一 machineId 校验。</div>
+    </div>
+    <div class="form-group" id="actResultBox" style="display:none">
+      <label>已生成 <span class="mono">.lc-activation.lic</span></label>
+      <textarea class="textarea mono" id="actResult" readonly style="min-height:70px" onclick="this.select()"></textarea>
+    </div>
+  </div>
+  <div class="drawer-footer"><button class="btn" data-close-drawer="activationDrawer">关闭</button><button class="btn btn-primary" id="btnGenActivation"><i class="ti ti-download"></i>生成并下载</button></div>
+</div>
 
 <div class="toast-container" id="toastHost"></div>
 
@@ -211,6 +232,8 @@ function render(){
       <td>
         <div class="row-actions">
           <span class="row-action" data-act="edit" data-id="${esc(c.id)}">编辑</span>
+          <span class="divider"></span>
+          <span class="row-action" data-act="activation" data-id="${esc(c.id)}">激活文件</span>
           <span class="divider"></span>
           <span class="row-action danger" data-act="del" data-id="${esc(c.id)}">删除</span>
         </div>
@@ -424,8 +447,35 @@ async function delCustomer(c){
 /* 2026-08-05 架构重构：删「标准部署清单模板」全部 JS（DEPLOY_TPL/addTplTaskRow/openDeployTpl/collectTplTasks/saveDeployTpl 等）——
    部署清单改为跟随产品代码（各子系统仓 docs/deploy.json 按 tag 读），运营端不再手工维护部署模板。 */
 
+/* ---------- CU-01 激活文件生成（设备码 → .lc-activation.lic，Blob 下载） ---------- */
+function openActivation(prefill){
+  $('#actDeviceCode').value = prefill||'';
+  $('#actResultBox').style.display='none'; $('#actResult').value='';
+  openDrawer('activationDrawer');
+  $('#actDeviceCode').focus();
+}
+async function genActivation(){
+  const deviceCode=$('#actDeviceCode').value.trim();
+  if(!deviceCode){ $('#actDeviceCode').classList.add('invalid'); toast('请输入设备码','warning'); return; }
+  $('#actDeviceCode').classList.remove('invalid');
+  $('#btnGenActivation').disabled=true;
+  try{
+    const r=await (await fetch('/api/activation/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deviceCode})})).json();
+    if(!r||!r.ok){ toast((r&&r.error)||'生成失败','error'); return; }
+    // Blob 下载：文件名固定 .lc-activation.lic（产品隐藏文件名），内容 = 后端返回的 content（含 #System Activation License + activation_key=）
+    const blob=new Blob([r.content],{type:'text/plain;charset=utf-8'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=r.filename||'.lc-activation.lic';
+    document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },0);
+    $('#actResult').value=r.content; $('#actResultBox').style.display='';
+    toast('已生成 .lc-activation.lic','success');
+  }catch(e){ toast('生成失败：'+e.message,'error'); }
+  finally{ $('#btnGenActivation').disabled=false; }
+}
+
 /* ---------- 事件绑定 ---------- */
 $('#btnAdd').addEventListener('click',()=>openEdit(null));
+$('#btnActivation').addEventListener('click',()=>openActivation(''));   // 工具条：不选医院，空设备码手输
+$('#btnGenActivation').addEventListener('click',genActivation);
 $('#btnAddProd').addEventListener('click',()=>addProdRow('',null));
 $('#btnAddContact').addEventListener('click',()=>addContactRow('',''));
 $('#btnSave').addEventListener('click',saveCustomer);
@@ -434,6 +484,7 @@ $('#custBody').addEventListener('click',e=>{
   const t=e.target.closest('[data-tickets]'); if(t){ if(t.classList.contains('text-link')) location.href='/inbox.html'; return; }
   const a=e.target.closest('[data-act]'); if(!a)return; const c=CUSTOMERS.find(x=>x.id===a.dataset.id); if(!c)return;
   if(a.dataset.act==='edit') openEdit(c);
+  else if(a.dataset.act==='activation') openActivation(c.deviceCode||'');   // 行内：从该医院设备码预填
   else if(a.dataset.act==='del') delCustomer(c);
 });
 /* 选择型即选即查 */

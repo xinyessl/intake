@@ -512,6 +512,21 @@
           "note": "已实现待验收：统一 lightbox 覆盖 data URL 与 /api/intake-media URL，支持关闭按钮/遮罩/Esc、Enter/Space、焦点返回与滚动恢复。专项 4/4、FS-04 脱库逻辑 142 通过/2 条真库环境跳过；FS-04/FS-06 完整真库套件因本机 MySQL 127.0.0.1:3306 ECONNREFUSED 在 before hook 阻断。未部署，待当前页真实浏览器验收。"
         }
       ]
+    },
+    {
+      "id": "B-20260828-激活文件生成",
+      "source": "CLI窗口·用户直接录入",
+      "importedAt": "2026-08-28",
+      "ref": "运营端「医院管理」加激活文件生成：传设备码→生成并下载 .lc-activation.lic。算法=Base64(SHA-256(设备码+固定verify key lingchuang@123))，逐字校对+反编译校验器 SystemActivationValidator 确认；黄金向量 4aea73e50cc4f679124cb68ac02942e→Kz3W2wXfWO9/NvRWxl7UCxLyyYcKh2WxMT+aeBSnxi8=。",
+      "tasks": [
+        {
+          "id": "CU01-ACTIVATION-1",
+          "title": "医院管理·激活文件生成（POST /api/activation/generate·admin限定 + customers.html 行内+工具条+设备码预填+Blob下载 .lc-activation.lic）",
+          "status": "doing",
+          "specRef": "CU-01",
+          "note": "已实现待验收（accept=wait）：server.mjs 加 activationLicense/activationFileContent + /api/activation/generate（不进 FIELD_OK/LINK_OK/FS08_FIELD_API=authGate deny-by-default，纯计算不落库不写盘）；customers.html 加 data-act=activation 行操作 + #btnActivation 工具条 + #activationDrawer + openActivation(从 c.deviceCode 预填)/genActivation(Blob 下载)。tools/activation-license.logic.test.mjs 6/6 绿（黄金向量断死+文件格式+端点 admin 闸+前端落点）；live server 冒烟：未登录 POST→401、admin→ok+黄金 license、空设备码→400。CU-01 加 AC-26/27（draft 待评审）。CU-01 回归 20/21（1 条失败为既有 fetchVersions vs ensureVersions 漂移，非本次引入，已 stash 核对）。未 commit 未部署。"
+        }
+      ]
     }
   ]
 }
