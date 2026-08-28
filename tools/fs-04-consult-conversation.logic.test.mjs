@@ -3187,6 +3187,56 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(q0499Reply, /门诊和住院人工审核工作量/);
   assert.deepEqual(bundle.audit(q0499Reply, q0499Question, q0499Route).violations, [], 'Q0499 确定性链路终稿必须恢复关键趋势范围并终审全绿');
 
+  const auditBrowserQuestions = JSON.parse(fs.readFileSync(
+    path.join(ROOT, 'tools/fixtures/audit-browser-1000.questions.json'), 'utf8',
+  ));
+  const q0509Question = auditBrowserQuestions.questions.find(item => item.id === 'Q0509')?.question;
+  assert.equal(q0509Question, '把多数据库方言适配（MySQL/达梦/PostgreSQL 三库同逻辑不同 SQL）从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。');
+  const q0509Route = runtimeRouteWithRepositoryContext(routeQuestion(auditTag3RouteMap, q0509Question), '2.7.260828-3');
+  assert.equal(q0509Route.route.id, 'AUD-QR-SC-02', 'Q0509 必须命中多数据库方言 current route');
+  const q0509Initial = bundle.audit('', q0509Question, q0509Route);
+  assert.equal(q0509Initial.chainEvidenceSufficient, true, 'Q0509 已有入口、精确接口与数据事实，应通过 chain 证据门');
+  assert.deepEqual(q0509Initial.chainKnownFactDimensions, ['入口', '接口', '数据']);
+  const q0509Reply = bundle.fallback('', q0509Initial);
+  const q0509Final = bundle.audit(q0509Reply, q0509Question, q0509Route);
+  assert.deepEqual(q0509Final.violations, [], JSON.stringify({
+    initial: q0509Initial.violations,
+    mode: q0509Initial.fallbackAnswerMode,
+    reply: q0509Reply,
+    final: q0509Final.violations,
+    missingRequestedInterfaces: q0509Final.missingRequestedInterfaces,
+    missingChainDimensions: q0509Final.missingChainDimensions,
+    unexpectedPaths: q0509Final.unexpectedPaths,
+    unexpectedEntities: q0509Final.unexpectedEntityTerms,
+    unexpectedTechnicalTokens: q0509Final.unexpectedTechnicalTokens,
+    actions: [q0509Final.unsafeActorActionCount, q0509Final.unsafeDirectActionCount],
+  }, null, 2));
+  assert.match(q0509Reply, /GET \/comm\/screen\/info\?projectName=\.\.\./, '参数占位省略号不能在路径归一化时被删掉');
+  assert.match(q0509Reply, /外部依赖[^。！？\n]*当前停点/, '未定义的外部依赖必须明确停住');
+  for (const modelError of [
+    { code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束' },
+    { status: 429, message: 'rate limit' },
+  ]) {
+    const q0509ModelFailureFallback = bundle.modelFailureFallback(q0509Question, q0509Route, modelError);
+    assert.ok(q0509ModelFailureFallback, `Q0509 ${modelError.code || modelError.status} 应发布已核 chain fallback`);
+    assert.equal(q0509ModelFailureFallback.fallbackSource, 'verifiedFacts');
+    assert.equal(q0509ModelFailureFallback.initialAudit.fallbackAnswerMode, 'chain');
+    assert.deepEqual(q0509ModelFailureFallback.finalAudit.violations, []);
+    assert.doesNotMatch(q0509ModelFailureFallback.reply, /AI 暂时连不上/);
+  }
+  assert.equal(bundle.modelFailureFallback(q0509Question, { ...q0509Route, matched: false }, { status: 429, message: 'rate limit' }), null, 'Q0509 问法 route miss 时仍必须失败');
+  const insufficientChainRoute = {
+    matched: true,
+    fallbackMode: 'verifiedFacts',
+    route: { id: 'INSUFFICIENT-CHAIN', title: '库存同步', fallbackMode: 'verifiedFacts' },
+    answerFacts: ['库存同步是一项系统功能。'],
+    directEvidenceFacts: [],
+  };
+  const insufficientChainQuestion = '把库存同步从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。';
+  const insufficientChainAudit = bundle.audit('', insufficientChainQuestion, insufficientChainRoute);
+  assert.equal(insufficientChainAudit.chainEvidenceSufficient, false, '只有模糊总述不构成可发布的多维链路证据');
+  assert.equal(bundle.modelFailureFallback(insufficientChainQuestion, insufficientChainRoute, { status: 429, message: 'rate limit' }), null, '证据不足的 matched route 不得因模型失败而伪造 chain');
+
   const genericChainCoverageQuestion = '把库存快照从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。';
   const genericChainCoverageRoute = {
     matched: true,
