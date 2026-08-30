@@ -527,6 +527,21 @@
           "note": "已实现待验收（accept=wait）：server.mjs 加 activationLicense/activationFileContent + /api/activation/generate（不进 FIELD_OK/LINK_OK/FS08_FIELD_API=authGate deny-by-default，纯计算不落库不写盘）；customers.html 加 data-act=activation 行操作 + #btnActivation 工具条 + #activationDrawer + openActivation(从 c.deviceCode 预填)/genActivation(Blob 下载)。tools/activation-license.logic.test.mjs 6/6 绿（黄金向量断死+文件格式+端点 admin 闸+前端落点）；live server 冒烟：未登录 POST→401、admin→ok+黄金 license、空设备码→400。CU-01 加 AC-26/27（draft 待评审）。CU-01 回归 20/21（1 条失败为既有 fetchVersions vs ensureVersions 漂移，非本次引入，已 stash 核对）。未 commit 未部署。"
         }
       ]
+    },
+    {
+      "id": "B-20260830-答疑链路维度与长度截断收口",
+      "source": "审方 2.7.260829-3 · Intake 浏览器千题回归",
+      "importedAt": "2026-08-30",
+      "ref": "Q0789 链路维度组装错位；Q0790 模型长度截断误报网络且未优先使用 current route 安全终稿",
+      "tasks": [
+        {
+          "id": "FS04-Q0789-Q0790",
+          "title": "答疑链路维度按 route 标签归组，并让长度截断准确分类后走已核事实安全收口",
+          "status": "doing",
+          "specRef": "FS-04",
+          "note": "已实现待验收：Q0789 入口/处理分支/接口/数据/外部依赖按显式 route 标签归组，外部依赖固定为已核 usercenter IDubboUserCenterService.verifyToken，缺失维度明确停住；Q0790 支持 route 原子只读顺序，finish_reason=length/stop_reason=max_tokens 统一记 MODEL_OUTPUT_TRUNCATED，已核 route 终稿审计全绿时安全发布，否则准确提示长度限制。focused/full 37/37 + 16/16 通过；隔离 MySQL 8.4 + 真 /api/consult + OpenAI 截断 SSE 冒烟中，审方 2.7.260829-3 精确原问与自然变体共 4 条全绿，截断半句 0 条落库，未提交、未部署。"
+        }
+      ]
     }
   ]
 }

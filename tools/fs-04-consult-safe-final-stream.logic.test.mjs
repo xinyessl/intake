@@ -315,9 +315,12 @@ test('consult 草稿与修订共享整轮完成上限，超时失败仍走安全
   assert.match(consult, /else if \(firstError && !stopped\)[\s\S]*?publishSafeFinal\(m, \{ err: true, code: 'consult_model_error'/);
   assert.match(consult, /const verifiedFallback = consultModelFailureFallback\(qtext, route, firstError\)/, '模型失败时必须先尝试 route verifiedFacts fallback');
   assert.match(consult, /retrieval\.modelDraftError = modelDraftError/);
-  assert.match(consult, /retrieval\.fallbackSource = verifiedFallback \? 'verifiedFacts' : 'model_error'/);
+  assert.match(consult, /retrieval\.fallbackSource = verifiedFallback \? verifiedFallback\.fallbackSource : 'model_error'/,
+    '运行态须记录 verifiedFacts 或 evidenceStop 的真实 fallbackSource');
   assert.match(consult, /modelDraftErrorInfo: verifiedFallback\.modelDraftError/);
   assert.match(consult, /fallbackSource: verifiedFallback\.fallbackSource/);
+  assert.match(consult, /const m = consultModelVisibleError\(firstError, consultRequestId\)/,
+    '无法发布 verified fallback 时，可见错误必须按长度、限流或超时分类，不能统一误报网络');
   assert.match(consult, /if \(finalAudit\.violations\.length\) \{[\s\S]*?const verifiedFacts = consultVerifiedFactsFallback\(qtext, route\)/,
     '草稿/修订均失败时仍须尝试 verifiedFacts 确定性终稿');
   assert.match(consult, /sse\(\{ done: true, convId, kbHits:[\s\S]*?stopSseHeartbeat\(\)[\s\S]*?res\.end\(\)/);

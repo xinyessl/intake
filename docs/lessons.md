@@ -1291,3 +1291,10 @@
 - 解法：外部会话/消息/通知/回调失败后业务是否继续的问法进入只读诊断；发布前将系统调用顺序明确改写为“当前实现会/由系统”，将补发、补偿、重做、重试建议收口为记录差异并交负责人评估，另行授权后才可制定补偿方案，本轮不执行。
 - 防复发：用真实连续会话回归 Q0282/Q0285，另用通用展示补全与补偿事实验证规则不绑定业务词；负向“不应重试/补发”和普通成功状态题不得误触发改写或诊断。
 - 关联：`server.mjs`、`tools/fs-04-consult-conversation.logic.test.mjs`、`docs/changes/CHG-consult-只读诊断区分系统行为与处置建议.md`。
+
+### L-135 链路维度要信显式标签，模型截断要信结束原因
+- 现象（2026-08-30）：审方 2.7.260829-3 的 JWT 链路题把普通 JWT 分支塞进“数据与状态”，又把 Shiro/JwtFilter 当成外部依赖；相邻续问的模型稿达到 token 上限时，现场还可能看到“AI 暂时连不上”。
+- 根因：链路组装只按 fact 内关键词匹配维度，同一个技术词可跨入口、分支、数据、依赖重复占位；模型调用虽能收到 `finish_reason=length` / `stop_reason=max_tokens`，失败发布口却没有保留独立错误分类，也没有先尝试 current route 的确定性终稿。
+- 解法：route fact 有显式标签时以标签为第一归组依据，只有无标签事实才用受控关键词兜底；处理分支不冒充数据，外部依赖只取明确外部调用 clause，缺失维度继续写停点。流结束原因统一转成 `MODEL_OUTPUT_TRUNCATED`，先尝试 `verifiedFacts` 安全 fallback 并重审；无安全终稿时按 length/rate-limit/timeout/empty 分别给可见错误。
+- 防复发：用真实 tag 的精确原问和自然变体同时断言入口不矛盾、数据不含普通 JWT、依赖唯一为 `IDubboUserCenterService.verifyToken`、无通用状态接口/DB/页面清单；再模拟 OpenAI/Anthropic 两种长度结束、429 与超时，核对 `modelDraftError.kind`、fallbackSource 和可见错误文案。
+- 关联：`FS-04 AC-143/144`；`server.mjs`；`tools/fs-04-consult-conversation.logic.test.mjs`；`tools/fs-04-consult-safe-final-stream.logic.test.mjs`；`docs/changes/CHG-consult-JWT链路维度与模型截断收口.md`。

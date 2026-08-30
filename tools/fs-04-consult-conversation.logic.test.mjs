@@ -964,10 +964,11 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     + extractFn(SRC, 'routeHasDirectOperationEvidence') + '\n'
     + extractFn(SRC, 'consultMatchedOperationFailureFallback') + '\n'
     + extractFn(SRC, 'consultModelErrorInfo') + '\n'
+    + extractFn(SRC, 'consultModelVisibleError') + '\n'
     + extractFn(SRC, 'consultSafeDiagnosticIntent') + '\n'
     + extractFn(SRC, 'consultModelFailureFallback') + '\n'
     + extractFn(SRC, 'consultRecoverSafeDiagnostic') + '\n'
-    + 'return { audit:consultAnswerSemanticAudit, revision:consultAnswerRevisionPrompt, fallback:consultAnswerSafeFallback, verifiedFallback:consultVerifiedFactsFallback, modelErrorInfo:consultModelErrorInfo, modelFailureFallback:consultModelFailureFallback, recoverSafeDiagnostic:consultRecoverSafeDiagnostic };',
+    + 'return { audit:consultAnswerSemanticAudit, revision:consultAnswerRevisionPrompt, fallback:consultAnswerSafeFallback, verifiedFallback:consultVerifiedFactsFallback, modelErrorInfo:consultModelErrorInfo, modelVisibleError:consultModelVisibleError, modelFailureFallback:consultModelFailureFallback, recoverSafeDiagnostic:consultRecoverSafeDiagnostic };',
   )();
   const auditAiInterfaceQuestion = 'AI 审方开始生成和停止生成分别调用哪个接口？请只给出两个 HTTP 方法与完整路径，并说明停止接口的 generateId 放在哪里。';
   const auditAiInterfaceRoute = {
@@ -3419,6 +3420,81 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     assert.equal(q0762ModelFallback.reply, q0762Reply);
     assert.deepEqual(q0762ModelFallback.finalAudit.violations, []);
   }
+
+  const auditTag20260829_3RouteMap = JSON.parse(execFileSync(
+    'git', ['show', '2.7.260829-3:docs/specs/00-功能模块地图.json'],
+    { cwd: path.resolve(ROOT, '../psp/audit'), encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 },
+  ));
+  const q0789Question = '把免鉴权路径与 JWT 只读排查从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。';
+  const q0789Route = runtimeRouteWithRepositoryContext(routeQuestion(auditTag20260829_3RouteMap, q0789Question), '2.7.260829-3');
+  assert.equal(q0789Route.route.id, 'AUD-QR-SYS-01-JWT-CHAIN');
+  const q0789Initial = bundle.audit('', q0789Question, q0789Route);
+  assert.equal(q0789Initial.fallbackAnswerMode, 'chain');
+  assert.equal(q0789Initial.chainEvidenceSufficient, true);
+  const q0789Reply = bundle.fallback('', q0789Initial);
+  const q0789Final = bundle.audit(q0789Reply, q0789Question, q0789Route);
+  assert.deepEqual(q0789Final.violations, [], JSON.stringify({ reply: q0789Reply, audit: q0789Final }, null, 2));
+  assert.match(q0789Reply, /入口：未命中 Shiro anon 的请求由全路径 jwt 映射交给 JwtFilter/);
+  assert.doesNotMatch(q0789Reply, /入口[^\n]*未提供可发布的入口细节/);
+  assert.match(q0789Reply, /处理分支：URI 包含 \/comm 或 \/external/);
+  assert.match(q0789Reply, /处理分支：非 \/wx\/ 请求携带非空 token/);
+  const q0789DataLines = q0789Reply.split('\n').filter(line => /^- 数据(?:与状态)?：/u.test(line));
+  assert.ok(q0789DataLines.every(line => !/(?:普通 JWT|JwtRealm|verifyToken)/u.test(line)), q0789Reply);
+  const q0789DependencyLines = q0789Reply.split('\n').filter(line => /^- 外部依赖：/u.test(line));
+  assert.equal(q0789DependencyLines.length, 1, q0789Reply);
+  assert.match(q0789DependencyLines[0], /用户中心 IDubboUserCenterService\.verifyToken/);
+  assert.doesNotMatch(q0789DependencyLines[0], /Shiro|JwtFilter/);
+  assert.match(q0789Reply, /接口[^\n]*当前停点/);
+  assert.match(q0789Reply, /数据[^\n]*当前停点/);
+
+  const q0789Variant = '请按入口、接口、数据、外部依赖梳理免鉴权路径的 JWT 链路，未定义处就停。';
+  const q0789VariantRoute = runtimeRouteWithRepositoryContext(routeQuestion(auditTag20260829_3RouteMap, q0789Variant), '2.7.260829-3');
+  assert.equal(q0789VariantRoute.route.id, 'AUD-QR-SYS-01-JWT-CHAIN');
+  const q0789VariantFallback = bundle.modelFailureFallback(q0789Variant, q0789VariantRoute, { status: 429, message: 'rate limit' });
+  assert.ok(q0789VariantFallback);
+  assert.deepEqual(q0789VariantFallback.finalAudit.violations, []);
+  assert.doesNotMatch(q0789VariantFallback.reply, /入口[^\n]*未提供可发布的入口细节|外部依赖[^\n]*(?:Shiro|JwtFilter)/);
+
+  const q0790Question = '回到免鉴权路径与 JWT 只读排查这里，第一层核过没有异常，下一步按什么顺序继续只读排查？';
+  const q0790Route = runtimeRouteWithRepositoryContext(routeQuestion(auditTag20260829_3RouteMap, q0790Question), '2.7.260829-3');
+  assert.equal(q0790Route.route.id, 'AUD-QR-SYS-01-JWT-CONTINUE');
+  const q0790Initial = bundle.audit('', q0790Question, q0790Route);
+  assert.equal(q0790Initial.continuationDiagnosticQuestion, true);
+  assert.equal(q0790Initial.fallbackAnswerMode, 'field_diagnostic');
+  assert.equal(q0790Initial.routeReadOnlySequenceSteps.length, 4, JSON.stringify(q0790Initial.routeReadOnlySequenceSteps));
+  const q0790Reply = bundle.fallback('', q0790Initial);
+  const q0790Final = bundle.audit(q0790Reply, q0790Question, q0790Route);
+  assert.deepEqual(q0790Final.violations, [], JSON.stringify({ reply: q0790Reply, audit: q0790Final }, null, 2));
+  const q0790Order = [
+    q0790Reply.indexOf('完整 path 与 Shiro 映射'),
+    q0790Reply.indexOf('JwtFilter 实际命中的分支'),
+    q0790Reply.indexOf('脱敏后的 Authorization 是否存在'),
+    q0790Reply.indexOf('JwtRealm 日志和已有的用户中心 verifyToken 调用证据'),
+  ];
+  assert.ok(q0790Order.every(index => index >= 0) && q0790Order.every((index, position) => position === 0 || index > q0790Order[position - 1]), q0790Reply);
+  assert.doesNotMatch(q0790Reply, /当前操作请求|业务流水|状态表|页面选择|HTTP\/业务码/);
+  assert.match(q0790Reply, /只读边界：本路由未定义通用状态接口、数据库查询或页面对象清单，不得加入这些检查/);
+  for (const modelError of [
+    { code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束' },
+    { status: 429, message: 'rate limit' },
+  ]) {
+    const q0790Fallback = bundle.modelFailureFallback(q0790Question, q0790Route, modelError);
+    assert.ok(q0790Fallback, JSON.stringify({ modelError, reply: q0790Reply, audit: q0790Final }, null, 2));
+    assert.equal(q0790Fallback.reply, q0790Reply);
+    assert.deepEqual(q0790Fallback.finalAudit.violations, []);
+  }
+  const q0790Variant = '免鉴权路径上一层核对过且正常，接下来按什么顺序继续只读排查 JWT？';
+  const q0790VariantRoute = runtimeRouteWithRepositoryContext(routeQuestion(auditTag20260829_3RouteMap, q0790Variant), '2.7.260829-3');
+  assert.equal(q0790VariantRoute.route.id, 'AUD-QR-SYS-01-JWT-CONTINUE');
+  const q0790VariantFallback = bundle.modelFailureFallback(q0790Variant, q0790VariantRoute, { code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束' });
+  assert.ok(q0790VariantFallback);
+  assert.deepEqual(q0790VariantFallback.finalAudit.violations, []);
+  assert.doesNotMatch(q0790VariantFallback.reply, /当前操作请求|业务流水|状态表|页面选择|HTTP\/业务码/);
+
+  assert.match(bundle.modelVisibleError({ code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束' }, 'length123'), /达到长度上限，未完整结束/);
+  assert.doesNotMatch(bundle.modelVisibleError({ code: 'MODEL_OUTPUT_TRUNCATED' }, 'length123'), /暂时连不上/);
+  assert.match(bundle.modelVisibleError({ status: 429, message: 'rate limit' }, 'rate123'), /当前请求较多/);
+  assert.match(bundle.modelVisibleError({ code: 'MODEL_FIRST_TOKEN_TIMEOUT', message: 'timeout' }, 'timeout123'), /响应超时/);
 
   const genericConditionalChecklistQuestion = '我没完全听懂库存备注调整的排查建议，换成实施可以逐项照做的只读清单。';
   const genericConditionalChecklistRoute = {

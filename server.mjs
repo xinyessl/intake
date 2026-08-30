@@ -4047,21 +4047,27 @@ function consultAnswerSemanticAudit(answer, question, route) {
     || implementationChecklistQuestion || requestResultMismatchQuestion
     ? /(?:^|[。！？；;])(?:[^，,。！？；;：:\n]{0,20}只读(?:排查|核对)(?:顺序)?|实施只读(?:清单|步骤))\s*[：:]/u
     : /(?:^|[。！？；;])(?:现场|实施)?只读(?:排查|核对)顺序\s*[：:]/u;
-  const isRouteReadOnlySequenceFact = fact => routeReadOnlySequenceAnchorRe.test(String(fact || ''));
-  const routeReadOnlySequenceFact = routeReadOnlySequenceQuestion
-    ? currentRouteFacts.find(isRouteReadOnlySequenceFact) || ''
-    : '';
+  const routeNumberedSequenceFactRe = /^第\s*\d+(?:\s*(?:至|到|[-~～])\s*\d+)?\s*步(?:[^：:\n]{0,20})?\s*[：:]/u;
+  const isRouteReadOnlySequenceFact = fact => routeReadOnlySequenceAnchorRe.test(String(fact || ''))
+    || routeNumberedSequenceFactRe.test(String(fact || ''));
+  const routeReadOnlySequenceFacts = routeReadOnlySequenceQuestion
+    ? currentRouteFacts.filter(isRouteReadOnlySequenceFact)
+    : [];
+  const routeHasStandaloneNumberedSequence = routeReadOnlySequenceFacts
+    .some(fact => routeNumberedSequenceFactRe.test(String(fact || '')));
+  const routeReadOnlySequenceFact = routeReadOnlySequenceFacts[0] || '';
   const routeReadOnlySequenceBoundary = (() => {
-    if (!routeReadOnlySequenceFact) return '';
-    const body = routeReadOnlySequenceFact.split(/[：:]/u).slice(1).join('：');
-    const boundaryIndex = body.search(/(?:禁止|不得|不能|不要|未经授权)/u);
-    return boundaryIndex >= 0
-      ? body.slice(boundaryIndex).replace(/^[，,；;。！？\s]+|[\s]+$/gu, '').trim()
-      : '';
+    const boundaryFact = currentRouteFacts.find(fact => /^(?:禁止扩展|只读边界|安全边界)\s*[：:]/u.test(String(fact || '')))
+      || routeReadOnlySequenceFacts.find(fact => /(?:禁止|不得|不能|不要|未经授权)/u.test(String(fact || '')))
+      || '';
+    if (!boundaryFact) return '';
+    const body = boundaryFact.split(/[：:]/u).slice(1).join('：');
+    const boundaryIndex = body.search(/(?:禁止|不得|不能|不要|未经授权|本路由未定义)/u);
+    return (boundaryIndex >= 0 ? body.slice(boundaryIndex) : body)
+      .replace(/^[，,；;。！？\s]+|[\s]+$/gu, '').trim();
   })();
   const routeReadOnlySequenceSteps = (() => {
-    if (!routeReadOnlySequenceFact) return [];
-    const body = routeReadOnlySequenceFact.split(/[：:]/u).slice(1).join('：');
+    if (!routeReadOnlySequenceFacts.length) return [];
     // 只在明确顺序标记前切分，保留同一步内部的并列对象与“只记录…”边界。
     // 同时支持“已登录后异常再读…”这类带条件的后续只读步骤；禁止/不得
     // 后的句子是安全边界，不作为可执行步骤。
@@ -4073,14 +4079,27 @@ function consultAnswerSemanticAudit(answer, question, route) {
       .replace(/^(?:先|再|然后|随后|最后|按)\s*/u, '')
       .replace(/[，,；;。！？\s]+$/gu, '')
       .trim();
-    const stepClauses = body.split(sequenceSplitRe)
-      .map(clause => clause
-        .replace(nonSequenceTailRe, '')
-        .replace(/[；;。！？](?:禁止|不得|不能|不要|未经授权)[\s\S]*$/u, '')
-        .replace(/^[，,；;。！？\s]+|[，,；;。！？\s]+$/gu, '')
-        .trim())
-      .filter(clause => clause && stepMarkerRe.test(clause)
-        && !/^(?:禁止|不得|不能|不要|未经授权)/u.test(clause));
+    const stepClauses = routeReadOnlySequenceFacts.flatMap(fact => {
+      const rawFact = String(fact || '').trim();
+      const numbered = rawFact.match(routeNumberedSequenceFactRe);
+      const body = rawFact.split(/[：:]/u).slice(1).join('：');
+      if (numbered) {
+        const sequentialList = body.match(/^(.*?)(?:依次)(?:核对|查看|检查|读取)([^。！？；;]+)[。！？；;]?$/u);
+        if (sequentialList) {
+          const sharedScope = sequentialList[1].replace(/[，,\s]+$/gu, '').trim();
+          return sequentialList[2].split(/、/u).map((item, index) =>
+            `${index === 0 && sharedScope ? `${sharedScope}，` : ''}${index > 0 ? '再' : ''}核对${item.trim()}`);
+        }
+        return [body.replace(/^[，,；;。！？\s]+|[，,；;。！？\s]+$/gu, '').trim()];
+      }
+      return body.split(sequenceSplitRe)
+        .map(clause => clause
+          .replace(nonSequenceTailRe, '')
+          .replace(/[；;。！？](?:禁止|不得|不能|不要|未经授权)[\s\S]*$/u, '')
+          .replace(/^[，,；;。！？\s]+|[，,；;。！？\s]+$/gu, '')
+          .trim())
+        .filter(clause => clause && stepMarkerRe.test(clause));
+    }).filter(clause => clause && !/^(?:禁止|不得|不能|不要|未经授权)/u.test(clause));
     const stepTokens = value => stripStepMarker(value)
       .split(/[、，,与和]/u)
       .map(token => token
@@ -4216,8 +4235,10 @@ function consultAnswerSemanticAudit(answer, question, route) {
       && (!continuationDiagnosticQuestion
         || (staticClientDiagnosticQuestion
           ? /(?:下一步|下一层|第二层|接下来|观测|待确认|缺失)/iu.test(text)
-          : (/(?:下一步|下一层|第二层|接下来|观测|分支)/iu.test(text)
-            && /(?:没有请求|请求失败|响应正常|未取得|缺失)/iu.test(text)))));
+          : (routeReadOnlySequenceSteps.length
+            ? missingRouteReadOnlySequenceSteps.length === 0
+            : (/(?:下一步|下一层|第二层|接下来|观测|分支)/iu.test(text)
+              && /(?:没有请求|请求失败|响应正常|未取得|缺失)/iu.test(text))))));
   const routeFactText = currentRouteFacts.join(' ');
   const routeFactDimensionRules = [
     ['接口', /(?:接口|\bAPI\b|HTTP|\b(?:GET|POST|PUT|PATCH|DELETE)\b\s+\/)/iu],
@@ -4275,7 +4296,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const normalizeChainFact = value => {
     let normalized = String(value || '').replace(/^\s*(?:[-*+]\s+|[1-9]\d*[.、．]\s+)/u, '').trim();
     for (let index = 0; index < 3; index++) {
-      const next = normalized.replace(/^\s*(?:业务结论|产品|入口|接口|任务和警示|外部依赖|生成记录|停止|前端证据边界|实施只读清单|实施只读核对|端到端边界|数据与状态|留痕|当前停点|影响|实施|时间|约束|排班|结果|边界|当前页面|后端边界|统一入口|接入入口与主接口|类型|长度|删除|历史影响|权限|研发|多任务|权重)\s*[：:]\s*/u, '').trim();
+      const next = normalized.replace(/^\s*(?:业务结论|产品|入口|接口|任务和警示|外部依赖|生成记录|停止|前端证据边界|实施只读清单|实施只读核对|端到端边界|数据与状态|留痕|当前停点|停点|禁止扩展|[^，,。！？；;：:\n]{1,20}分支|影响|实施|时间|约束|排班|结果|边界|当前页面|后端边界|统一入口|接入入口与主接口|类型|长度|删除|历史影响|权限|研发|多任务|权重)\s*[：:]\s*/u, '').trim();
       if (next === normalized) break;
       normalized = next;
     }
@@ -4284,7 +4305,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const chainFactLabels = new Map();
   const normalizeAndRememberChainFact = value => {
     const raw = String(value || '').replace(/^\s*(?:[-*+]\s+|[1-9]\d*[.、．]\s+)/u, '').trim();
-    const label = raw.match(/^(业务结论|产品|入口|接口|任务和警示|外部依赖|生成记录|停止|前端证据边界|实施只读清单|实施只读核对|端到端边界|数据与状态|留痕|当前停点|影响|实施|时间|约束|排班|结果|边界|当前页面|后端边界|统一入口|接入入口与主接口|类型|长度|删除|历史影响|权限|研发|多任务|权重)\s*[：:]/u)?.[1] || '';
+    const label = raw.match(/^(业务结论|产品|入口|接口|任务和警示|外部依赖|生成记录|停止|前端证据边界|实施只读清单|实施只读核对|端到端边界|数据与状态|留痕|当前停点|停点|禁止扩展|[^，,。！？；;：:\n]{1,20}分支|影响|实施|时间|约束|排班|结果|边界|当前页面|后端边界|统一入口|接入入口与主接口|类型|长度|删除|历史影响|权限|研发|多任务|权重)\s*[：:]/u)?.[1] || '';
     const normalized = normalizeChainFact(value);
     if (normalized && label && !chainFactLabels.has(normalized)) chainFactLabels.set(normalized, label);
     return normalized;
@@ -4371,16 +4392,32 @@ function consultAnswerSemanticAudit(answer, question, route) {
   ].map(normalizeAndRememberChainFact).filter(Boolean)));
   const chainSources = chainAvailableFacts;
   const chainDimensionRule = id => chainDimensionSourceRules.find(item => item[0] === id)?.[1];
-  const chainDimensionLabelAllowed = (id, fact) => {
+  const chainFactExplicitDimension = fact => {
     const label = chainFactLabels.get(fact);
-    if (!label || id !== 'entry') return true;
-    return ['入口', '当前页面', '统一入口', '接入入口与主接口'].includes(label);
+    if (!label) return '';
+    if (['入口', '当前页面', '统一入口', '接入入口与主接口'].includes(label)) return 'entry';
+    if (label === '接口') return 'interfaces';
+    if (label === '外部依赖') return 'dependencies';
+    if (['数据', '数据与状态', '状态', '任务和警示', '生成记录', '留痕', '结果'].includes(label)) return 'data';
+    if (/(?:分支)$/u.test(label)) return 'flow';
+    if (['当前停点', '停点', '禁止扩展', '停止'].includes(label)) return 'gap';
+    return 'other';
+  };
+  const chainFactSupportsDimension = (id, fact) => {
+    const explicitDimension = chainFactExplicitDimension(fact);
+    if (explicitDimension) {
+      if (explicitDimension === 'flow' && id === 'dependencies') {
+        return /(?:外部依赖|外部用户中心|用户中心[^。！？；\n]{0,48}verifyToken|\bHIS\b|Dify)/iu.test(fact)
+          && !/(?:不是|并非|不属于)[^。！？；\n]{0,24}外部依赖/iu.test(fact);
+      }
+      if (id === 'state') return explicitDimension === 'data';
+      return explicitDimension === id;
+    }
+    const rule = chainDimensionRule(id);
+    return !!(rule && rule.test(fact));
   };
   const missingChainFactDimensions = chainDimensions
-    .filter(item => {
-      const rule = chainDimensionRule(item.id);
-      return rule && !chainAvailableFacts.some(fact => chainDimensionLabelAllowed(item.id, fact) && rule.test(fact));
-    })
+    .filter(item => !chainAvailableFacts.some(fact => chainFactSupportsDimension(item.id, fact)))
     .map(item => item.id);
   // 模型失败时可以用 route 事实生成稳定链路，但不能把一条
   // 模糊总述包装成“入口→接口→数据→依赖”。多维链路至少要有
@@ -4414,10 +4451,24 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const dataChainFact = chainAvailableFacts.find(fact => /(?:\b[a-z][a-z0-9_]+_[a-z0-9_]+\b|\bdeleted\s*=)/iu.test(fact))
     || chainAvailableFacts.find(fact => /(?:软删除|不物理删除|标记记录)/iu.test(fact))
     || chainSources.find(fact => /(?:\b[a-z][a-z0-9_]+_[a-z0-9_]+\b|\bdeleted\s*=|软删除|不物理删除)/iu.test(fact)) || '';
-  const dependencyChainFactRaw = chainAvailableFacts.find(fact => /(?:外部依赖|用户中心|\bHIS\b|\bDubbo\b|Dify)/iu.test(fact))
+  const dependencyChainFactRaw = chainAvailableFacts.find(fact => chainFactExplicitDimension(fact) === 'dependencies'
+    || (chainFactExplicitDimension(fact) !== 'entry'
+      && !/(?:不是|并非|不属于)[^。！？；\n]{0,24}外部依赖/iu.test(fact)
+      && /(?:外部依赖|用户中心|\bHIS\b|\bDubbo\b|Dify)/iu.test(fact)))
     || chainSources.find(fact => /(?:外部依赖|用户中心|\bHIS\b|\bDubbo\b)/iu.test(fact)) || '';
-  const compactDependencyChainFact = dependencyChainFactRaw
-    .replace(/`?[A-Za-z_$][A-Za-z0-9_$]*(?:Service|Controller|Mapper|Repository|DAO|DTO|VO)(?:#[A-Za-z_$][A-Za-z0-9_$]*)?`?/g, '')
+  const dependencyChainClause = value => {
+    const clauses = String(value || '').split(/[；;。]/u).map(clause => clause.trim()).filter(Boolean);
+    const clause = clauses.find(item => /(?:外部依赖|用户中心|\bHIS\b|\bDubbo\b|Dify)/iu.test(item)
+      && !/(?:不是|并非|不属于)[^。！？；\n]{0,24}外部依赖/iu.test(item)) || String(value || '').trim();
+    // 只从明确的外部调用边界处截取；HIS/用户中心也可能只是带引号的
+    // 整条业务主链成员，贸然从系统名截断会留下孤立右引号或残句。
+    const externalStart = /(?:外部用户中心|用户中心[^。！？；\n]{0,48}verifyToken)/iu.test(clause)
+      ? clause.search(/(?:外部用户中心|用户中心)/iu)
+      : /外部依赖/u.test(clause) ? clause.search(/外部依赖/u) : -1;
+    return externalStart >= 0 ? clause.slice(externalStart).trim() : clause;
+  };
+  const compactDependencyChainFact = dependencyChainClause(dependencyChainFactRaw)
+    .replace(/`?[A-Za-z_$][A-Za-z0-9_$]*(?:Controller|Mapper|Repository|DAO|DTO|VO)(?:#[A-Za-z_$][A-Za-z0-9_$]*)?`?/g, '')
     .replace(/`?get[A-Z][A-Za-z0-9_$]*(?:Id|Info|List|Page|Detail)?`?/g, '')
     .replace(/\s{2,}/g, ' ').replace(/中心\s+补/gu, '中心补').trim();
   // 明确未知优先取 route.answerFacts 已发布的原子事实；只有该路由没有
@@ -4577,7 +4628,8 @@ function consultAnswerSemanticAudit(answer, question, route) {
       chainDimensionFacts,
       ['外部依赖'],
       /(?:外部依赖|HIS|用户中心|audit-server|Redis|redis2db|Socket|Dubbo|Dify)/iu,
-    );
+    ).map(dependencyChainClause);
+    const flowChainFacts = chainDimensionFacts.filter(fact => chainFactExplicitDimension(fact) === 'flow');
     const addMissingChainDimension = (id, label) => {
       if (!missingChainFactDimensions.includes(id)) return;
       chainLines.push(`- ${label}：本轮 route 已核事实未提供可发布的${label}细节，当前停点，不补写。`);
@@ -4599,9 +4651,18 @@ function consultAnswerSemanticAudit(answer, question, route) {
       const businessEntryFact = /(?:登录后|进入后|打开后|访问后|从[^。！？\n]{1,32}(?:进入|打开|访问))/u.test(chainBusinessFact)
         ? chainBusinessFact : '';
       if (businessEntryFact) chainLines.push(`- 入口：${normalizeChainFact(businessEntryFact)}`);
-      else addChainFacts('入口', entryChainFacts, missingChainFactDimensions.includes('entry') ? '' : chainEntryFact);
+      else {
+        const entryLineBefore = chainLines.length;
+        addChainFacts('入口', entryChainFacts, missingChainFactDimensions.includes('entry') ? '' : chainEntryFact);
+        // 首条 route fact 既可能是业务结论，也可能带明确“入口：”标签。
+        // 用户点名入口时维度必须单独出现，不能被全局事实去重吞掉。
+        if (chainLines.length === entryLineBefore && entryChainFacts.length) {
+          chainLines.push(`- 入口：${normalizeChainFact(entryChainFacts[0])}`);
+        }
+      }
       addMissingChainDimension('entry', '入口');
     }
+    addChainFacts('处理分支', flowChainFacts);
     if (chainDimensions.some(item => item.id === 'interfaces') && uniqueChainInterfaces.length) {
       for (const item of uniqueChainInterfaces) chainLines.push(`- 接口：\`${item.display}\`。`);
     }
@@ -4787,8 +4848,12 @@ function consultAnswerSemanticAudit(answer, question, route) {
       // route 有时把只读顺序和“新增/取消会写数据”的禁止边界写在同一
       // 条 fact。动作过滤不能因此连前半段已核顺序一起删掉；紧凑 route 清单只
       // 发布冒号后的顺序子句，通用清单再负责统一写操作边界。
-      .flatMap(fact => compactRouteChecklistFacts
-        && routeReadOnlySequenceSteps.length && isRouteReadOnlySequenceFact(fact)
+      .flatMap(fact => routeHasStandaloneNumberedSequence && isRouteReadOnlySequenceFact(fact)
+        ? []
+        : routeHasStandaloneNumberedSequence && /^(?:禁止扩展|只读边界|安全边界)\s*[：:]/u.test(String(fact || ''))
+          ? []
+        : compactRouteChecklistFacts
+          && routeReadOnlySequenceSteps.length && isRouteReadOnlySequenceFact(fact)
         ? []
         : routeReadOnlySequenceQuestion && isRouteReadOnlySequenceFact(fact)
           ? [String(fact).split(/[；;]/u)[0].trim()].filter(Boolean)
@@ -4927,7 +4992,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
     const routeContinuationStepBodies = routeReadOnlySequenceSteps.map(step =>
       `${String(step.displayText || step.text || '').replace(/[。！？]+$/u, '')}。`);
     const continuationSteps = continuationDiagnosticQuestion
-      ? [...routeContinuationStepBodies, ...continuationStepBodies]
+      ? [...routeContinuationStepBodies, ...(routeHasStandaloneNumberedSequence ? [] : continuationStepBodies)]
         .map((step, index) => `${index + 1}. ${step}`)
       : safeSteps;
     const compactImplementationChecklistSteps = compactRouteChecklistFacts && implementationChecklistQuestion
@@ -5255,6 +5320,20 @@ function consultAnswerSemanticAudit(answer, question, route) {
       if (index >= 0) violations.splice(index, 1);
     }
   }
+  // current route 可直接用“第 1 至 3 步 / 第 4 步”发布原子只读顺序，
+  // 不一定另写“实施只读清单：”锚点。只要终稿逐字等于本轮由这些 route
+  // facts 生成的确定性 fallback，就允许已核类名/token 不末置；模型自行
+  // 拼接的技术段、事实越界和写操作仍不会满足等值条件，继续严格拦截。
+  const verifiedRouteSequenceFallback = verifiedFactsFallback
+    && routeReadOnlySequenceSteps.length
+    && String(safeDiagnosticFallback || '').trim()
+    && String(text || '').trim() === consultNormalizeSafeMarkdown(String(safeDiagnosticFallback).trim()).trim();
+  if (verifiedRouteSequenceFallback) {
+    for (const permitted of ['audience_technical_not_last', 'audience_technical_dump']) {
+      const index = violations.indexOf(permitted);
+      if (index >= 0) violations.splice(index, 1);
+    }
+  }
   // 链路型 verifiedFacts 兜底由 safeChainFallback 依据 route 原句确定性生成。
   // 链路题本来就要求保留入口、接口、数据和外部依赖，审计器在解析这些
   // 已核技术事实时会产生 audience_technical_dump；仅当正文逐字等于该
@@ -5316,7 +5395,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
       if (actionIndex >= 0) violations.splice(actionIndex, 1);
     }
   }
-  return { checked: true, diagnosticQuestion, audienceMode, explicitOperationContracts, explicitOperationEvidenceMissing, verifiedOperationEvidenceStop, operationEvidenceStopReply, audienceTechnicalParts, productTechnicalParts, implementationMisplacedTechnicalParts, implementationTechnicalFirstParts, currentRouteFacts, nonWritingRouteFacts, ambiguousAsBuiltSystemActionParts, staticClientOnlyRoute, staticClientDiagnosticQuestion, staticClientScopeOverreach, staticClientDiagnosticComplete, dataNotRenderedRouteBoundaryGroups, missingDataNotRenderedBoundaryGroups, routeHasClientSessionScope, routeHasMultiDeviceSession, dataNotRenderedEvidenceComplete, existingRecordNarrowingQuestion, existingRecordNarrowingFact, existingRecordFilterDimensions, missingExistingRecordNarrowing, routeReadOnlySequenceQuestion, routeReadOnlySequenceFact, routeReadOnlySequenceBoundary, routeReadOnlySequenceSteps, missingRouteReadOnlySequenceSteps, routeFallbackMode: routeFallbackMode || '', verifiedFactsFallback, chainRequested, chainDimensions, chainKnownFactDimensions, chainEvidenceSufficient, chainStageLabels, chainKeyBusinessFacts, missingChainKeyBusinessFacts, missingRequestedInterfaces, missingChainDimensions, audienceTechnicalDumpParts: uniqueChainTechnicalDetailParts, safeChainFallback, evidenceSufficiencyQuestion, fullHandoffMaterialQuestion, broadEvidenceQuestion, partialEvidenceQuestion, frontendRequestOnlyEvidenceQuestion, partialEvidenceInventoryQuestion, broadFactQuestion, fieldDiagnosticQuestion, contextFollowupQuestion, explicitReviewDiagnosticQuestion, interfaceDataBoundaryDiagnosticQuestion, verifiedInterfaceDataBoundaryDiagnosticQuestion, interfaceDataBoundaryInterfaces, requiredInterfaceDataBoundarySignatures, missingInterfaceDataBoundarySignatures, interfaceDataBoundaryDataFacts, interfaceDataBoundaryChecklistFact, interfaceDataBoundaryChecklistItems, missingInterfaceDataBoundaryChecklistItems, interfaceDataBoundaryLayerIndexes, interfaceDataBoundaryRouteStructureComplete, interfaceDataBoundaryDiagnosticComplete, continuationDiagnosticQuestion, dataReturnedNotRenderedQuestion, implementationChecklistQuestion, stageAwareImplementationChecklist, checklistStageLabels, missingChecklistStageLabels, missingChecklistRouteLabels, requestResultMismatchQuestion, multiStepTransactionDiagnosticQuestion, retryBoundaryChecklistQuestion, retryRiskCoverageGroups, missingRetryRiskCoverage, retryRiskFactsComplete, multiStageSideEffectDiagnosticQuestion, multiStageDiagnosticLayersComplete, uiAuthorizationProofQuestion, minimalEvidenceQuestion, diagnosticSequenceQuestion, authorizationDiagnosticLayersComplete, diagnosticSequenceComplete, fallbackAnswerMode, factQuestionDimensions, missingRouteFactDimensions, verifiedFactCoverageQuestion, missingVerifiedFactCoverage, implementationFactCoverageQuestion, missingImplementationFactCoverage, implementationFactCoverageGroups, missingFailureBranchCoverage, hasEvidenceSufficiencyVerdict, minimumRoutePath, missingEvidenceMinimumPath, observationInputContract, undefinedObservationVariables, symbolicDefinitions: Object.fromEntries(symbolicDefinitions), undefinedSymbolicComparisons, focusedFactQuestion, focusedTypeOrLengthQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, focusedRelationshipFacts, missingFocusedRelationshipFacts, safeDiagnosticFallback, explicitNonDestructiveBoundaryQuestion, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsupportedEvidenceNegations, unsupportedEvidenceAbsenceClaims, evidenceAbsenceCorrectionFacts, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, optionCardinalityMismatches, nonSequentialOptionSets, undefinedGroupReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, emptyNumberedSections, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, emptyDiagnosticBranchHeadings, emptyListStepItems, danglingClosingPunctuationLines, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
+  return { checked: true, diagnosticQuestion, audienceMode, explicitOperationContracts, explicitOperationEvidenceMissing, verifiedOperationEvidenceStop, operationEvidenceStopReply, audienceTechnicalParts, productTechnicalParts, implementationMisplacedTechnicalParts, implementationTechnicalFirstParts, currentRouteFacts, nonWritingRouteFacts, ambiguousAsBuiltSystemActionParts, staticClientOnlyRoute, staticClientDiagnosticQuestion, staticClientScopeOverreach, staticClientDiagnosticComplete, dataNotRenderedRouteBoundaryGroups, missingDataNotRenderedBoundaryGroups, routeHasClientSessionScope, routeHasMultiDeviceSession, dataNotRenderedEvidenceComplete, existingRecordNarrowingQuestion, existingRecordNarrowingFact, existingRecordFilterDimensions, missingExistingRecordNarrowing, routeReadOnlySequenceQuestion, routeReadOnlySequenceFact, routeReadOnlySequenceFacts, routeReadOnlySequenceBoundary, routeReadOnlySequenceSteps, missingRouteReadOnlySequenceSteps, routeFallbackMode: routeFallbackMode || '', verifiedFactsFallback, chainRequested, chainDimensions, chainKnownFactDimensions, chainEvidenceSufficient, chainStageLabels, chainKeyBusinessFacts, missingChainKeyBusinessFacts, missingRequestedInterfaces, missingChainDimensions, audienceTechnicalDumpParts: uniqueChainTechnicalDetailParts, safeChainFallback, evidenceSufficiencyQuestion, fullHandoffMaterialQuestion, broadEvidenceQuestion, partialEvidenceQuestion, frontendRequestOnlyEvidenceQuestion, partialEvidenceInventoryQuestion, broadFactQuestion, fieldDiagnosticQuestion, contextFollowupQuestion, explicitReviewDiagnosticQuestion, interfaceDataBoundaryDiagnosticQuestion, verifiedInterfaceDataBoundaryDiagnosticQuestion, interfaceDataBoundaryInterfaces, requiredInterfaceDataBoundarySignatures, missingInterfaceDataBoundarySignatures, interfaceDataBoundaryDataFacts, interfaceDataBoundaryChecklistFact, interfaceDataBoundaryChecklistItems, missingInterfaceDataBoundaryChecklistItems, interfaceDataBoundaryLayerIndexes, interfaceDataBoundaryRouteStructureComplete, interfaceDataBoundaryDiagnosticComplete, continuationDiagnosticQuestion, dataReturnedNotRenderedQuestion, implementationChecklistQuestion, stageAwareImplementationChecklist, checklistStageLabels, missingChecklistStageLabels, missingChecklistRouteLabels, requestResultMismatchQuestion, multiStepTransactionDiagnosticQuestion, retryBoundaryChecklistQuestion, retryRiskCoverageGroups, missingRetryRiskCoverage, retryRiskFactsComplete, multiStageSideEffectDiagnosticQuestion, multiStageDiagnosticLayersComplete, uiAuthorizationProofQuestion, minimalEvidenceQuestion, diagnosticSequenceQuestion, authorizationDiagnosticLayersComplete, diagnosticSequenceComplete, fallbackAnswerMode, factQuestionDimensions, missingRouteFactDimensions, verifiedFactCoverageQuestion, missingVerifiedFactCoverage, implementationFactCoverageQuestion, missingImplementationFactCoverage, implementationFactCoverageGroups, missingFailureBranchCoverage, hasEvidenceSufficiencyVerdict, minimumRoutePath, missingEvidenceMinimumPath, observationInputContract, undefinedObservationVariables, symbolicDefinitions: Object.fromEntries(symbolicDefinitions), undefinedSymbolicComparisons, focusedFactQuestion, focusedTypeOrLengthQuestion, focusedFactPrimaryPath, focusedMustNotConfuse, missingFocusedMustNotConfuse, focusedRelationshipFacts, missingFocusedRelationshipFacts, safeDiagnosticFallback, explicitNonDestructiveBoundaryQuestion, focusedTechnicalTokens, focusedTechnicalOverreach, likelihoodAllowed, likelihoodTerms, unsupportedLikelihoodClaims, unsupportedCausalLocalizationClaims, unsupportedDeterministicFailureClaims, contradictoryObservationOrderClaims, causalPriorityAllowed, causalPriorityTerms, unsupportedComponentClaims, unsupportedEvidenceNegations, unsupportedEvidenceAbsenceClaims, evidenceAbsenceCorrectionFacts, unsafeActorActionCount: unsafeActorActions.length, unsafeDirectActionCount: unsafeDirectActions.length, unexpectedPaths, unexpectedEntityTerms: unexpectedScopeTerms, unexpectedTechnicalTokens, requiredPrimaryPath, missingPrimaryPath, focusedFactOverreach, undefinedOrdinalReferences, undefinedArabicStepReferences, optionCardinalityMismatches, nonSequentialOptionSets, undefinedGroupReferences, selfReferentialStepReferences, topLevelExpectedStart, nonSequentialTopLevelSteps, emptyNumberedSections, cardinalityMismatches, incompleteResultBranchTables, conflictingCountDeclarations, incompleteLeadIns, emptyDiagnosticBranchHeadings, emptyListStepItems, danglingClosingPunctuationLines, orphanedAlternativeLines, danglingAlternativeLines, orphanedContrastLines, incompletePairedBranches, contradictoryNegativeSections, singleStepQuestion, singleStepOverreach, malformedMarkdown, violations };
 }
 
 function consultAnswerRevisionPrompt(draft, audit) {
@@ -6006,6 +6085,21 @@ function consultModelErrorInfo(error) {
     ...(Number.isInteger(status) && status >= 100 && status <= 599 ? { status } : {}),
     message,
   };
+}
+
+function consultModelVisibleError(error, requestId) {
+  const info = consultModelErrorInfo(error);
+  const suffix = requestId ? `错误编号：${requestId}。` : '';
+  if (info.kind === 'length_limit') {
+    return `（AI 回答达到长度上限，未完整结束；请缩小问题范围后重试。${suffix}）`;
+  }
+  if (info.kind === 'rate_limit') {
+    return `（AI 当前请求较多，请稍后重试。${suffix}）`;
+  }
+  if (info.kind === 'timeout') {
+    return `（AI 响应超时，请稍后重试。${suffix}）`;
+  }
+  return `（AI 暂时连不上，请稍后重试。${suffix}）`;
 }
 
 // 初稿 429、长度截断、空响应和其它暂时性模型失败都走同一个发布口：只有
@@ -8354,7 +8448,8 @@ const server = http.createServer((req, res) => {
             };
             if (retrieval) retrieval.answerAudit = answerAudit;
             sse({ answerAudit });
-            const m = `（AI 暂时连不上，请稍后重试。错误编号：${consultRequestId}。）`; reply = await publishSafeFinal(m, { err: true, code: 'consult_model_error', requestId: consultRequestId, stage: 'model_draft' });
+            const m = consultModelVisibleError(firstError, consultRequestId);
+            reply = await publishSafeFinal(m, { err: true, code: 'consult_model_error', requestId: consultRequestId, stage: 'model_draft' });
           }
         }
       }
