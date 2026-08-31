@@ -1176,7 +1176,112 @@ function consultContextFollowupIntent(question) {
 function contextualRouteQuestion(map, messages, currentQuestion, subKey = '', contextDepth = 0) {
   const current = String(currentQuestion || '').trim();
   let direct = routeQuestion(map, current, subKey);
-  if (!consultContextFollowupIntent(current)) return direct;
+  const routes = Array.isArray(map && map.questionRoutes) ? map.questionRoutes : [];
+  // “回到<完整 route title>这里”是用户对主题的显式锚定，比“下一步/继续
+  // 排查”等跨模块通用词更具体。先识别唯一完整标题；后续若同时表达首层
+  // 已核与继续只读，只允许在和该标题卡共享判别主题词的 continuation 卡中
+  // 选择。找不到专用 continuation 时保持标题卡本身，绝不能落到别的主题。
+  const compactCurrent = current.toLowerCase().replace(/\s+/gu, '');
+  const explicitReturnTitleHits = routes.filter(route => {
+    const title = String(route && route.title || '').trim();
+    if (Array.from(title).length < 4) return false;
+    const compactTitle = title.toLowerCase().replace(/\s+/gu, '');
+    const marker = `回到${compactTitle}`;
+    const at = compactCurrent.indexOf(marker);
+    if (at < 0) return false;
+    const after = compactCurrent.slice(at + marker.length);
+    return /^(?:这里|这边|这块|这个主题|这一(?:块|项|层)|中|上|，|,|。|；|;|：|:)/u.test(after);
+  });
+  const explicitReturnTitleCard = explicitReturnTitleHits.length === 1 ? explicitReturnTitleHits[0] : null;
+  const explicitReturnContinuation = !!explicitReturnTitleCard
+    && /(?:第一层|首层|第一步)[^。！？；\n]{0,36}(?:核过|已核|核对过|正常|没有异常|无异常|通过)/u.test(current)
+    && /(?:下一步|下一层|接下来|后面|继续)/u.test(current)
+    && /(?:只读|排查|核对|检查|顺序)/u.test(current);
+  const routeCardResult = (card, score, extra = {}) => {
+    const fallbackMode = card && card.fallbackMode === 'verifiedFacts' ? 'verifiedFacts' : '';
+    const safeScore = Math.max(Number(score) || 0, ROUTE_MATCH_MIN);
+    return {
+      matched: true,
+      tier: 1,
+      fallbackMode,
+      route: { id: card.id, title: card.title, fallbackMode },
+      score: Math.round(safeScore * 1000) / 1000,
+      exactRouteTitle: false,
+      primaryRefs: Array.isArray(card.primaryRefs) ? card.primaryRefs : [],
+      contextRefs: Array.isArray(card.contextRefs) ? card.contextRefs : [],
+      answerFacts: Array.isArray(card.answerFacts) ? card.answerFacts : [],
+      mustNotConfuse: Array.isArray(card.mustNotConfuse) ? card.mustNotConfuse : [],
+      focusTechnicalTokens: Array.from(new Set(
+        (Array.isArray(card.focusTechnicalTokens) ? card.focusTechnicalTokens : [])
+          .filter(token => typeof token === 'string').map(token => token.trim()).filter(Boolean),
+      )),
+      topN: [{ id: card.id, title: card.title, score: Math.round(safeScore * 1000) / 1000 }],
+      ...extra,
+    };
+  };
+  const explicitReturnResult = (priorRouteId = '') => {
+    if (!explicitReturnTitleCard) return null;
+    const directScores = new Map((Array.isArray(direct.topN) ? direct.topN : [])
+      .map(item => [String(item && item.id || ''), Number(item && item.score) || 0]));
+    let selectedCard = explicitReturnTitleCard;
+    if (explicitReturnContinuation) {
+      // 只用 title + keywords 建主题指纹，不用 aliases 里的通用问句模板。
+      // 去掉“请求/日志/下一步”等跨模块词后仍有交集，才视为同主题专用续查。
+      const genericTopicTokens = new Set([
+        '接口', '请求', '响应', '日志', '记录', '数据', '页面', '列表', '查询', '状态', '业务', '系统', '功能',
+        '现场', '当前', '现有', '同一', '一次', '只读', '排查', '核对', '检查', '顺序', '第一', '一层', '下一',
+        '继续', '异常', '没有', '正常', '入口', '处理', '实现', '关键', '证据', '返回', '问题', '建议',
+        '读排', '层只', '步按',
+        'guide', 'continue', 'sys', 'qr', 'dq', 'di',
+      ]);
+      const topicTokens = card => new Set(kbTokenize([
+        card && card.title,
+        ...((card && card.keywords) || []),
+      ].filter(Boolean).join(' ')).filter(token => !genericTopicTokens.has(token) && !/^\d+$/u.test(token)));
+      const namedTokens = topicTokens(explicitReturnTitleCard);
+      const namedTitleTokens = new Set(kbTokenize(explicitReturnTitleCard.title)
+        .filter(token => !genericTopicTokens.has(token) && !/^\d+$/u.test(token)));
+      const continuationCardText = card => [card && card.title, ...((card && card.keywords) || [])].filter(Boolean).join(' ');
+      const namedCardIsContinuation = /(?:下一层|继续只读|只读排查|排查顺序|第一层)/u.test(continuationCardText(explicitReturnTitleCard));
+      const candidates = (namedCardIsContinuation ? [] : routes.filter(card => card !== explicitReturnTitleCard
+        && /(?:下一层|继续只读|只读排查|排查顺序|第一层)/u.test(continuationCardText(card)))).map(card => {
+        const candidateTokens = topicTokens(card);
+        const candidateTitleTokens = new Set(kbTokenize(card && card.title)
+          .filter(token => !genericTopicTokens.has(token) && !/^\d+$/u.test(token)));
+        const shared = [...candidateTokens].filter(token => namedTokens.has(token));
+        // 标题是人工 route 的主题名，权重大于同模块宽 keywords；英文标识
+        //（如 XML）在两侧标题中命中时再加权，避免“数据采集与集成”这类
+        // 公共模块词把其它 continuation 卡误认成点名主题的专用续查。
+        const namedTitleShared = [...namedTitleTokens].filter(token => candidateTokens.has(token)).length;
+        const candidateTitleShared = [...candidateTitleTokens].filter(token => namedTokens.has(token)).length;
+        const identifierShared = shared.filter(token => /[a-z0-9]/u.test(token)).length;
+        return {
+          card,
+          // 至少一个“被点名标题”的判别 token 必须落在 continuation 卡中；
+          // 只在候选标题/keywords 里碰巧出现 route 的宽技术命名空间不算关联。
+          affinity: namedTitleShared > 0
+            ? shared.length + namedTitleShared * 8 + candidateTitleShared * 2 + identifierShared * 4
+            : 0,
+          score: directScores.get(String(card && card.id || '')) || 0,
+        };
+      }).filter(item => item.affinity > 0)
+        .sort((a, b) => b.affinity - a.affinity || b.score - a.score || String(a.card.id || '').localeCompare(String(b.card.id || '')));
+      if (candidates.length) selectedCard = candidates[0].card;
+    }
+    const selectedScore = directScores.get(String(selectedCard.id || ''))
+      || directScores.get(String(explicitReturnTitleCard.id || ''))
+      || Number(direct.score) || ROUTE_MATCH_MIN;
+    const result = routeCardResult(selectedCard, selectedScore, {
+      explicitReturnTitle: true,
+      contextNamedRouteId: String(explicitReturnTitleCard.id || ''),
+      contextualDirectPromotion: selectedCard !== explicitReturnTitleCard,
+      contextOverride: String(selectedCard.id || '') !== String(priorRouteId || ''),
+      contextPreviousRouteId: String(priorRouteId || ''),
+    });
+    if (selectedCard === explicitReturnTitleCard) result.exactRouteTitle = true;
+    return result;
+  };
+  if (!consultContextFollowupIntent(current) && !explicitReturnTitleCard) return direct;
   const history = Array.isArray(messages) ? messages : [];
   const users = history.map((m, messageIndex) => ({ m, messageIndex }))
     .filter(({ m }) => m && m.role === 'user' && String(m.content || '').trim());
@@ -1192,7 +1297,7 @@ function contextualRouteQuestion(map, messages, currentQuestion, subKey = '', co
       break;
     }
   }
-  if (!previous) return direct;
+  if (!previous) return explicitReturnResult() || direct;
   // 上一轮本身也可能是“只剩截图/请求已抓到/还缺什么”之类承接问法。
   // 用它之前的历史递归还原当时已经裁决的 route，避免连续第二个弱追问被宽泛 DQ 抢走事实账本。
   let prior = consultContextFollowupIntent(previous) && contextDepth < 24
@@ -1226,9 +1331,10 @@ function contextualRouteQuestion(map, messages, currentQuestion, subKey = '', co
       break;
     }
   }
-  if (!prior.matched) return direct;
-  const routes = Array.isArray(map && map.questionRoutes) ? map.questionRoutes : [];
+  if (!prior.matched) return explicitReturnResult() || direct;
   const priorRouteId = String(prior.route && prior.route.id || '');
+  const anchoredReturn = explicitReturnResult(priorRouteId);
+  if (anchoredReturn) return anchoredReturn;
 
   // 完整业务标题可能让 routeQuestion 把上一轮宽 route 强制放到首位，
   // 但 topN 的原始相关分已经显示当前轮存在显著更强的意图专属 route。

@@ -49,6 +49,7 @@ const consultScopeTechnicalTokens = new Function(
 const contextualRouteQuestion = new Function(
   'routeQuestion', 'consultScopeTechnicalTokens',
   routeConstants + '\n'
+    + extractFn(SRC, 'kbTokenize') + '\n'
     + extractFn(SRC, 'consultContextFollowupIntent') + '\n'
     + extractFn(SRC, 'contextualRouteQuestion') + '\nreturn contextualRouteQuestion;',
 )(routeQuestion, consultScopeTechnicalTokens);
@@ -155,6 +156,36 @@ test('多轮 route 裁决：当前轮高置信专用意图覆盖宽历史，弱�
   const switched = contextualRouteQuestion(map, historyFor(hisBroad, explicitSwitch), explicitSwitch);
   assert.equal(switched.route.id, 'AUD-QR-MK-02', '当前轮显式新实体必须继续覆盖历史主题');
   assert.notEqual(switched.inherited, true, '显式切题不得标成从 HIS 历史继承');
+
+  const fixture = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools/fixtures/audit-browser-1000.questions.json'), 'utf8'));
+  const fixtureById = new Map(fixture.questions.map(item => [item.id, item.question]));
+  const q0845 = fixtureById.get('Q0845');
+  const realConversation = ['Q0841', 'Q0842', 'Q0843', 'Q0844', 'Q0845'].flatMap((id, index) => [
+    { role: 'user', content: fixtureById.get(id) },
+    ...(index < 4 ? [{ role: 'assistant', content: `第 ${index + 1} 轮已发布正文。` }] : []),
+  ]);
+  const q0845Route = contextualRouteQuestion(map, realConversation, q0845);
+  assert.equal(q0845Route.route.id, 'AUD-QR-GUIDE-01', JSON.stringify(q0845Route, null, 2));
+  assert.equal(q0845Route.contextNamedRouteId, 'AUD-QR-DI-03', '“回到 XML 报文解析集成”必须先锚定被点名 route');
+  assert.equal(q0845Route.contextPreviousRouteId, 'AUD-QR-DI-03');
+  assert.equal(q0845Route.topN[0].id, q0845Route.route.id, '上下文约束后的候选首项必须与 selected 一致');
+  assert.ok(q0845Route.topN.every(item => item.id !== 'AUD-QR-SYS-01-JWT-CONTINUE'), JSON.stringify(q0845Route.topN));
+
+  const q0845SingleTurn = contextualRouteQuestion(map, [{ role: 'user', content: q0845 }], q0845);
+  assert.equal(q0845SingleTurn.route.id, 'AUD-QR-GUIDE-01', '无历史时完整 route title 同样必须锚定同主题续查');
+  assert.equal(q0845SingleTurn.contextNamedRouteId, 'AUD-QR-DI-03');
+
+  const returnMarker = '回到医嘱标记这里，第一层核过没有异常，下一步按什么顺序继续只读排查？';
+  const returnMarkerRoute = contextualRouteQuestion(map, historyFor(hisBroad, returnMarker), returnMarker);
+  assert.equal(returnMarkerRoute.route.id, 'AUD-QR-MK-02', '没有同主题 continuation 卡时必须保持点名 route，不能被通用下一步 route 抢走');
+  assert.equal(returnMarkerRoute.contextNamedRouteId, 'AUD-QR-MK-02');
+
+  const returnJwt = '回到免鉴权路径下一层只读排查这里，完整 path 已拿到，接下来只读核什么？';
+  assert.equal(
+    contextualRouteQuestion(map, historyFor(hisContinue, returnJwt), returnJwt).route.id,
+    'AUD-QR-SYS-01-JWT-CONTINUE',
+    '显式回到另一个 route title 时仍应按新标题切题',
+  );
 });
 
 test('答疑受众按问句意图分层：普通业务默认产品，现场诊断归实施，明确技术契约才归研发', () => {
