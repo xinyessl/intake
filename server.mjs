@@ -3594,8 +3594,17 @@ function consultAnswerSemanticAudit(answer, question, route) {
     ...implementationTechnicalFirstParts,
   ]));
   const readOnlyWriteInstructionRe = /(?:^|[，：:；;]\s*)(?:[-*]\s+|[1-9]\d*[.、．]\s*)?(?:准备|先|再|然后|请|让|用|尝试|建议|可以|需要|应当|应该|去)[^。！？；\n]{0,40}(?:新建|新增|创建|编辑|删除|保存|提交|发送|完成|签名|审批|星标|补跑|重跑|重试|重新触发|再次触发)/iu;
+  // “核对提交编号/删除记录/审批流水”中的动作词是已有证据对象，不是
+  // 写操作指令。只豁免句首明确的核对/查看/对照/记录/读取，且同句后面
+  // 没有“核对后再删除/提交”等动作转折；真正的先查后写仍继续拦截。
+  const pureReadOnlyEvidenceStatement = statement => {
+    const plain = String(statement || '').replace(/^\s*(?:[-*+]\s+|[1-9]\d*[.、．]\s*)?/u, '').trim();
+    if (!/^(?:先|再|然后|随后|最后)?\s*(?:只读)?\s*(?:核对|查看|查验|检查|对照|记录|读取)/u.test(plain)) return false;
+    return !/(?:后|并|然后|随后|接着|同时)[，,\s]*(?:(?:请|再|去|重新)\s*)*(?:新建|新增|创建|编辑|删除|保存|提交|发送|完成|签名|审批|星标|补跑|重跑|重试|触发)/u.test(plain);
+  };
   const unsafeDirectActions = controlled || !(diagnosticQuestion || /只读/u.test(text)) ? [] : text.split(/(?<=[。！？；\n])/u)
-    .map(x => x.trim()).filter(statement => statement && !statementIsRouteFact(statement) && (
+    .map(x => x.trim()).filter(statement => statement && !statementIsRouteFact(statement)
+      && !pureReadOnlyEvidenceStatement(statement) && (
       Array.from(statement.matchAll(CONSULT_DIRECT_RISKY_ACTION_RE))
         .some(match => !negatedActorPrefix.test(statement.slice(0, match.index)) && !negatedRiskyAction(statement, match.index))
       || readOnlyWriteInstructionRe.test(statement)
@@ -4288,12 +4297,12 @@ function consultAnswerSemanticAudit(answer, question, route) {
     // 只在明确顺序标记前切分，保留同一步内部的并列对象与“只记录…”边界。
     // 同时支持“已登录后异常再读…”这类带条件的后续只读步骤；禁止/不得
     // 后的句子是安全边界，不作为可执行步骤。
-    const sequenceMarkerSource = '(?:先|再|然后|随后|最后|按|记录|确认|核对|查看|读|沿|(?:需|应)?单独确认|另行确认|分别确认|[^，,；;。！？\\n]{1,24}(?:需|应)单独确认|[^，,；;。！？\\n]{1,16}后(?:异常)?再)';
+    const sequenceMarkerSource = '(?:依次(?:核对|查看|检查|读取)|先|再|然后|随后|最后|按|记录|确认|核对|查看|读|沿|(?:需|应)?单独确认|另行确认|分别确认|[^，,；;。！？\\n]{1,24}(?:需|应)单独确认|[^，,；;。！？\\n]{1,16}后(?:异常)?再)';
     const sequenceSplitRe = new RegExp(`(?<=[，,；;。])(?=${sequenceMarkerSource})`, 'u');
     const stepMarkerRe = new RegExp(`^${sequenceMarkerSource}`, 'u');
     const nonSequenceTailRe = new RegExp(`[；;](?!${sequenceMarkerSource})[\\s\\S]*$`, 'u');
     const stripStepMarker = value => String(value || '')
-      .replace(/^(?:先|再|然后|随后|最后|按)\s*/u, '')
+      .replace(/^(?:依次|先|再|然后|随后|最后|按)\s*/u, '')
       .replace(/[，,；;。！？\s]+$/gu, '')
       .trim();
     const stepClauses = routeReadOnlySequenceFacts.flatMap(fact => {
@@ -4323,7 +4332,13 @@ function consultAnswerSemanticAudit(answer, question, route) {
         .replace(/(?:核对|查看|查验|检查|看|沿)/gu, '')
         .replace(/[\s。；;：:]/gu, ''))
       .filter(Boolean);
-    return stepClauses
+    const expandedStepClauses = stepClauses.flatMap(clause => {
+      const sequentialList = clause.match(/^依次(?:核对|查看|检查|读取)([^。！？；;]+)$/u);
+      if (!sequentialList) return [clause];
+      return sequentialList[1].split(/、/u).map((item, index) =>
+        `${index > 0 ? '再' : ''}核对${item.trim()}`);
+    });
+    return expandedStepClauses
       .map(step => ({
         // text 保持旧审计合同（不含“先/再/按”），displayText 用于
         // 确定性回答保留人能直接照做的顺序语义。
@@ -5021,9 +5036,44 @@ function consultAnswerSemanticAudit(answer, question, route) {
     const compactRouteChecklistFacts = (continuationDiagnosticQuestion
       || requestResultMismatchQuestion
       || (implementationChecklistQuestion && !stageAwareImplementationChecklist && !retryBoundaryChecklistQuestion))
-      && /(?:^|[。！？；;])实施只读(?:清单|步骤)\s*[：:]/u.test(routeReadOnlySequenceFact);
+      && routeReadOnlySequenceSteps.length > 0;
+    // 清单化追问只保留少量会改变现场判断的 route 边界，不再把整张
+    // answerFacts 搬到步骤前。分组按“响应成功边界 / 查询或覆盖缺口 /
+    // 日志异步边界”这类通用语义择取，每组最多一条，且都来自 current route。
+    const compactChecklistJudgmentFacts = compactRouteChecklistFacts && implementationChecklistQuestion
+      ? (() => {
+          const selected = [];
+          const usedFacts = new Set();
+          const boundaryClauses = fact => {
+            const clauses = String(fact || '').split(/(?<=[。！？；])/u).map(part => part.trim()).filter(Boolean);
+            const relevant = clauses.filter(part => [
+              /(?=.*(?:HTTP|业务码|成功码|XML))(?=.*(?:不能|不等于|无法|不保证|只证明|只表示|等同))/iu,
+              /(?=.*(?:查询|结果|读取|覆盖))(?=.*(?:缺口|未覆盖|未实现|注释|不支持|只组装|只能))/iu,
+              /(?:(?:请求|响应)?日志[^。！？；]{0,36}(?:异步|晚于|记录失败)|(?:日志存在|记录链)[^。！？；]{0,36}(?:不能代替|不等于|只证明))/iu,
+              /(?=.*(?:不会自动|只有[^。！？；]{0,40}才|不能代替|不等于))(?=.*(?:审核|采纳|保存|提交|写入|结果|状态))/iu,
+            ].some(re => re.test(part)));
+            return relevant.join('');
+          };
+          const addFirst = re => {
+            const fact = currentRouteFacts.find(item => !isRouteReadOnlySequenceFact(item)
+              && !usedFacts.has(item) && re.test(String(item || '')));
+            if (fact) {
+              usedFacts.add(fact);
+              selected.push(boundaryClauses(fact) || fact);
+            }
+          };
+          addFirst(/(?=.*(?:HTTP|业务码|成功码|响应))(?=.*(?:不能|不等于|无法|不保证|只证明|只表示))/iu);
+          addFirst(/(?=.*(?:查询|结果|读取|覆盖))(?=.*(?:缺口|未覆盖|未实现|注释|不支持|只组装|只能))/iu);
+          addFirst(/(?:(?:请求|响应)?日志[^。！？；]{0,36}(?:异步|晚于|记录失败)|(?:日志存在|记录链)[^。！？；]{0,36}(?:不能代替|不等于|只证明))/iu);
+          addFirst(/(?=.*(?:不会自动|只有[^。！？；]{0,40}才|不能代替|不等于))(?=.*(?:审核|采纳|保存|提交|写入|结果|状态))/iu);
+          return selected;
+        })()
+      : [];
     const diagnosticSourceFacts = compactRouteChecklistFacts
-      ? Array.from(new Set([currentRouteFacts[0], routeReadOnlySequenceFact].filter(Boolean)))
+      ? Array.from(new Set([
+          ...(compactChecklistJudgmentFacts.length ? compactChecklistJudgmentFacts : [currentRouteFacts[0]]),
+          routeReadOnlySequenceFact,
+        ].filter(Boolean)))
       : currentRouteFacts;
     const allConfirmedFacts = route && route.matched
       ? Array.from(new Set([
@@ -5108,7 +5158,9 @@ function consultAnswerSemanticAudit(answer, question, route) {
     // 恰有“成功：”事实时会误报缺少“失败：”。页面未呈现或接口/数据/
     // 边界的宽诊断都是业务事实盘点，使用不含分支引导词的标题；
     // facts 内容与顺序不变，真正的成对分支审计仍保持严格。
-    const knownBlockHeading = dataReturnedNotRenderedQuestion || verifiedInterfaceDataBoundaryDiagnosticQuestion || continuationDiagnosticQuestion
+    const knownBlockHeading = compactRouteChecklistFacts && implementationChecklistQuestion
+      ? '已核判断边界：'
+      : dataReturnedNotRenderedQuestion || verifiedInterfaceDataBoundaryDiagnosticQuestion || continuationDiagnosticQuestion
       ? '已核业务边界：'
       : '已知事实（继续作为判断基线）：';
     const knownBlock = stageChecklistKnownFacts.length
@@ -5213,7 +5265,8 @@ function consultAnswerSemanticAudit(answer, question, route) {
         .map((step, index) => `${index + 1}. ${step}`)
       : safeSteps;
     const compactImplementationChecklistSteps = compactRouteChecklistFacts && implementationChecklistQuestion
-      ? [...routeContinuationStepBodies, ...safeSteps.slice(2).map(step => step.replace(/^\d+\.\s*/u, ''))]
+      ? [...routeContinuationStepBodies, ...(routeContinuationStepBodies.length >= 3
+          ? [] : safeSteps.slice(2).map(step => step.replace(/^\d+\.\s*/u, '')))]
         .map((step, index) => `${index + 1}. ${step}`)
       : safeSteps;
     const staticClientContinuationSteps = staticClientDiagnosticQuestion
@@ -6383,8 +6436,15 @@ function consultVerifiedFactsFallback(question, route, routeFactsOnly = false) {
     && strictAudit.verifiedFactsPrePermitViolations.every(violation => safeTerminalPresentationViolations.has(violation)));
   const contextualReply = routeFactsOnly && routeFactsAreCompleteSafeTerminal
     ? consultVerifiedFactsContextualReply(question, initialAudit) : '';
+  // “换成实施逐项只读清单”明确改变的是发布形态。即使完整 route facts
+  // 本身安全，也不能让 strictReply 抢在按 current route 拆出的编号清单前；
+  // 只采用同一轮审计生成的 safeDiagnosticFallback，不接受模型自由扩写。
+  const implementationChecklistReply = routeFactsOnly && routeFactsAreCompleteSafeTerminal
+    && initialAudit.implementationChecklistQuestion
+    && String(initialAudit.safeDiagnosticFallback || '').trim()
+    ? consultNormalizeSafeMarkdown(String(initialAudit.safeDiagnosticFallback).trim()) : '';
   const reply = routeFactsOnly && routeFactsAreCompleteSafeTerminal
-    ? (contextualReply || strictReply)
+    ? (implementationChecklistReply || contextualReply || strictReply)
     : consultAnswerSafeFallback('', initialAudit);
   const finalAudit = consultAnswerSemanticAudit(reply, question, route);
   if (finalAudit.violations.length) return null;

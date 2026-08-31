@@ -3879,6 +3879,54 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.doesNotMatch(q0813Fallback.reply, /(?:因此|所以|这(?:就)?证明)[^。！？\n]{0,40}(?:已部署|已启动|当前可用|链路已完成)/);
   assert.deepEqual(q0813Fallback.finalAudit.violations, [], JSON.stringify(q0813Fallback.finalAudit, null, 2));
 
+  const q0814Question = '另一轮独立复测（814）里，先切到另一个问题：“HIS对外XML接口”当前实现的关键入口或处理链是什么？';
+  const q0814Route = runtimeRouteWithRepositoryContext(
+    routeQuestion(auditTag20260831_1RouteMap, q0814Question),
+    '2.7.260831-1',
+  );
+  assert.equal(q0814Route.route.id, 'AUD-QR-DI-02', JSON.stringify(q0814Route, null, 2));
+  const q0814Fallback = bundle.modelFailureFallback(q0814Question, q0814Route, {
+    code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束',
+  });
+  assert.ok(q0814Fallback, 'Q0814 topic switch 截断后仍须回答 DI-02 当前处理链');
+  assert.equal(q0814Fallback.initialAudit.implementationChecklistQuestion, false);
+  assert.match(q0814Fallback.reply, /统一入口[\s\S]*业务代码[\s\S]*提交审核/);
+  assert.match(q0814Fallback.reply, /查询结果[\s\S]*HIS 主动查询/);
+  assert.doesNotMatch(q0814Fallback.reply, /实施逐项只读清单/);
+  assert.deepEqual(q0814Fallback.finalAudit.violations, []);
+
+  const q0815Question = '另一轮独立复测（815）里，我没完全听懂HIS对外XML接口的排查建议，换成实施可以逐项照做的只读清单。';
+  const q0815Route = runtimeRouteWithRepositoryContext(
+    routeQuestion(auditTag20260831_1RouteMap, q0815Question),
+    '2.7.260831-1',
+  );
+  assert.equal(q0815Route.route.id, 'AUD-QR-DI-02', JSON.stringify(q0815Route, null, 2));
+  const q0815Fallback = bundle.modelFailureFallback(q0815Question, q0815Route, {
+    code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束',
+  });
+  const q0815Initial = bundle.audit('', q0815Question, q0815Route);
+  const q0815CandidateAudit = bundle.audit(q0815Initial.safeDiagnosticFallback, q0815Question, q0815Route);
+  assert.ok(q0815Fallback, JSON.stringify({ message: 'Q0815 截断后必须发布 route-scoped 实施只读清单', candidate: q0815Initial.safeDiagnosticFallback, violations: q0815CandidateAudit.violations, unsafeActorActionCount: q0815CandidateAudit.unsafeActorActionCount, unsafeDirectActionCount: q0815CandidateAudit.unsafeDirectActionCount }, null, 2));
+  assert.equal(q0815Fallback.initialAudit.implementationChecklistQuestion, true);
+  assert.equal(q0815Fallback.initialAudit.fallbackAnswerMode, 'field_diagnostic');
+  const q0815Steps = q0815Fallback.reply.match(/^\d+\.\s+.+$/gmu) || [];
+  assert.equal(q0815Steps.length, 5, q0815Fallback.reply);
+  q0815Steps.forEach((step, index) => assert.match(step, new RegExp(`^${index + 1}\\.\\s+`)));
+  assert.match(q0815Fallback.reply, /1\. 核对业务代码/);
+  assert.match(q0815Fallback.reply, /2\. 再核对XML 内业务处理码/);
+  assert.match(q0815Fallback.reply, /3\. 再核对提交编号/);
+  assert.match(q0815Fallback.reply, /4\. 再核对消息条目及状态/);
+  assert.match(q0815Fallback.reply, /5\. 再对照已有请求响应日志和当前任务记录/);
+  assert.match(q0815Fallback.reply, /HTTP 200[\s\S]*XML 成功码[\s\S]*不能单独证明/);
+  assert.match(q0815Fallback.reply, /查询缺口[\s\S]*自动通过读取代码当前都被注释/);
+  assert.match(q0815Fallback.reply, /请求和响应日志异步记录[\s\S]*不能代替业务落库/);
+  assert.match(q0815Fallback.reply, /不得只看 HTTP 200 判成功[\s\S]*不要为了抓包重复提交/);
+  assert.ok(q0815Route.answerFacts.filter(fact => q0815Fallback.reply.includes(fact)).length < q0815Route.answerFacts.length, 'Q0815 不得机械发布完整 route facts');
+  assert.doesNotMatch(q0815Fallback.reply, /(?:请|可以|需要|应当|应该|建议)[^。！？\n]{0,32}(?:重放|修改数据|重复提交处方|重复提交医嘱)/);
+  assert.deepEqual(q0815Fallback.finalAudit.violations, [], JSON.stringify({ reply: q0815Fallback.reply, audit: q0815Fallback.finalAudit }, null, 2));
+  assert.ok(!bundle.audit('1. 核对提交编号。', q0815Question, q0815Route).violations.includes('cross_actor_side_effect'), '只读核对对象中的“提交”不得误判成写操作');
+  assert.ok(bundle.audit('1. 核对提交编号后，请重新提交真实业务。', q0815Question, q0815Route).violations.includes('cross_actor_side_effect'), '先核对后写入仍须被动作守卫拦截');
+
   const absoluteSupportedRoute = {
     matched: true,
     route: { title: '绝对量词明确契约' },
