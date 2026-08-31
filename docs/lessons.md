@@ -13,6 +13,7 @@
 ---
 
 ## ✅ 本项目自检清单（每次交付前逐条过）
+- [ ] **【verifiedFacts 模型失败不能在完整 route facts 后再套通用诊断模板】**：先判断完整 `answerFacts` 是否已经通过实质安全门；安全则逐条发布并停止扩写，不安全则保留既有安全转换。发布审计同时拦 `current route` 等内部术语和 route 未正向定义的页面选择/状态接口/页面刷新/列表摘要；route miss 的最小安全留证不受影响（见 L-139）。
 - [ ] **【产品仓刷新只能写 Intake 托管缓存】**：`repoPath` 可能来自测试数据或历史登记，不能假定它一定是缓存 clone。任何 fetch/reset 前先用 realpath 确认位于 `data/repos`，再检查工作区 clean；fetch 后、reset 前再检查一次。外部/dirty/状态不明/fetch 失败一律 fail closed，并在接口结果中返回可观测 reason（见 L-138）。
 - [ ] **【同主题宽标题不能盖掉当前轮高置信专用意图】**：多轮里上一问是“当前实现/宽清单”，下一问明确改成第一层正常后的继续只读排查或受限证据判断时，不能只因问句仍逐字出现宽 route 标题就继承旧 facts。若本轮另一人工候选分数至少为旧候选两倍且绝对差达到命中门，应恢复专用 current route；弱短句仍继承。必须同时核 `routing.routeId/score/topN[0]` 一致（见 L-137）。
 - [ ] **【受限证据问句路由要先剥通用后缀、再在同主题簇比完整意图】**：“只有一次请求响应/无库权限/证据能判断到哪”会在多个 route alias 重复，不能让它的 IDF 分盖过问句前文的明确实体。先用主题分限制候选簇，再用完整问句区分 continue/chain/evidence；去材料前先 trim 尾标点，具体材料本身含实体时要保留。`verifiedFacts` 发布的“第 1 至 3 步/第 4 步仅适用”也要在终审中定义完整步骤集（见 L-136）。
@@ -1322,3 +1323,10 @@
 - 解法：写操作只允许 `data/repos` 下由 Intake clone 的专用缓存仓，使用 realpath 防符号链接逃逸；外部仓永远只读。托管缓存仓在 fetch 前和 reset 前各执行一次 `git status --porcelain`，dirty、状态不明或 fetch 失败均 fail closed；拒绝原因通过 `repos/blockedRepos/error` 返回。
 - 防复发：回归使用真实临时 bare origin + 托管/外部 clone，必须同时证明 clean 缓存仓能更新、dirty 仓 HEAD/已跟踪/未跟踪文件不变、外部 clean 仓也不写、符号链接不能越界；不能只用 mock 验证“调用了 status”。
 - 关联：`PD-01 AC-15`；`server.mjs`；`tools/repo-refresh-safety.mjs`；`tools/repo-refresh-safety.logic.test.mjs`；`docs/changes/CHG-产品仓刷新只写托管缓存.md`。
+
+### L-139 verifiedFacts 已构成完整安全终稿时不得再追加通用诊断
+- 现象（2026-08-31）：Audit Q795 已正确切到 `GUIDE-01`，模型长度截断后的确定性终稿也完整发布了该 route 的 `answerFacts`，但末尾仍追加一组通用“下一层只读排查顺序”，带出 route 未定义的页面选择、对象标识、状态接口、页面刷新、列表摘要，并泄露 `current route`。
+- 根因：模型失败入口虽然优先调用 `verifiedFacts` fallback，但仍复用普通 `field_diagnostic` 的通用步骤组装；发布审计又把完整 route facts 当成安全豁免，没有区分排版型 violation 与需改写的实质安全 violation，也未把运行时内部术语和未核通用模板列为发布阻断项。
+- 解法：先以未豁免的发布前审计确认完整 `answerFacts` 只有排版/结构类问题，且安全转换没有删除或改写任何事实；满足时只按“业务结论 / 实施口径”逐条发布原 facts 并停止扩写。不满足时继续走既有安全改写。发布终审另行阻断 `current route`、`answerFacts`、`mustNotConfuse` 等内部术语，以及 route 未正向定义的页面/状态模板；否定边界不误拦。
+- 防复发：同组回归必须模拟 Q792/Q793/Q795 的 length 与 429，逐条比对终稿和完整 route facts，并断言无通用页面、状态、账号、版本模板；普通 route miss 仍要保留安全最小留证步骤。至少一次隔离 MySQL 真登录、项目保存、连续会话 HTTP/SSE 冒烟，核对持久化正文和 `finalViolations=[]`。
+- 关联：`FS-04 AC-147`；`server.mjs`；`tools/fs-04-consult-conversation.logic.test.mjs`；`docs/changes/CHG-consult-模型失败只发布完整安全路由事实.md`。
