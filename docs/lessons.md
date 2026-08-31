@@ -13,6 +13,7 @@
 ---
 
 ## ✅ 本项目自检清单（每次交付前逐条过）
+- [ ] **【verifiedFacts 模型失败也不能丢掉本轮显式观测语义】**：完整 route facts 是产品事实底座，不等于现场题已经答完；当用户明确只确认前端已发起/服务端无日志，或接口有数据但页面未呈现时，在不删改 facts 的前提下分别组合“已知/未知”或“最小交接证据”。追加项只取用户观测和 route 已点名层，不恢复无条件通用页面/状态模板，不重放或写操作；精确主题题必须以 direct route 真跑，不能只模拟 inherited route（见 L-140）。
 - [ ] **【verifiedFacts 模型失败不能在完整 route facts 后再套通用诊断模板】**：先判断完整 `answerFacts` 是否已经通过实质安全门；安全则逐条发布并停止扩写，不安全则保留既有安全转换。发布审计同时拦 `current route` 等内部术语和 route 未正向定义的页面选择/状态接口/页面刷新/列表摘要；route miss 的最小安全留证不受影响（见 L-139）。
 - [ ] **【产品仓刷新只能写 Intake 托管缓存】**：`repoPath` 可能来自测试数据或历史登记，不能假定它一定是缓存 clone。任何 fetch/reset 前先用 realpath 确认位于 `data/repos`，再检查工作区 clean；fetch 后、reset 前再检查一次。外部/dirty/状态不明/fetch 失败一律 fail closed，并在接口结果中返回可观测 reason（见 L-138）。
 - [ ] **【同主题宽标题不能盖掉当前轮高置信专用意图】**：多轮里上一问是“当前实现/宽清单”，下一问明确改成第一层正常后的继续只读排查或受限证据判断时，不能只因问句仍逐字出现宽 route 标题就继承旧 facts。若本轮另一人工候选分数至少为旧候选两倍且绝对差达到命中门，应恢复专用 current route；弱短句仍继承。必须同时核 `routing.routeId/score/topN[0]` 一致（见 L-137）。
@@ -1330,3 +1331,10 @@
 - 解法：先以未豁免的发布前审计确认完整 `answerFacts` 只有排版/结构类问题，且安全转换没有删除或改写任何事实；满足时只按“业务结论 / 实施口径”逐条发布原 facts 并停止扩写。不满足时继续走既有安全改写。发布终审另行阻断 `current route`、`answerFacts`、`mustNotConfuse` 等内部术语，以及 route 未正向定义的页面/状态模板；否定边界不误拦。
 - 防复发：同组回归必须模拟 Q792/Q793/Q795 的 length 与 429，逐条比对终稿和完整 route facts，并断言无通用页面、状态、账号、版本模板；普通 route miss 仍要保留安全最小留证步骤。至少一次隔离 MySQL 真登录、项目保存、连续会话 HTTP/SSE 冒烟，核对持久化正文和 `finalViolations=[]`。
 - 关联：`FS-04 AC-147`；`server.mjs`；`tools/fs-04-consult-conversation.logic.test.mjs`；`docs/changes/CHG-consult-模型失败只发布完整安全路由事实.md`。
+
+### L-140 verifiedFacts 的事实底座与本轮现场观测必须分层组合
+- 现象（2026-08-31）：Audit C160 Q0798 已命中 `JWT-CONTINUE`，但模型长度截断后只原样发布 route facts，没有把“前端已发起”与缺失请求/服务端日志证据分开；Q0800 的接口有数据、页面未呈现也没有形成最小开发交接材料。
+- 根因：AC-147 为阻止通用模板污染，将 verifiedFacts 模型失败统一收敛成 facts-only；它正确保护了产品事实，却忽略了本轮用户已经明确给出的实例观测。首轮回归又把 route 强制模拟成 inherited，漏掉精确主题问法 direct route 下发布审计会把否定性的“不能推断具体故障层”误识别成无证据组件归因。
+- 解法：只为两类明确证据语义生成 route-scoped 组合终稿：先完整保留安全 facts，再单列用户已提供观测、未提供证据或最小交接材料；技术层名称只从 route facts 提取，页面材料只作为交接证据。否定边界避免使用会被组件故障审计当成正向归因的抽象故障层措辞，改为“不新增产品事实、不确认本次服务端处理结果”。
+- 防复发：精确题和自然变体都模拟 length/429；短续问用 inherited route，带业务主题的 Q0800 必须用真实 direct route。除终稿正文外同时断言 `fallbackSource`、`fallbackAnswerMode`、`finalViolations`，再跑隔离 MySQL 真登录/项目登记/连续 HTTP/SSE 与持久化核验。
+- 关联：`FS-04 AC-148`；`server.mjs`；`tools/fs-04-consult-conversation.logic.test.mjs`；`docs/changes/CHG-consult-模型失败按本轮观测组合已核事实.md`。
