@@ -2193,6 +2193,7 @@ function consultEvidenceLikelihoodGuard(question, route) {
     '没有直接频率证据时，删除上述概率定性和任何隐含排序；只能列不排序的“待验证假设/可能分支”。排查顺序只能依据本轮已有页面、请求、响应、原始报文、日志或审计里已经观察到的差异来决定，并明确写出该证据差异，不能把待验证假设包装成“先看这一边”。用户转述“医院说/电话里说/对接方称/怀疑/感觉/好像”的现象与归因，只能作为待核线索，不能当成确定因果或概率证据；答案必须把“原话”与“已核报文/响应差异”分开。',
     '诊断内容逐句只归为四类：①route/Spec 已核事实；②用户本轮已经提供的观察；③明确标成“待验证假设/可能分支”的未核原因；④通过动作一致性门的只读或受控动作。前端、后端、服务端、缓存、网关、鉴权、权限、数据库、配置、调度、部署或环境等组件故障，若用户或 route 没有直接确认，只能写成待验证假设，不能在条件分支、表格或小结中写成定论。有序观测点必须保持时间方向：若原始值 A 到报文/请求 B 时已经不同，只能确认差异不晚于 B，不能又说发生在 B 之后；只有 A=B 且后续收到/落库/页面 C 不同时，才可把差异边界收敛到 B 之后、C 之前。',
     '具体技术机制只允许来自用户本轮原文或 current/inherited route facts/refs。未点名缓存、数据源、错误兜底、本地存储、消息队列、中间件、代理层或网关时，不得为了解释现象自行引入；只能退回不点名具体机制的“页面呈现链路待验证”等局部边界。',
+    '还要审计“唯一/只有/全部/所有/每次/始终/从不/必然”等排他或全称措辞。只有 current/inherited route answerFacts 或用户本轮已明确提供的证据对同一事实给出等价限定时才能保留；“是请求来源”不能改成“是唯一来源”，“属于用户中心”不能改成“每次都要去用户中心确认”。不得把用户的问句或 route 的否定边界倒转成正向绝对结论；route facts 已明确写出的“唯一/每次/全部”可照实保留。',
     '核心事实题或已定位的共享键、字段类型、接口契约答清后立即停止；不得追加“改过模板、复制/重存、历史兼容、行业里经常如此”等经验成因。若用户明确问原因但证据只支持链路边界，就只说能定位到哪一层以及仍待验证的分支。',
     '本轮问题与已核 route 主题仅供证据边界判断，不自动生成事实：' + (routeText || '当前无 route 直接事实') + '。审计过程不要展示给用户，只输出删除无证据概率判断后的最终答案。',
   ].join('\n');
@@ -3324,6 +3325,75 @@ function consultAnswerSemanticAudit(answer, question, route) {
   const focusedTypeOrLengthQuestion = focusedFactQuestion
     && /(?:字段|列|column|varchar|uuid|integer|bigint|patient_id|visit_id|hospitalId|districtCode)/i.test(String(question || ''))
     && /(?:类型|type|长度(?:多少|是什么))/i.test(String(question || ''));
+  // 排他/全称量词会把局部 route fact 放大成系统级保证。只在同一
+  // claim 的 answerFacts 或用户本轮证据中存在等价量词时放行。
+  const absoluteQuantifierFamilies = [
+    { family: 'exclusive', re: /(?:唯一|仅有|只有|只由)/gu },
+    { family: 'universal_set', re: /(?:全部|所有|全都|一律|无一例外)/gu },
+    { family: 'universal_occurrence', re: /(?:每次|每回|每一(?:次|个|条|项|位|份|种))/gu },
+    { family: 'temporal_absolute', re: /(?:始终|永远|一直|从不|绝不)/gu },
+    { family: 'inevitable', re: /(?:必然|必定|一定|肯定)/gu },
+  ];
+  const absoluteStatements = text.split(/(?<=[。！？；\n])/u).map(item => item.trim()).filter(Boolean);
+  const absoluteClausePrefix = (statement, index) => {
+    const prefix = String(statement || '').slice(0, index);
+    const delimiter = Math.max(prefix.lastIndexOf('，'), prefix.lastIndexOf(','), prefix.lastIndexOf('：'), prefix.lastIndexOf(':'), prefix.lastIndexOf('；'), prefix.lastIndexOf(';'), prefix.lastIndexOf('。'), prefix.lastIndexOf('\n'));
+    return prefix.slice(delimiter + 1).trim();
+  };
+  const absoluteMatchIsQuoted = (statement, index) => {
+    const before = String(statement || '').slice(0, index);
+    const quotePairs = [['“', '”'], ['「', '」'], ['『', '』'], ['"', '"'], ["'", "'"], ['`', '`']];
+    return quotePairs.some(([open, close]) => open === close
+      ? (before.split(open).length - 1) % 2 === 1
+      : before.lastIndexOf(open) > before.lastIndexOf(close));
+  };
+  const absoluteMatchIsNegativeBoundary = (statement, index) => /(?:不得|不能|不要|不应|不可|无法|未能|未必|不一定|并非|不是|不代表|不等于|没有证据(?:证明|说明|支持)|尚不能确认)[^。！？；\n]{0,40}$/u.test(absoluteClausePrefix(statement, index));
+  // mustNotConfuse 只是否定边界，不能反向授权正向绝对结论。
+  const absoluteEvidenceClauses = [
+    ...((route && route.matched ? route.answerFacts : []) || []).flatMap(fact => String(fact || '').split(/[。！？；\n]/u)),
+    ...String(question || '').split(/[。！？；\n]/u).filter(clause => {
+      const value = clause.trim();
+      if (!value) return false;
+      const evidenceMarker = /(?:已确认|已经确认|本轮确认|日志|响应|记录|统计|抓包|实际|观察|看到|显示|证明|明确)/u.test(value);
+      return evidenceMarker || !/(?:是否|能否|是不是|哪些|怎么|如何|吗|么|呢)/u.test(value);
+    }),
+  ].map(item => item.trim()).filter(Boolean);
+  const normalizeAbsoluteClaim = value => String(value || '').toLowerCase()
+    .replace(/^(?:[-*+]\s+|\d+[.、．]\s*)/u, '')
+    .replace(/(?:唯一|仅有|只有|只由|全部|所有|全都|一律|无一例外|每次|每回|每一(?:次|个|条|项|位|份|种)|始终|永远|一直|从不|绝不|必然|必定|一定|肯定|都|均)/gu, '')
+    .replace(/(?:够不够|不够|足够)/gu, '')
+    .replace(/[\s\p{P}\p{S}]+/gu, '');
+  const absoluteClaimBigrams = value => {
+    const normalized = normalizeAbsoluteClaim(value);
+    return new Set(Array.from({ length: Math.max(0, normalized.length - 1) }, (_, index) => normalized.slice(index, index + 2)));
+  };
+  const absoluteClaimsEquivalent = (claim, evidence) => {
+    const left = normalizeAbsoluteClaim(claim), right = normalizeAbsoluteClaim(evidence);
+    if (!left || !right) return false;
+    if (Math.min(left.length, right.length) >= 2 && (left.includes(right) || right.includes(left))) return true;
+    const leftPairs = absoluteClaimBigrams(left), rightPairs = absoluteClaimBigrams(right);
+    const overlap = [...leftPairs].filter(pair => rightPairs.has(pair)).length;
+    return overlap >= 3 && overlap / Math.max(1, Math.min(leftPairs.size, rightPairs.size)) >= 0.45;
+  };
+  const absoluteQuantifierClaims = [];
+  for (const statement of absoluteStatements) {
+    for (const descriptor of absoluteQuantifierFamilies) {
+      for (const match of statement.matchAll(descriptor.re)) {
+        if (absoluteMatchIsQuoted(statement, match.index)
+          || absoluteMatchIsNegativeBoundary(statement, match.index)
+          || (/[?？]/u.test(statement) && /(?:你问|用户问|问题是|原问|是否|能否|是不是|哪些|吗|么|呢)/u.test(statement))) continue;
+        absoluteQuantifierClaims.push({ statement, family: descriptor.family, term: match[0] });
+      }
+      descriptor.re.lastIndex = 0;
+    }
+  }
+  const unsupportedAbsoluteClaims = absoluteQuantifierClaims.filter(claim => !absoluteEvidenceClauses.some(evidence => {
+    const descriptor = absoluteQuantifierFamilies.find(item => item.family === claim.family);
+    descriptor.re.lastIndex = 0;
+    const sameFamily = descriptor.re.test(evidence);
+    descriptor.re.lastIndex = 0;
+    return sameFamily && absoluteClaimsEquivalent(claim.statement, evidence);
+  })).map(claim => claim.statement);
   const likelihoodClaims = text.split(/(?<=[。！？；\n])/u).map(x => x.trim()).filter(statement => {
     const matched = CONSULT_LIKELIHOOD_WORD_RE.test(statement) || /典型(?:现象|表现|场景|特征|模式|症状)(?:边界)?/u.test(statement);
     CONSULT_LIKELIHOOD_WORD_RE.lastIndex = 0;
@@ -5283,6 +5353,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
   if (unsupportedGenericDiagnosticParts.length) violations.push('unsupported_generic_diagnostic_template');
   if (explicitOperationEvidenceMissing && text && !verifiedOperationEvidenceStop) violations.push('missing_explicit_operation_evidence');
   if (unsupportedExplicitOperationParts.length) violations.push('unsupported_explicit_operation');
+  if (unsupportedAbsoluteClaims.length) violations.push('unsupported_absolute_quantifier');
   if (likelihoodTerms.length || causalPriorityTerms.length) violations.push('unsupported_likelihood');
   if (contradictoryObservationOrderClaims.length) violations.push('contradictory_observation_order');
   if (unsupportedComponentClaims.length) violations.push('unsupported_component_fault');
@@ -5582,6 +5653,9 @@ function consultAnswerRevisionPrompt(draft, audit) {
     '下面是尚未发送给用户的草稿。请只输出修订后的完整答案，不要解释修订过程，不要增加任何新业务事实、接口、字段、按钮、原因或示例。',
     audit.violations.includes('unsupported_likelihood')
       ? '草稿含无直接证据的概率、频率、比例或成因定性。删除整句中的“最高频/最常见/常见/经常/通常/一般/大概率/多半/往往/很可能/可能丢位/可能丢精度/多发/高发/很多/不少/多数/大多/绝大多数/少数/极少/大部分/小部分/几乎全部/频繁/偶尔/有时/首要原因/主要原因/典型原因/常见于/可能是/很像/更像/疑似/倾向于/最容易出现/很容易丢位或丢精度/更容易在某时段对不上”等定性，也删除无已核契约支持的“一定会/必然/肯定会/就会直接导致”“会出现少位/丢精度/对不上”“就是会丢位的写法”“就是某方传错或配置错”等确定因果整句。箭头、“所以/因此”、“属…问题”、“定位为…”同样是因果定论；不得把一个观测现象直接映射为多个打包候选根因或进程/网络/数据格式/数据库约束等确定归类；“日志无某记录”只说明未观察到该日志，不证明对应动作未发生。用户在电话或现场转述的“对接方说/医院说/怀疑/感觉/好像”不是已核因果证据，只能保留为待核线索。某个观测点已经出现差异，只能说明变化不晚于该观测点；没有逐层证据时，不得进一步写成“发生在上游/生成号/Excel/中间系统/传参/序列化/转换/网关/前后端/数据库等具体侧或环节”。若当前只在诊断一个字段或对象，只保留直接回答它所需的事实，不得借技术依据枚举同表其它未问字段。若本轮没有已观察到的页面、请求或响应差异，也删除“优先查服务端/前端/缓存/配置”等成因排序。原因只能改成不排序的“待验证假设/可能分支”，并明确需要查看对应的原始日志或异常堆栈才能定位。证据收集步骤仍可按只读顺序说明。'
+      : '',
+    audit.violations.includes('unsupported_absolute_quantifier')
+      ? '草稿把局部事实强化成了无证据的排他或全称结论。删除或降级“唯一/仅有/只有/只由/全部/所有/全都/一律/无一例外/每次/每回/每一/始终/永远/一直/从不/绝不/必然/必定/一定/肯定”，回到 current route answerFacts 或用户本轮证据已支持的非排他原句。若 route fact 本身明确带同一限定则照实保留；不得把用户问句或否定边界反向当成正向证据。'
       : '',
     audit.violations.includes('unsupported_component_fault')
       ? '草稿把用户或 route 尚未确认的组件故障写成了定论。逐句按“已核事实 / 本轮观察 / 待验证假设 / 安全动作”四类重写；前端、后端、服务端、缓存、网关、鉴权、权限、数据库、配置、调度、部署或环境等未核原因只能明确标成“待验证假设/可能分支”，条件分支、表格和小结也不能绕过。'
@@ -5949,6 +6023,8 @@ function consultAnswerSafeFallback(draft, audit) {
     return /(?:不得|不能|不要|禁止|不可|不应|先别|停止|未确认)[^。！？；\n]{0,24}$/u.test(clausePrefix);
   };
   const keepPart = part => {
+    if (audit.violations.includes('unsupported_absolute_quantifier')
+      && /(?:唯一|仅有|只有|只由|全部|所有|全都|一律|无一例外|每次|每回|每一(?:次|个|条|项|位|份|种)|始终|永远|一直|从不|绝不|必然|必定|一定|肯定)/u.test(part)) return false;
     if (audit.violations.includes('contradictory_observation_order') && CONSULT_OBSERVATION_ORDER_CONTRADICTION_RE.test(part)) {
       CONSULT_OBSERVATION_ORDER_CONTRADICTION_RE.lastIndex = 0; return false;
     }

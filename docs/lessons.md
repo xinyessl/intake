@@ -13,6 +13,7 @@
 ---
 
 ## ✅ 本项目自检清单（每次交付前逐条过）
+- [ ] **【局部事实不能被模型加上无证据的绝对量词】**：发布前逐 claim 审计唯一/只有/全部/所有/每次/始终/从不/必然等排他或全称语义；只有 route `answerFacts` 或用户本轮证据对同 claim 给出等价限定才放行。否定边界、引用问句和 `mustNotConfuse` 不反向授权；修订仍失败时 verifiedFacts 只发布完整 facts（见 L-141）。
 - [ ] **【verifiedFacts 模型失败也不能丢掉本轮显式观测语义】**：完整 route facts 是产品事实底座，不等于现场题已经答完；当用户明确只确认前端已发起/服务端无日志，或接口有数据但页面未呈现时，在不删改 facts 的前提下分别组合“已知/未知”或“最小交接证据”。追加项只取用户观测和 route 已点名层，不恢复无条件通用页面/状态模板，不重放或写操作；精确主题题必须以 direct route 真跑，不能只模拟 inherited route（见 L-140）。
 - [ ] **【verifiedFacts 模型失败不能在完整 route facts 后再套通用诊断模板】**：先判断完整 `answerFacts` 是否已经通过实质安全门；安全则逐条发布并停止扩写，不安全则保留既有安全转换。发布审计同时拦 `current route` 等内部术语和 route 未正向定义的页面选择/状态接口/页面刷新/列表摘要；route miss 的最小安全留证不受影响（见 L-139）。
 - [ ] **【产品仓刷新只能写 Intake 托管缓存】**：`repoPath` 可能来自测试数据或历史登记，不能假定它一定是缓存 clone。任何 fetch/reset 前先用 realpath 确认位于 `data/repos`，再检查工作区 clean；fetch 后、reset 前再检查一次。外部/dirty/状态不明/fetch 失败一律 fail closed，并在接口结果中返回可观测 reason（见 L-138）。
@@ -1338,3 +1339,10 @@
 - 解法：只为两类明确证据语义生成 route-scoped 组合终稿：先完整保留安全 facts，再单列用户已提供观测、未提供证据或最小交接材料；技术层名称只从 route facts 提取，页面材料只作为交接证据。否定边界避免使用会被组件故障审计当成正向归因的抽象故障层措辞，改为“不新增产品事实、不确认本次服务端处理结果”。
 - 防复发：精确题和自然变体都模拟 length/429；短续问用 inherited route，带业务主题的 Q0800 必须用真实 direct route。除终稿正文外同时断言 `fallbackSource`、`fallbackAnswerMode`、`finalViolations`，再跑隔离 MySQL 真登录/项目登记/连续 HTTP/SSE 与持久化核验。
 - 关联：`FS-04 AC-148`；`server.mjs`；`tools/fs-04-consult-conversation.logic.test.mjs`；`docs/changes/CHG-consult-模型失败按本轮观测组合已核事实.md`。
+
+### L-141 未加限定的 route fact 不能被终稿强化成排他或全称结论
+- 现象（2026-08-31）：Audit C162 Q0807 的 route 只写“HIS 是审方请求来源”和“用户/JWT/菜单/角色属于用户中心”，模型修订稿却写成“唯一来源”和“每次验证都要去用户中心确认”，原终审未识别。
+- 根因：现有发布审计能拦无证据概率、因果和路径，但没有将排他/全称量词与同一 claim 的 route/user 证据绑定；只看主题词一致无法发现语义强化。
+- 解法：将唯一/只有、全部/所有、每次、始终/从不、必然等按语义家族做逐句审计；要求 route `answerFacts` 或用户本轮已给证据在同 claim 上同时带等价量词。`mustNotConfuse` 不作正向证据；否定句、引用问句和事实自带量词必须放行。
+- 防复发：用精确 Q0807 同时注入虚构 path 和两类强化，再让修订稿仍保留强化，断言最终只发布完整 route facts。跨 route 正反例至少覆盖事实明确限定、用户证据限定、无证据强化、否定边界和引用问句；真 HTTP/SSE 要核 `initial/revision/finalViolations`、fallbackSource 和持久化 route。
+- 关联：`FS-04 AC-149`；`server.mjs`；`tools/fs-04-consult-conversation.logic.test.mjs`；`docs/changes/CHG-consult-排他全称量词证据守卫.md`。

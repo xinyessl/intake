@@ -3815,6 +3815,55 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.equal(routeMissDiagnostic.fallbackSource, 'evidenceStop');
   assert.deepEqual(routeMissDiagnostic.finalAudit.violations, []);
 
+  const q0807Question = '另一轮独立复测（807）里，审方系统依赖哪些外部系统？';
+  const q0807Route = runtimeRouteWithRepositoryContext(
+    routeQuestion(auditTag20260831_1RouteMap, q0807Question),
+    '2.7.260831-1',
+  );
+  assert.equal(q0807Route.route.id, 'AUD-QR-SYS-01-BOUNDARY', JSON.stringify(q0807Route, null, 2));
+  const q0807InitialDraft = [
+    'HIS 是审方请求的唯一来源。',
+    '每次验证登录身份时都要去用户中心确认。',
+    '还可调用 GET /invented/dependency/status 查它们的运行状态。',
+  ].join('\n');
+  const q0807InitialAudit = bundle.audit(q0807InitialDraft, q0807Question, q0807Route);
+  assert.ok(q0807InitialAudit.violations.includes('unexpected_concrete_path'));
+  assert.ok(q0807InitialAudit.violations.includes('unsupported_absolute_quantifier'));
+  assert.match(bundle.revision(q0807InitialDraft, q0807InitialAudit), /唯一\/仅有\/只有/);
+  const q0807StillStrengthenedRevision = [
+    'HIS 是审方请求的唯一来源。',
+    '每次验证登录身份时都要去用户中心确认。',
+  ].join('\n');
+  const q0807RevisionAudit = bundle.audit(q0807StillStrengthenedRevision, q0807Question, q0807Route);
+  assert.ok(q0807RevisionAudit.violations.includes('unsupported_absolute_quantifier'));
+  const q0807Fallback = bundle.fallback(q0807InitialDraft, q0807InitialAudit);
+  assertCompleteFactsInOrder(q0807Fallback, q0807Route.answerFacts, 'Q0807');
+  assert.doesNotMatch(q0807Fallback, /唯一来源|每次验证登录身份|\/invented\/dependency\/status/);
+  assert.deepEqual(bundle.audit(q0807Fallback, q0807Question, q0807Route).violations, []);
+
+  const absoluteSupportedRoute = {
+    matched: true,
+    route: { title: '绝对量词明确契约' },
+    answerFacts: [
+      'HIS 是当前这类请求的唯一来源。',
+      '每次受控验签都记录审计结果。',
+      '所有已完成批次全都保留批次号。',
+      '本流程始终使用同一业务主键。',
+    ],
+  };
+  for (const fact of absoluteSupportedRoute.answerFacts) {
+    assert.ok(!bundle.audit(fact, '请按已核契约回答。', absoluteSupportedRoute).violations.includes('unsupported_absolute_quantifier'), `route fact 自身支持的绝对量词不得误拦：${fact}`);
+  }
+  const unsupportedAbsoluteDraft = '此系统只有 HIS 一个来源，所有请求每次都必然通过用户中心，并且始终不会走其它分支。';
+  assert.ok(bundle.audit(unsupportedAbsoluteDraft, q0807Question, q0807Route).violations.includes('unsupported_absolute_quantifier'), '跨量词无 route 证据强化须拦截');
+  assert.ok(bundle.audit('HIS 是唯一来源。', 'HIS 是否是唯一来源？', q0807Route).violations.includes('unsupported_absolute_quantifier'), '用户的是否问句不是排他事实证据');
+  const negativeBoundary = '不能说 HIS 是唯一来源；无法确认是否每次都调用用户中心；不是所有代码分支都代表生产已运行。';
+  assert.ok(!bundle.audit(negativeBoundary, q0807Question, q0807Route).violations.includes('unsupported_absolute_quantifier'), '否定边界不得误拦');
+  const quotedQuestion = '你问的是“HIS 是否是唯一来源，每次是否都查用户中心？”';
+  assert.ok(!bundle.audit(quotedQuestion, q0807Question, q0807Route).violations.includes('unsupported_absolute_quantifier'), '引用用户问句不得当成模型结论');
+  const userEvidenceQuestion = '日志已确认每次这类受控验签都记录审计结果，这能确认到哪里？';
+  assert.ok(!bundle.audit('每次这类受控验签都记录审计结果。', userEvidenceQuestion, { matched: false }).violations.includes('unsupported_absolute_quantifier'), '用户本轮明确证据可支持等价量词');
+
   assert.match(bundle.modelVisibleError({ code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束' }, 'length123'), /达到长度上限，未完整结束/);
   assert.doesNotMatch(bundle.modelVisibleError({ code: 'MODEL_OUTPUT_TRUNCATED' }, 'length123'), /暂时连不上/);
   assert.match(bundle.modelVisibleError({ status: 429, message: 'rate limit' }, 'rate123'), /当前请求较多/);
