@@ -6458,7 +6458,12 @@ function consultModelFailureFallback(question, route, error) {
     fallbackSource: 'verifiedFacts',
   };
 
-  const operationFallback = consultMatchedOperationFailureFallback(question, route);
+  // matched-operation fallback 只接收真正命中的 route。调用方先收窄，
+  // 避免 route=null/miss 依赖被调函数内部的短路保护，以后内部新增
+  // answerFacts 读取时再次出现空指针。
+  const operationFallback = route && route.matched
+    ? consultMatchedOperationFailureFallback(question, route)
+    : null;
   if (operationFallback) return {
     ...operationFallback,
     modelDraftError: consultModelErrorInfo(error),
@@ -6472,19 +6477,32 @@ function consultModelFailureFallback(question, route, error) {
   const missingRouteObject = route == null;
   const q = String(question || '').trim();
   const riskyOperationQuestion = /(?:怎么|如何)(?:发起|撤销|提交|保存|删除|新增|创建|审批|签名|收费|退费|重试|重做|重放|重提|修改|编辑|补发|补偿)/iu.test(q);
-  if (!missingRouteObject && !consultSafeDiagnosticIntent(q) && !riskyOperationQuestion) return null;
-  const initialAudit = consultAnswerSemanticAudit('', q, route);
+  const operationContracts = consultExplicitOperationContracts(q);
+  const safeDiagnosticQuestion = consultSafeDiagnosticIntent(q);
+  if (!missingRouteObject && !safeDiagnosticQuestion && !riskyOperationQuestion && !operationContracts.length) return null;
+  // null/miss 不带任何 route facts 进语义审计。对已识别的高风险
+  // 业务操作显式标记 evidence miss，只允许生成无具体步骤的安全停点。
+  const stopRoute = {
+    matched: false,
+    tier: 0,
+    score: 0,
+    topN: route && Array.isArray(route.topN) ? route.topN : [],
+    ...(operationContracts.length ? {
+      explicitOperationEvidenceMiss: operationContracts.map(({ entity, action }) => ({ entity, action })),
+    } : {}),
+  };
+  const initialAudit = consultAnswerSemanticAudit('', q, stopRoute);
   let reply = String(initialAudit.safeDiagnosticFallback || '').trim();
   if (!reply) reply = [
     '当前缺少可核验的功能事实，不能安全确认具体操作入口、顺序或状态条件。',
     '为避免误操作，本轮先停在这里：不得发起；不得撤销；不得提交；不得重试；不得修改业务状态。',
     '请先补充当前系统与页面、功能名称、当前业务状态以及已有报错或请求响应；由对应业务负责人核对正式说明和授权边界后，再确定后续处理。',
   ].join('\n\n');
-  let finalAudit = consultAnswerSemanticAudit(reply, q, route);
+  let finalAudit = consultAnswerSemanticAudit(reply, q, stopRoute);
   let passes = 0;
   while (finalAudit.violations.length && passes < 2) {
     reply = consultAnswerSafeFallback(reply, finalAudit);
-    finalAudit = consultAnswerSemanticAudit(reply, q, route);
+    finalAudit = consultAnswerSemanticAudit(reply, q, stopRoute);
     passes += 1;
   }
   if (finalAudit.violations.length) return null;

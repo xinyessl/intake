@@ -4555,6 +4555,27 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.equal(verifiedNullGuardProbe.run(chargeQuestions[0], null), null, 'null route 必须在 verified fallback 入口直接停住');
   assert.equal(verifiedNullGuardProbe.run(chargeQuestions[1], { matched: false }), null, 'route miss 必须在 verified fallback 入口直接停住');
   assert.equal(verifiedNullGuardProbe.calls(), 0, 'null / miss route 不得进入可能读取 answerFacts 的完整语义审计');
+  const nullRouteDispatchProbe = new Function(
+    'let matchedCalls=0;const auditRoutes=[];'
+    + 'function consultVerifiedFactsFallback(){return null;}'
+    + 'function consultMatchedOperationFailureFallback(){matchedCalls++;throw new Error("matched fallback must not receive null route");}'
+    + 'function consultExplicitOperationContracts(q){return /\u6536\u8d39/u.test(String(q||""))?[{entity:"\u6536\u8d39",action:/\u64a4\u9500/u.test(q)?"\u64a4\u9500":"\u53d1\u8d77"}]:[];}'
+    + 'function consultSafeDiagnosticIntent(){return false;}'
+    + 'function consultAnswerSemanticAudit(answer,q,route){if(!route)throw new Error("null route entered semantic audit");auditRoutes.push(route);return {safeDiagnosticFallback:"",violations:[]};}'
+    + 'function consultAnswerSafeFallback(reply){return reply;}'
+    + 'function consultModelErrorInfo(error){return {kind:error&&error.status===429?"rate_limit":"model_error",status:error&&error.status};}'
+    + extractFn(SRC, 'consultModelFailureFallback')
+    + ';return {run:consultModelFailureFallback,matchedCalls:()=>matchedCalls,auditRoutes};',
+  )();
+  const nullCharge429 = nullRouteDispatchProbe.run('怎么发起收费', null, { status: 429, message: 'rate limit' });
+  assert.ok(nullCharge429, 'route=null + HTTP429 的收费操作题必须返回安全停点');
+  assert.equal(nullRouteDispatchProbe.matchedCalls(), 0, 'route=null 不得进入 matched-operation fallback');
+  assert.ok(nullRouteDispatchProbe.auditRoutes.length >= 2);
+  assert.ok(nullRouteDispatchProbe.auditRoutes.every(routeValue => routeValue && routeValue.matched === false), 'null route 不得原样传入语义审计');
+  assert.deepEqual(nullRouteDispatchProbe.auditRoutes[0].explicitOperationEvidenceMiss, [{ entity: '收费', action: '发起' }]);
+  assert.equal(nullCharge429.modelDraftError.kind, 'rate_limit');
+  assert.match(nullCharge429.reply, /不得发起/);
+  assert.doesNotMatch(nullCharge429.reply, /调用[^\n]*收费接口|删除本地记录|重新收费/);
   for (const question of [...chargeQuestions, q0527Question]) {
     assert.doesNotThrow(() => bundle.audit(harmlessDraft, question, null), `${question} 的 answer_audit 不得读取 null route facts`);
     assert.equal(bundle.verifiedFallback(question, null), null, `${question} 的 verified fallback 不得从 null route 发布事实`);
