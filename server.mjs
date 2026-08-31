@@ -5033,10 +5033,10 @@ function consultAnswerSemanticAudit(answer, question, route) {
     // 只读顺序，只保留首条业务基线；顺序事实由下方
     // routeReadOnlySequenceSteps 展开，避免长 route 全量搬运后形成技术倾倒。
     // 这仍完全由 current route 派生，不会放入相邻 route 或模型新增事实。
-    const compactRouteChecklistFacts = (continuationDiagnosticQuestion
-      || requestResultMismatchQuestion
-      || (implementationChecklistQuestion && !stageAwareImplementationChecklist && !retryBoundaryChecklistQuestion))
-      && routeReadOnlySequenceSteps.length > 0;
+    const compactRouteChecklistFacts = requestResultMismatchQuestion
+      || ((continuationDiagnosticQuestion
+        || (implementationChecklistQuestion && !stageAwareImplementationChecklist && !retryBoundaryChecklistQuestion))
+        && routeReadOnlySequenceSteps.length > 0);
     // 清单化追问只保留少量会改变现场判断的 route 边界，不再把整张
     // answerFacts 搬到步骤前。分组按“响应成功边界 / 查询或覆盖缺口 /
     // 日志异步边界”这类通用语义择取，每组最多一条，且都来自 current route。
@@ -5069,9 +5069,17 @@ function consultAnswerSemanticAudit(answer, question, route) {
           return selected;
         })()
       : [];
+    const mismatchBoundaryFacts = requestResultMismatchQuestion
+      ? Array.from(new Set([
+          currentRouteFacts[0],
+          ...currentRouteFacts.filter(fact => /(?:职责|分工|外部边界|运行边界|证据边界|不能互相替代|调用契约|生产运行状态)/iu.test(String(fact || ''))).slice(0, 2),
+        ].filter(Boolean)))
+      : [];
     const diagnosticSourceFacts = compactRouteChecklistFacts
       ? Array.from(new Set([
-          ...(compactChecklistJudgmentFacts.length ? compactChecklistJudgmentFacts : [currentRouteFacts[0]]),
+          ...(requestResultMismatchQuestion
+            ? mismatchBoundaryFacts
+            : (compactChecklistJudgmentFacts.length ? compactChecklistJudgmentFacts : [currentRouteFacts[0]])),
           routeReadOnlySequenceFact,
         ].filter(Boolean)))
       : currentRouteFacts;
@@ -5293,18 +5301,28 @@ function consultAnswerSemanticAudit(answer, question, route) {
     const dataNotRenderedSteps = dataReturnedNotRenderedQuestion
       ? dataNotRenderedEvidenceItems.map((item, index) => `${index + 1}. ${item}`)
       : safeSteps;
+    const resultMismatchEvidenceFact = requestResultMismatchQuestion
+      ? currentRouteFacts.find(fact => /(?:实施|现场)[^。！？；\n]{0,32}(?:确认|核对)[^。！？；\n]{0,48}(?:版本|部署|配置|日志|记录|进程|健康|调用结果|响应|状态)/iu.test(String(fact || '')))
+      : '';
+    const resultMismatchEvidenceClause = String(resultMismatchEvidenceFact || '')
+      .match(/(?:分别|依次)?核对[^；;。！？\n]+/u)?.[0]?.trim() || '';
     const resultMismatchSteps = requestResultMismatchQuestion
-      ? [
-          '1. 先对照这次已经发生的请求与响应：请求参数、对象范围、HTTP/业务码和响应原文；不重新提交或改变业务数据。',
-          '2. 再对照响应对应的业务状态和已有流水，确认状态、结果字段及记录时间是否与本次响应一致；未取得的下游记录明确标成缺失。',
-          '3. 然后只读核对页面刷新、列表/摘要与已有状态记录是否一致；不要把“请求成功”直接等同于业务结果正确。',
-          '4. 按“请求失败 / 响应正常但业务状态或流水未变 / 状态已变但页面或摘要未同步 / 命中相邻状态入口边界”分支留证，记录观测和原始响应，不据此写死具体故障原因。',
-        ]
+      ? (routeContinuationStepBodies.length
+        ? [
+            '固定同一次已经发生的请求与响应，只记录其中实际可见的请求内容、返回内容和时间；请求通只证明该次有返回，不等于业务结果正确。',
+            ...routeContinuationStepBodies,
+            '汇总首次差异及其前一层已一致证据后停止；不重放请求、不重试、不修改数据，也不触发其它写操作。',
+          ].map((step, index) => `${index + 1}. ${step}`)
+        : [
+            '1. 固定同一次已经发生的请求与响应，只记录其中实际可见的请求内容、返回内容和时间；请求通只证明该次有返回，不等于业务结果正确。',
+            '2. 按上方已核职责和边界逐条对照已有证据，只标记“一致 / 首次不一致 / 未取得”，不补写未定义的接口、表、按钮或状态。',
+            resultMismatchEvidenceClause
+              ? `3. 对照已核实施证据项：${resultMismatchEvidenceClause}；只读取已经存在的材料，缺项就停在该层。`
+              : '3. 从请求与返回开始，沿上方已核职责顺序只读比较；遇到第一处差异或证据缺口就停在该层，不继续外推后续结果。',
+            '4. 汇总首次差异及其前一层已一致证据后停止；不重放请求、不重试、不修改数据，也不触发其它写操作。',
+          ])
       : safeSteps;
-    const compactResultMismatchSteps = compactRouteChecklistFacts && requestResultMismatchQuestion
-      ? [...routeContinuationStepBodies, ...resultMismatchSteps.slice(1).map(step => step.replace(/^\d+\.\s*/u, ''))]
-        .map((step, index) => `${index + 1}. ${step}`)
-      : resultMismatchSteps;
+    const compactResultMismatchSteps = resultMismatchSteps;
     const authorizationProofSteps = uiAuthorizationProofQuestion
       ? [
           '1. 页面层：只读记录当前账号、院区/科室、筛选条件、哪些对象不可选及对应提示；这只能说明当前页面限制生效，不能单独证明服务端授权安全。',
@@ -6496,7 +6514,14 @@ function consultVerifiedFactsFallback(question, route, routeFactsOnly = false) {
     && initialAudit.implementationChecklistQuestion
     && String(initialAudit.safeDiagnosticFallback || '').trim()
     ? consultNormalizeSafeMarkdown(String(initialAudit.safeDiagnosticFallback).trim()) : '';
-  const reply = contextualReply || (routeFactsOnly && routeFactsAreCompleteSafeTerminal
+  // 请求已通但业务结果不符时，本轮明确要的是“下一层怎么只读对照”。
+  // safeDiagnosticFallback 只由 current route facts 与固定安全步骤构成，
+  // 必须优先于完整 facts；最终仍走同一语义审计，任何越界模板都会拒绝。
+  const resultMismatchReply = routeFactsOnly
+    && initialAudit.requestResultMismatchQuestion
+    && String(initialAudit.safeDiagnosticFallback || '').trim()
+    ? consultNormalizeSafeMarkdown(String(initialAudit.safeDiagnosticFallback).trim()) : '';
+  const reply = contextualReply || resultMismatchReply || (routeFactsOnly && routeFactsAreCompleteSafeTerminal
     ? (implementationChecklistReply || strictReply)
     : consultAnswerSafeFallback('', initialAudit));
   const finalAudit = consultAnswerSemanticAudit(reply, question, route);
