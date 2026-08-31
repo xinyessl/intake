@@ -1035,7 +1035,7 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     + extractFn(SRC, 'consultSafeDiagnosticIntent') + '\n'
     + extractFn(SRC, 'consultModelFailureFallback') + '\n'
     + extractFn(SRC, 'consultRecoverSafeDiagnostic') + '\n'
-    + 'return { audit:consultAnswerSemanticAudit, revision:consultAnswerRevisionPrompt, fallback:consultAnswerSafeFallback, verifiedFallback:consultVerifiedFactsFallback, modelErrorInfo:consultModelErrorInfo, modelVisibleError:consultModelVisibleError, modelFailureFallback:consultModelFailureFallback, recoverSafeDiagnostic:consultRecoverSafeDiagnostic };',
+    + 'return { audit:consultAnswerSemanticAudit, contextual:consultVerifiedFactsContextualReply, revision:consultAnswerRevisionPrompt, fallback:consultAnswerSafeFallback, verifiedFallback:consultVerifiedFactsFallback, modelErrorInfo:consultModelErrorInfo, modelVisibleError:consultModelVisibleError, modelFailureFallback:consultModelFailureFallback, recoverSafeDiagnostic:consultRecoverSafeDiagnostic };',
   )();
   const auditAiInterfaceQuestion = 'AI 审方开始生成和停止生成分别调用哪个接口？请只给出两个 HTTP 方法与完整路径，并说明停止接口的 generateId 放在哪里。';
   const auditAiInterfaceRoute = {
@@ -2570,12 +2570,20 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.equal(q0078Route.answerFacts.length, 6, 'C016 Q0078 必须保留 DI-04 受限证据 facts');
   const q0078Initial = bundle.audit('', q0078Question, q0078Route);
   const q0078FallbackAudit = bundle.audit(q0078Initial.safeDiagnosticFallback, q0078Question, q0078Route);
+  const q0078ContextualReply = bundle.contextual(q0078Question, q0078Initial);
+  const q0078ContextualAudit = bundle.audit(q0078ContextualReply, q0078Question, q0078Route);
   const q0078Fallback = bundle.modelFailureFallback(q0078Question, q0078Route, { status: 429, message: 'rate limit' });
-  assert.ok(q0078Fallback, `C016 Q0078 HTTP429 时必须发布 DI-04 partial evidence 兜底；mode=${q0078Initial.fallbackAnswerMode}; safeViolations=${JSON.stringify(q0078FallbackAudit.violations)}`);
+  assert.ok(q0078Fallback, `C016 Q0078 HTTP429 时必须发布 DI-04 partial evidence 兜底；mode=${q0078Initial.fallbackAnswerMode}; safeViolations=${JSON.stringify(q0078FallbackAudit.violations)}; contextual=${JSON.stringify(q0078ContextualReply)}; contextualViolations=${JSON.stringify(q0078ContextualAudit.violations)}; verifiedContextual=${q0078ContextualAudit.verifiedContextualFactsFallback}`);
   assert.equal(q0078Fallback.initialAudit.fallbackAnswerMode, 'partial_evidence');
-  const q0078PublishedFacts = q0078Fallback.reply.split('\n').map(line => line.replace(/^\s*[-*+]\s+/u, '').trim())
-    .filter(line => line && line !== '业务结论' && line !== '实施口径');
-  assert.deepEqual(q0078PublishedFacts, q0078Route.answerFacts);
+  let q0078FactCursor = -1;
+  for (const fact of q0078Route.answerFacts) {
+    const next = q0078Fallback.reply.indexOf(fact, q0078FactCursor + 1);
+    assert.ok(next > q0078FactCursor, `Q0078 应完整逐序保留 route fact：${fact}\n${q0078Fallback.reply}`);
+    q0078FactCursor = next;
+  }
+  assert.match(q0078Fallback.reply, /一次既有请求和响应最多只能固定该次可见的请求内容和返回内容/);
+  assert.match(q0078Fallback.reply, /没有数据库权限[\s\S]*落库结果和数据库当前状态无法核对、均为未知/);
+  assert.doesNotMatch(q0078Fallback.reply, /没有数据库权限[^。！？\n]{0,40}(?:未落库|没有落库)/);
   assert.doesNotMatch(q0078Fallback.reply, /AI 暂时连不上|当前回答未通过发布前/);
   assert.deepEqual(q0078Fallback.finalAudit.violations, [], 'C016 Q0078 DI-04 partial evidence fallback 终审必须全绿');
 
@@ -3026,9 +3034,14 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   const q0373Fallback = bundle.modelFailureFallback(q0373Question, q0373Route, { status: 429, message: 'rate limit' });
   assert.ok(q0373Fallback, 'Q0373 模型失败时必须发布 current route 的确定性受限证据终稿');
   assert.equal(q0373Fallback.initialAudit.fallbackAnswerMode, 'partial_evidence');
-  const q0373PublishedFacts = q0373Fallback.reply.split('\n').map(line => line.replace(/^\s*[-*+]\s+/u, '').trim())
-    .filter(line => line && line !== '业务结论' && line !== '实施口径');
-  assert.deepEqual(q0373PublishedFacts, q0373Route.answerFacts);
+  let q0373FactCursor = -1;
+  for (const fact of q0373Route.answerFacts) {
+    const next = q0373Fallback.reply.indexOf(fact, q0373FactCursor + 1);
+    assert.ok(next > q0373FactCursor, `Q0373 应完整逐序保留 route fact：${fact}\n${q0373Fallback.reply}`);
+    q0373FactCursor = next;
+  }
+  assert.match(q0373Fallback.reply, /一次既有请求和响应最多只能固定该次可见的请求内容和返回内容/);
+  assert.match(q0373Fallback.reply, /没有数据库权限[\s\S]*落库结果和数据库当前状态无法核对、均为未知/);
   assert.match(q0373Fallback.reply, /门诊处方标记/);
   assert.doesNotMatch(q0373Fallback.reply, /current route|页面选择|状态接口|页面刷新|列表摘要/i);
   assert.doesNotMatch(q0373Fallback.reply, /audit_ai_generate|Dify|AI 生成|住院医嘱标记|audit_ipt_collect/);
@@ -3659,9 +3672,14 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
       assert.deepEqual(q0793Fallback.finalAudit.violations, [], JSON.stringify({ reply: q0793Fallback.reply, audit: q0793Fallback.finalAudit }, null, 2));
       assert.match(q0793Fallback.reply, /同一次既有请求/);
       assert.match(q0793Fallback.reply, /本路由未定义通用状态接口、数据库查询或页面对象清单，不得加入这些检查/);
-      const publishedFacts = q0793Fallback.reply.split('\n').map(line => line.replace(/^\s*[-*+]\s+/u, '').trim())
-        .filter(line => line && line !== '业务结论' && line !== '实施口径');
-      assert.deepEqual(publishedFacts, q0793Route.answerFacts, '模型失败终稿必须逐条等于完整 JWT-CONTINUE answerFacts');
+      let factCursor = -1;
+      for (const fact of q0793Route.answerFacts) {
+        const next = q0793Fallback.reply.indexOf(fact, factCursor + 1);
+        assert.ok(next > factCursor, `模型失败终稿必须逐条保留完整 JWT-CONTINUE answerFacts：${fact}\n${q0793Fallback.reply}`);
+        factCursor = next;
+      }
+      assert.match(q0793Fallback.reply, /本轮能确认[\s\S]*(?:一次既有请求和响应|现有受限证据最多只能固定)/);
+      assert.match(q0793Fallback.reply, /本轮未知[\s\S]*(?:没有数据库权限|落库结果和数据库当前状态无法核对)/);
       assert.doesNotMatch(q0793Fallback.reply, /AI 暂时连不上|(?:请|需要|应当|应该)查询数据库|(?:请|需要|应当|应该)检查状态表|页面选择|页面刷新|列表摘要|current route/iu);
     }
   }
@@ -3696,9 +3714,20 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
       assert.equal(fallback.initialAudit.fallbackAnswerMode, expectedMode);
       assert.equal(fallback.fallbackSource, 'verifiedFacts');
       assert.deepEqual(fallback.finalAudit.violations, []);
-      const publishedFacts = fallback.reply.split('\n').map(line => line.replace(/^\s*[-*+]\s+/u, '').trim())
-        .filter(line => line && line !== '业务结论' && line !== '实施口径');
-      assert.deepEqual(publishedFacts, currentTagRoute.answerFacts, `${question} 模型失败只发布 JWT-CONTINUE facts`);
+      if (expectedMode === 'partial_evidence') {
+        let factCursor = -1;
+        for (const fact of currentTagRoute.answerFacts) {
+          const next = fallback.reply.indexOf(fact, factCursor + 1);
+          assert.ok(next > factCursor, `${question} 模型失败必须逐条保留 JWT-CONTINUE facts：${fact}\n${fallback.reply}`);
+          factCursor = next;
+        }
+        assert.match(fallback.reply, /本轮能确认[\s\S]*一次既有请求和响应/);
+        assert.match(fallback.reply, /本轮未知[\s\S]*落库结果和数据库当前状态无法核对/);
+      } else {
+        const publishedFacts = fallback.reply.split('\n').map(line => line.replace(/^\s*[-*+]\s+/u, '').trim())
+          .filter(line => line && line !== '业务结论' && line !== '实施口径');
+        assert.deepEqual(publishedFacts, currentTagRoute.answerFacts, `${question} 模型失败只发布 JWT-CONTINUE facts`);
+      }
       assert.doesNotMatch(fallback.reply, /current route|页面选择|页面刷新|列表摘要|账号[^。！？；;\n]{0,16}版本/iu);
       assert.doesNotMatch(fallback.reply, /(?:核对|调用|查看)[^。！？\n]{0,24}通用状态接口/);
     }
@@ -3878,6 +3907,48 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.match(q0813Fallback.reply, /只读边界[\s\S]*同一次已经发生的请求、响应、日志和已有记录/);
   assert.doesNotMatch(q0813Fallback.reply, /(?:因此|所以|这(?:就)?证明)[^。！？\n]{0,40}(?:已部署|已启动|当前可用|链路已完成)/);
   assert.deepEqual(q0813Fallback.finalAudit.violations, [], JSON.stringify(q0813Fallback.finalAudit, null, 2));
+
+  const q0816Question = '另一轮独立复测（816）里，audit 包含哪些服务，分别负责什么？';
+  const q0817Question = '另一轮独立复测（817）里，审方系统依赖哪些外部系统？';
+  for (const [question, label] of [[q0816Question, 'Q0816'], [q0817Question, 'Q0817']]) {
+    const factRoute = runtimeRouteWithRepositoryContext(
+      routeQuestion(auditTag20260831_1RouteMap, question),
+      '2.7.260831-1',
+    );
+    assert.equal(factRoute.route.id, 'AUD-QR-SYS-01-BOUNDARY', JSON.stringify(factRoute, null, 2));
+    const factFallback = bundle.modelFailureFallback(question, factRoute, {
+      code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束',
+    });
+    assert.ok(factFallback, `${label} 普通事实题截断后必须发布完整 route facts`);
+    assert.equal(factFallback.initialAudit.fallbackAnswerMode, 'facts');
+    assert.equal(factFallback.initialAudit.evidenceSufficiencyQuestion, false);
+    assertCompleteFactsInOrder(factFallback.reply, factRoute.answerFacts, label);
+    assert.doesNotMatch(factFallback.reply, /本轮能确认|本轮未知|只读边界/);
+    assert.deepEqual(factFallback.finalAudit.violations, []);
+  }
+
+  const q0818Question = '关于审方四程序职责与外部系统边界，我现在只有一次既有请求和响应，没有数据库权限。现有证据最多能判断到哪？';
+  const q0818Route = runtimeRouteWithRepositoryContext(
+    routeQuestion(auditTag20260831_1RouteMap, q0818Question),
+    '2.7.260831-1',
+  );
+  assert.equal(q0818Route.route.id, 'AUD-QR-SYS-01-BOUNDARY', JSON.stringify(q0818Route, null, 2));
+  const q0818Fallback = bundle.modelFailureFallback(q0818Question, q0818Route, {
+    code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束',
+  });
+  assert.ok(q0818Fallback, 'Q0818 截断后必须发布证据充分性确定性终稿');
+  assert.equal(q0818Fallback.initialAudit.fallbackAnswerMode, 'partial_evidence');
+  assert.equal(q0818Fallback.initialAudit.evidenceSufficiencyQuestion, true);
+  assert.equal(q0818Fallback.initialAudit.partialEvidenceInventoryQuestion, false, 'Q0818 应走通用证据充分性分支，不冒充 Q0813 显式盘点');
+  assert.equal(q0818Fallback.finalAudit.verifiedContextualFactsFallback, true);
+  assertCompleteFactsInOrder(q0818Fallback.reply, q0818Route.answerFacts, 'Q0818');
+  assert.match(q0818Fallback.reply, /本轮能确认[\s\S]*一次既有请求和响应最多只能固定该次可见的请求内容和返回内容/);
+  assert.match(q0818Fallback.reply, /本轮未知[\s\S]*没有数据库权限[\s\S]*落库结果和数据库当前状态无法核对、均为未知/);
+  assert.match(q0818Fallback.reply, /不能由权限缺口反推数据库侧结果/);
+  assert.match(q0818Fallback.reply, /不能外推[^。！？\n]*相关服务已经部署或启动[^。！？\n]*外部依赖当前可用[^。！？\n]*后续链路已经完成/);
+  assert.match(q0818Fallback.reply, /只读边界[\s\S]*同一次已经发生的请求、响应和已有记录/);
+  assert.doesNotMatch(q0818Fallback.reply, /(?:因此|所以|这(?:就)?证明)[^。！？\n]{0,40}(?:已部署|已启动|当前可用|链路已完成)|(?:没有数据库权限|无数据库权限)[^。！？\n]{0,32}(?:未落库|没有落库)/);
+  assert.deepEqual(q0818Fallback.finalAudit.violations, [], JSON.stringify(q0818Fallback.finalAudit, null, 2));
 
   const q0814Question = '另一轮独立复测（814）里，先切到另一个问题：“HIS对外XML接口”当前实现的关键入口或处理链是什么？';
   const q0814Route = runtimeRouteWithRepositoryContext(

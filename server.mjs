@@ -5552,6 +5552,10 @@ function consultAnswerSemanticAudit(answer, question, route) {
       frontendRequestOnlyEvidenceQuestion,
       dataReturnedNotRenderedQuestion,
       partialEvidenceInventoryQuestion,
+      evidenceSufficiencyQuestion,
+      fallbackAnswerMode,
+      existingRecordNarrowingQuestion,
+      minimalEvidenceQuestion,
       currentRouteFacts,
       nonWritingRouteFacts,
     }) : '';
@@ -5568,6 +5572,10 @@ function consultAnswerSemanticAudit(answer, question, route) {
       'incomplete_diagnostic_sequence',
       'missing_evidence_sufficiency_verdict',
       'incomplete_requested_chain',
+      // 确定性 contextual 模板没有新增概率判断；若这里仍出现概率词，
+      // 只能来自逐条完整保留的 current route fact。与纯 facts 窄门一致，
+      // 仅在整份正文逐字等于模板时放行，普通模型草稿仍严格阻断。
+      'unsupported_likelihood',
     ]) {
       const index = violations.indexOf(permitted);
       if (index >= 0) violations.splice(index, 1);
@@ -6320,9 +6328,15 @@ function consultAnswerSafeFallback(draft, audit) {
 // 用户观测、实例未知和只读边界分开。下列附加内容只描述本轮证据边界，
 // 不新增产品事实；技术层名称也只从 current route 提取。
 function consultVerifiedFactsContextualReply(question, audit) {
+  const genericEvidenceSufficiencyQuestion = !!(audit
+    && audit.evidenceSufficiencyQuestion
+    && audit.fallbackAnswerMode === 'partial_evidence'
+    && !audit.existingRecordNarrowingQuestion
+    && !audit.minimalEvidenceQuestion);
   if (!audit || !(audit.frontendRequestOnlyEvidenceQuestion
     || audit.dataReturnedNotRenderedQuestion
-    || audit.partialEvidenceInventoryQuestion)) return '';
+    || audit.partialEvidenceInventoryQuestion
+    || genericEvidenceSufficiencyQuestion)) return '';
   const q = String(question || '').trim();
   const routeFacts = (Array.isArray(audit.nonWritingRouteFacts) && audit.nonWritingRouteFacts.length
     ? audit.nonWritingRouteFacts : audit.currentRouteFacts || [])
@@ -6392,6 +6406,38 @@ function consultVerifiedFactsContextualReply(question, audit) {
     ].join('\n'));
   }
 
+  // “只有一次既有请求和响应、没有数据库权限，最多能判断到哪”没有使用
+  // “哪些成立/仍需确认”的显式盘点句式，但仍是在问证据充分性。模型失败
+  // 时必须直答该次观测能固定到哪、数据库侧仍未知，不能让完整 route facts
+  // 抢先变成机械复述。结论只取用户本轮提供的证据形态；产品边界仍完整
+  // 来自 current route，因此不把无权限反写成未落库，也不外推运行状态。
+  if (genericEvidenceSufficiencyQuestion) {
+    const singleExistingExchange = /(?:一次|一条|单次)[^。！？\n]{0,24}(?:既有|已有|已经发生的)?[^。！？\n]{0,20}请求[^。！？\n]{0,24}(?:和|与|及|、)[^。！？\n]{0,16}响应/iu.test(q)
+      || /(?:一次|一条|单次)[^。！？\n]{0,24}(?:既有|已有|已经发生的)?[^。！？\n]{0,20}请求(?:和|与|及|、)响应/iu.test(q);
+    const noDatabaseAccess = /(?:没有|无|拿不到|未取得)[^。！？\n]{0,16}(?:数据库|库)[^。！？\n]{0,12}(?:权限|访问权)|(?:查不了|不能查|无法查|无权查看)[^。！？\n]{0,16}(?:数据库|库)|(?:没有|无)[^。！？\n]{0,8}数据库权限/iu.test(q);
+    const unsupportedInstanceConclusions = [];
+    if (/(?:程序|服务|部署|启动)/iu.test(routeFactText)) unsupportedInstanceConclusions.push('相关服务已经部署或启动');
+    if (/(?:外部|依赖|用户中心|消息服务|\bHIS\b|\bPKB\b|\bDify\b)/iu.test(routeFactText)) unsupportedInstanceConclusions.push('外部依赖当前可用');
+    if (/(?:链路|处理|落库|写入|后续|调用)/iu.test(routeFactText)) unsupportedInstanceConclusions.push('后续链路已经完成');
+    const observationVerdict = singleExistingExchange
+      ? '一次既有请求和响应最多只能固定该次可见的请求内容和返回内容；不能据此确认请求之外的运行状态或后续处理结果。'
+      : '现有受限证据最多只能固定本轮实际可见的请求和返回；不能据此确认证据之外的运行状态或后续处理结果。';
+    return consultNormalizeSafeMarkdown([
+      '本轮能确认',
+      `- ${observationVerdict}`,
+      ...factBlock,
+      '本轮未知',
+      noDatabaseAccess
+        ? '- 用户说明本轮没有数据库权限；这只表示落库结果和数据库当前状态无法核对、均为未知，不能由权限缺口反推数据库侧结果。'
+        : '',
+      unsupportedInstanceConclusions.length
+        ? `- 仅凭本轮可见请求和返回，不能外推${unsupportedInstanceConclusions.join('、')}。`
+        : '- 仅凭本轮可见请求和返回，不能外推未取得证据的运行状态或后续处理结果。',
+      '只读边界',
+      '- 只核对同一次已经发生的请求、响应和已有记录；没有权限取得的数据库证据明确标为未知，不改数据、不重放请求、不重复提交，也不触发写操作。',
+    ].filter(Boolean).join('\n'));
+  }
+
   return consultNormalizeSafeMarkdown([
     '本轮观测',
     '- 用户已提供的现象是接口返回有数据而页面未呈现；该描述只固定本轮观测，不能单独新增产品事实，也不能确认本次服务端处理结果。',
@@ -6429,12 +6475,19 @@ function consultVerifiedFactsFallback(question, route, routeFactsOnly = false) {
     'incomplete_diagnostic_sequence',
     'missing_evidence_sufficiency_verdict',
     'incomplete_requested_chain',
+    // strictReply 中的概率措辞若存在只能来自完整 current route facts；
+    // contextual 模板本身不生成概率归因，最终仍须逐字等于确定性模板。
+    'unsupported_likelihood',
   ]);
   const routeFactsAreCompleteSafeTerminal = !!(strictAudit
     && !strictAudit.ambiguousAsBuiltSystemActionParts.length
     && strictAudit.nonWritingRouteFacts.every((fact, index) => fact === strictAudit.currentRouteFacts[index])
     && strictAudit.verifiedFactsPrePermitViolations.every(violation => safeTerminalPresentationViolations.has(violation)));
-  const contextualReply = routeFactsOnly && routeFactsAreCompleteSafeTerminal
+  // contextual partial-evidence 模板只读取 nonWritingRouteFacts，并在终审中
+  // 逐字重建比对；因此即使原始 route facts 含需安全改写的 as-built 动作，
+  // 也可先生成该确定性终稿，再由完整终审决定是否发布。普通 strict facts
+  // 与实施清单仍要求 routeFactsAreCompleteSafeTerminal，不放宽动作安全门。
+  const contextualReply = routeFactsOnly
     ? consultVerifiedFactsContextualReply(question, initialAudit) : '';
   // “换成实施逐项只读清单”明确改变的是发布形态。即使完整 route facts
   // 本身安全，也不能让 strictReply 抢在按 current route 拆出的编号清单前；
@@ -6443,9 +6496,9 @@ function consultVerifiedFactsFallback(question, route, routeFactsOnly = false) {
     && initialAudit.implementationChecklistQuestion
     && String(initialAudit.safeDiagnosticFallback || '').trim()
     ? consultNormalizeSafeMarkdown(String(initialAudit.safeDiagnosticFallback).trim()) : '';
-  const reply = routeFactsOnly && routeFactsAreCompleteSafeTerminal
-    ? (implementationChecklistReply || contextualReply || strictReply)
-    : consultAnswerSafeFallback('', initialAudit);
+  const reply = contextualReply || (routeFactsOnly && routeFactsAreCompleteSafeTerminal
+    ? (implementationChecklistReply || strictReply)
+    : consultAnswerSafeFallback('', initialAudit));
   const finalAudit = consultAnswerSemanticAudit(reply, question, route);
   if (finalAudit.violations.length) return null;
   return { reply, initialAudit, finalAudit };
