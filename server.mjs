@@ -3639,7 +3639,11 @@ function consultAnswerSemanticAudit(answer, question, route) {
   // 前缀不会改变普通“现在怎么实现”的事实题意，但当本轮明确盘点接口、
   // 数据和边界时，它本身就是现场复测语境，不能再按普通 broad facts 只复述。
   const explicitReviewDiagnosticQuestion = /(?:另一轮独立复测|现场复测|独立复测|现场复核)/iu.test(questionText)
-    && /(?:接口|数据|边界)/iu.test(intentQuestionText)
+    // 三个维度必须同时出现；“菜单可见是不是代表后端接口有权限”之类
+    // 单一事实/关系题虽然含“接口”，仍只回答已核关系，不能强塞四步诊断。
+    && /接口/iu.test(intentQuestionText)
+    && /数据/iu.test(intentQuestionText)
+    && /边界/iu.test(intentQuestionText)
     // “从入口到外部依赖串起来”是显式研发链路题，沿用 chain fallback
     // 的入口/接口/数据/依赖合同，不应被复测诊断四步门改写为 field_diagnostic。
     && !/(?:串起来|串联|全链路|调用链|实现链路|从[^.。！？\n，,；;]{1,80}到[^.。！？\n，,；;]{1,40})/iu.test(questionText);

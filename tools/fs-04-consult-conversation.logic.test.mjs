@@ -3935,6 +3935,35 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.doesNotMatch(q0807Fallback, /唯一来源|每次验证登录身份|\/invented\/dependency\/status/);
   assert.deepEqual(bundle.audit(q0807Fallback, q0807Question, q0807Route).violations, []);
 
+  const q0841Question = '菜单可见是不是就代表后端接口有权限？';
+  const q0846Question = '另一轮独立复测（846）里，菜单可见是不是就代表后端接口有权限？';
+  const q0846Route = runtimeRouteWithRepositoryContext(
+    routeQuestion(auditTag20260831_1RouteMap, q0846Question),
+    '2.7.260831-1',
+  );
+  assert.equal(q0846Route.route.id, 'AUD-QR-SYS-01', JSON.stringify(q0846Route, null, 2));
+  for (const [question, label] of [[q0841Question, 'Q0841'], [q0846Question, 'Q0846']]) {
+    const initial = bundle.audit('', question, q0846Route);
+    assert.equal(initial.explicitReviewDiagnosticQuestion, false, `${label} 单一关系事实题不得进入宽复测盘点`);
+    assert.equal(initial.fallbackAnswerMode, 'facts', `${label} 应按 focused fact/relationship 发布`);
+    assert.ok(!initial.violations.includes('incomplete_diagnostic_sequence'), JSON.stringify(initial, null, 2));
+    const fallback = bundle.modelFailureFallback(question, q0846Route, {
+      code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束',
+    });
+    assert.ok(fallback, `${label} 模型失败后必须发布 current route 已核事实`);
+    assert.match(fallback.reply, /菜单可见[\s\S]{0,160}(?:不等同|不能单独证明)[^。！？\n]*后端/);
+    assert.deepEqual(fallback.finalAudit.violations, [], JSON.stringify(fallback.finalAudit, null, 2));
+  }
+  const q0846TrueDiagnostic = '另一轮独立复测（846）里，菜单可见但接口返回无权限，下一步怎么按顺序继续只读排查？';
+  const q0846TrueDiagnosticAudit = bundle.audit(q0846Route.answerFacts.join('\n'), q0846TrueDiagnostic, q0846Route);
+  assert.equal(q0846TrueDiagnosticAudit.fallbackAnswerMode, 'field_diagnostic', '真正要求下一步/顺序/只读排查的复测题仍须走完整诊断');
+  const q0846TrueDiagnosticFallback = bundle.modelFailureFallback(q0846TrueDiagnostic, q0846Route, {
+    status: 429, message: 'rate limit',
+  });
+  assert.ok(q0846TrueDiagnosticFallback, '真正诊断题模型失败时仍须发布只读诊断终稿');
+  assert.equal(q0846TrueDiagnosticFallback.initialAudit.fallbackAnswerMode, 'field_diagnostic');
+  assert.deepEqual(q0846TrueDiagnosticFallback.finalAudit.violations, []);
+
   const q0811Question = '另一轮独立复测（811）里，audit 包含哪些服务，分别负责什么？';
   const q0812Question = '另一轮独立复测（812）里，审方系统依赖哪些外部系统？';
   for (const [question, label] of [[q0811Question, 'Q0811'], [q0812Question, 'Q0812']]) {
