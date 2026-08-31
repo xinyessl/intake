@@ -930,7 +930,39 @@ function consultOperationEvidenceStopReply() {
 function routeQuestion(map, query, subKey = '') {
   const q = String(query || '');
   const qLower = q.toLowerCase();
-  const qset = new Set(kbTokenize(q));
+  // “关于 X，我现在只有一次既有请求和响应，没有数据库权限，现有证据
+  // 最多能判断到哪”这类受限证据模板在很多 route 的 aliases 中重复出现。
+  // 若直接把整句送入 IDF，最早收录模板的无关 route 可能靠这些通用后缀
+  // 获得异常高分，压过问句已经明确点名的 X。路由打分时只在能提取到
+  // 明确主题时使用“限制说明之前的主题 + 判断动词之后的具体对象”；
+  // 提取不到主题仍保留原问句，避免纯证据材料追问丢失上下文召回。
+  const partialEvidenceIntent = /(?:现有|当前|已有|本轮)?\s*证据[^。！？\n]{0,28}(?:最多|够不够|是否足够|能否|能不能|可以)?\s*(?:判断|确认|排除)|(?:只有|仅有|只拿到|仅拿到|只能看到|只能确认)[^。！？\n]{0,80}(?:请求|响应|截图|页面|记录|日志)[^。！？\n]{0,80}(?:没有|无|拿不到|无法|查不了|看不了|不能查|不能看)[^。！？\n]{0,24}(?:数据库|日志|源码|后台)/u.test(q);
+  let routeScoringQuery = q;
+  if (partialEvidenceIntent) {
+    const limitIndex = q.search(/(?:(?:我|我们|当前|现在|目前|现场|这边|本轮|这次)\s*){0,3}(?:只有|仅有|只拿到|仅拿到|只能看到|只能确认)/u);
+    const subjectParts = [];
+    if (limitIndex > 0) subjectParts.push(q.slice(0, limitIndex));
+    if (limitIndex >= 0) {
+      const limitationEnd = q.slice(limitIndex).search(/(?:没有|无|拿不到|无法|查不了|看不了|不能查|不能看)[^。！？\n]{0,24}(?:数据库|日志|源码|后台)|(?:现有|当前|已有|本轮)?\s*证据/u);
+      const rawMaterial = q.slice(limitIndex, limitationEnd > 0 ? limitIndex + limitationEnd : q.length)
+        .replace(/^(?:(?:我|我们|当前|现在|目前|现场|这边|本轮|这次)\s*){0,3}(?:只有|仅有|只拿到|仅拿到|只能看到|只能确认)\s*/u, '')
+        .replace(/^(?:同)?一(?:次|份|条|张)\s*/u, '')
+        .replace(/[且并，,；;。！？?\s]+$/u, '')
+        .replace(/(?:既有|已有|当前|现有)?\s*(?:请求\s*(?:(?:和|与|、|及)\s*)?响应|请求|响应|截图|页面|记录|日志)\s*$/u, '')
+        .trim();
+      // “AI 生成的 Dify 流式任务请求”这类材料本身含更具体的业务实体，
+      // 不能和通用“既有请求和响应”一起删掉；否则会退回宽泛页面 route。
+      if (kbTokenize(rawMaterial).length >= 2) {
+        subjectParts.length = 0;
+        subjectParts.push(rawMaterial);
+      }
+    }
+    const judgedObject = q.match(/(?:判断|确认|排除)(?!到哪|到什么|哪些|什么)([^。！？?]{2,80})/u)?.[1] || '';
+    if (judgedObject && !/^(?:到哪|到什么|哪些|什么|的部分|的范围)/u.test(judgedObject.trim())) subjectParts.push(judgedObject);
+    const subject = subjectParts.join(' ').replace(/^(?:关于|针对)\s*/u, '').replace(/[，,；;。！？?\s]+$/u, '').trim();
+    if (kbTokenize(subject).length >= 2) routeScoringQuery = subject;
+  }
+  const qset = new Set(kbTokenize(routeScoringQuery));
   const routes = Array.isArray(map && map.questionRoutes) ? map.questionRoutes : [];
   const specs = Array.isArray(map && map.specs) ? map.specs : [];
   const operationContracts = consultExplicitOperationContracts(q);
@@ -941,18 +973,24 @@ function routeQuestion(map, query, subKey = '') {
   //    ⚠️ tier-1 先跑：questionRoute 命中即带出人工整理的 answerFacts/mustNotConfuse（高价值），
   //       tier-3 精确反查只作 tier-1 未过阈值时的兜底增强（否则「order_instruction 怎么配」会被 tier-3 抢走、丢掉 answerFacts）。
   if (routes.length) {
-    const scoreAt = routeScorer(routes.map(r => String((r && r.searchText) || [(r && r.title), ...((r && r.aliases) || []), ...((r && r.keywords) || [])].filter(Boolean).join(' '))));
+    const routeSearchTexts = routes.map(r => String((r && r.searchText) || [(r && r.title), ...((r && r.aliases) || []), ...((r && r.keywords) || [])].filter(Boolean).join(' ')));
+    const scoreAt = routeScorer(routeSearchTexts);
+    const fullIntentScoreAt = routeScoringQuery === q ? null : routeScorer(routeSearchTexts);
+    const fullQset = fullIntentScoreAt ? new Set(kbTokenize(q)) : null;
     let best = null;
     const scored = routes.map((r, i) => {
       const directOperationEvidence = routeHasDirectOperationEvidence(r, operationContracts);
       let sc = scoreAt(qset, i);
+      const fullIntentScore = fullIntentScoreAt ? fullIntentScoreAt(fullQset, i) : sc;
       // 别名整串命中：query 含某 alias 作为子串（或 alias 含 query）→ 强 bonus（别名是人工短语，判别性高）
       let aliasHit = false;
       for (const a of ((r && r.aliases) || [])) { const al = String(a || '').toLowerCase().trim(); if (al.length >= 3 && (qLower.includes(al) || (al.length >= 4 && al.includes(qLower) && qLower.length >= 4))) { aliasHit = true; break; } }
       if (aliasHit) sc += ROUTE_ALIAS_BONUS;
       if (!directOperationEvidence) sc = 0;
-      return { r, sc: Math.round(sc * 1000) / 1000, aliasHit, directOperationEvidence };
-    }).sort((a, b) => {
+      return { r, sc: Math.round(sc * 1000) / 1000, fullIntentScore: Math.round(fullIntentScore * 1000) / 1000, aliasHit, directOperationEvidence };
+    });
+    const strongestSubjectScore = scored.reduce((max, item) => Math.max(max, item.sc), 0);
+    scored.sort((a, b) => {
       // QR 是面向确定事实的人工路由，DQ 是宽泛排查卡。同一问法下 DQ 的通用词较多，
       // 可能以很小分差压过已强命中实体的 QR（如“我的监护列表/详情路径”）。
       // 当两者分差在 15% 内时优先 QR；差距明显时仍尊重原始相关性，避免硬抢无关问题。
@@ -961,7 +999,14 @@ function routeQuestion(map, query, subKey = '') {
         const high = Math.max(a.sc, b.sc), low = Math.min(a.sc, b.sc);
         if (high > 0 && low >= high * 0.85) return aQr ? -1 : 1;
       }
-      return b.sc - a.sc;
+      // 受限证据题先用剥离模板后的主题分锁住同一业务簇；同簇候选主题分
+      // 已达到最高分 80% 时，再用完整问句里的“已有请求响应/无日志或 DB
+      // 权限/能确认到哪”意图区分事实链与证据续查 route。无关 route 即使
+      // 收录过同款模板，主题分未进该窄门，也不能靠完整问句重新抢回。
+      const samePartialEvidenceTopic = fullIntentScoreAt && strongestSubjectScore > 0
+        && a.sc >= strongestSubjectScore * 0.8 && b.sc >= strongestSubjectScore * 0.8;
+      if (samePartialEvidenceTopic && a.fullIntentScore !== b.fullIntentScore) return b.fullIntentScore - a.fullIntentScore;
+      return b.sc - a.sc || b.fullIntentScore - a.fullIntentScore;
     });
     // 当前问句完整出现唯一人工 route title 时，它比宽泛 searchText 的词频分
     // 更能表达用户显式切题（如“处方标记”vs FAQ/“医嘱标记”）。必须完整
@@ -3130,7 +3175,12 @@ function consultAnswerSemanticAudit(answer, question, route) {
     // “进入第N步”。顶层 `N.` 与明确“第N步：标题”在本行先登记。
     const topLevelDefinition = topLevelSteps.find(step => step.lineIndex === lineIndex);
     if (topLevelDefinition) definedArabicSteps.add(topLevelDefinition.number);
-    const heading = line.match(/^\s*(?:[-*+]\s+)?(?:\*\*|__)?\s*第\s*([1-9]\d*)\s*步(?:\s*[：:、.]|\s+)/u);
+    const rangeHeading = line.match(/^\s*(?:[-*+]\s+)?(?:\*\*|__)?\s*第\s*([1-9]\d*)\s*(?:至|到|[-~～])\s*([1-9]\d*)\s*步(?:[^：:\n]{0,20})?\s*[：:]/u);
+    if (rangeHeading) {
+      const start = Number(rangeHeading[1]), end = Number(rangeHeading[2]);
+      if (end >= start && end - start <= 20) for (let number = start; number <= end; number++) definedArabicSteps.add(number);
+    }
+    const heading = line.match(/^\s*(?:[-*+]\s+)?(?:\*\*|__)?\s*第\s*([1-9]\d*)\s*步(?:[^：:\n]{0,20})?\s*[：:]/u);
     if (heading) definedArabicSteps.add(Number(heading[1]));
     const referenced = new Set();
     for (const match of line.matchAll(/第\s*([1-9]\d*)(?:\s*[\/、和及]\s*([1-9]\d*))?\s*步/gu)) {

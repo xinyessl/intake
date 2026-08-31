@@ -3491,6 +3491,35 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.deepEqual(q0790VariantFallback.finalAudit.violations, []);
   assert.doesNotMatch(q0790VariantFallback.reply, /当前操作请求|业务流水|状态表|页面选择|HTTP\/业务码/);
 
+  const q0793Questions = [
+    '关于免鉴权路径与 JWT 只读排查，我现在只有一次既有请求和响应，没有数据库权限。现有证据最多能判断到哪？',
+    '免鉴权路径的 JWT 只读排查里，目前只有同一次请求响应且查不了数据库，现有证据最多能确认到哪一步？',
+  ];
+  for (const q0793Question of q0793Questions) {
+    const q0793Route = runtimeRouteWithRepositoryContext(routeQuestion(auditTag20260829_3RouteMap, q0793Question), '2.7.260829-3');
+    assert.equal(q0793Route.route.id, 'AUD-QR-SYS-01-JWT-CONTINUE', JSON.stringify(q0793Route, null, 2));
+    const q0793Initial = bundle.audit('', q0793Question, q0793Route);
+    assert.equal(q0793Initial.partialEvidenceQuestion, true);
+    assert.equal(q0793Initial.fallbackAnswerMode, 'partial_evidence');
+    const q0793Candidate = bundle.fallback('', q0793Initial);
+    const q0793CandidateAudit = bundle.audit(q0793Candidate, q0793Question, q0793Route);
+    for (const modelError of [
+      { code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束' },
+      { status: 429, message: 'rate limit' },
+    ]) {
+      const q0793Fallback = bundle.modelFailureFallback(q0793Question, q0793Route, modelError);
+      assert.ok(q0793Fallback, JSON.stringify({ question: q0793Question, modelError, candidate: q0793Candidate, candidateAudit: q0793CandidateAudit }, null, 2));
+      assert.equal(q0793Fallback.fallbackSource, 'verifiedFacts');
+      assert.equal(q0793Fallback.modelDraftError.kind, modelError.status === 429 ? 'rate_limit' : 'length_limit');
+      assert.deepEqual(q0793Fallback.finalAudit.violations, [], JSON.stringify({ reply: q0793Fallback.reply, audit: q0793Fallback.finalAudit }, null, 2));
+      assert.match(q0793Fallback.reply, /现有受限证据只够|能确认/);
+      assert.match(q0793Fallback.reply, /本轮未知/);
+      assert.match(q0793Fallback.reply, /同一次既有请求/);
+      assert.match(q0793Fallback.reply, /本路由未定义通用状态接口、数据库查询或页面对象清单，不得加入这些检查/);
+      assert.doesNotMatch(q0793Fallback.reply, /AI 暂时连不上|(?:请|需要|应当|应该)查询数据库|(?:请|需要|应当|应该)检查状态表/);
+    }
+  }
+
   assert.match(bundle.modelVisibleError({ code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束' }, 'length123'), /达到长度上限，未完整结束/);
   assert.doesNotMatch(bundle.modelVisibleError({ code: 'MODEL_OUTPUT_TRUNCATED' }, 'length123'), /暂时连不上/);
   assert.match(bundle.modelVisibleError({ status: 429, message: 'rate limit' }, 'rate123'), /当前请求较多/);

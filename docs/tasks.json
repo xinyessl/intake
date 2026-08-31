@@ -542,6 +542,21 @@
           "note": "已实现待验收：Q0789 入口/处理分支/接口/数据/外部依赖按显式 route 标签归组，外部依赖固定为已核 usercenter IDubboUserCenterService.verifyToken，缺失维度明确停住；Q0790 支持 route 原子只读顺序，finish_reason=length/stop_reason=max_tokens 统一记 MODEL_OUTPUT_TRUNCATED，已核 route 终稿审计全绿时安全发布，否则准确提示长度限制。focused/full 37/37 + 16/16 通过；隔离 MySQL 8.4 + 真 /api/consult + OpenAI 截断 SSE 冒烟中，审方 2.7.260829-3 精确原问与自然变体共 4 条全绿，截断半句 0 条落库，未提交、未部署。"
         }
       ]
+    },
+    {
+      "id": "B-20260831-受限证据主题路由与安全收口",
+      "source": "审方 2.7.260829-3 · Intake 浏览器千题回归",
+      "importedAt": "2026-08-31",
+      "ref": "C159 Q0793 受限证据问法被通用模板抢错 route，length 准确分类后仍未能从 JWT current route 生成安全终稿",
+      "tasks": [
+        {
+          "id": "FS04-Q0793",
+          "title": "受限证据问句先锁明确业务主题，并让 JWT route 在 length/429 时按已核原子事实安全收口",
+          "status": "doing",
+          "specRef": "FS-04",
+          "note": "已实现待人工验收：Q0793 精确原问/自然变体均命中 AUD-QR-SYS-01-JWT-CONTINUE，OpenAI length/429 均使用 verifiedFacts 保留已核事实与本轮未知，终审零违规。focused/full 37/37 + 16/16 已绿；隔离 MySQL 8.4 + 真 POST /api/consult SSE 的精确原问 length 与自然变体 429 均返回 fallbackSource=verifiedFacts、finalViolations=[]，真库 2 条且截断半句落库 0 条。临时容器/数据/脚本已清理；未提交、未 tag、未部署。"
+        }
+      ]
     }
   ]
 }
