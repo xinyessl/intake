@@ -37,6 +37,7 @@ import { buildHospitalCards as ovBuildHospitalCards, buildProductCards as ovBuil
 import { sortVersions as vpSortVersions } from './tools/version-plan-logic.mjs';
 // FS-04 答疑 Spec 两阶段召回：完整目录/元数据路由候选文件，再只搜候选正文；纯逻辑见专项测试。
 import { buildSpecDocument, searchSpecDocuments, currentTurnEvidenceGuard, expandRetrievalQuery } from './spec-retrieval.mjs';
+import { refreshManagedRepo } from './tools/repo-refresh-safety.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));           // 收件项目根目录
 const PORT = process.env.PORT || 5180;
@@ -1594,8 +1595,9 @@ function cloneRepo(projectId, key, repoUrl) {   // clone/pull 到缓存，返回
     return r.status === 0 ? dir : '';
   } catch { return ''; }
 }
-// 代码新鲜度：clone 是快照，只在登记时拉一次。这里把各子系统仓 fetch 最新 tag + reset 工作树到上游，
-// 让"版本清单(tag)"和"无版本时读的 spec 正文(工作树)"都是最新。带 15 分钟冷却；force=true 立即同步。
+// 代码新鲜度：只刷新 data/repos 下由 Intake clone 的专用缓存仓。
+// 外部开发工作区始终只读；缓存仓只要 dirty 也 fail closed，绝不 reset。
+// 带 15 分钟冷却；force=true 立即同步。
 const REPO_SYNC_AT = new Map();   // projId -> 上次同步时间戳
 function repoDirsOf(proj) { const d = []; ((proj && proj.subsystems) || []).forEach(s => { if (s && s.repoPath) d.push({ dir: s.repoPath, name: s.name || s.key || '' }); }); if (proj && proj.repoPath) d.push({ dir: proj.repoPath, name: '' }); return d; }
 function refreshRepos(proj, force) {
@@ -1604,14 +1606,18 @@ function refreshRepos(proj, force) {
   const repos = [], c = readGitCfg();
   for (const { dir, name } of repoDirsOf(proj)) {
     if (!fs.existsSync(path.join(dir, '.git'))) continue;
-    try {
-      if (c.token) { const cur = gitOut(dir, ['remote', 'get-url', 'origin']).trim(); const clean = cur.replace(/^(https?:\/\/)([^@/]*@)?/, '$1'); const auth = authGitUrl(clean, c); spawnSync('git', ['-C', dir, 'remote', 'set-url', 'origin', auth], { timeout: 15000 }); }   // 重嵌当前 token（provider 化，同 cloneRepo），防轮换后拉不动
-      const f = spawnSync('git', ['-C', dir, 'fetch', '--all', '--tags', '--prune', '--force'], { timeout: 90000 });
-      spawnSync('git', ['-C', dir, 'reset', '--hard', '@{u}'], { timeout: 30000 });   // 工作树对齐远端默认分支（spec 无版本时读这里）
-      const head = gitOut(dir, ['log', '-1', '--format=%h｜%ci｜%s']).trim();
-      const tags = gitOut(dir, ['tag', '-l']).split('\n').filter(Boolean).length;
-      repos.push({ name, ok: f.status === 0, head: head.slice(0, 90), tags });
-    } catch { repos.push({ name, ok: false, head: '', tags: 0 }); }
+    repos.push(refreshManagedRepo({
+      dir,
+      name,
+      cacheRoot: REPOS_CACHE,
+      prepareRemote: c.token ? (repoDir) => {
+        const cur = gitOut(repoDir, ['remote', 'get-url', 'origin']).trim();
+        const clean = cur.replace(/^(https?:\/\/)([^@/]*@)?/, '$1');
+        const auth = authGitUrl(clean, c);
+        const changed = spawnSync('git', ['-C', repoDir, 'remote', 'set-url', 'origin', auth], { timeout: 15000 });
+        if (changed.status !== 0) throw new Error(String(changed.stderr || changed.error || '无法更新 origin'));
+      } : null,
+    }));
   }
   REPO_SYNC_AT.set(proj.id, now);
   for (const k of [...SPEC_TEXT_CACHE.keys()]) if (k.startsWith(proj.id + '@')) SPEC_TEXT_CACHE.delete(k);   // 代码变了，spec 缓存作废
@@ -7936,7 +7942,13 @@ const server = http.createServer((req, res) => {
     return readBody(req, async (b, err) => {
       const proj = projById(b && b.project); if (!proj) return send(res, 400, JSON.stringify({ ok: false, error: '项目不存在' }));
       let r; try { r = refreshRepos(proj, true); } catch (e) { return send(res, 200, JSON.stringify({ ok: false, error: String((e && e.message) || e) })); }
-      send(res, 200, JSON.stringify({ ok: true, syncedAt: fmtSyncAt(r.at), repos: r.repos || [], versions: listVersions(proj) }));
+      const repos = r.repos || [];
+      const blockedRepos = repos.filter(repo => repo.skipped);
+      send(res, 200, JSON.stringify({
+        ok: blockedRepos.length === 0 && repos.every(repo => repo.ok),
+        error: blockedRepos.length ? blockedRepos.map(repo => `${repo.name || '默认仓'}：${repo.message}`).join('；') : '',
+        syncedAt: fmtSyncAt(r.at), repos, blockedRepos, versions: listVersions(proj),
+      }));
     });
   }
   if (url.pathname === '/api/git-config') { const c = readGitCfg(); return send(res, 200, JSON.stringify({ baseUrl: c.baseUrl || '', tokenMask: maskTok(c.token), configured: !!(c.baseUrl && c.token), provider: gitProvider(c) })); }

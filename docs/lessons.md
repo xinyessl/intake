@@ -13,6 +13,7 @@
 ---
 
 ## ✅ 本项目自检清单（每次交付前逐条过）
+- [ ] **【产品仓刷新只能写 Intake 托管缓存】**：`repoPath` 可能来自测试数据或历史登记，不能假定它一定是缓存 clone。任何 fetch/reset 前先用 realpath 确认位于 `data/repos`，再检查工作区 clean；fetch 后、reset 前再检查一次。外部/dirty/状态不明/fetch 失败一律 fail closed，并在接口结果中返回可观测 reason（见 L-138）。
 - [ ] **【同主题宽标题不能盖掉当前轮高置信专用意图】**：多轮里上一问是“当前实现/宽清单”，下一问明确改成第一层正常后的继续只读排查或受限证据判断时，不能只因问句仍逐字出现宽 route 标题就继承旧 facts。若本轮另一人工候选分数至少为旧候选两倍且绝对差达到命中门，应恢复专用 current route；弱短句仍继承。必须同时核 `routing.routeId/score/topN[0]` 一致（见 L-137）。
 - [ ] **【受限证据问句路由要先剥通用后缀、再在同主题簇比完整意图】**：“只有一次请求响应/无库权限/证据能判断到哪”会在多个 route alias 重复，不能让它的 IDF 分盖过问句前文的明确实体。先用主题分限制候选簇，再用完整问句区分 continue/chain/evidence；去材料前先 trim 尾标点，具体材料本身含实体时要保留。`verifiedFacts` 发布的“第 1 至 3 步/第 4 步仅适用”也要在终审中定义完整步骤集（见 L-136）。
 - [ ] **【多步副作用事务题与批量重试清单必须同时守顺序和风险事实】**：状态、流水、Redis/任务键、消息、外部回调等至少三类结果询问同一事务时，进入五层只读诊断；批量/多对象失败重试清单还须按 current route 逐项覆盖操作前状态校验、幂等键/并发锁、重复流水/消息/回调、局部幂等不代表整体幂等。as-built 的“再提交/发消息/触发回调”要转成风险判断，不能原样伪装成现场动作（见 L-133）。
@@ -1314,3 +1315,10 @@
 - 解法：仅当当前强制候选仍等于上一轮 route 时，比较本轮人工 topN；另一候选至少两倍且绝对差达到命中门时恢复其完整 route/facts/refs。规则不绑定业务词；弱短句、无强 direct 的部分证据轮继续继承。裁决后重排 topN，使 selected/score/topN 首项一致。
 - 防复发：同时回归宽实现→专用续查、宽 JWT→诊断/受限证据、弱短句继承、显式新实体切题和 routing 诊断一致性；不能只断言最终 route id。
 - 关联：`FS-04 AC-146`；`server.mjs`；`tools/fs-04-consult-conversation.logic.test.mjs`；`docs/changes/CHG-consult-强直接意图覆盖同主题宽历史.md`。
+
+### L-138 产品登记的 repoPath 不是可写授权，刷新只能操作托管缓存 clone
+- 现象（2026-08-31）：隔离冒烟项目误把活跃 PWRS 开发仓写入 `repoPath`，咨询请求触发 `refreshRepos` 后，无条件的 `git reset --hard @{u}` 覆盖了重点监控三个页面的未提交改动。
+- 根因：Intake 把“可读取产品代码的路径”错误等同于“可破坏性同步的缓存仓路径”；刷新前既未限制目录所有权，也未检查 dirty，fetch 失败后仍继续 reset，接口还会把跳过/失败吞成同步成功。
+- 解法：写操作只允许 `data/repos` 下由 Intake clone 的专用缓存仓，使用 realpath 防符号链接逃逸；外部仓永远只读。托管缓存仓在 fetch 前和 reset 前各执行一次 `git status --porcelain`，dirty、状态不明或 fetch 失败均 fail closed；拒绝原因通过 `repos/blockedRepos/error` 返回。
+- 防复发：回归使用真实临时 bare origin + 托管/外部 clone，必须同时证明 clean 缓存仓能更新、dirty 仓 HEAD/已跟踪/未跟踪文件不变、外部 clean 仓也不写、符号链接不能越界；不能只用 mock 验证“调用了 status”。
+- 关联：`PD-01 AC-15`；`server.mjs`；`tools/repo-refresh-safety.mjs`；`tools/repo-refresh-safety.logic.test.mjs`；`docs/changes/CHG-产品仓刷新只写托管缓存.md`。
