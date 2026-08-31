@@ -2589,9 +2589,9 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.ok(!q0173Initial.violations.includes('missing_evidence_sufficiency_verdict'), '完整 verified route facts 自身可作为确定性终稿，不再强制补通用未知模板');
   const q0173Fallback = bundle.modelFailureFallback(q0173Question, q0173Route, { status: 429, message: 'rate limit' });
   assert.ok(q0173Fallback, 'Q0173 HTTP429 时必须使用门诊自动通过 route facts 确定性兜底');
-  const q0173PublishedFacts = q0173Fallback.reply.split('\n').map(line => line.replace(/^\s*[-*+]\s+/u, '').trim())
-    .filter(line => line && line !== '业务结论' && line !== '实施口径');
-  assert.deepEqual(q0173PublishedFacts, q0173Route.answerFacts);
+  for (const fact of q0173Route.answerFacts) assert.ok(q0173Fallback.reply.includes(fact), `Q0173 应保留 route fact：${fact}`);
+  assert.match(q0173Fallback.reply, /本轮能确认[\s\S]*接口状态和业务返回/);
+  assert.match(q0173Fallback.reply, /本轮未知[\s\S]*不能外推[\s\S]*只读边界/);
   assert.match(q0173Fallback.reply, /门诊处方自动通过|RedisConsumer|AUDIT:OPT:AUTO/);
   assert.match(q0173Fallback.reply, /未覆盖|生命体征|影像|费用结算|收费明细/);
   assert.match(q0173Fallback.reply, /坏 JSON|队首|阻塞/);
@@ -3840,6 +3840,44 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assertCompleteFactsInOrder(q0807Fallback, q0807Route.answerFacts, 'Q0807');
   assert.doesNotMatch(q0807Fallback, /唯一来源|每次验证登录身份|\/invented\/dependency\/status/);
   assert.deepEqual(bundle.audit(q0807Fallback, q0807Question, q0807Route).violations, []);
+
+  const q0811Question = '另一轮独立复测（811）里，audit 包含哪些服务，分别负责什么？';
+  const q0812Question = '另一轮独立复测（812）里，审方系统依赖哪些外部系统？';
+  for (const [question, label] of [[q0811Question, 'Q0811'], [q0812Question, 'Q0812']]) {
+    const factRoute = runtimeRouteWithRepositoryContext(
+      routeQuestion(auditTag20260831_1RouteMap, question),
+      '2.7.260831-1',
+    );
+    assert.equal(factRoute.route.id, 'AUD-QR-SYS-01-BOUNDARY', JSON.stringify(factRoute, null, 2));
+    const factFallback = bundle.modelFailureFallback(question, factRoute, {
+      code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束',
+    });
+    assert.ok(factFallback, `${label} 普通事实题截断后必须发布完整 route facts`);
+    assert.equal(factFallback.initialAudit.partialEvidenceInventoryQuestion, false);
+    assertCompleteFactsInOrder(factFallback.reply, factRoute.answerFacts, label);
+    assert.doesNotMatch(factFallback.reply, /本轮能确认|本轮未知|只读边界/);
+    assert.deepEqual(factFallback.finalAudit.violations, []);
+  }
+
+  const q0813Question = '先别把审方四程序职责与外部系统边界的原因说死：当前只有接口状态和业务返回，哪些结论成立，哪些仍需确认？';
+  const q0813Route = runtimeRouteWithRepositoryContext(
+    routeQuestion(auditTag20260831_1RouteMap, q0813Question),
+    '2.7.260831-1',
+  );
+  assert.equal(q0813Route.route.id, 'AUD-QR-SYS-01-BOUNDARY', JSON.stringify(q0813Route, null, 2));
+  const q0813Fallback = bundle.modelFailureFallback(q0813Question, q0813Route, {
+    code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束',
+  });
+  assert.ok(q0813Fallback, 'Q0813 截断后必须发布受限证据盘点终稿');
+  assert.equal(q0813Fallback.initialAudit.fallbackAnswerMode, 'partial_evidence');
+  assert.equal(q0813Fallback.initialAudit.partialEvidenceInventoryQuestion, true);
+  assert.equal(q0813Fallback.finalAudit.verifiedContextualFactsFallback, true);
+  assertCompleteFactsInOrder(q0813Fallback.reply, q0813Route.answerFacts, 'Q0813');
+  assert.match(q0813Fallback.reply, /本轮能确认[\s\S]*当前有接口状态和业务返回/);
+  assert.match(q0813Fallback.reply, /本轮未知[\s\S]*不能外推[\s\S]*服务已经部署或启动[\s\S]*外部依赖当前可用[\s\S]*链路已经完成/);
+  assert.match(q0813Fallback.reply, /只读边界[\s\S]*同一次已经发生的请求、响应、日志和已有记录/);
+  assert.doesNotMatch(q0813Fallback.reply, /(?:因此|所以|这(?:就)?证明)[^。！？\n]{0,40}(?:已部署|已启动|当前可用|链路已完成)/);
+  assert.deepEqual(q0813Fallback.finalAudit.violations, [], JSON.stringify(q0813Fallback.finalAudit, null, 2));
 
   const absoluteSupportedRoute = {
     matched: true,

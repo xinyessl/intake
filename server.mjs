@@ -5498,6 +5498,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
     ? consultVerifiedFactsContextualReply(questionText, {
       frontendRequestOnlyEvidenceQuestion,
       dataReturnedNotRenderedQuestion,
+      partialEvidenceInventoryQuestion,
       currentRouteFacts,
       nonWritingRouteFacts,
     }) : '';
@@ -6262,11 +6263,13 @@ function consultAnswerSafeFallback(draft, audit) {
 }
 
 // verifiedFacts 的模型失败终稿通常只发布完整 route facts；但本轮若明确
-// 提供了“前端已发请求、服务端日志缺失”或“接口有数据、页面未呈现”这类
-// 观测，仍须把用户观测、实例未知和交接证据分开。下列附加内容只描述
-// 本轮证据边界，不新增产品事实；技术层名称也只从 current route 提取。
+// 提供局部观测，或要求盘点“现有受限证据能确认什么/仍未知什么”，仍须把
+// 用户观测、实例未知和只读边界分开。下列附加内容只描述本轮证据边界，
+// 不新增产品事实；技术层名称也只从 current route 提取。
 function consultVerifiedFactsContextualReply(question, audit) {
-  if (!audit || !(audit.frontendRequestOnlyEvidenceQuestion || audit.dataReturnedNotRenderedQuestion)) return '';
+  if (!audit || !(audit.frontendRequestOnlyEvidenceQuestion
+    || audit.dataReturnedNotRenderedQuestion
+    || audit.partialEvidenceInventoryQuestion)) return '';
   const q = String(question || '').trim();
   const routeFacts = (Array.isArray(audit.nonWritingRouteFacts) && audit.nonWritingRouteFacts.length
     ? audit.nonWritingRouteFacts : audit.currentRouteFacts || [])
@@ -6308,6 +6311,32 @@ function consultVerifiedFactsContextualReply(question, audit) {
       '只读边界',
       '- 只核对同一次已经发生的请求、响应、日志和已有记录；不重放请求、不重复提交、不重试，也不触发写操作。',
     ].filter(Boolean).join('\n'));
+  }
+
+  if (audit.partialEvidenceInventoryQuestion) {
+    const evidenceLabels = [
+      /接口状态/iu.test(q) ? '接口状态' : '',
+      /业务(?:返回|响应)/iu.test(q) ? '业务返回' : '',
+      /HTTP\s*状态/iu.test(q) ? 'HTTP 状态' : '',
+      /业务码/iu.test(q) ? '业务码' : '',
+      /响应原文/iu.test(q) ? '响应原文' : '',
+      /(?:请求|响应)(?:记录|报文)/iu.test(q) ? '请求响应记录' : '',
+    ].filter(Boolean);
+    const evidenceScope = Array.from(new Set(evidenceLabels));
+    const providedEvidence = evidenceScope.length ? evidenceScope.join('和') : '本轮点名的受限证据';
+    const unsupportedInstanceConclusions = ['本次观测对应的具体处理分支'];
+    if (/(?:程序|服务|部署|启动)/iu.test(routeFactText)) unsupportedInstanceConclusions.push('相关服务已经部署或启动');
+    if (/(?:外部|依赖|用户中心|消息服务|\bHIS\b|\bPKB\b|\bDify\b)/iu.test(routeFactText)) unsupportedInstanceConclusions.push('外部依赖当前可用');
+    if (/(?:链路|处理|落库|写入|后续|调用)/iu.test(routeFactText)) unsupportedInstanceConclusions.push('后续链路已经完成');
+    return consultNormalizeSafeMarkdown([
+      '本轮能确认',
+      `- 用户本轮只说明当前有${providedEvidence}；未提供具体值或原文时，只能确认这些观测已被提及，不能确认其具体内容。`,
+      ...factBlock,
+      '本轮未知',
+      `- 仅凭${providedEvidence}，不能外推${unsupportedInstanceConclusions.join('、')}；这些实例结论仍需按上述已核边界逐项确认。`,
+      '只读边界',
+      '- 只核对同一次已经发生的请求、响应、日志和已有记录，并按上述已核说明逐项对照；不重放请求、不重复提交、不重试、不改数据，也不触发写操作。',
+    ].join('\n'));
   }
 
   return consultNormalizeSafeMarkdown([
