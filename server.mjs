@@ -5093,6 +5093,59 @@ function consultAnswerSemanticAudit(answer, question, route) {
         ? ['当前停点：本轮到上述已核链路为止，不补写其它入口、数据、依赖或结果。']
         : [];
     safeChainFallback = [chainBusinessFact ? `业务结论：${normalizeChainFact(chainBusinessFact)}` : '', '链路（按本轮点名维度）：', ...chainLines, ...gapBlock].filter(Boolean).join('\n');
+
+    // 权限/认证边界 route 的事实常同时出现页面展示、匿名路径、过滤器分支、
+    // 方法授权与外部身份系统。仅按“页面/请求/数据”等宽词分桶，会把安全
+    // 说明误标成入口、把认证分支误标成数据。这里按事实语义重排这一类
+    // route-scoped 链路；触发条件来自事实形态，不绑定项目、route 或题号。
+    const authenticationImplementationFacts = chainDimensionFacts.filter(fact =>
+      /(?:Shiro|JwtFilter|isAccessAllowed|executeLogin|JwtRealm|全路径[^。！？；\n]{0,32}(?:映射|过滤)|(?:认证|鉴权)[^。！？；\n]{0,24}(?:过滤器|放行|分支))/iu.test(fact));
+    const authenticationBranchFacts = chainDimensionFacts.filter(fact =>
+      consultConcretePaths(fact).length > 0 || authenticationImplementationFacts.includes(fact));
+    const authorizationBoundaryFacts = chainDimensionFacts.filter(fact =>
+      !authenticationBranchFacts.includes(fact)
+      && /(?:(?:方法级|Controller|接口)[^。！？；\n]{0,36}(?:权限|角色|授权)|(?:角色|医院|院区|科室|患者|任务|创建人|owner|数据)[^。！？；\n]{0,36}(?:归属|校验|拦截)|(?:登录成功|菜单可见|按钮不可见|页面[^。！？；\n]{0,18}(?:展示|可见))[^。！？；\n]{0,44}(?:证明|授权|权限|拦截)|(?:授权|隔离测试环境|可回滚测试数据)[^。！？；\n]{0,36}(?:验证|执行))/iu.test(fact));
+    const layeredAuthorizationChain = chainDimensions.some(item => item.id === 'entry')
+      && chainDimensions.some(item => item.id === 'interfaces')
+      && chainDimensions.some(item => item.id === 'data' || item.id === 'permissions')
+      && chainDimensions.some(item => item.id === 'dependencies')
+      // 具体业务路径 + 通用 Controller 权限说明在很多普通功能 route
+      // 都存在，不能仅凭这两项切到认证架构链；必须有过滤器/Realm 等
+      // current-route 认证实现事实，才启用本语义重排。
+      && authenticationImplementationFacts.length > 0
+      && authorizationBoundaryFacts.length > 0;
+    if (layeredAuthorizationChain) {
+      const explicitEntryFacts = chainDimensionFacts.filter(fact => {
+        if (chainFactExplicitDimension(fact) === 'entry') return true;
+        if (authenticationBranchFacts.includes(fact) || authorizationBoundaryFacts.includes(fact)) return false;
+        return /(?:(?:从|通过|进入|打开|访问)[^。！？；\n]{0,36}(?:入口|页面|菜单)|(?:入口|页面|菜单)[^。！？；\n]{0,36}(?:进入|打开|访问|提交))/u.test(fact);
+      });
+      const externalDependencyClauses = Array.from(new Set(chainDimensionFacts
+        .flatMap(fact => String(fact || '').split(/[；;。]/u))
+        .map(clause => clause.trim())
+        .filter(clause => clause
+          && /(?:外部依赖|用户中心|\bHIS\b|\bDubbo\b|Dify)/iu.test(clause)
+          && !/(?:不是|并非|不属于)[^。！？；\n]{0,24}外部依赖/iu.test(clause))));
+      const hasConcreteExternalCallEvidence = externalDependencyClauses.some(clause =>
+        /(?:\b(?:GET|POST|PUT|PATCH|DELETE)\b\s+\/|(?:调用|请求|响应|返回|验签|verifyToken)[^。！？；\n]{0,40}(?:用户中心|\bHIS\b|\bDubbo\b|Dify)|(?:用户中心|\bHIS\b|\bDubbo\b|Dify)[^。！？；\n]{0,40}(?:调用|请求|响应|返回|验签|verifyToken))/iu.test(clause));
+      const layeredLines = [];
+      if (explicitEntryFacts.length) {
+        for (const fact of explicitEntryFacts) layeredLines.push(`- 入口：${normalizeChainFact(fact)}`);
+      } else {
+        layeredLines.push('- 入口：本轮已核资料没有定义具体业务页面或操作入口；停在入口待确认，不补写。');
+      }
+      for (const fact of authenticationBranchFacts) layeredLines.push(`- 接口认证分支：${normalizeChainFact(fact)}`);
+      for (const fact of authorizationBoundaryFacts.slice(0, 3)) layeredLines.push(`- 授权/数据边界：${normalizeChainFact(fact)}`);
+      if (externalDependencyClauses.length) {
+        for (const clause of externalDependencyClauses) layeredLines.push(`- 外部依赖：${normalizeChainFact(clause)}`);
+      } else {
+        layeredLines.push('- 外部依赖：本轮已核资料没有定义可发布的外部依赖细节；到这里停住，不补写。');
+      }
+      const layeredStop = hasConcreteExternalCallEvidence
+        ? '当前停点：到上述已核外部调用证据为止；其它调用顺序和结果未定义，不补写。'
+        : '当前停点：本轮已核资料未提供可逐字核对的真实外部调用接口、请求顺序或返回证据；到上述依赖边界即停住，不把菜单下发外推成完整外部调用链。';
+      safeChainFallback = ['链路（按本轮点名维度）：', ...layeredLines, layeredStop].join('\n');
+    }
   }
   // “最小证据/只缺一项”本身也是一份输入契约：后面的判断表不能首次
   // 引入没有在用户已有证据或前序采集清单中定义的观测量。这里按观测

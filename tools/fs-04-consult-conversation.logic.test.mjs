@@ -4002,10 +4002,25 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.equal(q0849Fallback.initialAudit.fallbackAnswerMode, 'chain');
   assert.equal(q0849Fallback.initialAudit.chainRequested, true);
   assert.match(q0849Fallback.reply, /链路（按本轮点名维度）/);
-  assert.match(q0849Fallback.reply, /入口[：:]/);
-  assert.match(q0849Fallback.reply, /(?:接口|数据与状态)[：:]/);
-  assert.match(q0849Fallback.reply, /外部依赖[：:][^\n]*(?:用户中心|HIS)/);
-  assert.match(q0849Fallback.reply, /(?:当前停点|未提供|未定义|不补写)/);
+  assert.match(q0849Fallback.reply, /入口：本轮已核资料没有定义具体业务页面或操作入口/);
+  assert.doesNotMatch(q0849Fallback.reply, /入口：[^\n]*(?:登录成功|菜单可见|按钮不可见)/, '权限证据不能误标成业务入口');
+  assert.match(q0849Fallback.reply, /接口认证分支：[^\n]*\/comm[^\n]*\/external/);
+  assert.match(q0849Fallback.reply, /接口认证分支：[^\n]*(?:Shiro|JwtFilter)[^\n]*(?:executeLogin|JwtRealm)/);
+  assert.doesNotMatch(q0849Fallback.reply, /数据与状态：[^\n]*(?:\/comm|\/external|Shiro|JwtFilter|executeLogin|JwtRealm)/, '认证分支不能误标成数据状态');
+  assert.match(q0849Fallback.reply, /授权\/数据边界：[^\n]*(?:登录成功|菜单可见|按钮不可见)/);
+  assert.match(q0849Fallback.reply, /授权\/数据边界：[^\n]*(?:Controller|方法级)[^\n]*(?:权限|角色)[^\n]*(?:院区|归属|Owner)/i);
+  const q0849DependencyLines = q0849Fallback.reply.split('\n').filter(line => /^- 外部依赖：/u.test(line));
+  assert.ok(q0849DependencyLines.some(line => /用户中心[^\n]*下发菜单/u.test(line)), q0849Fallback.reply);
+  assert.ok(q0849DependencyLines.every(line => !/(?:Shiro|JwtFilter|executeLogin|JwtRealm)/u.test(line)), q0849Fallback.reply);
+  assert.match(q0849Fallback.reply, /当前停点：[^\n]*未提供可逐字核对的真实外部调用接口、请求顺序或返回证据/);
+  const q0849LayerOrder = [
+    q0849Fallback.reply.indexOf('- 入口：'),
+    q0849Fallback.reply.indexOf('- 接口认证分支：'),
+    q0849Fallback.reply.indexOf('- 授权/数据边界：'),
+    q0849Fallback.reply.indexOf('- 外部依赖：'),
+    q0849Fallback.reply.indexOf('当前停点：'),
+  ];
+  assert.ok(q0849LayerOrder.every((position, index) => position >= 0 && (index === 0 || position > q0849LayerOrder[index - 1])), JSON.stringify({ reply: q0849Fallback.reply, q0849LayerOrder }, null, 2));
   assert.doesNotMatch(q0849Fallback.reply, /当前回答未通过发布前|重放请求|重复提交|触发写操作/);
   assert.deepEqual(q0849Fallback.finalAudit.violations, [], JSON.stringify(q0849Fallback.finalAudit, null, 2));
 
