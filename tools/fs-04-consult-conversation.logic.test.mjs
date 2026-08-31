@@ -1993,9 +1993,7 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   const q0003ChainQuestion = '把AI 审方生成从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。';
   const q0003ChainFallback = bundle.modelFailureFallback(q0003ChainQuestion, q0003Route, { status: 429, message: 'rate limit' });
   assert.ok(q0003ChainFallback, 'Q0003 AI-01 chain+HTTP429 必须使用已核链路兜底');
-  const q0003ChainFacts = q0003ChainFallback.reply.split('\n').map(line => line.replace(/^\s*[-*+]\s+/u, '').trim())
-    .filter(line => line && line !== '业务结论' && line !== '实施口径');
-  assert.deepEqual(q0003ChainFacts, q0003Route.answerFacts, '模型失败的链路终稿不得新增 route 外的“数据/当前停点”模板');
+  assert.equal(q0003ChainFallback.reply, q0003ChainFallback.initialAudit.safeChainFallback, '模型失败的 chain 必须保留确定性链路形态');
   assert.doesNotMatch(q0003ChainFallback.reply, /医嘱标记|AI 暂时连不上/);
   assert.deepEqual(q0003ChainFallback.finalAudit.violations, [], 'Q0003 AI-01 chain fallback 终审必须全绿');
   const q0009ChainQuestion = '把AI 审方生成从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。';
@@ -2016,9 +2014,7 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.equal(q0009ProductionRoute.directEvidenceFacts.length, 1, 'Q0009 routeContext+assemble 应注入 answerFacts 证据块');
   const q0009ProductionFallback = bundle.modelFailureFallback(q0009ChainQuestion, q0009ProductionRoute, { status: 429, message: 'rate limit' });
   assert.ok(q0009ProductionFallback, 'Q0009 生产 AI-01 route+HTTP429 必须使用已核链路兜底');
-  const q0009PublishedFacts = q0009ProductionFallback.reply.split('\n').map(line => line.replace(/^\s*[-*+]\s+/u, '').trim())
-    .filter(line => line && line !== '业务结论' && line !== '实施口径');
-  assert.deepEqual(q0009PublishedFacts, q0009ProductionRoute.answerFacts);
+  assert.equal(q0009ProductionFallback.reply, q0009ProductionFallback.initialAudit.safeChainFallback);
   assert.doesNotMatch(q0009ProductionFallback.reply, /入口：入口/);
   assert.ok((q0009ProductionFallback.reply.match(/端到端边界/gu) || []).length <= 1, '端到端边界不能在链路和当前停点重复');
   assert.doesNotMatch(q0009ProductionFallback.reply, /各写操作的角色|外部系统、调用方与数据源仅按/);
@@ -2078,7 +2074,7 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
     { status: 429, message: 'rate limit' },
   );
   assert.ok(q0019ActorFallback, 'route 已核角色动作也应能生成确定性链路兜底');
-  assert.match(q0019ActorFallback.reply, /实施：由运维重试后原失败状态不变/);
+  assert.match(q0019ActorFallback.reply, /由运维重试后原失败状态不变/);
   assert.deepEqual(q0019ActorFallback.finalAudit.violations, [], 'route 事实中的角色动作逐条可追溯时才允许确定性兜底');
   const q0019ActorExtraDraft = `${q0019ActorFallback.reply}\n建议让运维重试并重新提交。`;
   const q0019ActorExtraAudit = bundle.audit(
@@ -2153,9 +2149,7 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.deepEqual(q0179Initial.chainStageLabels, ['接入', '落库', '分配', '审核', '回写'], 'Q0179 应从标题括号/箭头提取业务阶段');
   const q0179Fallback = bundle.modelFailureFallback(q0179Question, q0179Route, { status: 429, message: 'rate limit' });
   assert.ok(q0179Fallback, 'Q0179 HTTP429 时必须使用链路事实兜底');
-  const q0179PublishedFacts = q0179Fallback.reply.split('\n').map(line => line.replace(/^\s*[-*+]\s+/u, '').trim())
-    .filter(line => line && line !== '业务结论' && line !== '实施口径');
-  assert.deepEqual(q0179PublishedFacts, q0179Route.answerFacts);
+  assert.equal(q0179Fallback.reply, q0179Initial.safeChainFallback);
   assert.match(q0179Fallback.reply, /在线药师与有本院权限药师的交集/);
   assert.match(q0179Fallback.reply, /1000 份权重.*平滑加权轮询/s);
   assert.match(q0179Fallback.reply, /共同候选.*承接整批.*(?:没有|无)共同候选.*逐任务各自分配/s);
@@ -2497,9 +2491,7 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.ok(q0029Fallback, `Q0029 HTTP429 链路 fallback 必须可发布；violations=${JSON.stringify(q0029FallbackAudit.violations)}`);
   assert.match(q0029Fallback.reply, /audit_reply_template|评语常用语/);
   assert.match(q0029Fallback.reply, /\/auditapi\/audit\/templates|\/auditapi\/audit\/template/);
-  const q0029PublishedFacts = q0029Fallback.reply.split('\n').map(line => line.replace(/^\s*[-*+]\s+/u, '').trim())
-    .filter(line => line && line !== '业务结论' && line !== '实施口径');
-  assert.deepEqual(q0029PublishedFacts, q0029Route.answerFacts);
+  assert.equal(q0029Fallback.reply, q0029InitialAudit.safeChainFallback);
   assert.deepEqual(q0029Fallback.finalAudit.violations, [], 'Q0029 CFG-02 链路 fallback 终审必须全绿');
 
   // 真实 C006 不是新会话：前三轮已经回答过，Q0029 的模型 429 仍必须
@@ -2590,9 +2582,7 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   const q0069ChainFallback = bundle.modelFailureFallback(q0069ChainQuestion, q0069ChainRoute, { status: 429, message: 'rate limit' });
   assert.ok(q0069ChainFallback, `C014 Q0069 HTTP429 链路 fallback 必须可发布；mode=${q0069ChainInitial.fallbackAnswerMode}; safeViolations=${JSON.stringify(q0069ChainFallbackAudit.violations)}`);
   assert.match(q0069ChainFallback.reply, /XML|格式合法|节点/);
-  const q0069PublishedFacts = q0069ChainFallback.reply.split('\n').map(line => line.replace(/^\s*[-*+]\s+/u, '').trim())
-    .filter(line => line && line !== '业务结论' && line !== '实施口径');
-  assert.deepEqual(q0069PublishedFacts, q0069ChainRoute.answerFacts);
+  assert.equal(q0069ChainFallback.reply, q0069ChainInitial.safeChainFallback);
   assert.doesNotMatch(q0069ChainFallback.reply, /XmlParserActuator|getNodeList|NodeList|Java/);
   assert.deepEqual(q0069ChainFallback.finalAudit.violations, [], 'C014 Q0069 DI-03 链路 fallback 终审必须全绿');
 
@@ -2648,9 +2638,7 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   const q0039StrictAudit = bundle.audit(q0039StrictReply, q0039Question, q0039Route);
   const q0039Fallback = bundle.modelFailureFallback(q0039Question, q0039Route, { status: 429, message: 'rate limit' });
   assert.ok(q0039Fallback, `Q0039 HTTP429 链路 fallback 必须可发布；route=${q0039Route.route?.id}; safeViolations=${JSON.stringify(q0039FallbackAudit.violations)}; strictViolations=${JSON.stringify(q0039StrictAudit.violations)}`);
-  const q0039PublishedFacts = q0039Fallback.reply.split('\n').map(line => line.replace(/^\s*[-*+]\s+/u, '').trim())
-    .filter(line => line && line !== '业务结论' && line !== '实施口径');
-  assert.deepEqual(q0039PublishedFacts, q0039Route.answerFacts, '模型失败时只发布完整个人审核方案 route facts');
+  assert.equal(q0039Fallback.reply, q0039InitialAudit.safeChainFallback, '模型失败时发布 route facts 生成的结构化个人审核方案链路');
   assert.doesNotMatch(q0039Fallback.reply, /GET |POST |PUT |DELETE /, 'route 未提供接口时不能臆造方法和路径');
   assert.doesNotMatch(q0039Fallback.reply, /current route|页面选择|状态接口|页面刷新|列表摘要/i);
   assert.deepEqual(q0039Fallback.finalAudit.violations, [], 'Q0039 个人审核方案链路 fallback 终审必须全绿');
@@ -3964,6 +3952,63 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.equal(q0846TrueDiagnosticFallback.initialAudit.fallbackAnswerMode, 'field_diagnostic');
   assert.deepEqual(q0846TrueDiagnosticFallback.finalAudit.violations, []);
 
+  const q0848Question = '复测审方系统边界与权限基线时只有页面现象和 requestId，暂时没有原始日志。下一步最少还要补哪类只读证据？';
+  const q0848Route = runtimeRouteWithRepositoryContext(
+    routeQuestion(auditTag20260831_1RouteMap, q0848Question),
+    '2.7.260831-1',
+  );
+  assert.equal(q0848Route.route.id, 'AUD-QR-SYS-01', JSON.stringify(q0848Route, null, 2));
+  for (const modelError of [
+    { code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束' },
+    { status: 429, message: 'rate limit' },
+  ]) {
+    const q0848Initial = bundle.audit('', q0848Question, q0848Route);
+    const q0848ContextualReply = bundle.contextual(q0848Question, q0848Initial);
+    const q0848ContextualAudit = bundle.audit(q0848ContextualReply, q0848Question, q0848Route);
+    const fallback = bundle.modelFailureFallback(q0848Question, q0848Route, modelError);
+    assert.ok(fallback, JSON.stringify({
+      modelError,
+      initialMode: q0848Initial.fallbackAnswerMode,
+      minimalEvidenceQuestion: q0848Initial.minimalEvidenceQuestion,
+      contextualReply: q0848ContextualReply,
+      contextualViolations: q0848ContextualAudit.violations,
+      contextualEvidenceNegations: q0848ContextualAudit.unsupportedEvidenceNegations,
+      contextualMissingFacts: q0848ContextualAudit.missingVerifiedFactCoverage,
+    }, null, 2));
+    assert.equal(fallback.fallbackSource, 'verifiedFacts');
+    assert.equal(fallback.initialAudit.fallbackAnswerMode, 'partial_evidence');
+    assert.equal(fallback.initialAudit.minimalEvidenceQuestion, true);
+    assert.equal(fallback.finalAudit.verifiedContextualFactsFallback, true);
+    assert.match(fallback.reply, /页面现象和requestId只够固定本轮客户端观测与关联标识/);
+    assert.match(fallback.reply, /优先按该 requestId 对齐同一次已经发生请求的原始请求和完整响应/);
+    assert.match(fallback.reply, /若原始请求或响应确实无法取得，再只读取得该 requestId 对应的现有服务端日志/);
+    assert.match(fallback.reply, /只补能够改变判断分支的下一项材料/);
+    assert.match(fallback.reply, /原始日志属于本轮待确认材料；基于当前页面现象和 requestId/);
+    assert.doesNotMatch(fallback.reply, /(?:已查看|已经查看|看过了|日志显示|日志证明)[^。！？\n]*日志/);
+    assert.match(fallback.reply, /不重放请求、不重复提交、不重试、不改数据/);
+    assert.deepEqual(fallback.finalAudit.violations, [], JSON.stringify(fallback.finalAudit, null, 2));
+  }
+
+  const q0849Question = '把审方系统边界与权限基线从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。';
+  const q0849Route = runtimeRouteWithRepositoryContext(
+    routeQuestion(auditTag20260831_1RouteMap, q0849Question),
+    '2.7.260831-1',
+  );
+  assert.equal(q0849Route.route.id, 'AUD-QR-SYS-01', JSON.stringify(q0849Route, null, 2));
+  const q0849Fallback = bundle.modelFailureFallback(q0849Question, q0849Route, {
+    code: 'MODEL_OUTPUT_TRUNCATED', message: '模型输出达到长度上限，未完整结束',
+  });
+  assert.ok(q0849Fallback, 'Q0849 模型截断后必须发布确定性 route-scoped 链路');
+  assert.equal(q0849Fallback.initialAudit.fallbackAnswerMode, 'chain');
+  assert.equal(q0849Fallback.initialAudit.chainRequested, true);
+  assert.match(q0849Fallback.reply, /链路（按本轮点名维度）/);
+  assert.match(q0849Fallback.reply, /入口[：:]/);
+  assert.match(q0849Fallback.reply, /(?:接口|数据与状态)[：:]/);
+  assert.match(q0849Fallback.reply, /外部依赖[：:][^\n]*(?:用户中心|HIS)/);
+  assert.match(q0849Fallback.reply, /(?:当前停点|未提供|未定义|不补写)/);
+  assert.doesNotMatch(q0849Fallback.reply, /当前回答未通过发布前|重放请求|重复提交|触发写操作/);
+  assert.deepEqual(q0849Fallback.finalAudit.violations, [], JSON.stringify(q0849Fallback.finalAudit, null, 2));
+
   const q0811Question = '另一轮独立复测（811）里，audit 包含哪些服务，分别负责什么？';
   const q0812Question = '另一轮独立复测（812）里，审方系统依赖哪些外部系统？';
   for (const [question, label] of [[q0811Question, 'Q0811'], [q0812Question, 'Q0812']]) {
@@ -4056,7 +4101,8 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   assert.ok(q0819Fallback, 'Q0819 chain 截断后仍须发布 current route 链路终稿');
   assert.equal(q0819Fallback.initialAudit.fallbackAnswerMode, 'chain');
   assert.equal(q0819Fallback.initialAudit.requestResultMismatchQuestion, false);
-  assertCompleteFactsInOrder(q0819Fallback.reply, q0819Route.answerFacts, 'Q0819');
+  assert.equal(q0819Fallback.reply, q0819Fallback.initialAudit.safeChainFallback);
+  assert.match(q0819Fallback.reply, /链路（按本轮点名维度）/);
   assert.doesNotMatch(q0819Fallback.reply, /分层只读对照顺序|首次差异|请求通只证明/);
   assert.deepEqual(q0819Fallback.finalAudit.violations, [], JSON.stringify(q0819Fallback.finalAudit, null, 2));
 

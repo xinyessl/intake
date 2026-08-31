@@ -6573,6 +6573,7 @@ function consultVerifiedFactsContextualReply(question, audit) {
   if (!audit || !(audit.frontendRequestOnlyEvidenceQuestion
     || audit.dataReturnedNotRenderedQuestion
     || audit.partialEvidenceInventoryQuestion
+    || audit.minimalEvidenceQuestion
     || genericEvidenceSufficiencyQuestion)) return '';
   const q = String(question || '').trim();
   const routeFacts = (Array.isArray(audit.nonWritingRouteFacts) && audit.nonWritingRouteFacts.length
@@ -6581,6 +6582,24 @@ function consultVerifiedFactsContextualReply(question, audit) {
   if (!routeFacts.length) return '';
   const routeFactText = routeFacts.join('\n');
   const factBlock = ['已核说明', ...routeFacts.map(fact => `- ${fact}`)];
+
+  if (audit.minimalEvidenceQuestion) {
+    const hasPageObservation = /(?:页面|界面|截图|现象)/iu.test(q);
+    const hasRequestId = /request\s*id|requestId|请求标识/iu.test(q);
+    const providedEvidence = [hasPageObservation ? '页面现象' : '', hasRequestId ? 'requestId' : '']
+      .filter(Boolean).join('和') || '本轮已提供的观测与关联标识';
+    return consultNormalizeSafeMarkdown([
+      `结论：当前${providedEvidence}只够固定本轮客户端观测与关联标识，不能单独判断服务端实际处理或后续业务结果。`,
+      ...factBlock,
+      '下一项最小只读证据',
+      '- 优先按该 requestId 对齐同一次已经发生请求的原始请求和完整响应；若原始请求或响应确实无法取得，再只读取得该 requestId 对应的现有服务端日志。',
+      '- 只补能够改变判断分支的下一项材料：用于区分请求是否到达、是否已有响应，以及页面现象是否与该响应一致；不扩散索取无关环境信息。',
+      '本轮未知',
+      '- 原始日志属于本轮待确认材料；基于当前页面现象和 requestId，服务端分支、处理结果和后续状态仍未知。',
+      '只读边界',
+      '- 只核对同一次已经发生的请求、响应、日志和已有记录；不重放请求、不重复提交、不重试、不改数据，也不触发写操作。',
+    ].join('\n'));
+  }
 
   if (audit.frontendRequestOnlyEvidenceQuestion) {
     const missingRequestEvidence = [];
@@ -6726,6 +6745,14 @@ function consultVerifiedFactsFallback(question, route, routeFactsOnly = false) {
   // 与实施清单仍要求 routeFactsAreCompleteSafeTerminal，不放宽动作安全门。
   const contextualReply = routeFactsOnly
     ? consultVerifiedFactsContextualReply(question, initialAudit) : '';
+  // chain 是用户显式要求的发布形态。模型失败时直接采用同轮审计仅由
+  // current route facts 确定性生成的 safeChainFallback；完整 facts 虽然
+  // 安全，但不能抢先吞掉入口→接口/数据→外部依赖与未知停点结构。
+  const chainReply = routeFactsOnly
+    && initialAudit.chainRequested
+    && initialAudit.chainEvidenceSufficient
+    && String(initialAudit.safeChainFallback || '').trim()
+    ? consultNormalizeSafeMarkdown(String(initialAudit.safeChainFallback).trim()) : '';
   // “换成实施逐项只读清单”明确改变的是发布形态。即使完整 route facts
   // 本身安全，也不能让 strictReply 抢在按 current route 拆出的编号清单前；
   // 只采用同一轮审计生成的 safeDiagnosticFallback，不接受模型自由扩写。
@@ -6745,7 +6772,7 @@ function consultVerifiedFactsFallback(question, route, routeFactsOnly = false) {
     && /(?:停在|停到|停止在|应停|先停|边界|不能(?:做|进行)?写操作|不得写)/u.test(String(question || ''))
     && String(initialAudit.safeDiagnosticFallback || '').trim()
     ? consultNormalizeSafeMarkdown(String(initialAudit.safeDiagnosticFallback).trim()) : '';
-  const reply = contextualReply || resultMismatchReply || stopAndHandoffReply || (routeFactsOnly && routeFactsAreCompleteSafeTerminal
+  const reply = contextualReply || chainReply || resultMismatchReply || stopAndHandoffReply || (routeFactsOnly && routeFactsAreCompleteSafeTerminal
     ? (implementationChecklistReply || strictReply)
     : consultAnswerSafeFallback('', initialAudit));
   const finalAudit = consultAnswerSemanticAudit(reply, question, route);
