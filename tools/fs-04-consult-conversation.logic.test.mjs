@@ -5649,6 +5649,39 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   ].join('\n'), '现场排查不要做什么？', route).violations, [], '否定标题自然管辖的裸禁止项不得误拦');
   assert.deepEqual(bundle.audit('**下一步：**\n- 可以只读核已有响应。', '现场下一步做什么？', route).violations, [], '正向标题下的安全建议不得误拦');
 
+  const productionCompatibilityQuestion = '大屏有多数据库 Mapper 就能承诺生产兼容吗？';
+  assert.ok(browserRequirements[productionCompatibilityQuestion], 'Q0822 生产原句应来自真实 1000 题 fixture');
+  const productionCompatibilityRoute = runtimeRouteWithContext(routeQuestion(productionRouteMap, productionCompatibilityQuestion));
+  assert.equal(productionCompatibilityRoute.route.id, 'AUD-QR-SYS-01-DATA-EVIDENCE');
+  assert.match(productionCompatibilityRoute.answerFacts[0], /不能直接承诺/);
+  const productionCompatibilityDraft = [
+    '直接承诺。',
+    '仓内存在多类数据库查询分支，只能证明代码准备了对应实现，不能证明当前生产已完成全量兼容验证。',
+  ].join('\n');
+  const productionCompatibilityAudit = bundle.audit(productionCompatibilityDraft, productionCompatibilityQuestion, productionCompatibilityRoute);
+  assert.ok(productionCompatibilityAudit.violations.includes('contradictory_route_boundary'), '肯定首句与 current route 的不能承诺边界冲突时必须拦截');
+  assert.deepEqual(productionCompatibilityAudit.routeBoundaryContradictionClaims, ['直接承诺。']);
+  assert.match(bundle.revision(productionCompatibilityDraft, productionCompatibilityAudit), /current route 已核事实明确不能作该结论/);
+  const productionCompatibilityFallback = bundle.fallback(productionCompatibilityDraft, productionCompatibilityAudit);
+  assert.doesNotMatch(productionCompatibilityFallback, /^直接承诺[。！]?/u);
+  assert.match(productionCompatibilityFallback, /不能直接承诺/);
+  assert.deepEqual(bundle.audit(productionCompatibilityFallback, productionCompatibilityQuestion, productionCompatibilityRoute).violations, [], '安全降级必须回到 route 已核否定边界且可发布');
+  assert.ok(!bundle.audit(
+    '不能直接承诺。现有代码分支不能证明当前生产已完成全量兼容验证。',
+    productionCompatibilityQuestion,
+    productionCompatibilityRoute,
+  ).violations.includes('contradictory_route_boundary'), '合法否定回答不得误拦');
+  assert.ok(!bundle.audit(
+    '现有代码分支只能证明已准备实现，不能证明生产兼容。',
+    '这些代码证据的边界是什么？',
+    productionCompatibilityRoute,
+  ).violations.includes('contradictory_route_boundary'), '未询问能否承诺的相邻边界说明不得误拦');
+  assert.ok(!bundle.audit(
+    '可以确认。',
+    '按验收记录能确认兼容吗？',
+    { matched: true, route: { title: '验收结论' }, answerFacts: ['完整验收记录已确认目标环境兼容。'] },
+  ).violations.includes('contradictory_route_boundary'), 'route 没有否定边界且明确支持时不得误拦肯定结论');
+
   const explicitLayerRuleRoute = {
     matched: true,
     route: { title: '字段转换契约' },
