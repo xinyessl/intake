@@ -1174,7 +1174,7 @@ function consultContextFollowupIntent(question) {
 
 function contextualRouteQuestion(map, messages, currentQuestion, subKey = '', contextDepth = 0) {
   const current = String(currentQuestion || '').trim();
-  const direct = routeQuestion(map, current, subKey);
+  let direct = routeQuestion(map, current, subKey);
   if (!consultContextFollowupIntent(current)) return direct;
   const history = Array.isArray(messages) ? messages : [];
   const users = history.map((m, messageIndex) => ({ m, messageIndex }))
@@ -1226,6 +1226,62 @@ function contextualRouteQuestion(map, messages, currentQuestion, subKey = '', co
     }
   }
   if (!prior.matched) return direct;
+  const routes = Array.isArray(map && map.questionRoutes) ? map.questionRoutes : [];
+  const priorRouteId = String(prior.route && prior.route.id || '');
+
+  // 完整业务标题可能让 routeQuestion 把上一轮宽 route 强制放到首位，
+  // 但 topN 的原始相关分已经显示当前轮存在显著更强的意图专属 route。
+  // 仅在“强制命中的仍是上一轮 route”且另一人工候选分数超过两倍时，
+  // 把当前轮强候选恢复为 direct route；普通短句、部分证据轮没有这种
+  // 明显分差时仍继承历史事实账本。规则只依赖当前轮候选分数和 route 卡，
+  // 不绑定具体产品、模块或关键词。
+  const directTopN = Array.isArray(direct.topN) ? direct.topN.slice() : [];
+  const dominantDirectCandidate = directTopN
+    .filter(item => item && typeof item.score === 'number')
+    .sort((a, b) => b.score - a.score)[0] || null;
+  const selectedDirectId = String(direct.route && direct.route.id || '');
+  const dominantDirectId = String(dominantDirectCandidate && dominantDirectCandidate.id || '');
+  const selectedDirectScore = Number(direct.score) || 0;
+  const dominantDirectScore = Number(dominantDirectCandidate && dominantDirectCandidate.score) || 0;
+  if (direct.matched
+    && selectedDirectId
+    && selectedDirectId === priorRouteId
+    && dominantDirectId
+    && dominantDirectId !== selectedDirectId
+    && dominantDirectScore >= ROUTE_MATCH_MIN
+    && dominantDirectScore >= Math.max(selectedDirectScore * 2, selectedDirectScore + ROUTE_MATCH_MIN)) {
+    const promotedCard = routes.find(route => String(route && route.id || '') === dominantDirectId);
+    if (promotedCard) {
+      const fallbackMode = promotedCard.fallbackMode === 'verifiedFacts' ? 'verifiedFacts' : '';
+      direct = {
+        matched: true,
+        tier: 1,
+        fallbackMode,
+        route: {
+          id: promotedCard.id,
+          title: promotedCard.title,
+          fallbackMode,
+        },
+        score: dominantDirectScore,
+        exactRouteTitle: false,
+        primaryRefs: Array.isArray(promotedCard.primaryRefs) ? promotedCard.primaryRefs : [],
+        contextRefs: Array.isArray(promotedCard.contextRefs) ? promotedCard.contextRefs : [],
+        answerFacts: Array.isArray(promotedCard.answerFacts) ? promotedCard.answerFacts : [],
+        mustNotConfuse: Array.isArray(promotedCard.mustNotConfuse) ? promotedCard.mustNotConfuse : [],
+        focusTechnicalTokens: Array.from(new Set(
+          (Array.isArray(promotedCard.focusTechnicalTokens) ? promotedCard.focusTechnicalTokens : [])
+            .filter(token => typeof token === 'string')
+            .map(token => token.trim())
+            .filter(Boolean),
+        )),
+        // topN 表示上下文裁决后的候选顺序；选中的 route 必须排在首位，
+        // 不能再出现“低分旧 route 被选中，高分新 route 藏在列表里”的诊断矛盾。
+        topN: directTopN.sort((a, b) => Number(b && b.score || 0) - Number(a && a.score || 0)).slice(0, 5),
+        contextualDirectPromotion: true,
+        contextPreviousRouteId: priorRouteId,
+      };
+    }
+  }
   const directId = String(direct.route && direct.route.id || '');
   const priorId = String(prior.route && prior.route.id || '');
   const currentTechnicalFocus = consultScopeTechnicalTokens(current);
@@ -1245,7 +1301,6 @@ function contextualRouteQuestion(map, messages, currentQuestion, subKey = '', co
   // “显式新实体”按当前 route 的地图关键词判断：当前问法命中了上一 route 未包含的判别词，视为切模块。
   // 排除列表/页面/数据/接口/排查等跨模块通用词，避免“那页面没数据”错误覆盖上一轮具体 route。
   const generic = new Set(['页面', '列表', '数据', '接口', '功能', '问题', '异常', '查询', '显示', '排查', '步骤', '入口', '患者']);
-  const routes = Array.isArray(map && map.questionRoutes) ? map.questionRoutes : [];
   const directCard = routes.find(r => String(r && r.id || '') === directId);
   const priorCard = routes.find(r => String(r && r.id || '') === priorId);
   const priorText = String(priorCard && priorCard.searchText || [priorCard && priorCard.title, ...((priorCard && priorCard.keywords) || [])].filter(Boolean).join(' ')).toLowerCase();

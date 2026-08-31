@@ -48,9 +48,11 @@ const consultScopeTechnicalTokens = new Function(
 )();
 const contextualRouteQuestion = new Function(
   'routeQuestion', 'consultScopeTechnicalTokens',
-  extractFn(SRC, 'consultContextFollowupIntent') + '\n'
+  routeConstants + '\n'
+    + extractFn(SRC, 'consultContextFollowupIntent') + '\n'
     + extractFn(SRC, 'contextualRouteQuestion') + '\nreturn contextualRouteQuestion;',
 )(routeQuestion, consultScopeTechnicalTokens);
+const routingDiag = new Function(routeConstants + '\n' + extractFn(SRC, 'routingDiag') + '\nreturn routingDiag;')();
 const assembleConsultSpecHits = new Function(extractFn(SRC, 'assembleConsultSpecHits') + '\nreturn assembleConsultSpecHits;')();
 const loadRouteContext = new Function(
   'safeRef', 'moduleMapRepo', 'specFileText',
@@ -92,6 +94,68 @@ function runtimeRouteWithRepositoryContext(route, ref = '') {
     directEvidenceFacts: (assembled.directEvidenceHits || []).map(hit => String((hit && hit.text) || '')).filter(Boolean),
   };
 }
+
+test('多轮 route 裁决：当前轮高置信专用意图覆盖宽历史，弱续问仍继承且诊断排序一致', () => {
+  const map = JSON.parse(execFileSync(
+    'git', ['show', '2.7.260831-1:docs/specs/00-功能模块地图.json'],
+    { cwd: path.resolve(ROOT, '../psp/audit'), encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 },
+  ));
+  const historyFor = (previous, current) => [
+    { role: 'user', content: previous },
+    { role: 'assistant', content: '这里只是上一轮模型正文，不作为路由事实。' },
+    { role: 'user', content: current },
+  ];
+
+  const hisBroad = '先切到另一个问题：“HIS对外XML接口”当前实现的关键入口或处理链是什么？';
+  const hisContinue = '回到HIS对外XML接口这里，第一层核过没有异常，下一步按什么顺序继续只读排查？';
+  const hisRoute = contextualRouteQuestion(map, historyFor(hisBroad, hisContinue), hisContinue);
+  assert.equal(hisRoute.route.id, 'AUD-QR-GUIDE-01', '当前轮高分只读续查 route 必须压过上一轮 DI-02 宽实现 route');
+  assert.equal(hisRoute.contextualDirectPromotion, true);
+  assert.equal(hisRoute.contextPreviousRouteId, 'AUD-QR-DI-02');
+  assert.equal(hisRoute.topN[0].id, hisRoute.route.id, '上下文裁决后的 topN 首项必须就是 selected route');
+  assert.ok(hisRoute.topN.every(item => item.score <= hisRoute.score), JSON.stringify(hisRoute.topN));
+  const hisDiag = routingDiag(true, hisRoute);
+  assert.equal(hisDiag.routeId, 'AUD-QR-GUIDE-01');
+  assert.equal(hisDiag.topN[0].id, hisDiag.routeId);
+  assert.ok(hisDiag.topN.every(item => item.score <= hisDiag.score), JSON.stringify(hisDiag));
+
+  const jwtBroad = '另一轮独立复测（791）里，审方哪些 URL 前缀现在免 JWT？';
+  const jwtDiagnostic = '另一轮独立复测（792）里，现在卡在“业务路径里碰巧带了 comm，现场担心会绕过认证”。给我一个能直接照着走的排查顺序。';
+  const jwtEvidence = '关于免鉴权路径与 JWT 只读排查，我现在只有一次既有请求和响应，没有数据库权限。现有证据最多能判断到哪？';
+  assert.equal(
+    contextualRouteQuestion(map, historyFor(jwtBroad, jwtDiagnostic), jwtDiagnostic).route.id,
+    'AUD-QR-SYS-01-JWT-CONTINUE',
+    '宽 JWT 清单后的现场诊断必须切到 JWT-CONTINUE',
+  );
+  assert.equal(
+    contextualRouteQuestion(map, historyFor(jwtBroad, jwtEvidence), jwtEvidence).route.id,
+    'AUD-QR-SYS-01-JWT-CONTINUE',
+    '宽 JWT 清单后的部分证据问法必须切到 JWT-CONTINUE',
+  );
+  assert.equal(
+    contextualRouteQuestion(map, [
+      { role: 'user', content: jwtBroad },
+      { role: 'assistant', content: '宽 JWT 回答。' },
+      { role: 'user', content: jwtDiagnostic },
+      { role: 'assistant', content: '只读续查回答。' },
+      { role: 'user', content: jwtEvidence },
+    ], jwtEvidence).route.id,
+    'AUD-QR-SYS-01-JWT-CONTINUE',
+    '连续两轮专用续查必须保持 JWT-CONTINUE',
+  );
+
+  for (const weakFollowup of ['那下一步呢？', '只有截图，没有日志，能判断到哪？']) {
+    const inherited = contextualRouteQuestion(map, historyFor(hisBroad, weakFollowup), weakFollowup);
+    assert.equal(inherited.route.id, 'AUD-QR-DI-02', `${weakFollowup} 没有强直接 route 时仍应继承上一轮`);
+    assert.equal(inherited.inherited, true);
+    assert.notEqual(inherited.contextualDirectPromotion, true);
+  }
+
+  const explicitSwitch = '先切到另一个问题：“医嘱标记”当前实现的关键入口或处理链是什么？';
+  const switched = contextualRouteQuestion(map, historyFor(hisBroad, explicitSwitch), explicitSwitch);
+  assert.equal(switched.route.id, 'AUD-QR-MK-02', '当前轮显式新实体必须继续覆盖历史主题');
+  assert.notEqual(switched.inherited, true, '显式切题不得标成从 HIS 历史继承');
+});
 
 test('答疑受众按问句意图分层：普通业务默认产品，现场诊断归实施，明确技术契约才归研发', () => {
   for (const q of ['医嘱标记现在是怎么实现的？', '这个功能是什么？', '支持哪些业务场景？', '业务规则和状态边界是什么？']) {
