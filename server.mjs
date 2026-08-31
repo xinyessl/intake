@@ -5272,16 +5272,56 @@ function consultAnswerSemanticAudit(answer, question, route) {
     const audienceReferenceBlock = audienceReferenceFacts.length
       ? ['研发参考', ...audienceReferenceFacts.map(fact => `- ${fact}`)].join('\n') : '';
     const handoffRequested = /(?:交给谁|谁继续|转给谁|交由谁|由谁继续|谁负责)/u.test(intentQuestionText);
-    const verifiedHandoffRole = handoffRequested
-      ? currentRouteFacts
-        .filter(fact => !/(?:不得|不能|无法|待确认|NEEDS-HUMAN|需由[^。！？；\n]{0,24}确认)/iu.test(String(fact || '')))
-        .map(fact => String(fact || '').match(/(?:产品负责人|研发负责人|接口负责人|运维|业务负责人)/u)?.[0] || '')
-        .find(Boolean) || ''
+    const stopAndHandoffQuestion = handoffRequested
+      && /(?:停在|停到|停止在|应停|先停|边界|不能(?:做|进行)?写操作|不得写)/u.test(intentQuestionText);
+    const handoffRoleDescriptors = [
+      { re: /\bDBA\b/iu, label: 'DBA/数据库负责人' },
+      { re: /数据库负责人/u, label: '数据库负责人' },
+      { re: /产品负责人/u, label: '产品负责人' },
+      { re: /研发负责人/u, label: '研发负责人' },
+      { re: /接口负责人/u, label: '接口负责人' },
+      { re: /业务负责人/u, label: '业务负责人' },
+      { re: /运维负责人|运维/u, label: '运维负责人' },
+      { re: /开发负责人/u, label: '开发负责人' },
+    ];
+    const verifiedHandoffRoles = handoffRequested
+      ? handoffRoleDescriptors.filter(descriptor => currentRouteFacts.some(fact => descriptor.re.test(String(fact || ''))))
+        .filter((descriptor, index, list) => list.findIndex(item => item.label === descriptor.label
+          || (descriptor.label === '数据库负责人' && item.label === 'DBA/数据库负责人')) === index)
+      : [];
+    const verifiedHandoffRole = verifiedHandoffRoles[0]?.label || '';
+    const stopBoundaryFact = stopAndHandoffQuestion
+      ? currentRouteFacts.find(fact => /(?:证据边界|只能证明|不能证明|不能承诺|缺少[^。！？；\n]{0,20}证据|不得)/u.test(String(fact || '')))
+        || ''
       : '';
+    const handoffSafetyFact = stopAndHandoffQuestion
+      ? currentRouteFacts.find(fact => /(?:不得|禁止|不允许|不能为验证|未经授权)/u.test(String(fact || ''))) || ''
+      : '';
+    const roleHandoffLines = verifiedHandoffRoles.map(descriptor => {
+      const roleFacts = currentRouteFacts.filter(fact => descriptor.re.test(String(fact || ''))
+        && /(?:只读|核对|对照|元数据|导出|记录|日志|版本|配置|证据|响应)/u.test(String(fact || '')));
+      const evidence = roleFacts[0] || currentRouteFacts.find(fact =>
+        /(?:只读|核对|对照|元数据|导出|记录|日志|版本|配置|证据|响应)/u.test(String(fact || ''))
+      ) || '';
+      return `- ${descriptor.label}：继续只读核对${evidence ? `“${evidence}”` : '本轮已有证据'}；不执行写操作。`;
+    });
+    const stopAndHandoffReply = stopAndHandoffQuestion ? consultNormalizeSafeMarkdown([
+      '停止点',
+      stopBoundaryFact
+        ? `- 停在本轮已核事实边界：${stopBoundaryFact}`
+        : '- 当前没有足够的已核事实确定下一层，先停在现有观测边界。',
+      '责任交接',
+      ...(roleHandoffLines.length
+        ? roleHandoffLines
+        : ['- 本轮已核资料未定义责任角色；停在上述边界，由用户指定责任人后再继续只读核对。']),
+      '只读边界',
+      ...(handoffSafetyFact ? [`- ${handoffSafetyFact}`] : []),
+      '- 不改数据、不重放、不重复提交、不重试；只核对上述已核事实已经点名的现有证据。',
+    ].join('\n')) : '';
     const handoffBlock = handoffRequested
       ? (verifiedHandoffRole
         ? `后续交接：将本轮只读证据交给已核实的${verifiedHandoffRole}继续确认；本轮不做写操作。`
-        : '后续交接：将本轮只读证据交给对应功能的产品负责人和研发/接口负责人继续确认；本轮不做写操作，也不指定具体人名或组织。')
+        : '后续交接：本轮已核资料未定义责任角色，停在当前证据边界，由用户指定责任人后再继续只读核对；本轮不做写操作。')
       : '';
     const safeSteps = singleStepQuestion
       ? ['1. 先只读对照一份已有页面原文与同一次已有请求/响应原文；没有既有请求时只记录“未取得请求证据”，不要为抓包重复未知业务操作。']
@@ -5457,6 +5497,7 @@ function consultAnswerSemanticAudit(answer, question, route) {
         ? `只读边界：${routeReadOnlySequenceBoundary}` : '';
       safeDiagnosticFallback = [diagnosticVerdict, checklistStageBlock, knownBlock, interfaceDataBoundaryRouteBlock, diagnosticStepsHeading, ...diagnosticSteps, routeReadOnlyBoundaryBlock, handoffBlock, audienceReferenceBlock].filter(Boolean).join('\n\n');
     }
+    if (stopAndHandoffReply) safeDiagnosticFallback = stopAndHandoffReply;
   }
   if (explicitOperationEvidenceMissing) safeDiagnosticFallback = operationEvidenceStopReply;
   const violations = [];
@@ -5700,6 +5741,28 @@ function consultAnswerSemanticAudit(answer, question, route) {
     && String(text || '').trim() === consultNormalizeSafeMarkdown(String(safeDiagnosticFallback).trim()).trim();
   if (verifiedRouteSequenceFallback) {
     for (const permitted of ['audience_technical_not_last', 'audience_technical_dump']) {
+      const index = violations.indexOf(permitted);
+      if (index >= 0) violations.splice(index, 1);
+    }
+  }
+  // “停在哪个边界并交给谁”不是通用四步排查题。确定性终稿只从
+  // current route 提取停点、明确角色和只读证据；正文逐字等于该模板时，
+  // 允许它不满足普通诊断的四步结构，模型自由扩写仍不会获得豁免。
+  const verifiedStopAndHandoffFallback = fieldDiagnosticQuestion
+    && /(?:交给谁|谁继续|转给谁|交由谁|由谁继续|谁负责)/u.test(intentQuestionText)
+    && /(?:停在|停到|停止在|应停|先停|边界|不能(?:做|进行)?写操作|不得写)/u.test(intentQuestionText)
+    && String(safeDiagnosticFallback || '').trim()
+    && String(text || '').trim() === consultNormalizeSafeMarkdown(String(safeDiagnosticFallback).trim()).trim();
+  if (verifiedStopAndHandoffFallback) {
+    for (const permitted of [
+      'audience_technical_not_last',
+      'audience_technical_dump',
+      'incomplete_diagnostic_sequence',
+      // 角色为空是服务端对 current route answerFacts 的确定性枚举结果，
+      // 不是模型根据 Top-N 缺片段臆断“说明书没写”。只对逐字模板放行。
+      'unsupported_evidence_absence',
+      'out_of_scope_entity',
+    ]) {
       const index = violations.indexOf(permitted);
       if (index >= 0) violations.splice(index, 1);
     }
@@ -6567,7 +6630,12 @@ function consultVerifiedFactsFallback(question, route, routeFactsOnly = false) {
     && initialAudit.requestResultMismatchQuestion
     && String(initialAudit.safeDiagnosticFallback || '').trim()
     ? consultNormalizeSafeMarkdown(String(initialAudit.safeDiagnosticFallback).trim()) : '';
-  const reply = contextualReply || resultMismatchReply || (routeFactsOnly && routeFactsAreCompleteSafeTerminal
+  const stopAndHandoffReply = routeFactsOnly
+    && /(?:交给谁|谁继续|转给谁|交由谁|由谁继续|谁负责)/u.test(String(question || ''))
+    && /(?:停在|停到|停止在|应停|先停|边界|不能(?:做|进行)?写操作|不得写)/u.test(String(question || ''))
+    && String(initialAudit.safeDiagnosticFallback || '').trim()
+    ? consultNormalizeSafeMarkdown(String(initialAudit.safeDiagnosticFallback).trim()) : '';
+  const reply = contextualReply || resultMismatchReply || stopAndHandoffReply || (routeFactsOnly && routeFactsAreCompleteSafeTerminal
     ? (implementationChecklistReply || strictReply)
     : consultAnswerSafeFallback('', initialAudit));
   const finalAudit = consultAnswerSemanticAudit(reply, question, route);

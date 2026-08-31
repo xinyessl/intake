@@ -2742,12 +2742,44 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   const q0030Initial = bundle.audit('', q0030Question, q0030Route);
   const q0030Fallback = bundle.modelFailureFallback(q0030Question, q0030Route, { status: 429, message: 'rate limit' });
   assert.ok(q0030Fallback, `Q0030 点名交接对象时 HTTP429 必须使用只读兜底；safeViolations=${JSON.stringify(bundle.audit(q0030Initial.safeDiagnosticFallback, q0030Question, q0030Route).violations)}`);
-  const q0030PublishedFacts = q0030Fallback.reply.split('\n').map(line => line.replace(/^\s*[-*+]\s+/u, '').trim())
-    .filter(line => line && line !== '业务结论' && line !== '实施口径');
-  assert.deepEqual(q0030PublishedFacts, q0030Route.answerFacts);
+  assert.match(q0030Fallback.reply, /停止点[\s\S]*(?:停在本轮已核事实边界|先停在现有观测边界)/);
+  assert.match(q0030Fallback.reply, /本轮已核资料未定义责任角色[\s\S]*由用户指定责任人/);
+  assert.match(q0030Fallback.reply, /不改数据、不重放、不重复提交、不重试/);
+  assert.doesNotMatch(q0030Fallback.reply, /产品负责人和研发|接口负责人继续确认|运维负责人/);
   assert.doesNotMatch(q0030Fallback.reply, /张三|李四|某某医院/);
   assert.doesNotMatch(q0030Fallback.reply, /current route|页面选择|状态接口|页面刷新|列表摘要/i);
   assert.deepEqual(q0030Fallback.finalAudit.violations, [], 'Q0030 只读边界与责任交接终稿必须终审全绿');
+
+  const q0830Question = '代码模型与生产数据库事实边界这一步只能确认现象稳定复现，不能做写操作。现在应停在哪个边界并交给谁继续？';
+  assert.ok(browserRequirements[q0830Question], 'Q0830 生产原句应来自真实 1000 题 fixture');
+  const q0830Route = runtimeRouteWithContext(routeQuestion(productionRouteMap, q0830Question));
+  assert.equal(q0830Route.route.id, 'AUD-QR-SYS-01-DATA-EVIDENCE');
+  const q0830Fallback = bundle.modelFailureFallback(q0830Question, q0830Route, { code: 'MODEL_OUTPUT_TRUNCATED', message: 'length limit' });
+  assert.ok(q0830Fallback, 'Q0830 length_limit 必须发布 route-scoped 停点与交接终稿');
+  assert.equal(q0830Fallback.initialAudit.fallbackAnswerMode, 'field_diagnostic');
+  assert.match(q0830Fallback.reply, /停止点[\s\S]*只能证明代码[\s\S]*不能证明当前生产/);
+  assert.match(q0830Fallback.reply, /DBA\/数据库负责人[\s\S]*目标生产实例的只读 schema 元数据或 DBA 导出/);
+  assert.match(q0830Fallback.reply, /迁移执行记录与版本、当前应用版本/);
+  assert.match(q0830Fallback.reply, /不得为验证直接执行 DDL、补字段、改类型、切换数据源或修改生产数据/);
+  assert.doesNotMatch(q0830Fallback.reply, /产品负责人和研发|接口负责人继续确认|对应功能的.*负责人/);
+  assert.doesNotMatch(q0830Fallback.reply, /(?:请|可以|需要|应当|建议)[^。！？；\n]{0,24}(?:重放|重复提交|重试|执行 DDL)/);
+  assert.deepEqual(q0830Fallback.finalAudit.violations, [], 'Q0830 停点、责任角色和只读证据终稿必须终审全绿');
+
+  const dataEvidenceFactQuestion = '大屏有多数据库 Mapper 就能承诺生产兼容吗？';
+  const dataEvidenceFactFallback = bundle.modelFailureFallback(dataEvidenceFactQuestion, q0830Route, { status: 429, message: 'rate limit' });
+  assert.ok(dataEvidenceFactFallback, '同 route 普通事实题仍应发布 verified facts');
+  assert.doesNotMatch(dataEvidenceFactFallback.reply, /停止点|责任交接|责任角色/);
+  const dataEvidenceChainQuestion = '把代码模型与生产数据库事实边界从入口、接口或数据到外部依赖的链路串起来；资料没定义的部分请明确停住。';
+  const dataEvidenceChainFallback = bundle.modelFailureFallback(dataEvidenceChainQuestion, q0830Route, { status: 429, message: 'rate limit' });
+  assert.ok(dataEvidenceChainFallback, '同 route chain 问法仍应沿已有链路 fallback');
+  assert.equal(dataEvidenceChainFallback.initialAudit.fallbackAnswerMode, 'chain');
+  assert.doesNotMatch(dataEvidenceChainFallback.reply, /责任交接|责任角色|由用户指定责任人/);
+  const dataEvidenceContextQuestion = '代码模型与生产数据库事实边界这条链路只确认前端发出了请求，服务端后续日志还没拿到。先说能确定的，未知项请单独标出来。';
+  const dataEvidenceContextFallback = bundle.modelFailureFallback(dataEvidenceContextQuestion, { ...q0830Route, inherited: true }, { status: 429, message: 'rate limit' });
+  assert.ok(dataEvidenceContextFallback, '同 route 非交接 context_followup 仍应保留 contextual partial-evidence fallback');
+  assert.equal(dataEvidenceContextFallback.initialAudit.fallbackAnswerMode, 'partial_evidence');
+  assert.match(dataEvidenceContextFallback.reply, /本轮能确定[\s\S]*本轮未知[\s\S]*只读边界/);
+  assert.doesNotMatch(dataEvidenceContextFallback.reply, /责任交接|责任角色|由用户指定责任人/);
 
   const q0281Question = Object.keys(browserRequirements).find(question => question === '打回时消息中心失败，门诊和住院结果一致吗？');
   const q0282Question = Object.keys(browserRequirements).find(question => question === '创建会话失败后门诊处方还会继续打回吗？');
@@ -3062,11 +3094,11 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   const q0285Initial = bundle.audit(q0285Route.answerFacts.join('\n'), q0285Question, q0285Route);
   assert.equal(q0285Initial.fallbackAnswerMode, 'field_diagnostic');
   const q0285Reply = bundle.fallback(q0285Route.answerFacts.join('\n'), q0285Initial);
-  assert.match(q0285Reply, /当前实现会在列表返回记录后，由系统自动只读调用用户中心 getHospitalInfoByHospitalId，读取并用于展示补全医院和机构名称/);
-  assert.match(q0285Reply, /不是要求实施手工调用，也不写业务数据/);
-  assert.doesNotMatch(q0285Reply, /列表返回记录后，再通过用户中心[^。！？\n]*补医院和机构名称/);
-  assert.match(q0285Reply, /本轮不做写操作/);
-  assert.deepEqual(bundle.audit(q0285Reply, q0285Question, q0285Route).violations, [], 'Q0285 应区分系统既有实现与现场动作');
+  assert.match(q0285Reply, /停止点[\s\S]*(?:本轮已核事实边界|先停在现有观测边界)/);
+  assert.match(q0285Reply, /本轮已核资料未定义责任角色[\s\S]*由用户指定责任人/);
+  assert.match(q0285Reply, /不改数据、不重放、不重复提交、不重试/);
+  assert.doesNotMatch(q0285Reply, /产品负责人和研发|接口负责人继续确认|运维负责人/);
+  assert.deepEqual(bundle.audit(q0285Reply, q0285Question, q0285Route).violations, [], 'Q0285 没有已核责任角色时必须明确停住并由用户指定');
 
   const genericReadOnlyHandoffQuestion = '这一步只能确认现象稳定复现，不能做写操作。现在应停在哪个边界并交给谁继续？';
   const genericImplementationRoute = {
@@ -3082,11 +3114,11 @@ test('二次修订失败时安全降级：删违规句、保留已核事实并�
   };
   const genericImplementationInitial = bundle.audit(genericImplementationRoute.answerFacts.join('\n'), genericReadOnlyHandoffQuestion, genericImplementationRoute);
   const genericImplementationReply = genericImplementationInitial.safeDiagnosticFallback;
-  assert.match(genericImplementationReply, /当前实现会在查询返回记录后，由系统自动只读调用资料服务 resolveOwnerName，读取并用于展示补全负责人名称/);
-  assert.match(genericImplementationReply, /不是要求实施手工调用，也不写业务数据/);
+  assert.match(genericImplementationReply, /停止点[\s\S]*(?:本轮已核事实边界|先停在现有观测边界)/);
+  assert.match(genericImplementationReply, /本轮已核资料未定义责任角色[\s\S]*由用户指定责任人/);
   assert.doesNotMatch(genericImplementationReply, /应定向补通知|再决定是否重做/);
-  assert.match(genericImplementationReply, /另行授权.*定向补偿/s);
-  assert.deepEqual(bundle.audit(genericImplementationReply, genericReadOnlyHandoffQuestion, genericImplementationRoute).violations, [], '通用实现顺序和补偿建议也应安全收口');
+  assert.doesNotMatch(genericImplementationReply, /产品负责人和研发|接口负责人继续确认|运维负责人/);
+  assert.deepEqual(bundle.audit(genericImplementationReply, genericReadOnlyHandoffQuestion, genericImplementationRoute).violations, [], '通用 route 未定义角色时必须安全停住，不得猜负责人');
 
   const q0381Question = Object.keys(browserRequirements).find(question => question === '医嘱标记现在是怎么实现的？');
   const q0382Question = Object.keys(browserRequirements).find(question => question === '医嘱标记涉及哪些接口、数据和边界？');
