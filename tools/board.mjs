@@ -48,11 +48,13 @@ function build() {
     if (!fm.id) continue;
     if (seen.has(fm.id)) { dups.push(`${fm.id}（docs/specs/${f} 与 ${seen.get(fm.id)} 重复，已忽略后者）`); continue; }
     seen.set(fm.id, f);
-    specs.push({ id: fm.id, title: fm.title || '', module: (fm.module || '').trim(), priority: (fm.priority || '').split('/')[0].trim(), status: fm.status || 'draft', file: 'docs/specs/' + f, nodes: specNodes(fm.id, fm.status || 'draft') });
+    const type = (fm.type || 'feature').trim();   // guide=系统导读(域级参考，不走 dev/test/accept)；其余=可验收功能 spec
+    specs.push({ id: fm.id, title: fm.title || '', module: (fm.module || '').trim(), type, priority: (fm.priority || '').split('/')[0].trim(), status: fm.status || 'draft', file: 'docs/specs/' + f, nodes: type === 'guide' ? {} : specNodes(fm.id, fm.status || 'draft') });
   }
   specs.sort((a, b) => a.id.localeCompare(b.id));
 
-  const summary = { total: specs.length, accepted: specs.filter(s => s.status === 'accepted').length, inDev: specs.filter(s => ['in-dev', 'testing'].includes(s.status)).length, ready: specs.filter(s => s.status === 'ready').length, draft: specs.filter(s => s.status === 'draft').length };
+  const feat = specs.filter(s => s.type !== 'guide');   // 可验收功能 spec（导读 type:guide 不计入验收统计）
+  const summary = { total: feat.length, accepted: feat.filter(s => s.status === 'accepted').length, inDev: feat.filter(s => ['in-dev', 'testing'].includes(s.status)).length, ready: feat.filter(s => s.status === 'ready').length, draft: feat.filter(s => s.status === 'draft').length, guides: specs.length - feat.length };
   const blockers = specs.filter(s => Object.values(s.nodes).includes('fail')).map(s => `${s.id} 有节点失败/驳回`).concat(dups.map(d => '重复 spec id：' + d));
   const board = { generatedAt: new Date().toISOString().replace('T', ' ').slice(0, 19), nodes: NODES, nodeCn: NODE_CN, specs, summary, blockers };
 
@@ -62,8 +64,10 @@ function build() {
   let md = `# 研发进度看板（Board）\n\n> ⚠️ 本文件由 \`node tools/board.mjs\` **自动生成**，请勿手改。状态源：spec 头部 status + docs/.state/<id>.json。\n> 生成时间：${board.generatedAt}　图例：⬜未开始 🔄进行中 ✅通过 ❌失败/驳回 ⏸️待人\n\n`;
   md += `| spec | 标题 | 优先级 | ${NODES.map(n => NODE_CN[n]).join(' | ')} | 状态 |\n`;
   md += `|---|---|---|${NODES.map(() => '---').join('|')}|---|\n`;
-  for (const s of specs) md += `| ${s.id} | ${s.title} | ${s.priority} | ${NODES.map(n => ICON[s.nodes[n]] || '⬜').join(' | ')} | ${s.status} |\n`;
-  md += `\n## 汇总\n- 总计 ${summary.total} · 已验收 ${summary.accepted} · 开发中 ${summary.inDev} · 待开发(ready) ${summary.ready} · 草拟 ${summary.draft}\n`;
+  for (const s of feat) md += `| ${s.id} | ${s.title} | ${s.priority} | ${NODES.map(n => ICON[s.nodes[n]] || '⬜').join(' | ')} | ${s.status} |\n`;
+  md += `\n## 汇总\n- 功能 spec 总计 ${summary.total} · 已验收 ${summary.accepted} · 开发中 ${summary.inDev} · 待开发(ready) ${summary.ready} · 草拟 ${summary.draft}　|　📖 系统导读 ${summary.guides} 份\n`;
+  const guides = specs.filter(s => s.type === 'guide');
+  if (guides.length) md += `\n## 系统导读（type: guide · 域级参考，不走验收流水线）\n` + guides.map(g => `- ${g.id} ${g.title}（${g.module || '—'}）`).join('\n') + '\n';
   if (blockers.length) md += `\n## 阻塞\n` + blockers.map(b => `- ${b}`).join('\n') + '\n';
   fs.writeFileSync(path.join(ROOT, 'docs/board.md'), md);
 
