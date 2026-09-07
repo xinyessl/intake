@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>咨询回复 · 收件 intake</title>
+<link rel="stylesheet" href="/vendor/tabler/tabler-icons.min.css">
+<link rel="stylesheet" href="/assets/theme.css">
+<script src="/assets/ui.js" defer></script>
+<script src="/assets/shell.js" defer></script>
+<style>
+  /* FS-10 咨询回复运营页：队列表 + 回复抽屉（完整对话 + 回复框 + AI 草稿沉淀）。抽屉/toast 自实现（部署 shell.js 无 UI.openDrawer，见 lessons L-004/L-178）。 */
+  .cr-status { display:inline-flex; align-items:center; gap:4px; height:22px; padding:0 9px; border-radius:var(--radius-pill); font-size:11.5px; font-weight:600; }
+  .cr-status.waiting { background:#FFF7E6; color:#B7791F; border:1px solid #F0D9A8; }
+  .cr-status.replied { background:#F1FAF4; color:#2E9E6B; border:1px solid #B7E0C7; }
+  .cr-q { max-width:420px; color:var(--color-text); }
+  .cr-q .qt { font-weight:600; line-height:1.5; }
+  .cr-q .qs { margin-top:3px; font-size:12px; color:var(--color-text-tertiary); line-height:1.5; overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+  /* 对话流（抽屉里只读展示完整咨询对话） */
+  .cr-chat { display:flex; flex-direction:column; gap:12px; }
+  .cr-msg { display:flex; gap:9px; max-width:92%; }
+  .cr-msg .av { width:28px; height:28px; border-radius:7px; flex:0 0 auto; display:grid; place-items:center; font-size:11px; font-weight:700; color:#fff; }
+  .cr-msg.user { margin-left:auto; flex-direction:row-reverse; }
+  .cr-msg.user .av { background:var(--color-text-tertiary); }
+  .cr-msg.ai .av { background:var(--color-primary); }
+  .cr-msg.human .av { background:#2E9E6B; }
+  .cr-msg .bub { padding:9px 13px; border-radius:11px; font-size:13.5px; line-height:1.6; overflow-wrap:anywhere; word-break:break-word; }
+  .cr-msg.user .bub { background:var(--color-primary); color:#fff; }
+  .cr-msg.ai .bub { background:var(--color-surface); border:1px solid var(--color-border); }
+  .cr-msg.human .bub { background:#F1FAF4; border:1px solid #B7E0C7; }
+  .cr-msg.human .bub .tag { display:inline-flex; align-items:center; gap:4px; font-size:11.5px; font-weight:700; color:#2E9E6B; margin-bottom:5px; }
+  .cr-reply-box { margin-top:8px; }
+  .cr-reply-box textarea { width:100%; box-sizing:border-box; min-height:90px; border:1px solid var(--color-border); border-radius:8px; padding:10px 12px; font-size:13.5px; line-height:1.6; resize:vertical; font-family:inherit; }
+  .cr-reply-box textarea:focus { border-color:var(--color-primary); outline:none; }
+  .cr-section-title { font-size:13px; font-weight:700; color:var(--color-text); margin:16px 0 8px; display:flex; align-items:center; gap:6px; }
+  .cr-section-title .ti { color:var(--color-primary); }
+  .cr-kb-panel { border:1px solid var(--color-border); border-radius:10px; padding:14px; background:var(--color-surface-alt); }
+  .cr-kb-panel label { display:block; font-size:12px; font-weight:600; color:var(--color-text-secondary); margin:0 0 5px; }
+  .cr-kb-panel textarea { width:100%; box-sizing:border-box; border:1px solid var(--color-border); border-radius:8px; padding:9px 11px; font-size:13px; line-height:1.6; resize:vertical; font-family:inherit; margin-bottom:10px; }
+  .cr-kb-panel .cr-kb-q { min-height:44px; }
+  .cr-kb-panel .cr-kb-a { min-height:120px; }
+  .cr-kb-hint { font-size:12px; color:var(--color-text-tertiary); margin-top:6px; }
+  .cr-kb-ok { color:#2E9E6B; font-weight:600; }
+  .cr-empty { text-align:center; padding:44px 20px; color:var(--color-text-tertiary); font-size:13px; }
+</style>
+</head>
+<body data-shell="admin" data-nav="consult-reply" data-breadcrumb="工单 > 咨询回复" data-content-layout="list">
+
+<div class="card">
+  <div class="filter-bar" style="display:flex;align-items:center;gap:12px;padding:10px 14px">
+    <div class="filter-grid" style="flex:1">
+      <div class="filter-field"><label>产品</label><select class="select" id="fProduct"><option value="">全部产品</option></select></div>
+      <div class="filter-field"><label>状态</label><select class="select" id="fStatus"><option value="">全部</option><option value="待回复">待回复</option><option value="已回复">已回复</option></select></div>
+    </div>
+    <button class="btn" id="refreshBtn"><i class="ti ti-refresh"></i>刷新</button>
+  </div>
+</div>
+
+<div class="card" style="flex:1;min-height:0;display:flex;flex-direction:column">
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th style="width:96px">状态</th>
+          <th>咨询问题</th>
+          <th style="width:130px">子系统</th>
+          <th style="width:140px">医院</th>
+          <th style="width:150px">转人工时间</th>
+          <th style="width:110px">操作</th>
+        </tr>
+      </thead>
+      <tbody id="crBody"></tbody>
+    </table>
+  </div>
+  <div class="pagination">
+    <div class="page-info">共 <b id="totalCount">0</b> 条待/已回复咨询</div>
+  </div>
+</div>
+
+<!-- 回复抽屉：完整对话（只读）+ 回复框 +（回复后）AI 整理草稿沉淀 -->
+<div class="drawer-mask" id="drawerMask"></div>
+<div class="drawer wide" id="replyDrawer">
+  <div class="drawer-header">
+    <div><div class="drawer-title">咨询回复</div><div class="drawer-subtitle" id="rdSub">—</div></div>
+    <span class="modal-close" data-close-drawer="replyDrawer"><i class="ti ti-x"></i></span>
+  </div>
+  <div class="drawer-body" id="replyBody"></div>
+  <div class="drawer-footer">
+    <button class="btn" data-close-drawer="replyDrawer">关闭</button>
+  </div>
+</div>
+
+<div class="toast-container" id="toastHost"></div>
+
+<script>
+function $(s,r){return (r||document).querySelector(s);}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function fmtTime(v){ if(!v)return '—'; let d=(typeof v==='number')?new Date(v):new Date(String(v).replace(' ','T')); if(isNaN(d)) return String(v); const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+function md(s){ return window.mdToHtml ? window.mdToHtml(String(s||'')) : esc(String(s||'')); }
+function toast(msg,type){ const host=$('#toastHost'); if(!host)return; const el=document.createElement('div'); el.className='toast '+(type||''); const ic=type==='success'?'ti-circle-check':type==='error'?'ti-alert-circle':type==='warning'?'ti-alert-triangle':'ti-info-circle'; el.innerHTML=`<i class="ti ${ic}"></i><span>${esc(msg)}</span>`; host.appendChild(el); requestAnimationFrame(()=>el.classList.add('show')); setTimeout(()=>{ el.classList.remove('show'); setTimeout(()=>el.remove(),300); },2400); }
+function openDrawer(id){ const d=document.getElementById(id); if(!d)return; $('#drawerMask').classList.add('open'); d.classList.add('open'); }
+function closeDrawer(id){ const d=document.getElementById(id); if(d)d.classList.remove('open'); if(!document.querySelector('.drawer.open')) $('#drawerMask').classList.remove('open'); }
+async function apiGet(p){ try{ return await (await fetch(p)).json(); }catch(e){ return null; } }
+async function apiPost(p,body){ try{ return await (await fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})})).json(); }catch(e){ return null; } }
+
+let PROJECTS=[], ITEMS=[], CUR=null;
+
+async function loadProjects(){
+  const r=await apiGet('/api/projects'); PROJECTS=(r&&r.projects)||[];
+  const sel=$('#fProduct'); sel.innerHTML='<option value="">全部产品</option>'+PROJECTS.map(p=>`<option value="${esc(p.id)}">${esc(p.name||p.id)}</option>`).join('');
+}
+function projName(id){ const p=PROJECTS.find(x=>x.id===id); return (p&&(p.name||p.id))||id||''; }
+
+async function loadQueue(){
+  const body={};
+  const proj=$('#fProduct').value; if(proj) body.project=proj;
+  const st=$('#fStatus').value; if(st) body.status=st;
+  const tbody=$('#crBody'); tbody.innerHTML='<tr><td colspan="6" class="cr-empty">加载中…</td></tr>';
+  const r=await apiPost('/api/consult-escalations',body);
+  ITEMS=(r&&r.items)||[];
+  $('#totalCount').textContent=ITEMS.length;
+  if(!ITEMS.length){ tbody.innerHTML='<tr><td colspan="6" class="cr-empty">暂无转人工的咨询（实施端点「转人工」后会出现在这里）</td></tr>'; return; }
+  tbody.innerHTML='';
+  ITEMS.forEach(function(it){
+    const tr=document.createElement('tr');
+    const stCls=it.status==='已回复'?'replied':'waiting';
+    const stIc=it.status==='已回复'?'ti-user-check':'ti-headset';
+    tr.innerHTML=
+      `<td><span class="cr-status ${stCls}"><i class="ti ${stIc}"></i> ${esc(it.status)}</span></td>`+
+      `<td class="cr-q"><div class="qt">${esc(it.title||'（无标题）')}</div>`+(it.escalateQuestion?`<div class="qs">${esc(it.escalateQuestion)}</div>`:'')+`</td>`+
+      `<td>${esc(it.subsystemLabel||it.subsystem||'—')}</td>`+
+      `<td>${esc(it.site||'—')}</td>`+
+      `<td>${esc(fmtTime(it.escalatedAt))}</td>`+
+      `<td><button class="btn btn-sm btn-primary" data-open="${esc(it.project)}|${esc(it.id)}"><i class="ti ti-messages"></i> ${it.status==='已回复'?'查看':'回复'}</button></td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+async function openReply(project,id){
+  const it=ITEMS.find(x=>x.project===project&&x.id===id); if(!it) return;
+  CUR={project,id,item:it};
+  $('#rdSub').textContent=projName(project)+' · '+(it.subsystemLabel||it.subsystem||'')+(it.site?' · '+it.site:'');
+  const body=$('#replyBody'); body.innerHTML='<div class="cr-empty">加载对话…</div>';
+  openDrawer('replyDrawer');
+  const d=await apiGet('/api/intake-detail?project='+encodeURIComponent(project)+'&id='+encodeURIComponent(id));
+  const rec=(d&&d.item)||null;
+  if(!rec){ body.innerHTML='<div class="cr-empty">咨询记录不存在或已删除</div>'; return; }
+  renderReplyBody(rec);
+}
+
+function renderReplyBody(rec){
+  const body=$('#replyBody');
+  const chat=Array.isArray(rec.chat)?rec.chat:[];
+  const replied=!!rec.humanReplied;
+  let html='<div class="cr-chat">';
+  chat.forEach(function(m){
+    const t=String((m&&m.text)||'').trim(); if(!t) return;
+    if(m.role==='assistant'&&m.human){
+      html+=`<div class="cr-msg human"><div class="av"><i class="ti ti-headset"></i></div><div class="bub"><div class="tag"><i class="ti ti-user-check"></i> 运营人工答复${m.by?' · '+esc(m.by):''}</div>${md(t)}</div></div>`;
+    } else if(m.role==='assistant'){
+      html+=`<div class="cr-msg ai"><div class="av">AI</div><div class="bub">${md(t)}</div></div>`;
+    } else {
+      html+=`<div class="cr-msg user"><div class="av">现</div><div class="bub">${esc(t).replace(/\n/g,'<br>')}</div></div>`;
+    }
+  });
+  html+='</div>';
+  // 回复框（未回复=写回复；已回复=可再补一条）
+  html+=`<div class="cr-section-title"><i class="ti ti-message-plus"></i> ${replied?'再补充一条人工回复':'写人工回复'}</div>`;
+  html+=`<div class="cr-reply-box"><textarea id="crReply" placeholder="给现场同事的权威答复（支持 Markdown）…"></textarea>`+
+        `<div style="margin-top:8px;display:flex;gap:8px"><button class="btn btn-primary" id="crReplyBtn"><i class="ti ti-send"></i> 发送回复</button></div></div>`;
+  // AI 草稿沉淀区（已回复才显；否则回复成功后动态注入）
+  html+=`<div id="crKbSlot">${replied?'':''}</div>`;
+  body.innerHTML=html;
+  $('#crReplyBtn').addEventListener('click',doReply);
+  if(replied) mountKbDraftEntry();   // 已回复 → 直接给「AI 整理沉淀」入口
+}
+
+async function doReply(){
+  const ta=$('#crReply'); const reply=(ta&&ta.value||'').trim();
+  if(!reply){ toast('回复内容不能为空','error'); return; }
+  const btn=$('#crReplyBtn'); btn.disabled=true;
+  const r=await apiPost('/api/consult-human-reply',{project:CUR.project,convId:CUR.id,reply});
+  if(r&&r.ok){
+    toast('回复已发送，现场会看到','success');
+    // 刷新抽屉对话 + 队列状态
+    const d=await apiGet('/api/intake-detail?project='+encodeURIComponent(CUR.project)+'&id='+encodeURIComponent(CUR.id));
+    if(d&&d.item) renderReplyBody(d.item);
+    loadQueue();
+  } else {
+    btn.disabled=false; toast((r&&r.error)||'发送失败','error');
+  }
+}
+
+// AI 整理草稿入口：显一枚按钮 → 点它调 consult-kb-draft → 展开可编辑 q/a 面板 → 运营改好「确认沉淀」存 KB。
+function mountKbDraftEntry(){
+  const slot=$('#crKbSlot'); if(!slot) return;
+  slot.innerHTML=`<div class="cr-section-title"><i class="ti ti-book-upload"></i> 沉淀经验库（AI 整理 → 你确认）</div>`+
+    `<div class="cr-kb-hint">让 AI 把「原问题 + 你的权威回复」整理成一条经验库条目，你编辑确认后入库——下次同类问题 AI 可直接答。</div>`+
+    `<div style="margin-top:10px"><button class="btn" id="crDraftBtn"><i class="ti ti-wand"></i> AI 整理草稿</button></div>`+
+    `<div id="crKbEdit"></div>`;
+  $('#crDraftBtn').addEventListener('click',genDraft);
+}
+
+async function genDraft(){
+  const btn=$('#crDraftBtn'); btn.disabled=true; btn.innerHTML='<i class="ti ti-loader"></i> 整理中…';
+  const r=await apiPost('/api/consult-kb-draft',{project:CUR.project,convId:CUR.id});
+  btn.disabled=false; btn.innerHTML='<i class="ti ti-wand"></i> 重新整理';
+  if(!(r&&r.ok)){ toast((r&&r.error)||'草稿生成失败','error'); return; }
+  const sub=r.subsystem||'';
+  $('#crKbEdit').innerHTML=`<div class="cr-kb-panel" style="margin-top:12px">`+
+    `<label>问题（q）</label><textarea class="cr-kb-q" id="crKbQ">${esc(r.q||'')}</textarea>`+
+    `<label>解法 / 结论（a · 权威答案）</label><textarea class="cr-kb-a" id="crKbA">${esc(r.a||'')}</textarea>`+
+    `<div style="display:flex;gap:8px;align-items:center"><button class="btn btn-primary" id="crSinkBtn"><i class="ti ti-check"></i> 确认沉淀</button><span id="crSinkMsg" class="cr-kb-hint"></span></div>`+
+    `<input type="hidden" id="crKbSub" value="${esc(sub)}"></div>`;
+  $('#crSinkBtn').addEventListener('click',sinkKb);
+}
+
+async function sinkKb(){
+  const q=($('#crKbQ').value||'').trim(), a=($('#crKbA').value||'').trim();
+  if(!q||!a){ toast('问题和解法都要填','error'); return; }
+  const sub=$('#crKbSub').value||'';
+  const btn=$('#crSinkBtn'); btn.disabled=true;
+  // 复用 /api/kb-save 直传 q/a 路径，source=escalated（区分来源），挂 project/subsystem
+  const r=await apiPost('/api/kb-save',{project:CUR.project,q,a,subsystem:sub,source:'escalated',from_ref:CUR.id});
+  if(r&&r.ok){ $('#crSinkMsg').innerHTML='<span class="cr-kb-ok"><i class="ti ti-check"></i> 已沉淀 · 下次同类问题 AI 可直接答</span>'; btn.innerHTML='<i class="ti ti-check"></i> 已沉淀'; }
+  else { btn.disabled=false; toast((r&&r.error)||'沉淀失败','error'); }
+}
+
+document.addEventListener('click',function(e){
+  const c=e.target.closest('[data-close-drawer]'); if(c){ closeDrawer(c.getAttribute('data-close-drawer')); return; }
+  const o=e.target.closest('[data-open]'); if(o){ const [p,id]=o.getAttribute('data-open').split('|'); openReply(p,id); return; }
+});
+$('#drawerMask').addEventListener('click',function(){ document.querySelectorAll('.drawer.open').forEach(d=>d.classList.remove('open')); $('#drawerMask').classList.remove('open'); });
+$('#fProduct').addEventListener('change',loadQueue);   // 选择型即选即查（全局规范 11）
+$('#fStatus').addEventListener('change',loadQueue);
+$('#refreshBtn').addEventListener('click',loadQueue);
+
+(async function init(){ await loadProjects(); await loadQueue(); })();
+</script>
+</body>
+</html>

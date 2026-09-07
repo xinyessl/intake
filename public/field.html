@@ -153,6 +153,11 @@ body { margin: 0; overflow: hidden; background: var(--color-bg); }
 .f-conv-kind { display: inline-flex; align-items: center; gap: 4px; height: 21px; padding: 0 9px; border-radius: var(--radius-pill); font-size: 11.5px; font-weight: 600; }
 .f-conv-kind.k-consult { background: #F1ECF8; color: #7A5BA6; }
 .f-conv-kind.k-intake { background: var(--color-primary-light); color: var(--color-primary); border: 1px solid var(--color-primary-border); }
+/* FS-10 转人工态徽标：已回复=绿、待回复=琥珀（附在会话类型徽标后） */
+.f-conv-human { display: inline-flex; align-items: center; gap: 3px; height: 21px; padding: 0 8px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 600; }
+.f-conv-human .ti { font-size: 12px; }
+.f-conv-human.replied { background: #F1FAF4; color: #2E9E6B; border: 1px solid #B7E0C7; }
+.f-conv-human.waiting { background: #FFF7E6; color: #B7791F; border: 1px solid #F0D9A8; }
 /* 这次聊天建了几张单（多单聊天关键提示） */
 .f-conv-cnt { display: inline-flex; align-items: center; height: 21px; padding: 0 8px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 600; background: var(--color-surface-alt); color: var(--color-text-secondary); border: 1px solid var(--color-border); }
 .f-conv-cnt.f-conv-cnt-none { background: transparent; color: var(--color-text-tertiary); border-style: dashed; }   /* 未建单：弱化虚线，区别于「N 单」实心 */
@@ -685,6 +690,12 @@ button.f-ov-card { width: 100%; appearance: none; }
 .f-msg .bub pre code { white-space: inherit; overflow-wrap: normal; word-break: normal; }
 .f-msg.me .bub code { background: rgba(255,255,255,.18); color: #fff; }
 .f-msg .bub strong { font-weight: 700; }
+/* FS-10 运营人工答复气泡：头像绿色 + 气泡浅绿描边 + 顶部标签条，明显区别于 AI 气泡 */
+.f-msg.f-human-reply .av { background: #2E9E6B; }
+.f-msg.f-human-reply .bub { background: #F1FAF4; border: 1px solid #B7E0C7; color: var(--color-text); }
+.f-msg.f-human-reply .bub .f-human-tag { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; color: #2E9E6B; margin-bottom: 6px; }
+.f-msg.f-human-reply .bub .f-human-tag .ti { font-size: 14px; }
+.f-msg.f-human-reply .bub .f-human-body { min-width: 0; }
 /* 受控 Markdown 块级元素（聊天气泡 + 经验库答复 + 答复内引用条目答案共用；紧凑分节·对齐藏青 token） */
 .f-msg .bub .md-p, .f-kb-answer .md-p, .f-kb-cite-item .a .md-p { margin: 0 0 .5em; }
 .f-msg .bub .md-p:last-child, .f-kb-answer .md-p:last-child, .f-kb-cite-item .a .md-p:last-child { margin-bottom: 0; }
@@ -2715,7 +2726,8 @@ button.f-ov-card { width: 100%; appearance: none; }
       if (!item) return;
       // 恢复会话：消息流 + convId + project + kind=consult。Part B：保留每条消息的 media（per-message），渲染时随该轮就位（旧记录消息无 media → 末尾兜底显图，见下）。
       var rawChat = Array.isArray(item.chat) ? item.chat : [];
-      var msgs = rawChat.map(function (m) { return { role: (m.role === 'assistant' ? 'assistant' : 'user'), content: m.text || '', media: (Array.isArray(m.media) ? m.media : null), kbRefs: normalizeKbRefs(m.kbRefs) }; }).filter(function (m) { return m.content || (m.media && m.media.length); });
+      // FS-10：保留 human 标记（运营人工答复）+ 署名，供渲染成「运营人工答复」样式（区别 AI 气泡）
+      var msgs = rawChat.map(function (m) { return { role: (m.role === 'assistant' ? 'assistant' : 'user'), content: m.text || '', media: (Array.isArray(m.media) ? m.media : null), kbRefs: normalizeKbRefs(m.kbRefs), human: !!(m && m.human), by: (m && m.by) || '' }; }).filter(function (m) { return m.content || (m.media && m.media.length); });
       chat.messages = msgs.map(function (m) { var x = { role: m.role, content: m.content }; if (m.kbRefs.length) x.kbRefs = m.kbRefs; return x; });   // 引用仅供本地/历史重放；sendConsult 请求会收敛为 role/content，不能由客户端冒充本轮引用
       chat.convId = item.convId || item.id || '';        // consult 的 convId = 记录 id
       chat.reopenProject = item.project || it.project;    // 续问归属锁定
@@ -2734,6 +2746,7 @@ button.f-ov-card { width: 100%; appearance: none; }
       msgs.forEach(function (m) {
         var urls = (m.media && m.media.length) ? mediaUrls(proj0, m.media) : [];
         if (urls.length) anyMsgMedia = true;
+        if (m.role === 'assistant' && m.human) { appendHumanReplyBubble(m.content, m.by, urls); return; }   // FS-10：运营人工答复 → 专属样式（非普通 AI 气泡）
         var bub = appendBubble(m.role === 'user' ? 'me' : 'ai', m.content, false, urls);   // urls 非空 → 气泡内附该轮截图缩略图
         if (m.role === 'assistant' && m.kbRefs.length && !isNonSubstantiveReply(m.content)) renderKbCite(bub, m.kbRefs);   // 没覆盖/无相关的答复：不显「已参考经验」（都没符合的经验，展示误导）
       });
@@ -3520,6 +3533,23 @@ button.f-ov-card { width: 100%; appearance: none; }
     box.appendChild(msg); scrollChatBottom();
     return bub;
   }
+  // FS-10：运营「人工答复」气泡（只读渲染，区别于 AI 气泡）——头像用耳机、气泡加「运营人工答复」标签条 + 专属配色。
+  function appendHumanReplyBubble(text, by, imgs) {
+    clearPlaceholder();
+    var box = chatBox(); if (!box) return null;
+    var msg = document.createElement('div');
+    msg.className = 'f-msg ai f-human-reply';   // 复用 ai 侧布局（左对齐），叠 f-human-reply 换配色
+    var av = document.createElement('div'); av.className = 'av'; av.innerHTML = '<i class="ti ti-headset"></i>';
+    var bub = document.createElement('div'); bub.className = 'bub';
+    var tag = document.createElement('div'); tag.className = 'f-human-tag';
+    tag.innerHTML = '<i class="ti ti-user-check"></i> 运营人工答复' + (by ? ' · ' + escapeHtml(by) : '');
+    var body = document.createElement('div'); body.className = 'f-human-body'; body.innerHTML = md(text || '');
+    bub.appendChild(tag); bub.appendChild(body);
+    if (Array.isArray(imgs) && imgs.length) bub.appendChild(bubbleImgs(imgs));
+    msg.appendChild(av); msg.appendChild(bub);
+    box.appendChild(msg); scrollChatBottom();
+    return bub;
+  }
   // 构造气泡内的截图缩略图区；imgs = URL 数组（data URL 或 /api/intake-media URL 均可）。
   function bubbleImgs(imgs) {
     var wrap = document.createElement('div'); wrap.className = 'f-bub-imgs';
@@ -4211,6 +4241,8 @@ button.f-ov-card { width: 100%; appearance: none; }
     if (replyText && chat.lastQ && !nonSub) appendKbSink();
     // 咨询「转工单」入口（CT-3）：AI 答复结束且已有咨询会话（chat.convId）→ 追加一枚转工单按钮，实施判断该升级时点它 → 弹确认弹窗 → 直接建单（不再靠 AI 生成工单模板续聊）。
     if (replyText && chat.convId) appendConsultToIntake();
+    // FS-10 咨询「转人工」入口：AI 答不好时点它 → 该咨询打「待人工回复」态、交运营端回复（仍是咨询、不转开发工单）。外挂功能，与上面「转工单」并列。
+    if (replyText && chat.convId) appendConsultEscalate();
     scrollChatBottom();
     saveDraft();
     // 咨询落库后即时刷新左侧提交清单（否则新咨询记录不出现、切模式/新对话后"消失"，须刷新页面才见——与建单流对齐）
@@ -4258,6 +4290,33 @@ button.f-ov-card { width: 100%; appearance: none; }
     var btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn btn-sm btn-primary'; btn.style.marginTop = '8px';
     btn.innerHTML = '<i class="ti ti-ticket"></i> 🎫 转工单';
     btn.addEventListener('click', function () { openConsultToIntake(convId, archive, btn); });
+    card.appendChild(btn);
+    msg.appendChild(av); msg.appendChild(card);
+    box.appendChild(msg); scrollChatBottom();
+  }
+
+  // ========== FS-10 咨询「转人工」入口（外挂 · 与 lsy 的 consult 渲染隔离，只加 UI + 调新端点，不动答复流） ==========
+  //   AI 答不好时点它 → POST /api/consult-escalate {project,convId} → 该咨询打「待人工回复」态，交运营端回复（仍是咨询，不转开发工单）。
+  //   幂等：每个咨询会话（convId）只挂一枚（重复 finishConsult 不叠加）；成功后按钮置「已转人工 · 待运营回复」禁用（禁重复点）。
+  function appendConsultEscalate() {
+    var box = chatBox(); if (!box) return;
+    var convId = chat.convId; if (!convId) return;
+    if (box.querySelector('.f-escalate[data-conv="' + convId + '"]')) return;   // 同会话已挂过 → 不重复追加
+    var archive = currentArchive();
+    var msg = document.createElement('div'); msg.className = 'f-msg ai';
+    var av = document.createElement('div'); av.className = 'av'; av.innerHTML = '<i class="ti ti-headset"></i>';
+    var card = document.createElement('div'); card.className = 'f-arch f-escalate'; card.setAttribute('data-conv', convId);
+    card.innerHTML = '<div class="rowk">AI 答复没解决你的问题？可转人工，交运营同事看完整对话后给你回复（仍是咨询，不建工单）。</div>';
+    var btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn btn-sm btn-primary'; btn.style.marginTop = '8px';
+    btn.innerHTML = '<i class="ti ti-headset"></i> 转人工';
+    btn.addEventListener('click', function () {
+      btn.disabled = true;
+      api('/api/consult-escalate', { method: 'POST', body: JSON.stringify({ project: archive.project, convId: convId }) })
+        .then(function (r) {
+          if (r.body && r.body.ok) { btn.innerHTML = '<i class="ti ti-check"></i> 已转人工 · 待运营回复'; showToast('已转人工，运营会尽快回复', 'success'); }
+          else { btn.disabled = false; btn.innerHTML = '<i class="ti ti-headset"></i> 转人工失败，重试'; }
+        }).catch(function () { btn.disabled = false; btn.innerHTML = '<i class="ti ti-headset"></i> 转人工失败，重试'; });
+    });
     card.appendChild(btn);
     msg.appendChild(av); msg.appendChild(card);
     box.appendChild(msg); scrollChatBottom();
@@ -4736,6 +4795,9 @@ button.f-ov-card { width: 100%; appearance: none; }
     var kindHtml = isConsult
       ? '<span class="f-conv-kind k-consult"><i class="ti ti-message-question"></i> 咨询</span>'
       : '<span class="f-conv-kind k-intake"><i class="ti ti-pencil-plus"></i> 提需求/报BUG</span>';
+    // FS-10：转人工态徽标——已人工回复=绿「运营已回复」（点开看）；待回复=琥珀「待运营回复」
+    if (isConsult && it.humanReplied) kindHtml += '<span class="f-conv-human replied"><i class="ti ti-user-check"></i> 运营已回复</span>';
+    else if (isConsult && it.escalated) kindHtml += '<span class="f-conv-human waiting"><i class="ti ti-headset"></i> 待运营回复</span>';
     // intake 会话：显这次聊天建了几张单 + 需求/BUG 拆分（多单聊天关键：让用户一眼知这条对话建了多张单）；AC-36：未建单（沟通过但还没建单）也在列，显「未建单」
     var cntHtml = '';
     if (!isConsult && it.ticketCount != null) {

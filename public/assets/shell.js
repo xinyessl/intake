@@ -24,7 +24,8 @@
       { id: "console", label: "工作台", icon: "ti-layout-dashboard", href: "/console.html" }
     ]},
     { section: "工单", items: [
-      { id: "inbox",  label: "工单管理", icon: "ti-inbox", href: "/inbox.html" }
+      { id: "inbox",  label: "工单管理", icon: "ti-inbox", href: "/inbox.html" },
+      { id: "consult-reply", label: "咨询回复", icon: "ti-headset", href: "/consult-reply.html" }   /* FS-10：咨询转人工后运营在此回复 + 沉淀经验库 */
     ]},
     { section: "交付", items: [
       { id: "batches",  label: "批次管理", icon: "ti-package",     href: "/batches.html" }

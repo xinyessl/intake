@@ -104,6 +104,6 @@ export async function upsertIntake(projectId, e) {
 export async function replaceKB(projectId, arr) {
   await q(`DELETE FROM kb_entries WHERE project_id=?`, [projectId]);
   for (const e of arr) await q(`INSERT INTO kb_entries (id,project_id,q,a,subsystem,module,tags,source,from_ref,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)`,
-    [e.id, projectId, e.q || '', e.a || '', e.subsystem || '', e.module || '', J(e.tags || []), (e.from === 'manual' || e.from === 'consult') ? e.from : 'auto', e.from || '', e.at || '']);
+    [e.id, projectId, e.q || '', e.a || '', e.subsystem || '', e.module || '', J(e.tags || []), (e.from === 'manual' || e.from === 'consult' || e.from === 'escalated') ? e.from : 'auto', e.from || '', e.at || '']);
 }
 export async function ping() { const [r] = await q('SELECT 1 AS ok'); return r[0].ok === 1; }
