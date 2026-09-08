@@ -696,6 +696,11 @@ button.f-ov-card { width: 100%; appearance: none; }
 .f-msg.f-human-reply .bub .f-human-tag { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; color: #2E9E6B; margin-bottom: 6px; }
 .f-msg.f-human-reply .bub .f-human-tag .ti { font-size: 14px; }
 .f-msg.f-human-reply .bub .f-human-body { min-width: 0; }
+/* FS-10 增强：居中系统提示条（人工服务结束等）+ 人工服务中提示条 */
+.f-sys-notice { display: flex; justify-content: center; margin: 10px 0; }
+.f-sys-notice span { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--color-text-tertiary); background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius-pill, 999px); padding: 4px 12px; }
+.f-human-mode-bar { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; color: #2E9E6B; background: #F1FAF4; border: 1px solid #B7E0C7; border-radius: 8px; padding: 7px 12px; }
+.f-human-mode-bar .ti { font-size: 15px; flex: 0 0 auto; }
 /* 受控 Markdown 块级元素（聊天气泡 + 经验库答复 + 答复内引用条目答案共用；紧凑分节·对齐藏青 token） */
 .f-msg .bub .md-p, .f-kb-answer .md-p, .f-kb-cite-item .a .md-p { margin: 0 0 .5em; }
 .f-msg .bub .md-p:last-child, .f-kb-answer .md-p:last-child, .f-kb-cite-item .a .md-p:last-child { margin-bottom: 0; }
@@ -1051,6 +1056,8 @@ button.f-ov-card { width: 100%; appearance: none; }
       </div>
       <!-- 输入区 f-chat-f：截图预览条 + 文本框 + 图片入口 + 发送按钮（回车发送；支持选图/粘贴，最多 6 张，每次发送后清空） -->
       <div class="f-chat-f">
+        <!-- FS-10 增强：人工服务中提示条（humanActive 时显示；消息发给运营、不走 AI） -->
+        <div class="f-human-mode-bar" id="fHumanModeBar" style="display:none"><i class="ti ti-headset"></i> <span>人工服务中 · 你发的消息将直接发给运营同事，暂不经过 AI</span></div>
         <div class="f-img-preview" id="fImgPreview"></div>
         <div class="f-chat-row">
           <input class="input" id="fChatInput" autocomplete="off" placeholder="问问这个系统怎么用、遇到的报错原因…回车发送（可贴/选截图）" maxlength="4000">
@@ -2728,9 +2735,10 @@ button.f-ov-card { width: 100%; appearance: none; }
       if (!item) return;
       // 恢复会话：消息流 + convId + project + kind=consult。Part B：保留每条消息的 media（per-message），渲染时随该轮就位（旧记录消息无 media → 末尾兜底显图，见下）。
       var rawChat = Array.isArray(item.chat) ? item.chat : [];
-      // FS-10：保留 human 标记（运营人工答复）+ 署名，供渲染成「运营人工答复」样式（区别 AI 气泡）
-      var msgs = rawChat.map(function (m) { return { role: (m.role === 'assistant' ? 'assistant' : 'user'), content: m.text || '', media: (Array.isArray(m.media) ? m.media : null), kbRefs: normalizeKbRefs(m.kbRefs), human: !!(m && m.human), by: (m && m.by) || '' }; }).filter(function (m) { return m.content || (m.media && m.media.length); });
-      chat.messages = msgs.map(function (m) { var x = { role: m.role, content: m.content }; if (m.kbRefs.length) x.kbRefs = m.kbRefs; if (m.role === 'assistant' && m.human) { x.human = true; if (m.by) x.by = m.by; } if (Array.isArray(m.media) && m.media.length) x.media = m.media; return x; });   // 引用仅供本地/历史重放；FS-10：保留 human/by（运营人工答复标记）+ media，供刷新恢复重放成人工气泡；sendConsult 请求会收敛为 role/content，不能由客户端冒充本轮引用
+      // FS-10：保留 human 标记（运营人工答复 / 现场人工消息 / 系统提示）+ 署名，供渲染成对应样式（区别 AI 气泡）
+      var msgs = rawChat.map(function (m) { return { role: (m.role === 'assistant' ? 'assistant' : 'user'), content: m.text || '', media: (Array.isArray(m.media) ? m.media : null), kbRefs: normalizeKbRefs(m.kbRefs), human: !!(m && m.human), by: (m && m.by) || '', system: !!(m && m.system) }; }).filter(function (m) { return m.content || (m.media && m.media.length); });
+      chat.messages = msgs.map(function (m) { var x = { role: m.role, content: m.content }; if (m.kbRefs.length) x.kbRefs = m.kbRefs; if (m.human) { x.human = true; if (m.by) x.by = m.by; if (m.system) x.system = true; } if (Array.isArray(m.media) && m.media.length) x.media = m.media; return x; });   // 引用仅供本地/历史重放；FS-10：保留 human/by/system（人工消息标记，双方向 + 系统提示）+ media，供刷新恢复重放成对应气泡；sendConsult 请求会收敛为 role/content，不能由客户端冒充本轮引用
+      chat.humanActive = !!item.humanActive;   // FS-10 增强：人工服务态随记录恢复——true → 续问走 human-message（不调 AI）
       chat.convId = item.convId || item.id || '';        // consult 的 convId = 记录 id
       chat.reopenProject = item.project || it.project;    // 续问归属锁定
       chat.reopenSubsystem = item.subsystem || '';        // 续问保留原子系统（append 时 subsystem 不被清空 + 续聊不触发咨询必选拦截）
@@ -2748,9 +2756,11 @@ button.f-ov-card { width: 100%; appearance: none; }
       msgs.forEach(function (m) {
         var urls = (m.media && m.media.length) ? mediaUrls(proj0, m.media) : [];
         if (urls.length) anyMsgMedia = true;
+        if (m.role === 'assistant' && m.human && m.system) { appendSystemNotice(m.content); return; }   // FS-10：系统提示（人工服务结束等）→ 居中系统条
         if (m.role === 'assistant' && m.human) { appendHumanReplyBubble(m.content, m.by, urls); return; }   // FS-10：运营人工答复 → 专属样式（非普通 AI 气泡）
+        // FS-10 增强：现场人工消息（role:user + human）= 实施自己在人工模式下发的消息 → 用实施侧「me」气泡（与普通提问同侧、同款）
         var bub = appendBubble(m.role === 'user' ? 'me' : 'ai', m.content, false, urls);   // urls 非空 → 气泡内附该轮截图缩略图
-        if (m.role === 'assistant' && m.kbRefs.length && !isNonSubstantiveReply(m.content)) renderKbCite(bub, m.kbRefs);   // 没覆盖/无相关的答复：不显「已参考经验」（都没符合的经验，展示误导）
+        if (m.role === 'assistant' && !m.human && m.kbRefs.length && !isNonSubstantiveReply(m.content)) renderKbCite(bub, m.kbRefs);   // 没覆盖/无相关的答复：不显「已参考经验」（都没符合的经验，展示误导）
       });
       if (!anyMsgMedia) appendMediaBubble(proj0, item.media);   // 旧记录兜底：消息级无 media（老 consult 只有记录级 e.media）→ 仍把图贴末尾，别让老记录图丢失
       markLeftActive('consult', chat.convId);                       // Bug B：左侧对应条标为选中
@@ -3359,6 +3369,7 @@ button.f-ov-card { width: 100%; appearance: none; }
     // AC-36：reopen 一条**未建单**的会话记录（intake-conv）→ 锁定其归档上下文，续聊仍走 intake-chat（同 sessionId → 同一条会话记录、AI 够了再建单落该 sessionId），不受当前视图切换影响。
     reopenConvProject: '', reopenConvSite: '', reopenConvSubsystem: '', reopenConvVersion: '',
     deep: false,             // 「深入思考」开关（默认关=基于 spec+经验库；开=sendConsult 带 deep:true，后端检索源码更深入分析）；仅 consult 生效
+    humanActive: false,      // FS-10 增强（持续人工对话）：当前打开的咨询是否处于「人工服务中」——true 时 sendChat 走 /api/consult-human-message（不调 AI），运营点「结束人工服务」→ 轮询翻 false → 恢复 AI 答疑（/api/consult）。随 reopenConsult/详情/轮询同步；随草稿 save/restore
     // AC-32（2026-08-06 改）：紧急程度改 per-ticket——不再挂 chat.priority（全局一个值），移到每张已建单卡片各设各的（见 appendArchiveCard / setTicketPriority）
     // FS-04 · 每个"系统上下文"各记一段会话（会话内内存态；切系统时保存旧段 + 恢复新段，未聊过→空会话）
     bySystem: {},           // 系统上下文键 systemKey() → 会话快照（切系统时存/取；纯内存态，不进任何端存储，刷新丢失可接受——已发咨询可点记录 reopen）
@@ -3551,6 +3562,15 @@ button.f-ov-card { width: 100%; appearance: none; }
     msg.appendChild(av); msg.appendChild(bub);
     box.appendChild(msg); scrollChatBottom();
     return bub;
+  }
+  // FS-10 增强：居中「系统提示」条（人工服务结束等）——非气泡，一行居中灰条，区别于对话消息。
+  function appendSystemNotice(text) {
+    clearPlaceholder();
+    var box = chatBox(); if (!box) return null;
+    var row = document.createElement('div'); row.className = 'f-sys-notice';
+    row.innerHTML = '<span><i class="ti ti-info-circle"></i> ' + escapeHtml(String(text || '')) + '</span>';
+    box.appendChild(row); scrollChatBottom();
+    return row;
   }
   // 构造气泡内的截图缩略图区；imgs = URL 数组（data URL 或 /api/intake-media URL 均可）。
   function bubbleImgs(imgs) {
@@ -3912,9 +3932,11 @@ button.f-ov-card { width: 100%; appearance: none; }
     appendCards(0);
     messages.forEach(function (m, index) {
       var urls = (m && Array.isArray(m.media) && m.media.length) ? mediaUrls(projectFallback || '', m.media) : [];   // FS-10：随轮 media（人工回复/历史轮附图）在气泡内就位
+      if (m.role === 'assistant' && m.human && m.system) { appendSystemNotice(m.content); appendCards(index + 1); return; }   // FS-10 增强：系统提示（人工服务结束）→ 系统条，刷新恢复不退化
       if (m.role === 'assistant' && m.human) { appendHumanReplyBubble(m.content, m.by || '', urls); appendCards(index + 1); return; }   // FS-10：运营人工答复 → 专属「运营人工答复」样式，刷新恢复不退化成普通 AI 气泡
+      // FS-10 增强：现场人工消息（role:user + human）= 实施侧「me」气泡（与普通问句同侧同款）；此处按 role 已归 me，无需特判
       var bub = appendBubble(m.role === 'user' ? 'me' : 'ai', m.content, false, urls);
-      if (m.role === 'assistant' && normalizeKbRefs(m.kbRefs).length && !isNonSubstantiveReply(m.content)) renderKbCite(bub, m.kbRefs);   // 没覆盖/无相关：不显「已参考经验」
+      if (m.role === 'assistant' && !m.human && normalizeKbRefs(m.kbRefs).length && !isNonSubstantiveReply(m.content)) renderKbCite(bub, m.kbRefs);   // 没覆盖/无相关：不显「已参考经验」
       appendCards(index + 1);
     });
   }
@@ -3976,6 +3998,19 @@ button.f-ov-card { width: 100%; appearance: none; }
       appendBubble('ai', '你还没有被分配负责医院，暂时无法提交。请联系运营端为你分配医院后再试。');
       return;
     }
+    // FS-10 增强（持续人工对话）：该咨询处于人工服务中（humanActive）→ 不调 AI、直接把消息发给运营（/api/consult-human-message）。
+    //   优先于「咨询必选子系统」守卫（人工模式已在某条既有 convId 上，无需再选子系统）。
+    if (chat.submitKind === 'consult' && chat.humanActive && chat.convId) {
+      var himgs = pendingImages.slice();
+      clearPendingImages();
+      input.value = '';
+      appendBubble('me', text || '（截图）', false, himgs);   // 实施侧气泡（与普通问句同款）
+      chat.messages.push({ role: 'user', human: true, content: text || '（截图）' });   // FS-10：现场人工消息标记 human:true → 刷新恢复重放为 me 气泡、不当成 AI 前置问句
+      chat.lastQ = text;
+      saveDraft();
+      sendHumanMessage(text, himgs);
+      return;
+    }
     // 咨询必选子系统（2026-07-23 裁决）：新咨询若归档上下文无子系统（全部系统/全部子项目）→ 拦住并引导选择；不清空输入以便选完再发。
     //   仅 consult 生效；reopen 续聊带 reopenSubsystem 不被拦；提需求/报BUG（intake）走 AI 自动判子系统、不强制手选。
     if (chat.submitKind === 'consult' && guardConsultSubsystem()) return;
@@ -3992,6 +4027,30 @@ button.f-ov-card { width: 100%; appearance: none; }
     // FS-04 v2（2026-08-07）治本：续聊已建单会话也走 intake-chat（plan 流）——AI 出计划、用户在确认卡上决定「补充旧单 or 新建」，
     //   不再无脑 append 到旧单（旧 sendIntakeReply 会把新提的需求闷头追加进那张旧单，见踩坑背景）。builtTickets 随请求上送供 AI 判 append/new。
     else sendIntake(imgs);
+  }
+  // FS-10 增强：人工模式下发消息 —— 调 /api/consult-human-message（不调 AI）。消息已上屏 + push chat.messages（在 sendChat 里），此处只负责落库 + 处理返回。
+  //   服务端会给该轮图片落盘 media；成功后无需再动对话流（已上屏）。失败 → 显一条 ai 提示 + 允许重发（不清已上屏消息）。
+  function sendHumanMessage(text, imgs) {
+    var archive = currentArchive();
+    var proj = chat.reopenProject || archive.project;
+    api('/api/consult-human-message', { method: 'POST', body: JSON.stringify({ project: proj, convId: chat.convId, text: text || '', images: (Array.isArray(imgs) && imgs.length) ? imgs : undefined }) })
+      .then(function (r) {
+        var b = r.body || {};
+        if (b.ok) {
+          // 服务端已把本轮图片落盘并回相对路径 → 把最后一条 user 消息的 media 补成落盘路径（刷新恢复能取图），并 saveDraft
+          if (Array.isArray(b.media) && b.media.length) {
+            for (var i = chat.messages.length - 1; i >= 0; i--) { if (chat.messages[i].role === 'user') { chat.messages[i].media = b.media.slice(); break; } }
+          }
+          saveDraft();
+          try { refreshLeftList(); } catch (e) {}
+          return;
+        }
+        // humanActive:false（运营已结束人工服务）→ 提示恢复 AI 答疑；其余错误提示重试
+        if (b.humanActive === false) { chat.humanActive = false; syncHumanModeBar(); appendSystemNotice('人工服务已结束，你的消息未发送。恢复 AI 答疑后可重新提问。'); }
+        else appendBubble('ai', (b.error || '消息发送失败，请稍后重试。'));
+        saveDraft();
+      })
+      .catch(function () { appendBubble('ai', '消息发送失败（网络问题），请稍后重试。'); });
   }
 
   // 发送态切换：发送中把「发送」按钮切成「停止」态（不置灰死，仍可点=中断本轮 AI 生成）；结束切回「发送」。
@@ -4315,15 +4374,26 @@ button.f-ov-card { width: 100%; appearance: none; }
     btn.innerHTML = '<i class="ti ti-headset"></i> 转人工';
     btn.addEventListener('click', function () {
       btn.disabled = true;
-      api('/api/consult-escalate', { method: 'POST', body: JSON.stringify({ project: archive.project, convId: convId }) })
+      api('/api/consult-escalate', { method: 'POST', body: JSON.stringify({ project: chat.reopenProject || archive.project, convId: convId }) })
         .then(function (r) {
-          if (r.body && r.body.ok) { btn.innerHTML = '<i class="ti ti-check"></i> 已转人工 · 待运营回复'; showToast('已转人工，运营会尽快回复', 'success'); }
+          if (r.body && r.body.ok) {
+            btn.innerHTML = '<i class="ti ti-check"></i> 已转人工 · 可继续和运营对话'; showToast('已转人工，可直接和运营同事对话', 'success');
+            // FS-10 增强：转人工成功 → 进入人工服务模式（后续 sendChat 走 human-message，不调 AI），显提示条，落草稿
+            if (chat.convId === convId) { chat.humanActive = true; syncHumanModeBar(); appendSystemNotice('已转人工，你可以直接在下方继续和运营同事对话（含截图），运营处理完会点「结束人工服务」恢复 AI 答疑。'); saveDraft(); }
+          }
           else { btn.disabled = false; btn.innerHTML = '<i class="ti ti-headset"></i> 转人工失败，重试'; }
         }).catch(function () { btn.disabled = false; btn.innerHTML = '<i class="ti ti-headset"></i> 转人工失败，重试'; });
     });
     card.appendChild(btn);
     msg.appendChild(av); msg.appendChild(card);
     box.appendChild(msg); scrollChatBottom();
+  }
+  // FS-10 增强：按 chat.humanActive 显/隐「人工服务中」提示条 + 更新输入框 placeholder（人工模式提示消息发给运营）。
+  function syncHumanModeBar() {
+    var bar = $('fHumanModeBar');
+    if (bar) bar.style.display = (chat.submitKind === 'consult' && chat.humanActive && chat.convId) ? 'flex' : 'none';
+    var input = $('fChatInput');
+    if (input && chat.submitKind === 'consult' && chat.humanActive && chat.convId) input.placeholder = '给运营同事发消息…回车发送（可贴/选截图）';
   }
 
   // CT-3：转工单确认弹窗（app 风格，参考 fPrompt 那套遮罩，多字段版：类型切换 + 标题输入 + 说明）。
@@ -4470,6 +4540,7 @@ button.f-ov-card { width: 100%; appearance: none; }
       ? '问问这个系统怎么用、遇到的报错原因…回车发送'
       : '说说想要的功能改进，或遇到的问题…回车发送';
     syncDeep();   // 按 submitKind 显隐「深入思考」开关（仅 consult 可用）+ 刷新按钮态
+    syncHumanModeBar();   // FS-10 增强：按人工服务态显/隐提示条（切到 intake 时隐藏）
     saveDraft();
   }
 
@@ -4522,7 +4593,7 @@ button.f-ov-card { width: 100%; appearance: none; }
     // 「停止」：切新对话/切系统时若上一轮还在发送中 → 先 abort 旧请求（signal 传进三条路径），避免旧响应/流式串进新对话
     if (chat.sending && chat.abortCtrl) { try { chat.abortCtrl.abort(); } catch (e) {} }
     chat.abortCtrl = null;
-    chat.messages = []; chat.savedId = ''; chat.builtTickets = []; chat.lastPlanCard = null; chat.filedUpTo = 0; chat.convId = ''; chat.sessionId = newSessionId(); chat.reopenSessionId = ''; chat.analyzed = false; chat.sending = false; chat.lastQ = ''; chat.lastA = ''; chat.reopenProject = ''; chat.reopenSubsystem = ''; chat.reopenIntakeProject = ''; chat.reopenConvProject = ''; chat.reopenConvSite = ''; chat.reopenConvSubsystem = ''; chat.reopenConvVersion = ''; chat.deep = false;   // 新对话重置深入思考为关；FS-04 v2 清 builtTickets/lastPlanCard（新会话不带旧已建单清单、无待确认计划卡）（合理默认：新会话不默认耗时的源码检索）；清 reopenIntakeProject/reopenConv* + filedUpTo=0（水位线归零，新会话不带旧已建单背景）；新 sessionId（这次聊天建的单归新的一条对话记录）。AC-32：紧急程度已移到 per-ticket 卡片，无全局态可重置
+    chat.messages = []; chat.savedId = ''; chat.builtTickets = []; chat.lastPlanCard = null; chat.filedUpTo = 0; chat.convId = ''; chat.sessionId = newSessionId(); chat.reopenSessionId = ''; chat.analyzed = false; chat.sending = false; chat.lastQ = ''; chat.lastA = ''; chat.reopenProject = ''; chat.reopenSubsystem = ''; chat.reopenIntakeProject = ''; chat.reopenConvProject = ''; chat.reopenConvSite = ''; chat.reopenConvSubsystem = ''; chat.reopenConvVersion = ''; chat.deep = false; chat.humanActive = false;   // 新对话重置深入思考为关 + 人工服务态（新会话不带旧人工模式）；FS-04 v2 清 builtTickets/lastPlanCard（新会话不带旧已建单清单、无待确认计划卡）（合理默认：新会话不默认耗时的源码检索）；清 reopenIntakeProject/reopenConv* + filedUpTo=0（水位线归零，新会话不带旧已建单背景）；新 sessionId（这次聊天建的单归新的一条对话记录）。AC-32：紧急程度已移到 per-ticket 卡片，无全局态可重置
     var box = chatBox();
     if (box) {
       box.innerHTML = '';
@@ -4538,6 +4609,7 @@ button.f-ov-card { width: 100%; appearance: none; }
     markLeftActive('', '');   // Bug B：开新对话 → 清左侧选中态（当前无打开的记录）
     setSending(false);
     syncDeep();       // 深入思考已重置为关 → 刷新开关按钮态（去高亮）
+    syncHumanModeBar();   // FS-10 增强：新对话 → 隐藏人工服务提示条
     updateScope();
     // FS-04：清当前系统上下文桶那份会话（否则切走再切回会恢复出已被清掉的旧对话）
     if (chat.lastSystemKey != null && chat.bySystem) delete chat.bySystem[chat.lastSystemKey];
@@ -4562,7 +4634,7 @@ button.f-ov-card { width: 100%; appearance: none; }
       reopenProject: chat.reopenProject || '', reopenSubsystem: chat.reopenSubsystem || '',
       reopenIntakeProject: chat.reopenIntakeProject || '', reopenConvProject: chat.reopenConvProject || '',
       reopenConvSite: chat.reopenConvSite || '', reopenConvSubsystem: chat.reopenConvSubsystem || '', reopenConvVersion: chat.reopenConvVersion || '',
-      deep: !!chat.deep, input: input ? input.value : '',
+      deep: !!chat.deep, humanActive: !!chat.humanActive, input: input ? input.value : '',
       user: (state.me && (state.me.username || state.me.name)) || '',
       nav: { mode: state.mode, curSite: state.curSite, curSub: state.curSub, curSys: state.curSys, groupBy: state.groupBy, ctxVer: state.ctxVer },
       leftActive: { kind: state.leftActiveKind || '', id: state.leftActiveId || '' }
@@ -4587,6 +4659,7 @@ button.f-ov-card { width: 100%; appearance: none; }
     try {
       var d = draft || readDraft(); if (!d) return false;
       chat.deep = !!d.deep;
+      chat.humanActive = !!d.humanActive;   // FS-10 增强：恢复人工服务态（刷新后仍走 human-message；轮询会用最新 humanActive 二次校准）
       chat.submitKind = d.kind === 'consult' ? 'consult' : 'intake';
       chat.savedId = d.savedId || ''; chat.builtTickets = Array.isArray(d.builtTickets) ? d.builtTickets.slice() : []; chat.lastPlanCard = null; chat.convId = d.convId || ''; chat.sessionId = d.sessionId || newSessionId(); chat.reopenSessionId = d.reopenSessionId || ''; chat.reopenProject = d.reopenProject || ''; chat.reopenSubsystem = d.reopenSubsystem || ''; chat.reopenIntakeProject = d.reopenIntakeProject || ''; chat.reopenConvProject = d.reopenConvProject || ''; chat.reopenConvSite = d.reopenConvSite || ''; chat.reopenConvSubsystem = d.reopenConvSubsystem || ''; chat.reopenConvVersion = d.reopenConvVersion || '';   // FS-04：恢复会话 id（无则新的，刷新后续聊建单仍归一条对话记录）+ 未建单会话记录续聊上下文（AC-36）
       chat.messages = Array.isArray(d.messages) ? d.messages.slice() : [];
@@ -4809,6 +4882,7 @@ button.f-ov-card { width: 100%; appearance: none; }
     _hrTimer = setInterval(function () { if (document.visibilityState === 'visible') pollHumanReplies(false); }, HR_POLL_MS);
   }
   // 判「新人工回复」：与 last-seen humanReplyAt 比对；首帧（baseline）只建基线不提醒（避免把历史回复当新的）。
+  //   FS-10 增强：next 里连带记 humanActive（用于「运营结束人工服务」的检测，见 pollHumanReplies）。
   function detectNewHumanReplies(items, lastMap, baseline) {
     var next = {}, fresh = [];
     (items || []).forEach(function (it) {
@@ -4826,48 +4900,66 @@ button.f-ov-card { width: 100%; appearance: none; }
   function pollHumanReplies(baseline) {
     if (_hrInFlight) return;               // 防并发
     _hrInFlight = true;
+    var isBaseline = baseline || _hrLastReply === null;
     api('/api/field/conversations', { method: 'GET' }).then(function (r) {
       var items = (r.body && Array.isArray(r.body.items)) ? r.body.items : [];
-      var res = detectNewHumanReplies(items, _hrLastReply, baseline || _hrLastReply === null);
+      var res = detectNewHumanReplies(items, _hrLastReply, isBaseline);
       _hrLastReply = res.next;
-      if (res.fresh.length) onNewHumanReplies(res.fresh);
+      if (res.fresh.length) onNewHumanReplies(res.fresh, isBaseline);
+      // FS-10 增强（持续双向人工对话）：当前正开着的咨询 → 无条件增量同步（拉详情把本地未渲染的双方 human/system 消息补上），
+      //   覆盖「运营回复」「运营发新截图」「运营结束人工服务（system 提示 + humanActive→false）」——不依赖 humanReplyAt 变化（结束时它不变）。
+      if (chat.convId && chat.submitKind === 'consult') {
+        var openIt = items.find(function (x) { return x && x.kind === 'consult' && x.id === chat.convId; });
+        if (openIt) syncOpenConsultMessages(openIt, isBaseline);
+      }
       // 对话记录抽屉开着 → 静默翻新列表（徽标：待回复→已回复），不影响右侧对话区/输入框
       if ($('fConvDrawer') && $('fConvDrawer').classList.contains('open')) refreshConvBadges(items);
     }).catch(function () { /* 失败静默，下轮重试 */ }).then(function () { _hrInFlight = false; });
     // 顺带刷新待办计数（原来只加载时读一次；此处轻量更新，不打断当前操作）
     try { loadTodo(); } catch (e) {}
   }
-  // 发现新人工回复：① 提醒 ② 若正开在右侧对话区（chat.convId 匹配）→ 实时 append 人工回复气泡（不重渲染整流、不动输入框）③ 抽屉徽标由 refreshConvBadges 翻新。
-  function onNewHumanReplies(freshItems) {
+  // 发现新人工回复：① 提醒（首帧 baseline 不提醒）② 若正开在右侧对话区（chat.convId 匹配）→ 由 syncOpenConsultMessages 增量补气泡（此处不重复 append）③ 抽屉徽标由 refreshConvBadges 翻新。
+  function onNewHumanReplies(freshItems, isBaseline) {
+    if (isBaseline) return;   // 首帧只建基线不提醒
     freshItems.forEach(function (it) {
       var titleFrag = (it.title || '').slice(0, 20);
       showToast('运营已回复你的咨询' + (titleFrag ? '「' + titleFrag + '」' : ''), 'success');
-      if (chat.convId && chat.convId === it.id) appendNewHumanReply(it);   // 正开着这条 → 实时补气泡
     });
   }
-  // 该咨询正开在右侧 → 拉一次详情，把「本地还没渲染过的」human 消息 append 进对话区（复用 appendHumanReplyBubble）。
-  //   只追加新增的 human 气泡，不清空/不重建对话流 → 不打断用户正在看的内容与输入框。
-  function appendNewHumanReply(it) {
+  // FS-10 增强：该咨询正开在右侧 → 拉一次详情，把「本地还没渲染过的」双方 human/system 消息增量 append（运营人工答复 / 运营截图 / 系统结束提示）。
+  //   同时检测「运营已结束人工服务」（humanActive→false）→ 关人工模式、隐提示条、恢复 AI 答疑。
+  //   铁律：只增量补新消息 + 更新模式态，不清空/不重建对话流、不动输入框（不打断用户正在看/输入）。
+  //   防重复：以「chat.messages 里已持久化的 human/system 条数」为增量基线——现场自己发的人工消息发送时已 push（sendChat），运营的在其后；双方消息严格按服务端真实时序追加，故本地 human/system 计数 = 已显条数。
+  function syncOpenConsultMessages(it, isBaseline) {
     api('/api/intake-detail?project=' + encodeURIComponent(it.project) + '&id=' + encodeURIComponent(it.id), { method: 'GET' }).then(function (r) {
-      if (!chat.convId || chat.convId !== it.id) return;                    // 拉取期间用户可能已切走，二次确认
+      if (!chat.convId || chat.convId !== it.id || chat.submitKind !== 'consult') return;   // 拉取期间用户可能已切走，二次确认
       var item = (r.body && r.body.item) || null; if (!item) return;
       var box = chatBox(); if (!box) return;
-      var humans = (Array.isArray(item.chat) ? item.chat : []).filter(function (m) { return m && m.role === 'assistant' && m.human && (m.text || (Array.isArray(m.media) && m.media.length)); });
-      // 防重复：以「chat.messages 里已持久化的 human 条数」为增量基线（比 DOM 计数更可靠——刷新恢复后 messages 与 DOM 一致；即便本地已 push 未刷新，也不会重复）。
-      var alreadyPersisted = (Array.isArray(chat.messages) ? chat.messages : []).filter(function (m) { return m && m.role === 'assistant' && m.human; }).length;
+      // 服务端 chat 里所有「人工/系统」消息（双方向：运营 assistant human、现场 user human、系统 system）——过滤掉纯空消息
+      var serverHS = (Array.isArray(item.chat) ? item.chat : []).filter(function (m) { return m && (m.human || m.system) && (m.text || (Array.isArray(m.media) && m.media.length)); });
+      var localHS = (Array.isArray(chat.messages) ? chat.messages : []).filter(function (m) { return m && (m.human || m.system); }).length;
       var pushed = false;
-      for (var i = alreadyPersisted; i < humans.length; i++) {              // 只补新增的（防重复 append + 防重复 push）
-        var m = humans[i];
+      for (var i = localHS; i < serverHS.length; i++) {   // 只补本地还没有的（防重复 append + 防重复 push）
+        var m = serverHS[i];
         var urls = (Array.isArray(m.media) && m.media.length) ? mediaUrls(item.project || it.project, m.media) : [];
+        if (m.system) { appendSystemNotice(m.text || ''); chat.messages.push({ role: 'assistant', human: true, system: true, content: m.text || '', by: m.by || '' }); pushed = true; continue; }
+        if (m.role === 'user') {   // 现场人工消息（理论上本地已 push；极端漏时兜底补 me 气泡）
+          appendBubble('me', m.text || '', false, urls);
+          var um = { role: 'user', human: true, content: m.text || '' }; if (Array.isArray(m.media) && m.media.length) um.media = m.media; chat.messages.push(um); pushed = true; continue;
+        }
+        // 运营人工答复
         appendHumanReplyBubble(m.text || '', m.by || '', urls);
-        // FS-10 修：把人工回复也持久化进 chat.messages（形状同 reopenConsult：{role:'assistant',human:true,by,content,media}），使刷新后 restoreDraft 能恢复它、不丢失
         var msg = { role: 'assistant', human: true, content: m.text || '' };
         if (m.by) msg.by = m.by;
         if (Array.isArray(m.media) && m.media.length) msg.media = m.media;
-        chat.messages.push(msg);
-        pushed = true;
+        chat.messages.push(msg); pushed = true;
       }
-      if (pushed) saveDraft();   // 落草稿 → 刷新恢复不丢人工回复
+      // 模式态校准：运营结束人工服务（humanActive:false）→ 关模式、隐提示条（system 提示已随上面 append）。首帧（baseline）也校准，避免刷新后误留人工模式。
+      var wasActive = chat.humanActive;
+      chat.humanActive = !!item.humanActive;
+      if (wasActive && !chat.humanActive && !isBaseline) showToast('人工服务已结束，已恢复 AI 答疑', 'info');
+      syncHumanModeBar();
+      if (pushed || wasActive !== chat.humanActive) saveDraft();   // 落草稿 → 刷新恢复不丢双向人工消息/模式态
     }).catch(function () {});
   }
   // 对话记录抽屉开着时：静默翻新每条 consult 的转人工徽标（待运营回复 → 运营已回复），不重建整列表、不打断。

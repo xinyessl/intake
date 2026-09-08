@@ -1734,6 +1734,23 @@ function fmtSyncAt(ts) { if (!ts) return ''; const d = new Date(ts); return `${d
 // ===== 进件（需求/BUG）：写收件自己的 intake-store，AI 沟通澄清/给处理意见 =====
 function intakeDir(proj) { return path.join(INTAKE_STORE, proj.id); }   // 落本地 intake-store/<projectId>/，不碰产品代码仓
 function intakeGenId(proj, type) { const d = new Date(); const dp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`; const pre = type === 'bug' ? 'BUG' : type === 'consult' ? 'ZX' : 'XQ'; let n = 1; try { n = fs.readdirSync(intakeDir(proj)).filter(f => f.startsWith(`${pre}-${dp}`) && f.endsWith('.md')).length + 1; } catch {} return `${pre}-${dp}-${String(n).padStart(2, '0')}`; }
+// FS-10 增强（持续人工对话·双方截图）：把一批 data URL 截图落盘到某咨询的 media 目录（复用 /api/consult 现有落盘范式：media/<convId>/img-N.png，序号从已有 media 数累加、累计封顶 6）。
+//   同时把新增相对路径累加进 e.media（记录级，detail.html 兼容），并返回本轮新增路径（挂到本轮消息 m.media，reopen 随轮就位）。
+//   纯副作用工具：调用方负责把 roundMedia 挂到具体 chat 消息 + saveIntake 落库。零依赖、失败静默（不炸主流程）。
+function persistConsultImages(proj, e, images) {
+  const imgs = (Array.isArray(images) ? images : []).slice(0, 6);
+  const prevMedia = Array.isArray(e.media) ? e.media.slice() : [];
+  const roundMedia = [];
+  try {
+    const room = Math.max(0, 6 - prevMedia.length); const add = imgs.slice(0, room);   // 累计不超过 6 张（对齐 /api/consult 上限）
+    if (add.length) {
+      const mdir = path.join(intakeDir(proj), 'media', e.id); fs.mkdirSync(mdir, { recursive: true });
+      add.forEach((du, i) => { const mm = /^data:image\/\w+;base64,(.+)$/.exec(du || ''); if (mm) { const n = prevMedia.length + i + 1; fs.writeFileSync(path.join(mdir, `img-${n}.png`), Buffer.from(mm[1], 'base64')); roundMedia.push(`media/${e.id}/img-${n}.png`); } });
+    }
+  } catch {}
+  if (roundMedia.length) e.media = prevMedia.concat(roundMedia);   // 记录级 media 累加（不覆盖历史轮截图）
+  return roundMedia;
+}
 function yamlEsc(s) { s = String(s == null ? '' : s).replace(/\n/g, ' ').trim(); return /[:#"']/.test(s) ? JSON.stringify(s) : s; }
 function renderIntakeMd(e) {   // 结构化 frontmatter + 可读正文 + 沟通记录
   const fm = ['---', `id: ${e.id}`, `type: ${e.type}`, `project: ${e.project}`, `version: ${yamlEsc(e.version)}`, `site: ${yamlEsc(e.site)}`, `subsystem: ${yamlEsc(e.subsystem)}`, `module: ${yamlEsc(e.module)}`, `title: ${yamlEsc(e.title)}`, `priority: ${yamlEsc(e.priority)}`];
@@ -7432,12 +7449,12 @@ function authGate(pathname, user, link) {
   if (!user) return 'login';
   if (isAdmin(user)) return 'allow';                                    // 管理员：全放行
   // 现场侧（产品经理 / 实施工程师）：只允许 提交面 + 工单查看 + 验证
-  const FIELD_OK = new Set(['/', '/submit.html', '/detail.html', '/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/intake-commit-plan', '/api/consult', '/api/consult-to-intake', '/api/consult-escalate', '/api/intake-delete', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-media', '/api/intake-transition', '/api/field/submissions', '/api/field/conversations', '/api/field/overview', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/intake-set-priority', '/api/field/update-plan', '/api/field/update-toggle', '/api/field/update-sql-merged']);   // FS-09：/api/field/overview = 「全览」个人全局图（医院卡 + 产品卡）数据源，端点内按 user.sites+projects 收敛。   // FS-04：/api/field/conversations = 右上「对话记录」数据源；/api/intake-commit-plan = 建单前确认清单确定性建单（v2 2026-08-07）（consult 每条 + intake 按 sessionId 分组），端点内按 user.sites 收敛   // FS-05：现场端新端点（按批次视图/下载/改版本/维保回写/逐单验证）+ 累积更新计划（读代码 docs/deploy.json/累积计划/勾选/合并SQL），均端点内按 user.sites 二次收敛。2026-08-05 架构重构删 deploy-template/customer-deploy-task/batch-task/version-releases（跟随产品代码，废弃手工登记与部署模板）
+  const FIELD_OK = new Set(['/', '/submit.html', '/detail.html', '/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/intake-commit-plan', '/api/consult', '/api/consult-to-intake', '/api/consult-escalate', '/api/consult-human-message', '/api/intake-delete', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-media', '/api/intake-transition', '/api/field/submissions', '/api/field/conversations', '/api/field/overview', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/intake-set-priority', '/api/field/update-plan', '/api/field/update-toggle', '/api/field/update-sql-merged']);   // FS-09：/api/field/overview = 「全览」个人全局图（医院卡 + 产品卡）数据源，端点内按 user.sites+projects 收敛。   // FS-04：/api/field/conversations = 右上「对话记录」数据源；/api/intake-commit-plan = 建单前确认清单确定性建单（v2 2026-08-07）（consult 每条 + intake 按 sessionId 分组），端点内按 user.sites 收敛   // FS-05：现场端新端点（按批次视图/下载/改版本/维保回写/逐单验证）+ 累积更新计划（读代码 docs/deploy.json/累积计划/勾选/合并SQL），均端点内按 user.sites 二次收敛。2026-08-05 架构重构删 deploy-template/customer-deploy-task/batch-task/version-releases（跟随产品代码，废弃手工登记与部署模板）
   return FIELD_OK.has(pathname) ? 'allow' : 'forbidden';
 }
 // FS-08 §4①：field 域接口允许集 = LINK_OK ∪ FIELD_OK（供访客链接 + 现场账号），与 authGate 内 FIELD_OK 同源，避免漂移。
 //   注意：这里是 authGate 里那份 FIELD_OK 的镜像常量——两者若改一处务必同步（authGate 用于登录态白名单，本集用于 field 域名层外层闸）。
-const FS08_FIELD_API = new Set(['/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/intake-commit-plan', '/api/consult', '/api/consult-to-intake', '/api/consult-escalate', '/api/intake-delete', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-media', '/api/intake-transition', '/api/field/submissions', '/api/field/conversations', '/api/field/overview', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/intake-set-priority', '/api/field/update-plan', '/api/field/update-toggle', '/api/field/update-sql-merged', '/api/model-config']);   // FS-09：/api/field/overview 须与 FIELD_OK 同步（否则实施域 originGate deny→forbidden，见 fs-08 防漂移断言）。   // FS-04：/api/field/conversations + /api/intake-commit-plan 须与 FIELD_OK 同步（否则实施域 originGate deny→forbidden）（否则实施域 originGate deny→forbidden，见 fs-08 防漂移断言）   // FS-05 端点须与 FIELD_OK 同步，否则实施域(field)整个流被 originGate deny→forbidden（实测坑，见 fs-08 防漂移断言）；update-plan/update-toggle/update-sql-merged 为累积更新计划现场端。2026-08-05 架构重构删 deploy-template/customer-deploy-task/batch-task/version-releases（跟随产品代码）
+const FS08_FIELD_API = new Set(['/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/intake-commit-plan', '/api/consult', '/api/consult-to-intake', '/api/consult-escalate', '/api/consult-human-message', '/api/intake-delete', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-media', '/api/intake-transition', '/api/field/submissions', '/api/field/conversations', '/api/field/overview', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/intake-set-priority', '/api/field/update-plan', '/api/field/update-toggle', '/api/field/update-sql-merged', '/api/model-config']);   // FS-09：/api/field/overview 须与 FIELD_OK 同步（否则实施域 originGate deny→forbidden，见 fs-08 防漂移断言）。   // FS-04：/api/field/conversations + /api/intake-commit-plan 须与 FIELD_OK 同步（否则实施域 originGate deny→forbidden）（否则实施域 originGate deny→forbidden，见 fs-08 防漂移断言）   // FS-05 端点须与 FIELD_OK 同步，否则实施域(field)整个流被 originGate deny→forbidden（实测坑，见 fs-08 防漂移断言）；update-plan/update-toggle/update-sql-merged 为累积更新计划现场端。2026-08-05 架构重构删 deploy-template/customer-deploy-task/batch-task/version-releases（跟随产品代码）
 // field 域可加载的静态页（现场提交面 + 实施端外壳 + 现场可看的详情 + 登录页）。console/inbox/customers/kb/model-config/accounts/projects 等后台页不在其中 → 越域拒。
 const FS08_FIELD_PAGES = new Set(['/', '/field.html', '/submit.html', '/detail.html', '/login.html']);
 // 鉴权/健康端点：两域都放（field 域现场登录/查身份/登出/健康探测需要）。
@@ -9409,6 +9426,7 @@ const server = http.createServer((req, res) => {
       const chatArr = Array.isArray(e.chat) ? e.chat : [];
       let lastUser = ''; for (let i = chatArr.length - 1; i >= 0; i--) { if (chatArr[i] && chatArr[i].role === 'user') { lastUser = String(chatArr[i].text || '').trim(); break; } }
       e.escalated = true; e.escalatedAt = at; e.escalatedBy = by; e.escalateQuestion = (lastUser || String(e.title || '').trim()).slice(0, 500);
+      e.humanActive = true;   // FS-10 增强（持续人工对话）：进入人工服务模式——实施后续消息不调 AI、直接进 chat + 通知运营；仅运营「结束人工服务」置 false 才恢复 AI 答疑（consult-human-end）
       e.updatedAt = at;
       await saveIntake(proj, e);
       return send(res, 200, JSON.stringify({ ok: true }));
@@ -9428,12 +9446,19 @@ const server = http.createServer((req, res) => {
           if (!e || e.type !== 'consult' || e.deleted || !e.escalated) continue;
           const status = e.humanReplied ? '已回复' : '待回复';
           if (onlyStatus && onlyStatus !== status) continue;
+          // 最后一条消息摘要/时间/角色——供运营队列一眼看「进行中的人工会话」谁最后发了什么（现场追问 / 运营已回 / 系统结束）
+          const chatArr = Array.isArray(e.chat) ? e.chat : [];
+          const lastMsg = chatArr.length ? chatArr[chatArr.length - 1] : null;
+          const lastMsgText = lastMsg ? String(lastMsg.text || (Array.isArray(lastMsg.media) && lastMsg.media.length ? '［截图］' : '')).slice(0, 120) : '';
+          const lastMsgRole = lastMsg ? (lastMsg.system ? 'system' : (lastMsg.role === 'user' ? 'field' : (lastMsg.human ? 'admin' : 'ai'))) : '';
           items.push({
             project: pid, id: e.id, title: String(e.title || '').slice(0, 300),
             site: e.site || '', subsystem: e.subsystem || '', subsystemLabel: kbSubLabel(pid, e.subsystem),
             escalateQuestion: String(e.escalateQuestion || '').slice(0, 500),
             escalatedAt: e.escalatedAt || '', escalatedBy: e.escalatedBy || '',
             status, humanReplyAt: e.humanReplyAt || '', humanReplyBy: e.humanReplyBy || '',
+            humanActive: !!e.humanActive, humanEndedAt: e.humanEndedAt || '',   // FS-10 增强：进行中的人工会话（humanActive）供运营端标识 + 可点「结束人工服务」
+            lastMsgText, lastMsgRole, lastMsgAt: (lastMsg && lastMsg.at) || e.updatedAt || '', lastFieldMsgAt: e.lastFieldMsgAt || '',   // 最后消息摘要/角色/时间 + 现场最后发言时间（运营端轮询判现场新消息）
           });
         }
       }
@@ -9446,15 +9471,66 @@ const server = http.createServer((req, res) => {
       if (!b) return send(res, 400, JSON.stringify({ ok: false, error: err }));
       const proj = projById(b.project); if (!proj) return send(res, 400, JSON.stringify({ ok: false, error: '项目不存在' }));
       const convId = String(b.convId || '').trim(); if (!convId) return send(res, 400, JSON.stringify({ ok: false, error: '缺少咨询会话 id' }));
-      const reply = String(b.reply || '').trim(); if (!reply) return send(res, 400, JSON.stringify({ ok: false, error: '回复内容不能为空' }));
+      const reply = String(b.reply || '').trim();
+      const imgs = (Array.isArray(b.images) ? b.images : []).slice(0, 6);   // FS-10 增强：运营也能发截图（可选）；无图不带
+      if (!reply && !imgs.length) return send(res, 400, JSON.stringify({ ok: false, error: '回复内容不能为空' }));   // 允许「纯截图」回复
       const e = loadIntake(proj, convId);
       if (!e || e.type !== 'consult' || e.deleted) return send(res, 400, JSON.stringify({ ok: false, error: '咨询记录不存在' }));
       const at = nowStamp();
       const by = user ? (user.name || user.username) : '运营';
       e.chat = Array.isArray(e.chat) ? e.chat : [];
+      const roundMedia = persistConsultImages(proj, e, imgs);   // FS-10 增强：运营截图落盘（复用 consult media 范式），本轮路径挂到本条消息
       // human:true 标记的 assistant 消息 = 运营人工答复（实施端据此渲染成人工答复样式，区别于 AI 气泡）；ts 供排序/展示
-      e.chat.push({ role: 'assistant', human: true, by, byRole: 'admin', at, text: reply.slice(0, 4000), ts: Date.now() });
+      const msg = { role: 'assistant', human: true, by, byRole: 'admin', at, text: reply.slice(0, 4000), ts: Date.now() };
+      if (roundMedia.length) msg.media = roundMedia.slice();
+      e.chat.push(msg);
       e.humanReplied = true; e.humanReplyAt = at; e.humanReplyBy = by; e.updatedAt = at;
+      await saveIntake(proj, e);
+      return send(res, 200, JSON.stringify({ ok: true }));
+    });
+  }
+  if (url.pathname === '/api/consult-human-message' && req.method === 'POST') {   // FS-10 增强：实施在「人工服务中」的咨询里发消息——不调 AI、直接进 chat（role:user, human:true, byRole:field）+ 通知运营。∈ FIELD_OK∩FS08（实施可发）。
+    return readBody(req, async (b, err) => {
+      if (!b) return send(res, 400, JSON.stringify({ ok: false, error: err }));
+      const proj = projById(link ? link.project : b.project); if (!proj) return send(res, 400, JSON.stringify({ ok: false, error: '请选择项目' }));
+      const convId = String(b.convId || '').trim(); if (!convId) return send(res, 400, JSON.stringify({ ok: false, error: '缺少咨询会话 id' }));
+      const text = String(b.text || '').trim();
+      const imgs = (Array.isArray(b.images) ? b.images : []).slice(0, 6);   // 实施也能发截图（可选）
+      if (!text && !imgs.length) return send(res, 400, JSON.stringify({ ok: false, error: '消息内容不能为空' }));
+      const e = loadIntake(proj, convId);
+      if (!e || e.type !== 'consult' || e.deleted) return send(res, 400, JSON.stringify({ ok: false, error: '咨询记录不存在' }));
+      // 现场账号 sites 收敛：只能在自己 sites 内医院的咨询里发人工消息（admin 不限，对齐 escalate 范式）
+      if (user && !isAdmin(user) && (!Array.isArray(user.sites) || !user.sites.map(String).includes(String(e.site || '')))) return send(res, 403, JSON.stringify({ ok: false, error: '无权在该医院的咨询里发消息' }));
+      // 状态校验：必须处于人工服务模式（escalated && humanActive）——否则该走 AI 答疑 /api/consult（前端据 humanActive 分派，此处兜底拒）
+      if (!e.escalated || !e.humanActive) return send(res, 409, JSON.stringify({ ok: false, error: '该咨询不在人工服务中', humanActive: false }));
+      const at = nowStamp();
+      const by = user ? (user.name || user.username) : (link ? link.name : '现场');
+      e.chat = Array.isArray(e.chat) ? e.chat : [];
+      const roundMedia = persistConsultImages(proj, e, imgs);   // 实施截图落盘（复用 consult media 范式）
+      // 实施发的人工消息 = user + human:true + byRole:field（区别于 AI 前的普通 user 消息）；运营端据此在对话流里显为「现场人工消息」
+      const msg = { role: 'user', human: true, by, byRole: 'field', at, text: text.slice(0, 4000), ts: Date.now() };
+      if (roundMedia.length) msg.media = roundMedia.slice();
+      e.chat.push(msg);
+      // 实施发言 → 运营需要再看/再回：回到「待回复」态（humanReplyAt 不动，供实施端轮询判运营新回复；lastFieldMsgAt 供运营端轮询判现场新消息）
+      e.humanReplied = false; e.lastFieldMsgAt = at; e.updatedAt = at;
+      await saveIntake(proj, e);
+      return send(res, 200, JSON.stringify({ ok: true, media: roundMedia }));
+    });
+  }
+  if (url.pathname === '/api/consult-human-end' && req.method === 'POST') {   // FS-10 增强：仅运营「结束人工服务」——置 humanActive=false，之后实施再发言恢复 AI 答疑。admin 限定（未进白名单）。幂等。
+    return readBody(req, async (b, err) => {
+      if (!b) return send(res, 400, JSON.stringify({ ok: false, error: err }));
+      const proj = projById(b.project); if (!proj) return send(res, 400, JSON.stringify({ ok: false, error: '项目不存在' }));
+      const convId = String(b.convId || '').trim(); if (!convId) return send(res, 400, JSON.stringify({ ok: false, error: '缺少咨询会话 id' }));
+      const e = loadIntake(proj, convId);
+      if (!e || e.type !== 'consult' || e.deleted) return send(res, 400, JSON.stringify({ ok: false, error: '咨询记录不存在' }));
+      if (!e.humanActive) return send(res, 200, JSON.stringify({ ok: true, alreadyEnded: true }));   // 幂等：已结束再点不报错、不追加重复系统提示
+      const at = nowStamp();
+      const by = user ? (user.name || user.username) : '运营';
+      e.humanActive = false; e.humanEndedAt = at; e.humanEndedBy = by; e.updatedAt = at;
+      // append 一条系统提示（human:true + system:true，实施端渲染成一条系统提示气泡、区别于普通人工回复）——告知恢复 AI 答疑
+      e.chat = Array.isArray(e.chat) ? e.chat : [];
+      e.chat.push({ role: 'assistant', human: true, byRole: 'admin', by, at, system: true, text: '【人工服务已结束，后续将由 AI 助手继续为您答疑】', ts: Date.now() });
       await saveIntake(proj, e);
       return send(res, 200, JSON.stringify({ ok: true }));
     });
@@ -9467,17 +9543,18 @@ const server = http.createServer((req, res) => {
       const e = loadIntake(proj, convId);
       if (!e || e.type !== 'consult' || e.deleted) return send(res, 400, JSON.stringify({ ok: false, error: '咨询记录不存在' }));
       const chat = Array.isArray(e.chat) ? e.chat : [];
-      // 原问题 = 第一条 user；权威答案 = 最后一条 human:true 的 assistant（缺则最后一条 assistant）
+      // 原问题 = 第一条 user；权威答案 = 最后一条 human:true 的 assistant（缺则最后一条 assistant）。
+      //   FS-10 增强：跳过 system:true 系统提示消息（如「人工服务已结束」）——它不是权威答案，不能被当作 KB 的 a。
       const firstUser = chat.find(m => m && m.role === 'user');
       let humanAns = '', anyAssistant = '';
-      for (let i = chat.length - 1; i >= 0; i--) { const m = chat[i]; if (!m || m.role !== 'assistant') continue; if (!anyAssistant) anyAssistant = String(m.text || '').trim(); if (m.human && !humanAns) { humanAns = String(m.text || '').trim(); break; } }
+      for (let i = chat.length - 1; i >= 0; i--) { const m = chat[i]; if (!m || m.role !== 'assistant' || m.system) continue; if (!anyAssistant) anyAssistant = String(m.text || '').trim(); if (m.human && !humanAns) { humanAns = String(m.text || '').trim(); break; } }
       let q = String((firstUser && firstUser.text) || e.escalateQuestion || e.title || '').trim();
       let a = (humanAns || anyAssistant || '').trim();   // 兜底：无 human 回复时用最后一条 assistant
       const sub = String(e.subsystem || '').trim();
       // 用 AI 整理：把整段对话 + 人工回复喂给 kbFromConsult 模板（点明「运营人工答复=权威答案」，让 AI 以它为准生成 a）
       const cfg = readModelCfg();
       if (cfg.apiKey && chat.length) {
-        const dialog = chat.map(m => `${m.role === 'assistant' ? (m.human ? '运营人工答复(权威答案)' : 'AI') : (m.role === 'dev' ? '开发' : '现场')}：${String(m.text || '').trim()}`).join('\n');
+        const dialog = chat.filter(m => m && !m.system).map(m => `${m.role === 'assistant' ? (m.human ? '运营人工答复(权威答案)' : 'AI') : (m.role === 'dev' ? '开发' : '现场')}：${String(m.text || '').trim()}`).join('\n');   // FS-10 增强：跳过 system 系统提示（非对话内容）
         const baseSys = renderPromptTpl(DATA_DIR, 'kbFromConsult', {});
         const sys = baseSys + '\n\n注意：本段对话中「运营人工答复(权威答案)」是运营给出的权威结论，a 必须以它为准（AI 早前的答复若与之冲突，以人工答复为准）。';
         try {
@@ -9788,7 +9865,7 @@ const server = http.createServer((req, res) => {
     // consult：每条一项
     for (const e of raw) {
       if (e.type !== 'consult') continue;
-      items.push({ kind: 'consult', id: e.id, project: e.project, title: (e.title || firstUserText(e) || '系统咨询').slice(0, 60), site: e.site || '', subsystem: e.subsystem || '', updatedAt: e.updatedAt || e.submittedAt || '', escalated: !!e.escalated, humanReplied: !!e.humanReplied, humanReplyAt: e.humanReplyAt || '' });   // FS-10：透出转人工/已人工回复态 + humanReplyAt（供实施端轮询判「新人工回复」：humanReplyAt 变化=有新回复），只读附加字段，不改会话逻辑
+      items.push({ kind: 'consult', id: e.id, project: e.project, title: (e.title || firstUserText(e) || '系统咨询').slice(0, 60), site: e.site || '', subsystem: e.subsystem || '', updatedAt: e.updatedAt || e.submittedAt || '', escalated: !!e.escalated, humanReplied: !!e.humanReplied, humanReplyAt: e.humanReplyAt || '', humanActive: !!e.humanActive, humanEndedAt: e.humanEndedAt || '' });   // FS-10：透出转人工/已人工回复态 + humanReplyAt（供实施端轮询判「新人工回复」）+ humanActive（持续人工对话增强：实施端判当前是否人工模式；运营结束后翻 false → 实施端恢复 AI 答疑），只读附加字段，不改会话逻辑
     }
     // 先把 requirement/bug 工单按 (project, sessionId) 索引，供会话记录关联 + 兜底归组共用
     const ticketsBySession = new Map();   // 'proj|sid' → [{id,type,priority,subsystem,version,submittedAt,updatedAt,site,chat}]

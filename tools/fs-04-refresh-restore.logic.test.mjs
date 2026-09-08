@@ -239,9 +239,9 @@ test('新对话只清对话并保留导航，且会立即覆盖保存空对话',
   let saves = 0;
   const box = { innerHTML: 'old', appendChild() {} };
   const newConversation = new Function(
-    'state', 'chat', 'newSessionId', 'chatBox', 'document', '$', 'clearPendingImages', 'markLeftActive', 'setSending', 'syncDeep', 'updateScope', 'saveDraft',
+    'state', 'chat', 'newSessionId', 'chatBox', 'document', '$', 'clearPendingImages', 'markLeftActive', 'setSending', 'syncDeep', 'syncHumanModeBar', 'updateScope', 'saveDraft',
     extractFn(FIELD, 'newConversation') + '\nreturn newConversation;',
-  )(state, chat, () => 'new-session', () => box, { createElement: () => ({ className: '', id: '', innerHTML: '' }) }, () => ({ value: 'old' }), () => {}, () => {}, () => {}, () => {}, () => {}, () => { saves++; });
+  )(state, chat, () => 'new-session', () => box, { createElement: () => ({ className: '', id: '', innerHTML: '' }) }, () => ({ value: 'old' }), () => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => { saves++; });
   newConversation();
   assert.deepEqual(state, before, '导航上下文不被重置');
   assert.deepEqual(chat.messages, []); assert.equal(chat.sessionId, 'new-session'); assert.equal(chat.deep, false);

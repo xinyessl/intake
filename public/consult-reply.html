@@ -43,6 +43,24 @@
   .cr-kb-hint { font-size:12px; color:var(--color-text-tertiary); margin-top:6px; }
   .cr-kb-ok { color:#2E9E6B; font-weight:600; }
   .cr-empty { text-align:center; padding:44px 20px; color:var(--color-text-tertiary); font-size:13px; }
+  /* FS-10 增强：对话流可滚 + 双方截图 + 系统条 + 抽屉输入区 */
+  .cr-chat { max-height:52vh; overflow:auto; }
+  .cr-imgs { display:flex; flex-wrap:wrap; gap:6px; margin-top:7px; }
+  .cr-imgs img { width:84px; height:84px; object-fit:cover; border-radius:7px; border:1px solid var(--color-border); display:block; }
+  .cr-sys { display:flex; justify-content:center; margin:10px 0; }
+  .cr-sys span { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--color-text-tertiary); background:var(--color-bg); border:1px solid var(--color-border); border-radius:999px; padding:4px 12px; }
+  .cr-reply-actions { margin-top:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .cr-end-btn { margin-left:auto; color:#B7791F; border-color:#F0D9A8; }
+  .cr-end-btn:hover { background:#FFF7E6; }
+  .cr-ended-tag { display:inline-block; margin-left:8px; font-size:11.5px; font-weight:600; color:#B7791F; background:#FFF7E6; border:1px solid #F0D9A8; border-radius:999px; padding:1px 9px; }
+  .cr-img-preview { display:flex; flex-wrap:wrap; gap:7px; margin-top:8px; }
+  .cr-img-thumb { position:relative; display:inline-block; }
+  .cr-img-thumb img { width:64px; height:64px; object-fit:cover; border-radius:7px; border:1px solid var(--color-border); display:block; }
+  .cr-img-thumb button { position:absolute; top:-6px; right:-6px; width:18px; height:18px; border-radius:50%; border:none; background:var(--color-text); color:#fff; font-size:13px; line-height:1; cursor:pointer; padding:0; }
+  /* 进行中人工会话（队列行标识） */
+  .cr-active-dot { display:inline-flex; align-items:center; gap:4px; margin-left:6px; font-size:11px; font-weight:600; color:#2E9E6B; }
+  .cr-active-dot::before { content:''; width:7px; height:7px; border-radius:50%; background:#2E9E6B; display:inline-block; }
+  .cr-last { margin-top:3px; font-size:11.5px; color:var(--color-text-tertiary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:400px; }
 </style>
 </head>
 <body data-shell="admin" data-nav="consult-reply" data-breadcrumb="工单 > 咨询回复" data-content-layout="list">
@@ -100,7 +118,7 @@ function fmtTime(v){ if(!v)return '—'; let d=(typeof v==='number')?new Date(v)
 function md(s){ return window.mdToHtml ? window.mdToHtml(String(s||'')) : esc(String(s||'')); }
 function toast(msg,type){ const host=$('#toastHost'); if(!host)return; const el=document.createElement('div'); el.className='toast '+(type||''); const ic=type==='success'?'ti-circle-check':type==='error'?'ti-alert-circle':type==='warning'?'ti-alert-triangle':'ti-info-circle'; el.innerHTML=`<i class="ti ${ic}"></i><span>${esc(msg)}</span>`; host.appendChild(el); requestAnimationFrame(()=>el.classList.add('show')); setTimeout(()=>{ el.classList.remove('show'); setTimeout(()=>el.remove(),300); },2400); }
 function openDrawer(id){ const d=document.getElementById(id); if(!d)return; $('#drawerMask').classList.add('open'); d.classList.add('open'); }
-function closeDrawer(id){ const d=document.getElementById(id); if(d)d.classList.remove('open'); if(!document.querySelector('.drawer.open')) $('#drawerMask').classList.remove('open'); }
+function closeDrawer(id){ const d=document.getElementById(id); if(d)d.classList.remove('open'); if(!document.querySelector('.drawer.open')){ $('#drawerMask').classList.remove('open'); } if(id==='replyDrawer'){ stopDrawerPoll(); CUR=null; CUR_IMAGES=[]; loadQueue(); } }
 async function apiGet(p){ try{ return await (await fetch(p)).json(); }catch(e){ return null; } }
 async function apiPost(p,body){ try{ return await (await fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})})).json(); }catch(e){ return null; } }
 
@@ -120,15 +138,21 @@ function renderQueue(items){
   tbody.innerHTML='';
   ITEMS.forEach(function(it){
     const tr=document.createElement('tr');
-    const stCls=it.status==='已回复'?'replied':'waiting';
-    const stIc=it.status==='已回复'?'ti-user-check':'ti-headset';
+    const active=!!it.humanActive;
+    const stCls=active?'waiting':(it.status==='已回复'?'replied':'waiting');
+    const stIc=active?'ti-messages':(it.status==='已回复'?'ti-user-check':'ti-headset');
+    const stTxt=active?'人工对话中':it.status;
+    // 进行中人工会话额外标绿点；最后消息摘要（谁最后说了什么）
+    const activeDot=active?`<span class="cr-active-dot">进行中</span>`:'';
+    const roleLbl=it.lastMsgRole==='field'?'现场':it.lastMsgRole==='admin'?'我':it.lastMsgRole==='ai'?'AI':it.lastMsgRole==='system'?'系统':'';
+    const lastHtml=it.lastMsgText?`<div class="cr-last">${roleLbl?esc(roleLbl)+'：':''}${esc(it.lastMsgText)}</div>`:'';
     tr.innerHTML=
-      `<td><span class="cr-status ${stCls}"><i class="ti ${stIc}"></i> ${esc(it.status)}</span></td>`+
-      `<td class="cr-q"><div class="qt">${esc(it.title||'（无标题）')}</div>`+(it.escalateQuestion?`<div class="qs">${esc(it.escalateQuestion)}</div>`:'')+`</td>`+
+      `<td><span class="cr-status ${stCls}"><i class="ti ${stIc}"></i> ${esc(stTxt)}</span></td>`+
+      `<td class="cr-q"><div class="qt">${esc(it.title||'（无标题）')}${activeDot}</div>`+(it.escalateQuestion?`<div class="qs">${esc(it.escalateQuestion)}</div>`:'')+lastHtml+`</td>`+
       `<td>${esc(it.subsystemLabel||it.subsystem||'—')}</td>`+
       `<td>${esc(it.site||'—')}</td>`+
       `<td>${esc(fmtTime(it.escalatedAt))}</td>`+
-      `<td><button class="btn btn-sm btn-primary" data-open="${esc(it.project)}|${esc(it.id)}"><i class="ti ti-messages"></i> ${it.status==='已回复'?'查看':'回复'}</button></td>`;
+      `<td><button class="btn btn-sm btn-primary" data-open="${esc(it.project)}|${esc(it.id)}"><i class="ti ti-messages"></i> ${active?'对话':(it.status==='已回复'?'查看':'回复')}</button></td>`;
     tbody.appendChild(tr);
   });
 }
@@ -168,11 +192,16 @@ function startQueuePoll(){
   _qTimer=setInterval(function(){ if(document.visibilityState==='visible') pollQueue(); }, QUEUE_POLL_MS);
 }
 document.addEventListener('visibilitychange',function(){ if(document.visibilityState==='visible'&&_qTimer) pollQueue(); });
-window.addEventListener('beforeunload',function(){ stopQueuePoll(); });
+window.addEventListener('beforeunload',function(){ stopQueuePoll(); stopDrawerPoll(); });
+
+// FS-10 增强（持续双向人工对话）：抽屉里的待发截图（本次输入态，data URL 数组，≤6）。发送后清空。
+let CUR_IMAGES=[];
+const CR_IMG_MAX=6;
+function mediaUrls(project,media){ if(!Array.isArray(media)||!media.length||!project) return []; return media.map(p=>'/api/intake-media?project='+encodeURIComponent(project)+'&file='+encodeURIComponent(String(p))); }
 
 async function openReply(project,id){
   const it=ITEMS.find(x=>x.project===project&&x.id===id); if(!it) return;
-  CUR={project,id,item:it};
+  CUR={project,id,item:it}; CUR_IMAGES=[];
   $('#rdSub').textContent=projName(project)+' · '+(it.subsystemLabel||it.subsystem||'')+(it.site?' · '+it.site:'');
   const body=$('#replyBody'); body.innerHTML='<div class="cr-empty">加载对话…</div>';
   openDrawer('replyDrawer');
@@ -180,49 +209,154 @@ async function openReply(project,id){
   const rec=(d&&d.item)||null;
   if(!rec){ body.innerHTML='<div class="cr-empty">咨询记录不存在或已删除</div>'; return; }
   renderReplyBody(rec);
+  startDrawerPoll();   // 抽屉打开 → 起会话轮询（拉现场新消息）
+}
+
+// 单条对话消息 HTML（含截图缩略图）——双向：AI / 运营人工答复(assistant human) / 现场消息(user，含现场人工消息 user human) / 系统提示(system)
+function crMsgHtml(m,project){
+  const t=String((m&&m.text)||'').trim();
+  const urls=mediaUrls(project,m&&m.media);
+  const imgsHtml=urls.length?('<div class="cr-imgs">'+urls.map(u=>`<a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(u)}" alt="截图" loading="lazy"></a>`).join('')+'</div>'):'';
+  if(!t&&!urls.length) return '';
+  if(m&&m.system){ return `<div class="cr-sys"><span><i class="ti ti-info-circle"></i> ${esc(t)}</span></div>`; }
+  if(m&&m.role==='assistant'&&m.human){
+    return `<div class="cr-msg human"><div class="av"><i class="ti ti-headset"></i></div><div class="bub"><div class="tag"><i class="ti ti-user-check"></i> 我（运营）${m.by?' · '+esc(m.by):''}</div>${md(t)}${imgsHtml}</div></div>`;
+  }
+  if(m&&m.role==='assistant'){
+    return `<div class="cr-msg ai"><div class="av">AI</div><div class="bub">${md(t)}${imgsHtml}</div></div>`;
+  }
+  // user（现场）——含现场人工消息（human），运营视角统一显为「现场」侧
+  return `<div class="cr-msg user"><div class="av">现</div><div class="bub">${esc(t).replace(/\n/g,'<br>')}${imgsHtml}</div></div>`;
 }
 
 function renderReplyBody(rec){
   const body=$('#replyBody');
   const chat=Array.isArray(rec.chat)?rec.chat:[];
-  const replied=!!rec.humanReplied;
-  let html='<div class="cr-chat">';
-  chat.forEach(function(m){
-    const t=String((m&&m.text)||'').trim(); if(!t) return;
-    if(m.role==='assistant'&&m.human){
-      html+=`<div class="cr-msg human"><div class="av"><i class="ti ti-headset"></i></div><div class="bub"><div class="tag"><i class="ti ti-user-check"></i> 运营人工答复${m.by?' · '+esc(m.by):''}</div>${md(t)}</div></div>`;
-    } else if(m.role==='assistant'){
-      html+=`<div class="cr-msg ai"><div class="av">AI</div><div class="bub">${md(t)}</div></div>`;
-    } else {
-      html+=`<div class="cr-msg user"><div class="av">现</div><div class="bub">${esc(t).replace(/\n/g,'<br>')}</div></div>`;
-    }
-  });
+  const humanActive=!!rec.humanActive, escalated=!!rec.escalated;
+  let html='<div class="cr-chat" id="crChat">';
+  chat.forEach(function(m){ html+=crMsgHtml(m,rec.project||CUR.project); });
   html+='</div>';
-  // 回复框（未回复=写回复；已回复=可再补一条）
-  html+=`<div class="cr-section-title"><i class="ti ti-message-plus"></i> ${replied?'再补充一条人工回复':'写人工回复'}</div>`;
-  html+=`<div class="cr-reply-box"><textarea id="crReply" placeholder="给现场同事的权威答复（支持 Markdown）…"></textarea>`+
-        `<div style="margin-top:8px;display:flex;gap:8px"><button class="btn btn-primary" id="crReplyBtn"><i class="ti ti-send"></i> 发送回复</button></div></div>`;
+  if(escalated&&humanActive){
+    // 持续人工对话中：底部持续输入（文字+截图）+「结束人工服务」按钮
+    html+=`<div class="cr-section-title"><i class="ti ti-messages"></i> 与现场同事持续对话</div>`;
+    html+=`<div class="cr-reply-box"><textarea id="crReply" placeholder="给现场同事的回复（支持 Markdown，可加截图）…"></textarea>`+
+          `<div class="cr-img-preview" id="crImgPreview"></div>`+
+          `<div class="cr-reply-actions"><button class="btn btn-primary" id="crReplyBtn"><i class="ti ti-send"></i> 发送</button>`+
+          `<button class="btn" id="crImgBtn"><i class="ti ti-photo"></i> 加截图</button>`+
+          `<input type="file" id="crImgInput" accept="image/*" multiple hidden>`+
+          `<button class="btn cr-end-btn" id="crEndBtn"><i class="ti ti-player-stop"></i> 结束人工服务</button></div></div>`;
+  } else {
+    // 未在人工模式（已结束 / 老数据）：可补一条人工回复（回复后仍会通知现场）
+    html+=`<div class="cr-section-title"><i class="ti ti-message-plus"></i> ${escalated?'补充一条人工回复':'写人工回复'}${humanActive?'':' <span class="cr-ended-tag">人工服务已结束</span>'}</div>`;
+    html+=`<div class="cr-reply-box"><textarea id="crReply" placeholder="给现场同事的权威答复（支持 Markdown，可加截图）…"></textarea>`+
+          `<div class="cr-img-preview" id="crImgPreview"></div>`+
+          `<div class="cr-reply-actions"><button class="btn btn-primary" id="crReplyBtn"><i class="ti ti-send"></i> 发送回复</button>`+
+          `<button class="btn" id="crImgBtn"><i class="ti ti-photo"></i> 加截图</button>`+
+          `<input type="file" id="crImgInput" accept="image/*" multiple hidden></div></div>`;
+  }
   // AI 草稿沉淀区（已回复才显；否则回复成功后动态注入）
-  html+=`<div id="crKbSlot">${replied?'':''}</div>`;
+  html+=`<div id="crKbSlot"></div>`;
   body.innerHTML=html;
   $('#crReplyBtn').addEventListener('click',doReply);
-  if(replied) mountKbDraftEntry();   // 已回复 → 直接给「AI 整理沉淀」入口
+  const imgBtn=$('#crImgBtn'), imgInput=$('#crImgInput');
+  if(imgBtn&&imgInput){ imgBtn.addEventListener('click',()=>imgInput.click()); imgInput.addEventListener('change',e=>{ addImageFiles(e.target.files); imgInput.value=''; }); }
+  const endBtn=$('#crEndBtn'); if(endBtn) endBtn.addEventListener('click',doEnd);
+  renderImgPreview();
+  // 已回复过（humanReplied）→ 给「AI 整理沉淀」入口（结束或未结束都可沉淀）
+  if(rec.humanReplied) mountKbDraftEntry();
+  scrollCrChat();
+}
+function scrollCrChat(){ const c=$('#crChat'); if(c) c.scrollTop=c.scrollHeight; }
+
+// 抽屉里的截图选取 → 压缩成 dataURL（最长边 1600，JPEG 0.82）加入 CUR_IMAGES（≤6）。
+function addImageFiles(files){
+  const list=Array.prototype.slice.call(files||[]).filter(f=>f&&/^image\//.test(f.type));
+  if(!list.length) return;
+  let room=CR_IMG_MAX-CUR_IMAGES.length;
+  if(room<=0){ toast('最多 '+CR_IMG_MAX+' 张截图','warning'); return; }
+  list.slice(0,room).forEach(function(f){
+    const reader=new FileReader();
+    reader.onload=function(){
+      const img=new Image();
+      img.onload=function(){
+        let w=img.width,h=img.height; const max=1600;
+        if(w>max||h>max){ if(w>=h){ h=Math.round(h*max/w); w=max; } else { w=Math.round(w*max/h); h=max; } }
+        const cv=document.createElement('canvas'); cv.width=w; cv.height=h; cv.getContext('2d').drawImage(img,0,0,w,h);
+        try{ CUR_IMAGES.push(cv.toDataURL('image/jpeg',0.82)); }catch(e){ CUR_IMAGES.push(reader.result); }
+        renderImgPreview();
+      };
+      img.onerror=function(){ CUR_IMAGES.push(reader.result); renderImgPreview(); };
+      img.src=reader.result;
+    };
+    reader.readAsDataURL(f);
+  });
+}
+function renderImgPreview(){
+  const box=$('#crImgPreview'); if(!box) return;
+  box.innerHTML=CUR_IMAGES.map((du,i)=>`<span class="cr-img-thumb"><img src="${esc(du)}" alt=""><button type="button" data-rm="${i}">&times;</button></span>`).join('');
+  box.querySelectorAll('[data-rm]').forEach(b=>b.addEventListener('click',function(){ CUR_IMAGES.splice(Number(this.getAttribute('data-rm')),1); renderImgPreview(); }));
 }
 
 async function doReply(){
   const ta=$('#crReply'); const reply=(ta&&ta.value||'').trim();
-  if(!reply){ toast('回复内容不能为空','error'); return; }
+  if(!reply&&!CUR_IMAGES.length){ toast('回复内容不能为空（可加截图）','error'); return; }
   const btn=$('#crReplyBtn'); btn.disabled=true;
-  const r=await apiPost('/api/consult-human-reply',{project:CUR.project,convId:CUR.id,reply});
+  const imgs=CUR_IMAGES.slice();
+  const r=await apiPost('/api/consult-human-reply',{project:CUR.project,convId:CUR.id,reply,images:imgs.length?imgs:undefined});
   if(r&&r.ok){
     toast('回复已发送，现场会看到','success');
-    // 刷新抽屉对话 + 队列状态
+    CUR_IMAGES=[];
+    // 刷新抽屉对话 + 队列状态（renderReplyBody 会重建，含新消息）
     const d=await apiGet('/api/intake-detail?project='+encodeURIComponent(CUR.project)+'&id='+encodeURIComponent(CUR.id));
     if(d&&d.item) renderReplyBody(d.item);
     loadQueue();
   } else {
     btn.disabled=false; toast((r&&r.error)||'发送失败','error');
   }
+}
+
+// 「结束人工服务」→ /api/consult-human-end；成功后抽屉标「已结束」+ 停止会话轮询 + 刷新队列。
+async function doEnd(){
+  if(!confirm('结束人工服务？结束后现场同事的新消息将恢复由 AI 答疑。')) return;
+  const btn=$('#crEndBtn'); if(btn) btn.disabled=true;
+  const r=await apiPost('/api/consult-human-end',{project:CUR.project,convId:CUR.id});
+  if(r&&(r.ok||r.alreadyEnded)){
+    toast('已结束人工服务','success');
+    const d=await apiGet('/api/intake-detail?project='+encodeURIComponent(CUR.project)+'&id='+encodeURIComponent(CUR.id));
+    if(d&&d.item) renderReplyBody(d.item);
+    loadQueue();
+  } else { if(btn) btn.disabled=false; toast((r&&r.error)||'结束失败','error'); }
+}
+
+// ========== FS-10 增强 · 抽屉内会话轮询（拉现场新消息，不打断运营输入） ==========
+//   机制：抽屉打开时每 12s 拉一次 /api/intake-detail，把「本地 #crChat 里还没有的」消息增量 append（按已渲染消息条数为基线），
+//   不重建整个 body（否则清空运营正在写的 textarea / 待发截图 / AI 草稿面板）。可见时才轮、inFlight 防并发、抽屉关闭清 interval。
+//   humanActive 若被本端外因翻 false（多标签），下一轮拉到会随 append 系统提示条呈现（不强制重建）。
+const DRAWER_POLL_MS=12000;
+let _drInFlight=false,_drTimer=null;
+function stopDrawerPoll(){ if(_drTimer){ clearInterval(_drTimer); _drTimer=null; } _drInFlight=false; }
+function startDrawerPoll(){
+  stopDrawerPoll();
+  _drTimer=setInterval(function(){ if(document.visibilityState==='visible'&&isReplyDrawerOpen()) pollDrawer(); }, DRAWER_POLL_MS);
+}
+async function pollDrawer(){
+  if(_drInFlight||!CUR||!isReplyDrawerOpen()) return;
+  _drInFlight=true;
+  try{
+    const d=await apiGet('/api/intake-detail?project='+encodeURIComponent(CUR.project)+'&id='+encodeURIComponent(CUR.id));
+    if(!isReplyDrawerOpen()||!CUR) return;   // 请求期间抽屉已关/已切走 → 放弃
+    const rec=(d&&d.item)||null; if(!rec) return;
+    const chatArr=Array.isArray(rec.chat)?rec.chat:[];
+    const cont=$('#crChat'); if(!cont) return;
+    const rendered=cont.querySelectorAll('.cr-msg, .cr-sys').length;   // 已渲染消息数（含系统条）
+    // 服务端「可显示」消息（有文本或图）——与 crMsgHtml 的可显示口径一致
+    const showable=chatArr.filter(m=>m&&(String((m&&m.text)||'').trim()||(Array.isArray(m.media)&&m.media.length)));
+    if(showable.length>rendered){
+      for(let i=rendered;i<showable.length;i++){ const h=crMsgHtml(showable[i],rec.project||CUR.project); if(h) cont.insertAdjacentHTML('beforeend',h); }
+      scrollCrChat();
+    }
+  }catch(e){ /* 静默，下轮重试 */ }
+  finally{ _drInFlight=false; }
 }
 
 // AI 整理草稿入口：显一枚按钮 → 点它调 consult-kb-draft → 展开可编辑 q/a 面板 → 运营改好「确认沉淀」存 KB。
@@ -264,7 +398,7 @@ document.addEventListener('click',function(e){
   const c=e.target.closest('[data-close-drawer]'); if(c){ closeDrawer(c.getAttribute('data-close-drawer')); return; }
   const o=e.target.closest('[data-open]'); if(o){ const [p,id]=o.getAttribute('data-open').split('|'); openReply(p,id); return; }
 });
-$('#drawerMask').addEventListener('click',function(){ document.querySelectorAll('.drawer.open').forEach(d=>d.classList.remove('open')); $('#drawerMask').classList.remove('open'); });
+$('#drawerMask').addEventListener('click',function(){ document.querySelectorAll('.drawer.open').forEach(d=>d.classList.remove('open')); $('#drawerMask').classList.remove('open'); stopDrawerPoll(); CUR=null; CUR_IMAGES=[]; loadQueue(); });
 $('#fProduct').addEventListener('change',loadQueue);   // 选择型即选即查（全局规范 11）
 $('#fStatus').addEventListener('change',loadQueue);
 $('#refreshBtn').addEventListener('click',loadQueue);

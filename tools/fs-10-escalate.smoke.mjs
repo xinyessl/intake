@@ -87,6 +87,7 @@ test('AC-1/2 转人工：置 escalated 态，再点幂等 alreadyEscalated', asy
   const d = await req('/api/intake-detail?project=' + PID + '&id=' + encodeURIComponent(convId), { cookie: adminCookie });
   const e = d.json && d.json.item; assert.ok(e);
   assert.equal(e.escalated, true, 'escalated=true');
+  assert.equal(e.humanActive, true, 'humanActive=true（进入人工服务模式·持续双向对话增强）');
   assert.ok(e.escalatedAt, 'escalatedAt 有值');
   assert.equal(e.escalatedBy, FIELD_NAME, 'escalatedBy=发起人');
   assert.match(String(e.escalateQuestion || ''), /结算按钮/, 'escalateQuestion=最后一条 user 快照');
@@ -130,6 +131,91 @@ test('AC-5 人工回复：append human:true，escalations 转「已回复」；�
   assert.ok((r2.json.items || []).some(x => x.id === convId), 'escalations 按已回复筛出该条');
 });
 
+const PNG_1PX = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC';
+test('FS-10 增强·持续双向人工对话：实施 human-message（含截图）落 chat（user human byRole:field + media）', async () => {
+  // impl 在人工服务中发消息 → 直接进 chat、不调 AI；带一张截图 → 落盘 media
+  const r = await req('/api/consult-human-message', { method: 'POST', cookie: fieldCookie, body: { project: PID, convId, text: '还是不行，我把报错截图发你', images: [PNG_1PX] } });
+  assert.equal(r.status, 200, 'impl human-message 允许（∈ FIELD_OK∩FS08）');
+  assert.ok(r.json && r.json.ok);
+  assert.ok(Array.isArray(r.json.media) && r.json.media.length === 1, '本轮截图落盘并回相对路径');
+  const d = await req('/api/intake-detail?project=' + PID + '&id=' + encodeURIComponent(convId), { cookie: adminCookie });
+  const e = d.json.item; const chat = e.chat || [];
+  const last = chat[chat.length - 1];
+  assert.equal(last.role, 'user', '现场人工消息 role=user');
+  assert.equal(last.human, true, 'human:true 标记');
+  assert.equal(last.byRole, 'field', 'byRole=field（区别运营 admin）');
+  assert.equal(last.by, FIELD_NAME);
+  assert.match(last.text, /报错截图/);
+  assert.ok(Array.isArray(last.media) && last.media.length === 1, '截图挂到本条消息 media');
+  assert.equal(e.humanReplied, false, '现场发言后回到「待回复」态');
+  assert.ok(e.lastFieldMsgAt, 'lastFieldMsgAt 有值');
+  // 空消息（无文本无图）→ 400
+  const rEmpty = await req('/api/consult-human-message', { method: 'POST', cookie: fieldCookie, body: { project: PID, convId, text: '  ' } });
+  assert.equal(rEmpty.status, 400, '空消息 400');
+});
+
+test('FS-10 增强：运营 human-reply 带截图（运营也能发图）→ chat 末条含 media', async () => {
+  const r = await req('/api/consult-human-reply', { method: 'POST', cookie: adminCookie, body: { project: PID, convId, reply: '看到了，这是权限问题，附我这边配置截图', images: [PNG_1PX] } });
+  assert.equal(r.status, 200); assert.ok(r.json && r.json.ok);
+  const d = await req('/api/intake-detail?project=' + PID + '&id=' + encodeURIComponent(convId), { cookie: adminCookie });
+  const chat = d.json.item.chat || []; const last = chat[chat.length - 1];
+  assert.equal(last.role, 'assistant'); assert.equal(last.human, true); assert.equal(last.byRole, 'admin');
+  assert.ok(Array.isArray(last.media) && last.media.length === 1, '运营回复截图落盘 + 挂消息 media');
+});
+
+test('FS-10 增强：/api/field/conversations + escalations 透出 humanActive + 最后消息摘要', async () => {
+  const rc = await req('/api/field/conversations', { cookie: fieldCookie });
+  const ci = (rc.json.items || []).find(x => x.kind === 'consult' && x.id === convId);
+  assert.ok(ci, 'conversations 列到该 consult');
+  assert.equal(ci.humanActive, true, 'conversations 透出 humanActive=true');
+  const rq = await req('/api/consult-escalations', { method: 'POST', cookie: adminCookie, body: {} });
+  const qi = (rq.json.items || []).find(x => x.id === convId);
+  assert.ok(qi, 'escalations 列到该条');
+  assert.equal(qi.humanActive, true, 'escalations 透出 humanActive=true（进行中人工会话）');
+  assert.ok(qi.lastMsgText, 'escalations 带最后消息摘要');
+  assert.ok(['field', 'admin', 'ai', 'system'].includes(qi.lastMsgRole), 'lastMsgRole 归一');
+});
+
+test('FS-10 增强·结束人工服务：仅运营 human-end 置 humanActive=false + 系统提示 + 幂等；impl→403', async () => {
+  // impl 无权结束
+  const rImpl = await req('/api/consult-human-end', { method: 'POST', cookie: fieldCookie, body: { project: PID, convId } });
+  assert.equal(rImpl.status, 403, 'impl 调 human-end → 403（admin 限定）');
+  // admin 结束
+  const r = await req('/api/consult-human-end', { method: 'POST', cookie: adminCookie, body: { project: PID, convId } });
+  assert.equal(r.status, 200); assert.ok(r.json && r.json.ok);
+  const d = await req('/api/intake-detail?project=' + PID + '&id=' + encodeURIComponent(convId), { cookie: adminCookie });
+  const e = d.json.item; const chat = e.chat || [];
+  assert.equal(e.humanActive, false, 'humanActive=false（结束人工服务）');
+  assert.ok(e.humanEndedAt && e.humanEndedBy, '记 humanEndedAt/By');
+  const last = chat[chat.length - 1];
+  assert.equal(last.system, true, '末条=系统提示消息');
+  assert.match(last.text, /人工服务已结束/);
+  // 幂等：再点返 alreadyEnded、不重复追加系统提示
+  const chatLenBefore = chat.length;
+  const r2 = await req('/api/consult-human-end', { method: 'POST', cookie: adminCookie, body: { project: PID, convId } });
+  assert.equal(r2.status, 200); assert.ok(r2.json && r2.json.alreadyEnded, '幂等 alreadyEnded');
+  const d2 = await req('/api/intake-detail?project=' + PID + '&id=' + encodeURIComponent(convId), { cookie: adminCookie });
+  assert.equal((d2.json.item.chat || []).length, chatLenBefore, '幂等不重复追加系统提示');
+});
+
+test('FS-10 增强·结束后拒发：human-message 在非人工模式（humanActive=false）→ 409（前端据此恢复 AI 答疑）', async () => {
+  const r = await req('/api/consult-human-message', { method: 'POST', cookie: fieldCookie, body: { project: PID, convId, text: '结束后又发一条' } });
+  assert.equal(r.status, 409, '非人工模式发 human-message → 409');
+  assert.equal(r.json && r.json.humanActive, false, '回 humanActive:false 供前端切回 AI 模式');
+});
+
+test('FS-10 增强·白名单：human-message ∈ FIELD_OK∩FS08；human-end 不在任何 field/link 白名单（admin 限定）', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'server.mjs'), 'utf8');
+  function grab(name) { const i = src.indexOf(name + ' = new Set(['); const j = src.indexOf('])', i); const body = src.slice(src.indexOf('[', i) + 1, j); return [...body.matchAll(/'([^']+)'/g)].map(m => m[1]); }
+  const link = new Set(grab('const LINK_OK'));
+  const fok = new Set(grab('const FIELD_OK'));
+  const fs08 = new Set(grab('const FS08_FIELD_API'));
+  assert.ok(fok.has('/api/consult-human-message') && fs08.has('/api/consult-human-message'), 'human-message ∈ FIELD_OK∩FS08（实施可发）');
+  for (const ep of ['/api/consult-human-end', '/api/consult-human-reply', '/api/consult-escalations', '/api/consult-kb-draft']) {
+    assert.ok(!link.has(ep) && !fok.has(ep) && !fs08.has(ep), ep + ' 不在任何 field/link 白名单（admin 限定）');
+  }
+});
+
 test('FS-10 实时性增强：/api/field/conversations consult 项透出 humanReplyAt（实施端轮询判「新回复」所需）', async () => {
   // 实施端（impl）拉对话记录数据源，该条 consult 应带 escalated/humanReplied/humanReplyAt（人工回复后）。
   const r = await req('/api/field/conversations', { cookie: fieldCookie });
@@ -149,7 +235,9 @@ test('AC-7 kb-draft：admin 返 {q,a}（无模型兜底=原问题/人工回复�
   const r = await req('/api/consult-kb-draft', { method: 'POST', cookie: adminCookie, body: { project: PID, convId } });
   assert.equal(r.status, 200); assert.ok(r.json && r.json.ok);
   assert.match(r.json.q, /结算按钮/, 'q 兜底=原问题');
-  assert.match(r.json.a, /收费权限/, 'a 兜底=人工回复');
+  // a 兜底=最后一条 human 运营回复（跳过 system 系统提示「人工服务已结束」）——本会话最后的运营回复是「这是权限问题…」
+  assert.match(r.json.a, /权限问题/, 'a 兜底=最后一条人工回复（不含 system 系统提示）');
+  assert.doesNotMatch(r.json.a, /人工服务已结束/, 'a 不能是 system 系统提示消息');
   assert.equal(r.json.subsystem, 'billing');
 });
 
