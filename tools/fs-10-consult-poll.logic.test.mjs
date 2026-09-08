@@ -115,9 +115,101 @@ test('B5 field 进工作空间起轮询、命中时提醒 + 开着才 append + �
   assert.ok(/try \{ loadTodo\(\); \} catch \(e\) \{\}/.test(FIELD_HTML), '顺带刷新待办计数');
 });
 test('B6 field append 只补新增 human 气泡（防重复），不重建对话流/不动输入框', () => {
-  assert.ok(/box\.querySelectorAll\('\.f-human-reply'\)\.length/.test(FIELD_HTML), '按已渲染 human 气泡数定位增量');
-  assert.ok(/for \(var i = already; i < humans\.length; i\+\+\)/.test(FIELD_HTML), '只 append 新增部分');
-  assert.ok(!/box\.innerHTML = ''/.test(extractFn(FIELD_HTML, 'appendNewHumanReply')), 'appendNewHumanReply 不清空对话区');
+  const fn = extractFn(FIELD_HTML, 'appendNewHumanReply');
+  // 增量基线改用「chat.messages 里已持久化的 human 条数」（比 DOM 计数更可靠，刷新恢复后 messages 与 DOM 一致；见 L-025）
+  assert.ok(/\.role === 'assistant' && m\.human/.test(fn) && /alreadyPersisted/.test(fn), '按 chat.messages 已有 human 条数定位增量');
+  assert.ok(/for \(var i = alreadyPersisted; i < humans\.length; i\+\+\)/.test(fn), '只 append 新增部分');
+  assert.ok(!/box\.innerHTML = ''/.test(fn), 'appendNewHumanReply 不清空对话区');
+});
+test('B7 field 人工回复实时到达时同时 push 进 chat.messages + saveDraft（刷新恢复不丢·L-025）', () => {
+  const fn = extractFn(FIELD_HTML, 'appendNewHumanReply');
+  assert.ok(/chat\.messages\.push\(msg\)/.test(fn), '把人工回复持久化进 chat.messages');
+  assert.ok(/role: 'assistant', human: true/.test(fn), '持久化形状带 human:true（区别 AI 气泡）');
+  assert.ok(/if \(pushed\) saveDraft\(\)/.test(fn), '有新增才落草稿（刷新恢复）');
+});
+test('B8 renderSavedConversation 把 human 消息重放成运营人工答复气泡（非普通 AI 气泡·L-025）', () => {
+  const fn = extractFn(FIELD_HTML, 'renderSavedConversation');
+  assert.ok(/m\.role === 'assistant' && m\.human/.test(fn), '重放时判 human');
+  assert.ok(/appendHumanReplyBubble\(m\.content, m\.by \|\| '', urls\)/.test(fn), 'human 走专属人工答复气泡');
+});
+test('B9 reopenConsult 恢复的 chat.messages 保留 human/by（否则刷新后退化成 AI 气泡·L-025）', () => {
+  const fn = extractFn(FIELD_HTML, 'reopenConsult');
+  assert.ok(/if \(m\.role === 'assistant' && m\.human\) \{ x\.human = true;/.test(fn), 'chat.messages 保留 human 标记');
+});
+
+// 抽真身 appendNewHumanReply 沙箱跑：人工回复到达 → push 进 chat.messages + saveDraft，重复轮询不重复 push（L-025 核心修复）
+function makeAppendNewHumanReply(deps) {
+  return new Function(
+    'api', 'chat', 'chatBox', 'mediaUrls', 'appendHumanReplyBubble', 'saveDraft',
+    extractFn(FIELD_HTML, 'appendNewHumanReply') + '\nreturn appendNewHumanReply;',
+  )(deps.api, deps.chat, deps.chatBox, deps.mediaUrls, deps.appendHumanReplyBubble, deps.saveDraft);
+}
+test('B10 人工回复到达：push 进 chat.messages（human:true+by）+ saveDraft 被调 + 气泡渲染', async () => {
+  const bubbles = [], saved = { n: 0 };
+  const chat = { convId: 'ZX-1', messages: [{ role: 'user', content: '问题' }, { role: 'assistant', content: 'AI答' }] };
+  const detailItem = { project: 'p1', chat: [
+    { role: 'user', text: '问题' }, { role: 'assistant', text: 'AI答' },
+    { role: 'assistant', human: true, by: '运营小李', text: '人工答复内容' },
+  ] };
+  const fn = makeAppendNewHumanReply({
+    api: () => Promise.resolve({ body: { item: detailItem } }),
+    chat,
+    chatBox: () => ({}),
+    mediaUrls: () => [],
+    appendHumanReplyBubble: (text, by) => bubbles.push('human:' + text + '·' + by),
+    saveDraft: () => { saved.n++; },
+  });
+  fn({ project: 'p1', id: 'ZX-1' });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(bubbles.length, 1, '渲染一条人工气泡');
+  assert.deepEqual(bubbles, ['human:人工答复内容·运营小李']);
+  const humans = chat.messages.filter((m) => m.role === 'assistant' && m.human);
+  assert.equal(humans.length, 1, 'chat.messages 里含该 human 消息');
+  assert.equal(humans[0].content, '人工答复内容');
+  assert.equal(humans[0].by, '运营小李');
+  assert.equal(saved.n, 1, 'saveDraft 被调（刷新恢复不丢）');
+});
+test('B11 重复轮询同一条人工回复不重复 push/render（防重复·L-025）', async () => {
+  const bubbles = [], saved = { n: 0 };
+  const chat = { convId: 'ZX-1', messages: [{ role: 'user', content: '问题' }] };
+  const detailItem = { project: 'p1', chat: [
+    { role: 'user', text: '问题' },
+    { role: 'assistant', human: true, by: '小李', text: '答复' },
+  ] };
+  const fn = makeAppendNewHumanReply({
+    api: () => Promise.resolve({ body: { item: detailItem } }),
+    chat, chatBox: () => ({}), mediaUrls: () => [],
+    appendHumanReplyBubble: (t, b) => bubbles.push(t + '·' + b),
+    saveDraft: () => { saved.n++; },
+  });
+  fn({ project: 'p1', id: 'ZX-1' });
+  await new Promise((r) => setTimeout(r, 0));
+  fn({ project: 'p1', id: 'ZX-1' });   // 第二次轮询同一条
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(bubbles.length, 1, '同一条只渲染一次');
+  assert.equal(chat.messages.filter((m) => m.human).length, 1, '同一条只 push 一次');
+  assert.equal(saved.n, 1, '无新增不再 saveDraft');
+});
+test('B12 运营再补一条人工回复：只 append 新增那条（增量）', async () => {
+  const bubbles = [];
+  const chat = { convId: 'ZX-1', messages: [
+    { role: 'user', content: '问题' },
+    { role: 'assistant', human: true, by: '小李', content: '第一条' },   // 已持久化过一条
+  ] };
+  const detailItem = { project: 'p1', chat: [
+    { role: 'user', text: '问题' },
+    { role: 'assistant', human: true, by: '小李', text: '第一条' },
+    { role: 'assistant', human: true, by: '小王', text: '第二条' },
+  ] };
+  const fn = makeAppendNewHumanReply({
+    api: () => Promise.resolve({ body: { item: detailItem } }),
+    chat, chatBox: () => ({}), mediaUrls: () => [],
+    appendHumanReplyBubble: (t) => bubbles.push(t), saveDraft: () => {},
+  });
+  fn({ project: 'p1', id: 'ZX-1' });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(bubbles, ['第二条'], '只补新增第二条，不重贴第一条');
+  assert.equal(chat.messages.filter((m) => m.human).length, 2, 'chat.messages 现有两条 human');
 });
 
 /* ================= C. consult-reply.html 队列轮询静态接线 ================= */

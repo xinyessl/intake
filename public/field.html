@@ -2730,7 +2730,7 @@ button.f-ov-card { width: 100%; appearance: none; }
       var rawChat = Array.isArray(item.chat) ? item.chat : [];
       // FS-10：保留 human 标记（运营人工答复）+ 署名，供渲染成「运营人工答复」样式（区别 AI 气泡）
       var msgs = rawChat.map(function (m) { return { role: (m.role === 'assistant' ? 'assistant' : 'user'), content: m.text || '', media: (Array.isArray(m.media) ? m.media : null), kbRefs: normalizeKbRefs(m.kbRefs), human: !!(m && m.human), by: (m && m.by) || '' }; }).filter(function (m) { return m.content || (m.media && m.media.length); });
-      chat.messages = msgs.map(function (m) { var x = { role: m.role, content: m.content }; if (m.kbRefs.length) x.kbRefs = m.kbRefs; return x; });   // 引用仅供本地/历史重放；sendConsult 请求会收敛为 role/content，不能由客户端冒充本轮引用
+      chat.messages = msgs.map(function (m) { var x = { role: m.role, content: m.content }; if (m.kbRefs.length) x.kbRefs = m.kbRefs; if (m.role === 'assistant' && m.human) { x.human = true; if (m.by) x.by = m.by; } if (Array.isArray(m.media) && m.media.length) x.media = m.media; return x; });   // 引用仅供本地/历史重放；FS-10：保留 human/by（运营人工答复标记）+ media，供刷新恢复重放成人工气泡；sendConsult 请求会收敛为 role/content，不能由客户端冒充本轮引用
       chat.convId = item.convId || item.id || '';        // consult 的 convId = 记录 id
       chat.reopenProject = item.project || it.project;    // 续问归属锁定
       chat.reopenSubsystem = item.subsystem || '';        // 续问保留原子系统（append 时 subsystem 不被清空 + 续聊不触发咨询必选拦截）
@@ -3911,7 +3911,9 @@ button.f-ov-card { width: 100%; appearance: none; }
     }
     appendCards(0);
     messages.forEach(function (m, index) {
-      var bub = appendBubble(m.role === 'user' ? 'me' : 'ai', m.content);
+      var urls = (m && Array.isArray(m.media) && m.media.length) ? mediaUrls(projectFallback || '', m.media) : [];   // FS-10：随轮 media（人工回复/历史轮附图）在气泡内就位
+      if (m.role === 'assistant' && m.human) { appendHumanReplyBubble(m.content, m.by || '', urls); appendCards(index + 1); return; }   // FS-10：运营人工答复 → 专属「运营人工答复」样式，刷新恢复不退化成普通 AI 气泡
+      var bub = appendBubble(m.role === 'user' ? 'me' : 'ai', m.content, false, urls);
       if (m.role === 'assistant' && normalizeKbRefs(m.kbRefs).length && !isNonSubstantiveReply(m.content)) renderKbCite(bub, m.kbRefs);   // 没覆盖/无相关：不显「已参考经验」
       appendCards(index + 1);
     });
@@ -4850,13 +4852,22 @@ button.f-ov-card { width: 100%; appearance: none; }
       if (!chat.convId || chat.convId !== it.id) return;                    // 拉取期间用户可能已切走，二次确认
       var item = (r.body && r.body.item) || null; if (!item) return;
       var box = chatBox(); if (!box) return;
-      var already = box.querySelectorAll('.f-human-reply').length;          // 已渲染的人工回复气泡数
       var humans = (Array.isArray(item.chat) ? item.chat : []).filter(function (m) { return m && m.role === 'assistant' && m.human && (m.text || (Array.isArray(m.media) && m.media.length)); });
-      for (var i = already; i < humans.length; i++) {                       // 只补新增的（防重复 append）
+      // 防重复：以「chat.messages 里已持久化的 human 条数」为增量基线（比 DOM 计数更可靠——刷新恢复后 messages 与 DOM 一致；即便本地已 push 未刷新，也不会重复）。
+      var alreadyPersisted = (Array.isArray(chat.messages) ? chat.messages : []).filter(function (m) { return m && m.role === 'assistant' && m.human; }).length;
+      var pushed = false;
+      for (var i = alreadyPersisted; i < humans.length; i++) {              // 只补新增的（防重复 append + 防重复 push）
         var m = humans[i];
         var urls = (Array.isArray(m.media) && m.media.length) ? mediaUrls(item.project || it.project, m.media) : [];
         appendHumanReplyBubble(m.text || '', m.by || '', urls);
+        // FS-10 修：把人工回复也持久化进 chat.messages（形状同 reopenConsult：{role:'assistant',human:true,by,content,media}），使刷新后 restoreDraft 能恢复它、不丢失
+        var msg = { role: 'assistant', human: true, content: m.text || '' };
+        if (m.by) msg.by = m.by;
+        if (Array.isArray(m.media) && m.media.length) msg.media = m.media;
+        chat.messages.push(msg);
+        pushed = true;
       }
+      if (pushed) saveDraft();   // 落草稿 → 刷新恢复不丢人工回复
     }).catch(function () {});
   }
   // 对话记录抽屉开着时：静默翻新每条 consult 的转人工徽标（待运营回复 → 运营已回复），不重建整列表、不打断。

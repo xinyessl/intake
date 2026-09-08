@@ -138,14 +138,17 @@ test('多单会话刷新恢复：builtTickets 按消息锚点与保存顺序完�
   };
   const cards = [], timeline = [];
   const render = new Function(
-    'chat', 'appendArchiveCard', 'appendBubble', 'normalizeKbRefs', 'renderKbCite',
+    'chat', 'appendArchiveCard', 'appendBubble', 'appendHumanReplyBubble', 'mediaUrls', 'normalizeKbRefs', 'renderKbCite', 'isNonSubstantiveReply',
     extractFn(FIELD, 'normalizeBuiltTickets') + '\n' + extractFn(FIELD, 'renderSavedConversation') + '\nreturn renderSavedConversation;',
   )(
     chat,
     (info) => { cards.push(info); timeline.push('card:' + info.id); },
     (role, content) => { timeline.push('msg:' + content); return {}; },
+    (content, by) => { timeline.push('human:' + content + (by ? '·' + by : '')); return {}; },
+    () => [],
     () => [],
     () => {},
+    () => false,
   );
   render('fallback-project');
   assert.deepEqual(cards.map((x) => x.id), ['XQ-1', 'BG-2', 'XQ-3']);
@@ -158,6 +161,64 @@ test('多单会话刷新恢复：builtTickets 按消息锚点与保存顺序完�
   render('fallback-project');
   assert.deepEqual(cards.map((x) => x.id), ['XQ-1'], '老草稿无 builtTickets 时才回退 savedId');
   assert.equal(timeline.at(-1), 'card:XQ-1', '老草稿兜底卡贴在消息末尾');
+});
+
+// FS-10 回归：带运营人工回复的咨询会话刷新恢复——human 消息必须重放成「运营人工答复」样式，不退化成普通 AI 气泡（L-025）
+test('刷新恢复：human 消息重放为运营人工答复气泡、AI/user 各自原样，顺序不乱', () => {
+  const chat = {
+    savedId: '',
+    builtTickets: [],
+    messages: [
+      { role: 'user', content: '床位号查不到患者？' },
+      { role: 'assistant', content: '你可以先检查……' },                       // AI 答复
+      { role: 'user', content: '还是不行' },
+      { role: 'assistant', human: true, by: '运营小李', content: '这是配置项 X，去后台开启即可' },  // 运营人工答复
+    ],
+  };
+  const timeline = [];
+  const render = new Function(
+    'chat', 'appendArchiveCard', 'appendBubble', 'appendHumanReplyBubble', 'mediaUrls', 'normalizeKbRefs', 'renderKbCite', 'isNonSubstantiveReply',
+    extractFn(FIELD, 'normalizeBuiltTickets') + '\n' + extractFn(FIELD, 'renderSavedConversation') + '\nreturn renderSavedConversation;',
+  )(
+    chat,
+    () => {},
+    (role, content) => { timeline.push(role + ':' + content); return {}; },
+    (content, by) => { timeline.push('human:' + content + (by ? '·' + by : '')); return {}; },
+    () => [],
+    () => [],
+    () => {},
+    () => false,
+  );
+  render('p1');
+  assert.deepEqual(timeline, [
+    'me:床位号查不到患者？',
+    'ai:你可以先检查……',
+    'me:还是不行',
+    'human:这是配置项 X，去后台开启即可·运营小李',
+  ], 'human 消息走 appendHumanReplyBubble（含署名），AI/user 原样，顺序保持');
+});
+
+// FS-10 回归：纯咨询轮次（无人工回复）刷新恢复不回归——全部按 me/ai 气泡重放
+test('刷新恢复：纯咨询会话（无人工回复）不回归，assistant 仍走普通 AI 气泡', () => {
+  const chat = {
+    savedId: '', builtTickets: [],
+    messages: [
+      { role: 'user', content: '问题A' },
+      { role: 'assistant', content: '答复A' },
+    ],
+  };
+  const timeline = [];
+  const render = new Function(
+    'chat', 'appendArchiveCard', 'appendBubble', 'appendHumanReplyBubble', 'mediaUrls', 'normalizeKbRefs', 'renderKbCite', 'isNonSubstantiveReply',
+    extractFn(FIELD, 'normalizeBuiltTickets') + '\n' + extractFn(FIELD, 'renderSavedConversation') + '\nreturn renderSavedConversation;',
+  )(
+    chat, () => {},
+    (role, content) => { timeline.push(role + ':' + content); return {}; },
+    () => { timeline.push('SHOULD-NOT-BE-CALLED'); return {}; },
+    () => [], () => [], () => {}, () => false,
+  );
+  render('p1');
+  assert.deepEqual(timeline, ['me:问题A', 'ai:答复A'], '无 human 消息 → 不触发人工气泡');
 });
 
 test('草稿 payload 保存导航、提交类型、deep 和左侧选中态', () => {
