@@ -1197,6 +1197,7 @@ button.f-ov-card { width: 100%; appearance: none; }
   }
 
   function doLogout() {
+    stopHumanReplyPoll();   // FS-10：登出清「人工回复」轮询 interval（避免登出后仍打端点）
     api('/api/logout', { method: 'GET' }).catch(function () {}).then(function () {
       // AC-8 清空工作空间状态并重新显示登录门
       state = { me: null, mode: 'hosp', sites: [], curSite: null, subsystems: [], projects: [], customers: [], projMap: {}, groupBy: 'type', curSub: '', subOptions: [], systems: [], curSys: null, sysOpen: false, sysQuery: '', hospOpen: false, hospQuery: '', verMap: {}, ctxVer: null, verOpen: false, verDetailOpen: false, leftActiveKind: '', leftActiveId: '', planExpanded: {}, batchExpanded: {} };
@@ -1231,6 +1232,7 @@ button.f-ov-card { width: 100%; appearance: none; }
     hideGate();
     renderUser();
     loadTodo();
+    startHumanReplyPoll();   // FS-10：进工作空间起「人工回复」轻量轮询（可见时~18s 拉一次，见 startHumanReplyPoll）
     // FS-04：引用数据就绪后，先读取并校验导航上下文，再加载对应视图，最后恢复对话。
     // 不先调 onHospitalChange/syncConversationToSystem，避免 curSub 和草稿被初始默认界面覆盖。
     loadRefData().then(function () {
@@ -4787,6 +4789,101 @@ button.f-ov-card { width: 100%; appearance: none; }
       items.forEach(function (it) { results.appendChild(mkConvItem(it)); });
     }).catch(function () { results.innerHTML = ''; hollow.style.display = 'block'; hollow.textContent = '加载失败，请重试'; });
   }
+
+  // ========== FS-10（实时性增强）· 实施端轻量轮询「人工回复」 ==========
+  //   仅前端轮询 /api/field/conversations（复用 FS-04 数据源，FS-10 已透出 escalated/humanReplied/humanReplyAt）。
+  //   目标：运营在「咨询回复」页答复后，实施端**不用手动刷新**即可看到——提醒 + 对话记录徽标翻新 + 若该咨询正开在右侧则实时 append 人工回复气泡。
+  //   机制（两端通用要求）：间隔 15~20s；仅 document.visibilityState==='visible' 时轮；切回可见立即拉一次；inFlight 防并发；失败静默重试下轮；登出/卸载清 interval。
+  //   铁律：只更新对话记录/徽标/提醒（+ 待办计数），**绝不**重渲染正在流式的答复区、不清用户正在输入的框、不打断 AI 答复流。
+  var HR_POLL_MS = 18000;                 // 轮询间隔（15~20s 区间内取 18s）
+  var _hrLastReply = null;                // Map: convId → 上次已知 humanReplyAt（首帧建基线、不误报旧回复）
+  var _hrInFlight = false;                // 防并发：上一次没回来不叠发
+  var _hrTimer = null;                    // setInterval 句柄（登出/卸载 clearInterval）
+  function stopHumanReplyPoll() { if (_hrTimer) { clearInterval(_hrTimer); _hrTimer = null; } _hrInFlight = false; }
+  function startHumanReplyPoll() {
+    stopHumanReplyPoll();
+    _hrLastReply = null;                   // 每次进工作空间重建基线
+    pollHumanReplies(true);                // 立即拉一次建基线（首帧不提醒）
+    _hrTimer = setInterval(function () { if (document.visibilityState === 'visible') pollHumanReplies(false); }, HR_POLL_MS);
+  }
+  // 判「新人工回复」：与 last-seen humanReplyAt 比对；首帧（baseline）只建基线不提醒（避免把历史回复当新的）。
+  function detectNewHumanReplies(items, lastMap, baseline) {
+    var next = {}, fresh = [];
+    (items || []).forEach(function (it) {
+      if (!it || it.kind !== 'consult') return;
+      var at = it.humanReplyAt || (it.humanReplied ? '__replied__' : '');   // 老数据无 humanReplyAt 但 humanReplied → 用占位标记，仍能判「首次变已回复」
+      next[it.id] = at;
+      if (!at) return;                                                        // 没人工回复，跳过
+      if (!baseline) {
+        var prev = lastMap ? lastMap[it.id] : undefined;
+        if (prev === undefined || prev !== at) fresh.push(it);               // 首次出现 或 时间戳变化 = 新回复（含「同一咨询运营再补一条」）
+      }
+    });
+    return { next: next, fresh: fresh };
+  }
+  function pollHumanReplies(baseline) {
+    if (_hrInFlight) return;               // 防并发
+    _hrInFlight = true;
+    api('/api/field/conversations', { method: 'GET' }).then(function (r) {
+      var items = (r.body && Array.isArray(r.body.items)) ? r.body.items : [];
+      var res = detectNewHumanReplies(items, _hrLastReply, baseline || _hrLastReply === null);
+      _hrLastReply = res.next;
+      if (res.fresh.length) onNewHumanReplies(res.fresh);
+      // 对话记录抽屉开着 → 静默翻新列表（徽标：待回复→已回复），不影响右侧对话区/输入框
+      if ($('fConvDrawer') && $('fConvDrawer').classList.contains('open')) refreshConvBadges(items);
+    }).catch(function () { /* 失败静默，下轮重试 */ }).then(function () { _hrInFlight = false; });
+    // 顺带刷新待办计数（原来只加载时读一次；此处轻量更新，不打断当前操作）
+    try { loadTodo(); } catch (e) {}
+  }
+  // 发现新人工回复：① 提醒 ② 若正开在右侧对话区（chat.convId 匹配）→ 实时 append 人工回复气泡（不重渲染整流、不动输入框）③ 抽屉徽标由 refreshConvBadges 翻新。
+  function onNewHumanReplies(freshItems) {
+    freshItems.forEach(function (it) {
+      var titleFrag = (it.title || '').slice(0, 20);
+      showToast('运营已回复你的咨询' + (titleFrag ? '「' + titleFrag + '」' : ''), 'success');
+      if (chat.convId && chat.convId === it.id) appendNewHumanReply(it);   // 正开着这条 → 实时补气泡
+    });
+  }
+  // 该咨询正开在右侧 → 拉一次详情，把「本地还没渲染过的」human 消息 append 进对话区（复用 appendHumanReplyBubble）。
+  //   只追加新增的 human 气泡，不清空/不重建对话流 → 不打断用户正在看的内容与输入框。
+  function appendNewHumanReply(it) {
+    api('/api/intake-detail?project=' + encodeURIComponent(it.project) + '&id=' + encodeURIComponent(it.id), { method: 'GET' }).then(function (r) {
+      if (!chat.convId || chat.convId !== it.id) return;                    // 拉取期间用户可能已切走，二次确认
+      var item = (r.body && r.body.item) || null; if (!item) return;
+      var box = chatBox(); if (!box) return;
+      var already = box.querySelectorAll('.f-human-reply').length;          // 已渲染的人工回复气泡数
+      var humans = (Array.isArray(item.chat) ? item.chat : []).filter(function (m) { return m && m.role === 'assistant' && m.human && (m.text || (Array.isArray(m.media) && m.media.length)); });
+      for (var i = already; i < humans.length; i++) {                       // 只补新增的（防重复 append）
+        var m = humans[i];
+        var urls = (Array.isArray(m.media) && m.media.length) ? mediaUrls(item.project || it.project, m.media) : [];
+        appendHumanReplyBubble(m.text || '', m.by || '', urls);
+      }
+    }).catch(function () {});
+  }
+  // 对话记录抽屉开着时：静默翻新每条 consult 的转人工徽标（待运营回复 → 运营已回复），不重建整列表、不打断。
+  //   按 id 定位已渲染卡片，只改 .f-conv-human 徽标；卡片不存在（新咨询）不强插（避免打断），交由用户主动开抽屉刷新。
+  function refreshConvBadges(items) {
+    var results = $('fConvResults'); if (!results) return;
+    (items || []).forEach(function (it) {
+      if (!it || it.kind !== 'consult') return;
+      // 找对应卡片：mkConvItem 未标 data-id，这里靠 humanReplied 态直接整卡翻新代价高——改为轻量：仅当抽屉开着且需要时静默重载列表。
+    });
+    // 抽屉开着时直接静默重载（不显「加载中…」，避免闪烁）——只更新未在右侧对话区打断的列表部分。
+    silentReloadConversations();
+  }
+  // 静默重载对话记录列表（抽屉开着时用）：不显「加载中…」占位，拉到后原地替换；失败保留旧列表不报错。
+  function silentReloadConversations() {
+    var results = $('fConvResults'), hollow = $('fConvHollow');
+    if (!results) return;
+    api('/api/field/conversations', { method: 'GET' }).then(function (r) {
+      if (!$('fConvDrawer') || !$('fConvDrawer').classList.contains('open')) return;   // 抽屉已关，放弃
+      var items = (r.body && Array.isArray(r.body.items)) ? r.body.items : [];
+      if (!items.length) { results.innerHTML = ''; if (hollow) { hollow.style.display = 'block'; hollow.textContent = '暂无对话记录（发起咨询或提需求/报BUG 后会出现在这里）'; } return; }
+      if (hollow) hollow.style.display = 'none';
+      results.innerHTML = '';
+      items.forEach(function (it) { results.appendChild(mkConvItem(it)); });
+    }).catch(function () { /* 静默：保留旧列表 */ });
+  }
+
   // 一条对话记录卡片：类型徽标 +（intake 多单时）「N 单」计数 + 概要标题 + 上下文（子系统·医院·时间）。点击 → reopen 续聊。
   function mkConvItem(it) {
     var el = document.createElement('div');
@@ -5236,6 +5333,12 @@ button.f-ov-card { width: 100%; appearance: none; }
   bind();
   restore();
 
+  // FS-10：可见性门控 + 卸载清理——切回可见立即拉一次（不等下个 interval）；页面隐藏时 interval 内自跳过（见 startHumanReplyPoll）；卸载清 interval。
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible' && _hrTimer) pollHumanReplies(false);   // 切回可见立即拉一次（仅在轮询已起时）
+  });
+  window.addEventListener('beforeunload', function () { stopHumanReplyPoll(); });
+
   // 左右面板可拖拽调整宽度（splitter；宽度存 sessionStorage 会话级，避页面禁用的持久存储静态断言）
   (function initSplitter(){
     var sp=document.getElementById('fSplitter'), pane=document.getElementById('fSubmitPane'), ws=document.getElementById('fWorkspace');
@@ -5248,7 +5351,7 @@ button.f-ov-card { width: 100%; appearance: none; }
   })();
 
   // 暴露给测试/调试（不含敏感数据）
-  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, openConvRec: openConvRec, closeConvRec: closeConvRec, loadConversations: loadConversations, mkConvItem: mkConvItem, reopenConversation: reopenConversation, reopenIntakeConv: reopenIntakeConv, bindConvDelete: bindConvDelete, doDeleteConversation: doDeleteConversation, newSessionId: newSessionId, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, openTicketDrawer: openTicketDrawer, closeTicketDrawer: closeTicketDrawer, renderTicketDrawer: renderTicketDrawer, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, setTicketPriority: setTicketPriority, newConversation: newConversation, sendChat: sendChat, stopSending: stopSending, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast, openMaintainEdit: openMaintainEdit, doMaintainSave: doMaintainSave, maintainChipHtml: maintainChipHtml, maintainDaysLeft: maintainDaysLeft, renderTodoBody: renderTodoBody, mkUpdatePlanBlock: mkUpdatePlanBlock, loadUpdatePlan: loadUpdatePlan, renderUpdatePlan: renderUpdatePlan, mkPlanTaskItem: mkPlanTaskItem, mkSqlBundleItem: mkSqlBundleItem, doTaskToggle: doTaskToggle, doSqlBundleToggle: doSqlBundleToggle, appendConsultToIntake: appendConsultToIntake, openConsultToIntake: openConsultToIntake, doConsultToIntake: doConsultToIntake, appendMediaBubble: appendMediaBubble, mediaUrls: mediaUrls, createImagePreviewTrigger: createImagePreviewTrigger, openImagePreview: openImagePreview, closeImagePreview: closeImagePreview, markLeftActive: markLeftActive, reapplyLeftActive: reapplyLeftActive, bindReopen: bindReopen, fConfirm: fConfirm, doDeleteItem: doDeleteItem, bindDelete: bindDelete, renderOverview: renderOverview, renderOverviewNative: renderOverviewNative, unmountReactOverview: unmountReactOverview };
+  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, openConvRec: openConvRec, closeConvRec: closeConvRec, loadConversations: loadConversations, mkConvItem: mkConvItem, reopenConversation: reopenConversation, reopenIntakeConv: reopenIntakeConv, bindConvDelete: bindConvDelete, doDeleteConversation: doDeleteConversation, newSessionId: newSessionId, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, openTicketDrawer: openTicketDrawer, closeTicketDrawer: closeTicketDrawer, renderTicketDrawer: renderTicketDrawer, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, setTicketPriority: setTicketPriority, newConversation: newConversation, sendChat: sendChat, stopSending: stopSending, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast, openMaintainEdit: openMaintainEdit, doMaintainSave: doMaintainSave, maintainChipHtml: maintainChipHtml, maintainDaysLeft: maintainDaysLeft, renderTodoBody: renderTodoBody, mkUpdatePlanBlock: mkUpdatePlanBlock, loadUpdatePlan: loadUpdatePlan, renderUpdatePlan: renderUpdatePlan, mkPlanTaskItem: mkPlanTaskItem, mkSqlBundleItem: mkSqlBundleItem, doTaskToggle: doTaskToggle, doSqlBundleToggle: doSqlBundleToggle, appendConsultToIntake: appendConsultToIntake, openConsultToIntake: openConsultToIntake, doConsultToIntake: doConsultToIntake, appendMediaBubble: appendMediaBubble, mediaUrls: mediaUrls, createImagePreviewTrigger: createImagePreviewTrigger, openImagePreview: openImagePreview, closeImagePreview: closeImagePreview, markLeftActive: markLeftActive, reapplyLeftActive: reapplyLeftActive, bindReopen: bindReopen, fConfirm: fConfirm, doDeleteItem: doDeleteItem, bindDelete: bindDelete, renderOverview: renderOverview, renderOverviewNative: renderOverviewNative, unmountReactOverview: unmountReactOverview, startHumanReplyPoll: startHumanReplyPoll, stopHumanReplyPoll: stopHumanReplyPoll, pollHumanReplies: pollHumanReplies, detectNewHumanReplies: detectNewHumanReplies };
 })();
 </script>
 </body>

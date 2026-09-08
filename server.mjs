@@ -9788,7 +9788,7 @@ const server = http.createServer((req, res) => {
     // consult：每条一项
     for (const e of raw) {
       if (e.type !== 'consult') continue;
-      items.push({ kind: 'consult', id: e.id, project: e.project, title: (e.title || firstUserText(e) || '系统咨询').slice(0, 60), site: e.site || '', subsystem: e.subsystem || '', updatedAt: e.updatedAt || e.submittedAt || '', escalated: !!e.escalated, humanReplied: !!e.humanReplied });   // FS-10：透出转人工/已人工回复态，供实施端对话记录显「运营已回复」提醒（只读附加字段，不改会话逻辑）
+      items.push({ kind: 'consult', id: e.id, project: e.project, title: (e.title || firstUserText(e) || '系统咨询').slice(0, 60), site: e.site || '', subsystem: e.subsystem || '', updatedAt: e.updatedAt || e.submittedAt || '', escalated: !!e.escalated, humanReplied: !!e.humanReplied, humanReplyAt: e.humanReplyAt || '' });   // FS-10：透出转人工/已人工回复态 + humanReplyAt（供实施端轮询判「新人工回复」：humanReplyAt 变化=有新回复），只读附加字段，不改会话逻辑
     }
     // 先把 requirement/bug 工单按 (project, sessionId) 索引，供会话记录关联 + 兜底归组共用
     const ticketsBySession = new Map();   // 'proj|sid' → [{id,type,priority,subsystem,version,submittedAt,updatedAt,site,chat}]

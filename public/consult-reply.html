@@ -10,7 +10,8 @@
 <script src="/assets/shell.js" defer></script>
 <style>
   /* FS-10 咨询回复运营页：队列表 + 回复抽屉（完整对话 + 回复框 + AI 草稿沉淀）。抽屉/toast 自实现（部署 shell.js 无 UI.openDrawer，见 lessons L-004/L-178）。 */
-  .cr-status { display:inline-flex; align-items:center; gap:4px; height:22px; padding:0 9px; border-radius:var(--radius-pill); font-size:11.5px; font-weight:600; }
+  .cr-status { display:inline-flex; align-items:center; gap:4px; height:22px; padding:0 9px; border-radius:var(--radius-pill); font-size:11.5px; font-weight:600; white-space:nowrap; flex:0 0 auto; }
+  .cr-status i { flex:0 0 auto; }
   .cr-status.waiting { background:#FFF7E6; color:#B7791F; border:1px solid #F0D9A8; }
   .cr-status.replied { background:#F1FAF4; color:#2E9E6B; border:1px solid #B7E0C7; }
   .cr-q { max-width:420px; color:var(--color-text); }
@@ -61,7 +62,7 @@
     <table class="data-table">
       <thead>
         <tr>
-          <th style="width:96px">状态</th>
+          <th style="width:110px;min-width:110px">状态</th>
           <th>咨询问题</th>
           <th style="width:130px">子系统</th>
           <th style="width:140px">医院</th>
@@ -111,13 +112,9 @@ async function loadProjects(){
 }
 function projName(id){ const p=PROJECTS.find(x=>x.id===id); return (p&&(p.name||p.id))||id||''; }
 
-async function loadQueue(){
-  const body={};
-  const proj=$('#fProduct').value; if(proj) body.project=proj;
-  const st=$('#fStatus').value; if(st) body.status=st;
-  const tbody=$('#crBody'); tbody.innerHTML='<tr><td colspan="6" class="cr-empty">加载中…</td></tr>';
-  const r=await apiPost('/api/consult-escalations',body);
-  ITEMS=(r&&r.items)||[];
+function renderQueue(items){
+  const tbody=$('#crBody');
+  ITEMS=items||[];
   $('#totalCount').textContent=ITEMS.length;
   if(!ITEMS.length){ tbody.innerHTML='<tr><td colspan="6" class="cr-empty">暂无转人工的咨询（实施端点「转人工」后会出现在这里）</td></tr>'; return; }
   tbody.innerHTML='';
@@ -135,6 +132,43 @@ async function loadQueue(){
     tbody.appendChild(tr);
   });
 }
+async function loadQueue(){
+  const body={};
+  const proj=$('#fProduct').value; if(proj) body.project=proj;
+  const st=$('#fStatus').value; if(st) body.status=st;
+  const tbody=$('#crBody'); tbody.innerHTML='<tr><td colspan="6" class="cr-empty">加载中…</td></tr>';
+  const r=await apiPost('/api/consult-escalations',body);
+  renderQueue((r&&r.items)||[]);
+}
+
+// ========== FS-10（实时性增强）· 运营端队列轻量轮询 ==========
+//   仅前端轮询 /api/consult-escalations 刷新队列：新「待回复」自动出现、已回复的翻到「已回复」态，运营不用手动点刷新。
+//   机制：间隔 18s（15~20s 区间）；仅 document.visibilityState==='visible' 时轮；切回可见立即拉一次；inFlight 防并发；失败静默重试下轮；页面卸载清 interval。
+//   不打断运营正在回复：**回复抽屉打开时跳过静默刷新**（不重渲染盖掉正在输入/看 AI 草稿的抽屉；抽屉里 doReply 成功后仍会主动 loadQueue）。表格与抽屉分离，只在抽屉关闭时静默翻新列表。
+const QUEUE_POLL_MS=18000;
+let _qInFlight=false, _qTimer=null;
+function isReplyDrawerOpen(){ const d=document.getElementById('replyDrawer'); return !!(d&&d.classList.contains('open')); }
+function stopQueuePoll(){ if(_qTimer){ clearInterval(_qTimer); _qTimer=null; } _qInFlight=false; }
+async function pollQueue(){
+  if(_qInFlight) return;                       // 防并发
+  if(isReplyDrawerOpen()) return;              // 回复抽屉开着 → 不静默刷新（不打断运营回复/看草稿）
+  _qInFlight=true;
+  try{
+    const body={};
+    const proj=$('#fProduct').value; if(proj) body.project=proj;
+    const st=$('#fStatus').value; if(st) body.status=st;
+    const r=await apiPost('/api/consult-escalations',body);
+    if(isReplyDrawerOpen()) return;            // 请求期间运营打开了抽屉 → 放弃这次渲染
+    if(r&&Array.isArray(r.items)) renderQueue(r.items);   // 静默翻新（无「加载中…」占位，避免闪烁）
+  }catch(e){ /* 静默：保留旧列表，下轮重试 */ }
+  finally{ _qInFlight=false; }
+}
+function startQueuePoll(){
+  stopQueuePoll();
+  _qTimer=setInterval(function(){ if(document.visibilityState==='visible') pollQueue(); }, QUEUE_POLL_MS);
+}
+document.addEventListener('visibilitychange',function(){ if(document.visibilityState==='visible'&&_qTimer) pollQueue(); });
+window.addEventListener('beforeunload',function(){ stopQueuePoll(); });
 
 async function openReply(project,id){
   const it=ITEMS.find(x=>x.project===project&&x.id===id); if(!it) return;
@@ -235,7 +269,7 @@ $('#fProduct').addEventListener('change',loadQueue);   // 选择型即选即查�
 $('#fStatus').addEventListener('change',loadQueue);
 $('#refreshBtn').addEventListener('click',loadQueue);
 
-(async function init(){ await loadProjects(); await loadQueue(); })();
+(async function init(){ await loadProjects(); await loadQueue(); startQueuePoll(); })();   // FS-10：起队列轻量轮询（可见时~18s，抽屉开着不刷）
 </script>
 </body>
 </html>

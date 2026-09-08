@@ -130,6 +130,19 @@ test('AC-5 人工回复：append human:true，escalations 转「已回复」；�
   assert.ok((r2.json.items || []).some(x => x.id === convId), 'escalations 按已回复筛出该条');
 });
 
+test('FS-10 实时性增强：/api/field/conversations consult 项透出 humanReplyAt（实施端轮询判「新回复」所需）', async () => {
+  // 实施端（impl）拉对话记录数据源，该条 consult 应带 escalated/humanReplied/humanReplyAt（人工回复后）。
+  const r = await req('/api/field/conversations', { cookie: fieldCookie });
+  assert.equal(r.status, 200);
+  const items = (r.json && r.json.items) || [];
+  const it = items.find(x => x.kind === 'consult' && x.id === convId);
+  assert.ok(it, 'conversations 列到该 consult');
+  assert.equal(it.escalated, true, '透出 escalated=true');
+  assert.equal(it.humanReplied, true, '透出 humanReplied=true');
+  assert.ok(Object.prototype.hasOwnProperty.call(it, 'humanReplyAt'), '出参含 humanReplyAt 字段');
+  assert.ok(it.humanReplyAt, 'humanReplyAt 有值（人工回复后）→ 前端可据此判新');
+});
+
 test('AC-7 kb-draft：admin 返 {q,a}（无模型兜底=原问题/人工回复）；impl→403', async () => {
   const rImpl = await req('/api/consult-kb-draft', { method: 'POST', cookie: fieldCookie, body: { project: PID, convId } });
   assert.equal(rImpl.status, 403, 'impl kb-draft → 403');
