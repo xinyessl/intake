@@ -2004,6 +2004,67 @@ function consultKbStrong(x) {
   return score >= CONSULT_KB_MIN_SIM;                                // 语义可用：余弦要过 consult 收紧门槛
 }
 function consultKbFilter(kbScored) { return (Array.isArray(kbScored) ? kbScored : []).filter(consultKbStrong); }
+// consult 经验库「主题/实体维度」二次校验（强度门槛之上再加一层）：
+//   线上真实 bug：问「药师工作站用户权限如何配置」，阿里云 qwen embedding 把「如何…配置…」共同句式算出 sim≥0.5 过强度门槛，
+//   却引用了「医嘱干预功能中配置药品说明书跳转地址」——纯语义阈值拦不住「同是配置类但业务实体完全无关」的误引。
+//   这里加实体/主题校验：① 子系统不符（强信号）② 实体词零交集且语义分不足（辅助信号）→ 判主题不相关，拦掉。
+//   保守原则：误拦真相关比漏放无关更糟（会让本该有的经验不被引用），任何信号不明确一律放行（宁稳不误伤）。
+//   只过滤 hits 这条（注入 consultSystem + kb 事件 + kbRefs 的口径），kbScored 全召回仍原样进 buildRetrieval 诊断，不受影响。
+// 泛化停用词：真正无区分度的动作/助词/疑问/泛化词（去掉后剩的才是判别性实体词）。
+//   ⚠️ 谨慎：「权限」在本 case 是**关键实体**不能当停用词；只放无区分度的词，宁可少放停用词也别误删关键实体。
+const CONSULT_KB_TOPIC_STOPWORDS = new Set([
+  // 疑问/请求/助词
+  '如何', '怎么', '怎样', '怎么办', '如下', '请问', '一下', '是否', '能否', '可以', '需要', '为何', '为什么', '什么',
+  '的', '了', '吗', '呢', '么', '啊', '哦', '嗯', '和', '与', '及', '或', '在', '中', '里', '有', '没', '这', '那',
+  // 无区分度的通用动作/名词（配置/设置类共同句式，正是本 case 误引的根源）
+  '配置', '设置', '使用', '操作', '功能', '问题', '处理', '方法', '方式', '流程', '步骤', '进行', '实现', '开启', '关闭',
+  '查看', '显示', '出现', '相关', '一个', '一些', '这个', '那个', '如何配置', '怎么配置',
+]);
+// 从文本抽「判别性实体词」：kbTokenize 后去掉纯停用词 token。
+//   kbTokenize 产出中文 bigram + 英文词；bigram 若两个字都在停用词单字集里则视为泛化，否则保留（保守：宁可多留实体词）。
+function consultTopicEntityTokens(text) {
+  const toks = kbTokenize(text);
+  const out = new Set();
+  for (const t of toks) {
+    if (!t) continue;
+    if (CONSULT_KB_TOPIC_STOPWORDS.has(t)) continue;   // 整词命中停用词（如英文词 / 恰好成词的 bigram）→ 去掉
+    // 中文 bigram：两个字若都是无区分度的停用单字（如「如何」「配置」拆出的「如」「何」「配」「置」）则丢，否则留
+    if (/^[一-鿿]{2}$/.test(t)) {
+      const c1 = t[0], c2 = t[1];
+      if (CONSULT_KB_TOPIC_STOPWORDS.has(c1) && CONSULT_KB_TOPIC_STOPWORDS.has(c2)) continue;
+    }
+    out.add(t);
+  }
+  return out;
+}
+// 判定单条 kbScored 条目是否主题相关（true=放行 / false=拦）。opts: { subsystem: 当前咨询子系统(b.subsystem), _score: 该条 rank 分 }。
+//   注：当前 route 命中结果不携带 subsystem 字段（见 routeQuestion 返回体），故子系统上下文只取 b.subsystem（用户在现场端所选系统，英文 name，与 entry.subsystem 同口径）。
+//   核心判据 = **实体零交集**（query 与 entry.q 的判别性实体词无重叠）：这是「同配置词但业务无关」的直接特征（本 case 权限 vs 说明书跳转，实体互不沾）。
+//   实体有交集 → 一律放行（哪怕子系统不同——如 B-KB-REL2「排班表导出」虽属 report 子系统，但 query 确实问它、实体重叠，是真相关，不能误伤）。
+//   实体零交集时才看加强信号，任一成立即拦：
+//     ① 子系统不符（强信号，最能解决本 case）：当前有明确子系统上下文，且 entry.subsystem 是**另一个不同的**子系统（非空、非包含关系）。
+//     ② 语义分不足（sim<0.6）：embedding 只是靠共同句式蹭到边缘分，非强信心相关。
+//   保守：实体有交集 / 子系统缺信息且语义分够高 / 无 query 实体可判 → 一律放行（宁稳不误伤，漏放无关好过误拦真相关）。
+function consultKbTopicGuard(queryText, entry, opts) {
+  opts = opts || {};
+  if (!entry || typeof entry !== 'object') return true;                 // 无条目信息 → 放行
+  const qEnt = consultTopicEntityTokens(queryText);
+  const eEnt = consultTopicEntityTokens(entry.q || '');
+  if (!qEnt.size || !eEnt.size) return true;                            // 抽不出实体词（无从判主题）→ 放行
+  let hasInter = false; for (const t of qEnt) if (eEnt.has(t)) { hasInter = true; break; }
+  if (hasInter) return true;                                            // ★ 实体有交集 → 真相关，放行（不因子系统不同误伤 B-KB-REL2 那类）
+  // —— 实体零交集：可能是「同配置词但业务无关」的误引，看加强信号 ——
+  const curSub = String((opts && opts.subsystem) || '').trim().toLowerCase();
+  const entSub = String((entry.subsystem || '')).trim().toLowerCase();
+  // 信号①：子系统不符（当前有明确子系统上下文，entry 属另一个不同子系统，且非互为包含的同族）
+  const subMismatch = !!(curSub && entSub && curSub !== entSub && !(curSub.includes(entSub) || entSub.includes(curSub)));
+  if (subMismatch) return false;                                        // 实体零交集 + 子系统确不同 → 拦（本 case：药师工作站权限 vs audit 说明书跳转）
+  // 信号②：语义分不足（sim<0.6）。score<1.1=语义分(sim)，≥1.1=纯词计数（无 sim 可判，此时不靠语义拦）。
+  const score = typeof (opts && opts._score) === 'number' ? opts._score : (typeof entry._score === 'number' ? entry._score : null);
+  const sim = (score != null && score < 1.1) ? score : null;
+  if (sim != null && sim < 0.6) return false;                          // 实体零交集 + 语义分只到边缘 → 拦
+  return true;                                                          // 子系统缺信息且语义分够高（或纯词模式无 sim）→ 保守放行
+}
 function loadEmbedCfg() { const e = (readModelCfg() || {}).embed; return (e && e.apiKey && e.baseUrl && e.model) ? e : null; }   // 三要素齐全才算配置好，否则 null（=语义不可用，退回关键词）
 async function embedTexts(texts) {                                   // 批量取向量：POST {baseUrl}/embeddings，返回 [[...],[...]] 与 input 顺序对齐
   const cfg = loadEmbedCfg(); if (!cfg) throw new Error('未配置 embedding 模型');
@@ -9037,7 +9098,11 @@ const server = http.createServer((req, res) => {
       // consult 专用二次门槛：全局 SEM_GATE(0.42) 召回口径下 sim=0.42 的边缘条目也会进 kbScored（与提问相关度很弱、易误引）。
       //   这里过一遍 consultKbFilter（语义 sim≥CONSULT_KB_MIN_SIM=0.5 / 纯词 matchedTerms≥CONSULT_KB_MIN_LEX=3），只让「够强相关」的条目进注入(consultSystem)+kb 事件+kbRefs。
       //   kbScored（全召回）保留原样给 buildRetrieval 检索诊断（「召回了但太弱没注入」本身是有用的排查信息）；仅 hits（喂模型+kbRefs 的口径）收敛为强相关子集。
-      hits = consultKbFilter(kbScored).map(x => x.e);
+      // 主题/实体维度二次校验（consultKbTopicGuard）：强度门槛之上再拦「同配置词但业务实体无关」的误引（线上 case：问药师工作站权限，误引医嘱干预说明书跳转）。
+      //   先过主题维度（子系统不符 / 实体零交集且语义分不足 → 拦），再走原强度过滤。保守：任何信号不明确一律放行，不误伤真相关。
+      //   kbScored 全召回仍原样进 buildRetrieval（下方），不受本过滤影响（诊断完整）。
+      const topicOk = kbScored.filter(x => consultKbTopicGuard(retrievalQuery, x.e, { subsystem: sub, _score: (typeof x.score === 'number' ? x.score : null) }));
+      hits = consultKbFilter(topicOk).map(x => x.e);
       const cver = String(b.version || '').trim();
       // PD-04：先按提问路由到功能模块（仅对有「功能模块地图」的产品生效）。无地图 → map=null → 完全走原 specSearch（向后兼容）。
       consultStage = 'routing';

@@ -75,7 +75,7 @@ depends_on: [FS-01]
 - **AC-16** Given 建单成功（intake-submit）When 返回 Then 响应含 `{ok:true, id, reply}`（AI 首轮沟通话术），前端把 `reply` 作为 AI 首条气泡展示，工单进入 `待处理`（或 AI 配置就绪时 `沟通中`）。
 
 ### E. 咨询答疑（consult · SSE · 不进批次 · 可沉淀经验库）
-- **AC-17** Given 切到「咨询答疑」模式 When 现场发问并回车 Then 以仅含 `role/content` 的 `messages[]` 调 `POST /api/consult`（SSE 流式，带 `project`/`version`/`site`/`subsystem`/`deep`），AI 答复**逐字流式**追加到 AI 气泡（`data: {v:片段}`），结束事件 `{done:true, convId, kbHits}`；经验引用的真实性与恢复契约见 FS-06 AC-C5/C6/C7。
+- **AC-17** Given 切到「咨询答疑」模式 When 现场发问并回车 Then 以仅含 `role/content` 的 `messages[]` 调 `POST /api/consult`（SSE 流式，带 `project`/`version`/`site`/`subsystem`/`deep`），AI 答复**逐字流式**追加到 AI 气泡（`data: {v:片段}`），结束事件 `{done:true, convId, kbHits}`；经验引用的真实性、相关度门槛与恢复契约见 FS-19 AC-C5/C5b/C5c/C6/C7（C5c=主题/实体校验：强度门槛之上再拦"同配置词但业务实体无关"的误引，见 `consultKbTopicGuard`）。
 - **AC-18** Given 咨询会话产生答复 When `consult` 落库 Then 生成 `type='consult'` 记录（`lifecycle='已答复'`），**不进运营端工单收件箱**（`listIntake` 默认 `withConsult=false` 过滤掉）、**不进批次**；`convId` 返回供同会话续问（同 `convId` 续存，不新建）。
 - **AC-19-KB** Given 咨询"解决了"（现场点「已解决/沉淀经验库」）When 触发 Then 调 `POST /api/kb-from-consult`（带 `project`/`convId`；兼容旧入参 `q`/`a`）沉淀为经验库条目（`from='consult'`），成功反馈；不解决则不沉淀。
   - **整段对话 AI 整理（非只抓最后一轮）**：带 `convId` 时后端取该 consult 记录**整段 `chat`**，用 AI 整理成一条条目——`q`=用户**核心问题**（抓真正要解决的那个，**不是最后一个追问**）、`a`=**最终解决方案**且**涵盖整段排查脉络**（核心问题→关键排查→最终定位与解法）；`subsystem` 取 `src.subsystem`。

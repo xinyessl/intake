@@ -118,8 +118,10 @@ test('fs-06 REL2 口径：问对两条都多 token 命中的问题 → 两条都
 });
 
 test('consult 端点接线：过滤后 hits 派生自 consultKbFilter；kbScored 全召回仍给 buildRetrieval 诊断', () => {
-  // 端点里：保留 fs-06 断言的原行（kbScored 全召回 + hits），紧接着 hits 收敛为 consultKbFilter(kbScored).map(x=>x.e)。
-  assert.match(SRC, /hits = consultKbFilter\(kbScored\)\.map\(x => x\.e\);/, '★ hits 由 consultKbFilter 收敛（注入/kbRefs 口径收紧）');
+  // 端点里：保留 fs-06 断言的原行（kbScored 全召回 + hits），紧接着 hits 收敛为强度过滤。
+  //   ⚠️ 结构变、强度过滤行为不变：主题维度校验（consultKbTopicGuard）后接强度过滤——kbScored → topicOk(主题) → consultKbFilter(强度)。
+  //   故 hits 现由 consultKbFilter(topicOk) 派生（topicOk = 主题维度过滤后的 kbScored 子集），强度门槛口径不变。
+  assert.match(SRC, /hits = consultKbFilter\(topicOk\)\.map\(x => x\.e\);/, '★ hits 由 consultKbFilter 收敛（注入/kbRefs 口径收紧；主题过滤后再过强度）');
   // buildRetrieval 仍吃全召回 kbScored（诊断保留「召回了但太弱」信息）。
   // 注：spec 侧参数 PD-04 修复后由 specScored 更名为 searchScored（specSearch 底座，一处两用喂模型+诊断），本断言只锁 kbScored 全召回不收敛。
   assert.match(SRC, /buildRetrieval\(\{ query: qtext[^}]*\}, searchScored, kbScored, codeHits\)/, 'buildRetrieval 用全召回 kbScored（诊断不收敛）');
