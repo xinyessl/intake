@@ -317,7 +317,7 @@ async function doReply(){
 
 // 「结束人工服务」→ /api/consult-human-end；成功后抽屉标「已结束」+ 停止会话轮询 + 刷新队列。
 async function doEnd(){
-  if(!confirm('结束人工服务？结束后现场同事的新消息将恢复由 AI 答疑。')) return;
+  if(!(await uiConfirm('结束后现场同事的新消息将恢复由 AI 答疑。',{title:'结束人工服务',okText:'结束人工服务'}))) return;
   const btn=$('#crEndBtn'); if(btn) btn.disabled=true;
   const r=await apiPost('/api/consult-human-end',{project:CUR.project,convId:CUR.id});
   if(r&&(r.ok||r.alreadyEnded)){
