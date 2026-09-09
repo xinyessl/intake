@@ -17,14 +17,25 @@ function parseInline(html, label) {
   assert.ok(n >= 1, label + ' 有内联脚本');
 }
 
-test('field.html：转人工按钮 + 调 /api/consult-escalate + 成功文案', () => {
-  assert.ok(field.includes('appendConsultEscalate'), '有 appendConsultEscalate 函数');
-  assert.ok(field.includes("'/api/consult-escalate'"), '调 consult-escalate 端点');
-  assert.ok(field.includes('已转人工 · 待运营回复'), '成功后按钮改「已转人工·待运营回复」');
-  assert.ok(field.includes('f-escalate'), '按钮卡片 class f-escalate（幂等去重键）');
-  // 挂载点：finishConsult 里既调 appendConsultToIntake 又调 appendConsultEscalate（转工单 + 转人工并列）
+test('field.html：合并引导卡 appendConsultActions（沉淀经验库 + 转工单 + 转人工三入口合一条）', () => {
+  assert.ok(field.includes('function appendConsultActions'), '有 appendConsultActions 合并函数');
+  assert.ok(field.includes('f-consult-actions'), '合并卡片 class f-consult-actions（卡片级幂等去重键）');
+  // 三个入口的接口调用 + 成功文案逐一保留
+  assert.ok(field.includes("'/api/kb-from-consult'"), '沉淀经验库调 kb-from-consult');
+  assert.ok(field.includes('已沉淀到经验库'), '沉淀成功文案');
+  assert.ok(field.includes("'/api/consult-escalate'"), '转人工调 consult-escalate 端点');
+  assert.ok(field.includes('已转人工 · 可继续和运营对话'), '转人工成功文案');
+  assert.ok(field.includes('openConsultToIntake('), '转工单走 openConsultToIntake 弹窗');
+  // 条件出按钮：沉淀=实质答复(canKb)、转工单/转人工=有会话(convId)
+  const fn = field.slice(field.indexOf('function appendConsultActions'), field.indexOf('function appendConsultActions') + 4000);
+  assert.ok(/canKb\s*=\s*!nonSub\s*&&\s*!!chat\.lastQ/.test(fn), '沉淀经验库仅实质答复');
+  assert.ok(/canTicket\s*=\s*!!convId/.test(fn) && /canEscalate\s*=\s*!!convId/.test(fn), '转工单/转人工仅有会话时出');
+  assert.ok(/if\s*\(chat\.humanActive\)\s*return/.test(fn), 'humanActive（人工服务中）时整卡不出');
+  assert.ok(fn.includes('chat.humanActive = true'), '转人工成功后进人工模式');
+  // 挂载点：finishConsult 里改为一处 appendConsultActions（不再三处分散调用）
   const fc = field.slice(field.indexOf('function finishConsult'), field.indexOf('function finishConsult') + 1600);
-  assert.ok(fc.includes('appendConsultToIntake()') && fc.includes('appendConsultEscalate()'), 'finishConsult 里在转工单入口旁追加转人工入口');
+  assert.ok(fc.includes('appendConsultActions('), 'finishConsult 里合并为一处 appendConsultActions');
+  assert.ok(!fc.includes('appendKbSink()') && !fc.includes('appendConsultToIntake()') && !fc.includes('appendConsultEscalate()'), 'finishConsult 不再分散调三个旧函数');
 });
 
 test('field.html：运营人工答复 human:true 渲染成专属样式（区别 AI 气泡）', () => {

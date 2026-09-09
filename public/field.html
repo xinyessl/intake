@@ -4306,92 +4306,93 @@ button.f-ov-card { width: 100%; appearance: none; }
     // 非实质答复：答案说了"没覆盖/无相关"，就别再显/存「已参考经验」——都没符合的经验，展示反而误导（据回复内容判定）。
     if (nonSub && bub && bub._kbCite) { try { bub._kbCite.remove(); } catch (e) {} bub._kbCite = null; }
     if (replyText) { var m = { role: 'assistant', content: replyText }; var refs = normalizeKbRefs(kbRefs); if (refs.length && !nonSub) m.kbRefs = refs; chat.messages.push(m); chat.lastA = replyText; }
-    if (aborted) { scrollChatBottom(); saveDraft(); return; }   // 主动停止：不追加 KB/转工单入口，仅保留已生成内容 + 存草稿
-    // 咨询「已解决 → 沉淀经验库」入口（AC-19-KB）：结束后在气泡下追加一枚小按钮。仅「实质答复」才提示沉淀（非实质无价值）。
-    if (replyText && chat.lastQ && !nonSub) appendKbSink();
-    // 咨询「转工单」入口（CT-3）：AI 答复结束且已有咨询会话（chat.convId）→ 追加一枚转工单按钮，实施判断该升级时点它 → 弹确认弹窗 → 直接建单（不再靠 AI 生成工单模板续聊）。
-    if (replyText && chat.convId) appendConsultToIntake();
-    // FS-10 咨询「转人工」入口：AI 答不好时点它 → 该咨询打「待人工回复」态、交运营端回复（仍是咨询、不转开发工单）。外挂功能，与上面「转工单」并列。
-    if (replyText && chat.convId) appendConsultEscalate();
+    if (aborted) { scrollChatBottom(); saveDraft(); return; }   // 主动停止：不追加引导入口，仅保留已生成内容 + 存草稿
+    // 咨询答复结束后的「合并引导卡」（沉淀经验库 / 转工单 / 转人工，三入口合一条 f-msg 卡片，按条件出按钮）。
+    //   沉淀经验库：仅「实质答复」（replyText && chat.lastQ && !nonSub）——非实质无价值；转工单/转人工：仅已有咨询会话（chat.convId）。
+    //   humanActive（人工服务中）时不出（此时是人工对话，不该再引导转人工/沉淀/转工单）。
+    if (replyText) appendConsultActions(nonSub);
     scrollChatBottom();
     saveDraft();
     // 咨询落库后即时刷新左侧提交清单（否则新咨询记录不出现、切模式/新对话后"消失"，须刷新页面才见——与建单流对齐）
     try { if (chat.convId) refreshLeftList(); } catch (e) {}
   }
 
-  // AC-19-KB：咨询「解决了/沉淀经验库」→ kb-from-consult（带 project/q/a）
-  function appendKbSink() {
+  // ========== 咨询答复结束后的「合并引导卡」（AC-19-KB 沉淀经验库 + CT-3 转工单 + FS-10 转人工，三入口合一条卡片） ==========
+  //   一条 f-msg ai 卡片：一句精炼引导 + 一排按钮（flex 换行自适应），按实际条件出现哪些按钮。
+  //   条件：沉淀经验库 = 实质答复（!nonSub && chat.lastQ）；转工单/转人工 = 已有咨询会话（chat.convId）。
+  //   幂等：整卡同 convId 只挂一枚（`.f-consult-actions[data-conv]` 守卫，重复 finishConsult 不叠加）。
+  //   humanActive（人工服务中）时不出（此时是人工对话，续问走 sendHumanMessage 不经 finishConsult；仍加防御 return）。
+  //   注：引导按钮是交互入口、不进 chat.messages（不落草稿，刷新/reopen 后按状态重新判断是否再挂），保持原三函数行为。
+  function appendConsultActions(nonSub) {
+    if (chat.humanActive) return;   // 人工服务中 → 不再出引导卡（此刻是人工对话）
     var box = chatBox(); if (!box) return;
+    var convId = chat.convId || '';
     var archive = currentArchive();
+    var canKb = !nonSub && !!chat.lastQ;              // 沉淀经验库：仅实质答复
+    var canTicket = !!convId;                          // 转工单：仅已有咨询会话
+    var canEscalate = !!convId;                        // 转人工：仅已有咨询会话
+    if (!canKb && !canTicket && !canEscalate) return;  // 一个按钮都不该出 → 整卡不渲染
+    // 幂等：同会话已挂过合并卡 → 不重复追加（convId 为空时用占位键，避免无 convId 的纯沉淀卡重复挂）
+    var dedupeKey = convId || 'nc';
+    if (box.querySelector('.f-consult-actions[data-conv="' + dedupeKey + '"]')) return;
+
     var msg = document.createElement('div'); msg.className = 'f-msg ai';
     var av = document.createElement('div'); av.className = 'av'; av.innerHTML = '<i class="ti ti-bulb"></i>';
-    var card = document.createElement('div'); card.className = 'f-arch';
-    card.innerHTML = '<div class="rowk">这条答疑对你有帮助吗？有价值可沉淀到经验库，帮下一个人少走弯路。</div>';
-    var btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn btn-sm btn-primary'; btn.style.marginTop = '8px';
-    btn.innerHTML = '<i class="ti ti-book-upload"></i> 已解决 · 沉淀经验库';
-    btn.addEventListener('click', function () {
-      btn.disabled = true;
-      // 沉淀整段咨询对话：优先发 convId，让后端用 AI 整理整段对话成一条经验库条目（core Q + 全脉络 A）；
-      // convId 为空（异常兜底）时回落发最后一轮 lastQ/lastA，后端向后兼容。
-      var payload = chat.convId ? { project: archive.project, convId: chat.convId } : { project: archive.project, q: chat.lastQ, a: chat.lastA };
-      api('/api/kb-from-consult', { method: 'POST', body: JSON.stringify(payload) })
-        .then(function (r) {
-          if (r.body && r.body.ok) { btn.innerHTML = '<i class="ti ti-check"></i> 已沉淀到经验库'; }
-          else { btn.disabled = false; btn.innerHTML = '<i class="ti ti-book-upload"></i> 沉淀失败，重试'; }
-        }).catch(function () { btn.disabled = false; btn.innerHTML = '<i class="ti ti-book-upload"></i> 沉淀失败，重试'; });
-    });
-    card.appendChild(btn);
-    msg.appendChild(av); msg.appendChild(card);
-    box.appendChild(msg); scrollChatBottom();
-  }
+    var card = document.createElement('div'); card.className = 'f-arch f-consult-actions'; card.setAttribute('data-conv', dedupeKey);
+    // 一句精炼引导（合并三句）
+    var lead = document.createElement('div'); lead.className = 'rowk';
+    lead.textContent = '这条答疑解决了吗？可沉淀经验库帮下一个人，或升级工单 / 转人工。';
+    card.appendChild(lead);
+    // 一排按钮（横向 flex + gap + 换行自适应）
+    var row = document.createElement('div');
+    row.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;';
 
-  // CT-3：咨询「转工单」入口 —— 结束后在气泡下追加一枚「转工单」按钮（同 appendKbSink 小卡片风格）。
-  //   实施判断该升级为需求/BUG 时点它 → 弹确认弹窗（选类型 + 改标题）→ 确认 → POST /api/consult-to-intake 直接建单（不再靠 AI 生成工单模板续聊）。
-  //   幂等：每个咨询会话（convId）只挂一枚（重复 finishConsult 不叠加）；建单成功后按钮置「已转工单」禁用（防重复建单）。
-  function appendConsultToIntake() {
-    var box = chatBox(); if (!box) return;
-    var convId = chat.convId; if (!convId) return;
-    if (box.querySelector('.f-toticket[data-conv="' + convId + '"]')) return;   // 同会话已挂过 → 不重复追加
-    var archive = currentArchive();
-    var msg = document.createElement('div'); msg.className = 'f-msg ai';
-    var av = document.createElement('div'); av.className = 'av'; av.innerHTML = '<i class="ti ti-ticket"></i>';
-    var card = document.createElement('div'); card.className = 'f-arch f-toticket'; card.setAttribute('data-conv', convId);
-    card.innerHTML = '<div class="rowk">这个咨询需要升级为需求 / BUG 交运营端处理吗？可直接转成工单。</div>';
-    var btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn btn-sm btn-primary'; btn.style.marginTop = '8px';
-    btn.innerHTML = '<i class="ti ti-ticket"></i> 🎫 转工单';
-    btn.addEventListener('click', function () { openConsultToIntake(convId, archive, btn); });
-    card.appendChild(btn);
-    msg.appendChild(av); msg.appendChild(card);
-    box.appendChild(msg); scrollChatBottom();
-  }
+    // ① 已解决 · 沉淀经验库（主色）—— 逻辑逐字保留自原 appendKbSink
+    if (canKb) {
+      var kbBtn = document.createElement('button'); kbBtn.type = 'button'; kbBtn.className = 'btn btn-sm btn-primary';
+      kbBtn.innerHTML = '<i class="ti ti-book-upload"></i> 已解决 · 沉淀经验库';
+      kbBtn.addEventListener('click', function () {
+        kbBtn.disabled = true;
+        // 沉淀整段咨询对话：优先发 convId，让后端用 AI 整理整段对话成一条经验库条目（core Q + 全脉络 A）；
+        // convId 为空（异常兜底）时回落发最后一轮 lastQ/lastA，后端向后兼容。
+        var payload = chat.convId ? { project: archive.project, convId: chat.convId } : { project: archive.project, q: chat.lastQ, a: chat.lastA };
+        api('/api/kb-from-consult', { method: 'POST', body: JSON.stringify(payload) })
+          .then(function (r) {
+            if (r.body && r.body.ok) { kbBtn.innerHTML = '<i class="ti ti-check"></i> 已沉淀到经验库'; }
+            else { kbBtn.disabled = false; kbBtn.innerHTML = '<i class="ti ti-book-upload"></i> 沉淀失败，重试'; }
+          }).catch(function () { kbBtn.disabled = false; kbBtn.innerHTML = '<i class="ti ti-book-upload"></i> 沉淀失败，重试'; });
+      });
+      row.appendChild(kbBtn);
+    }
 
-  // ========== FS-10 咨询「转人工」入口（外挂 · 与 lsy 的 consult 渲染隔离，只加 UI + 调新端点，不动答复流） ==========
-  //   AI 答不好时点它 → POST /api/consult-escalate {project,convId} → 该咨询打「待人工回复」态，交运营端回复（仍是咨询，不转开发工单）。
-  //   幂等：每个咨询会话（convId）只挂一枚（重复 finishConsult 不叠加）；成功后按钮置「已转人工 · 待运营回复」禁用（禁重复点）。
-  function appendConsultEscalate() {
-    var box = chatBox(); if (!box) return;
-    var convId = chat.convId; if (!convId) return;
-    if (box.querySelector('.f-escalate[data-conv="' + convId + '"]')) return;   // 同会话已挂过 → 不重复追加
-    var archive = currentArchive();
-    var msg = document.createElement('div'); msg.className = 'f-msg ai';
-    var av = document.createElement('div'); av.className = 'av'; av.innerHTML = '<i class="ti ti-headset"></i>';
-    var card = document.createElement('div'); card.className = 'f-arch f-escalate'; card.setAttribute('data-conv', convId);
-    card.innerHTML = '<div class="rowk">AI 答复没解决你的问题？可转人工，交运营同事看完整对话后给你回复（仍是咨询，不建工单）。</div>';
-    var btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn btn-sm btn-primary'; btn.style.marginTop = '8px';
-    btn.innerHTML = '<i class="ti ti-headset"></i> 转人工';
-    btn.addEventListener('click', function () {
-      btn.disabled = true;
-      api('/api/consult-escalate', { method: 'POST', body: JSON.stringify({ project: chat.reopenProject || archive.project, convId: convId }) })
-        .then(function (r) {
-          if (r.body && r.body.ok) {
-            btn.innerHTML = '<i class="ti ti-check"></i> 已转人工 · 可继续和运营对话'; showToast('已转人工，可直接和运营同事对话', 'success');
-            // FS-10 增强：转人工成功 → 进入人工服务模式（后续 sendChat 走 human-message，不调 AI），显提示条，落草稿
-            if (chat.convId === convId) { chat.humanActive = true; syncHumanModeBar(); appendSystemNotice('已转人工，你可以直接在下方继续和运营同事对话（含截图），运营处理完会点「结束人工服务」恢复 AI 答疑。'); saveDraft(); }
-          }
-          else { btn.disabled = false; btn.innerHTML = '<i class="ti ti-headset"></i> 转人工失败，重试'; }
-        }).catch(function () { btn.disabled = false; btn.innerHTML = '<i class="ti ti-headset"></i> 转人工失败，重试'; });
-    });
-    card.appendChild(btn);
+    // ② 转工单（次级 · 描边）—— 逻辑逐字保留自原 appendConsultToIntake
+    if (canTicket) {
+      var ticketBtn = document.createElement('button'); ticketBtn.type = 'button'; ticketBtn.className = 'btn btn-sm';
+      ticketBtn.innerHTML = '<i class="ti ti-ticket"></i> 🎫 转工单';
+      ticketBtn.addEventListener('click', function () { openConsultToIntake(convId, archive, ticketBtn); });
+      row.appendChild(ticketBtn);
+    }
+
+    // ③ 转人工（次级 · 描边）—— 逻辑逐字保留自原 appendConsultEscalate（含进人工模式 + 提示条 + 系统提示 + 落草稿）
+    if (canEscalate) {
+      var escBtn = document.createElement('button'); escBtn.type = 'button'; escBtn.className = 'btn btn-sm';
+      escBtn.innerHTML = '<i class="ti ti-headset"></i> 转人工';
+      escBtn.addEventListener('click', function () {
+        escBtn.disabled = true;
+        api('/api/consult-escalate', { method: 'POST', body: JSON.stringify({ project: chat.reopenProject || archive.project, convId: convId }) })
+          .then(function (r) {
+            if (r.body && r.body.ok) {
+              escBtn.innerHTML = '<i class="ti ti-check"></i> 已转人工 · 可继续和运营对话'; showToast('已转人工，可直接和运营同事对话', 'success');
+              // FS-10 增强：转人工成功 → 进入人工服务模式（后续 sendChat 走 human-message，不调 AI），显提示条，落草稿
+              if (chat.convId === convId) { chat.humanActive = true; syncHumanModeBar(); appendSystemNotice('已转人工，你可以直接在下方继续和运营同事对话（含截图），运营处理完会点「结束人工服务」恢复 AI 答疑。'); saveDraft(); }
+            }
+            else { escBtn.disabled = false; escBtn.innerHTML = '<i class="ti ti-headset"></i> 转人工失败，重试'; }
+          }).catch(function () { escBtn.disabled = false; escBtn.innerHTML = '<i class="ti ti-headset"></i> 转人工失败，重试'; });
+      });
+      row.appendChild(escBtn);
+    }
+
+    card.appendChild(row);
     msg.appendChild(av); msg.appendChild(card);
     box.appendChild(msg); scrollChatBottom();
   }
@@ -5461,7 +5462,7 @@ button.f-ov-card { width: 100%; appearance: none; }
   })();
 
   // 暴露给测试/调试（不含敏感数据）
-  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, openConvRec: openConvRec, closeConvRec: closeConvRec, loadConversations: loadConversations, mkConvItem: mkConvItem, reopenConversation: reopenConversation, reopenIntakeConv: reopenIntakeConv, bindConvDelete: bindConvDelete, doDeleteConversation: doDeleteConversation, newSessionId: newSessionId, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, openTicketDrawer: openTicketDrawer, closeTicketDrawer: closeTicketDrawer, renderTicketDrawer: renderTicketDrawer, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, setTicketPriority: setTicketPriority, newConversation: newConversation, sendChat: sendChat, stopSending: stopSending, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast, openMaintainEdit: openMaintainEdit, doMaintainSave: doMaintainSave, maintainChipHtml: maintainChipHtml, maintainDaysLeft: maintainDaysLeft, renderTodoBody: renderTodoBody, mkUpdatePlanBlock: mkUpdatePlanBlock, loadUpdatePlan: loadUpdatePlan, renderUpdatePlan: renderUpdatePlan, mkPlanTaskItem: mkPlanTaskItem, mkSqlBundleItem: mkSqlBundleItem, doTaskToggle: doTaskToggle, doSqlBundleToggle: doSqlBundleToggle, appendConsultToIntake: appendConsultToIntake, openConsultToIntake: openConsultToIntake, doConsultToIntake: doConsultToIntake, appendMediaBubble: appendMediaBubble, mediaUrls: mediaUrls, createImagePreviewTrigger: createImagePreviewTrigger, openImagePreview: openImagePreview, closeImagePreview: closeImagePreview, markLeftActive: markLeftActive, reapplyLeftActive: reapplyLeftActive, bindReopen: bindReopen, fConfirm: fConfirm, doDeleteItem: doDeleteItem, bindDelete: bindDelete, renderOverview: renderOverview, renderOverviewNative: renderOverviewNative, unmountReactOverview: unmountReactOverview, startHumanReplyPoll: startHumanReplyPoll, stopHumanReplyPoll: stopHumanReplyPoll, pollHumanReplies: pollHumanReplies, detectNewHumanReplies: detectNewHumanReplies };
+  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, openConvRec: openConvRec, closeConvRec: closeConvRec, loadConversations: loadConversations, mkConvItem: mkConvItem, reopenConversation: reopenConversation, reopenIntakeConv: reopenIntakeConv, bindConvDelete: bindConvDelete, doDeleteConversation: doDeleteConversation, newSessionId: newSessionId, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, openTicketDrawer: openTicketDrawer, closeTicketDrawer: closeTicketDrawer, renderTicketDrawer: renderTicketDrawer, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, setTicketPriority: setTicketPriority, newConversation: newConversation, sendChat: sendChat, stopSending: stopSending, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast, openMaintainEdit: openMaintainEdit, doMaintainSave: doMaintainSave, maintainChipHtml: maintainChipHtml, maintainDaysLeft: maintainDaysLeft, renderTodoBody: renderTodoBody, mkUpdatePlanBlock: mkUpdatePlanBlock, loadUpdatePlan: loadUpdatePlan, renderUpdatePlan: renderUpdatePlan, mkPlanTaskItem: mkPlanTaskItem, mkSqlBundleItem: mkSqlBundleItem, doTaskToggle: doTaskToggle, doSqlBundleToggle: doSqlBundleToggle, appendConsultActions: appendConsultActions, openConsultToIntake: openConsultToIntake, doConsultToIntake: doConsultToIntake, appendMediaBubble: appendMediaBubble, mediaUrls: mediaUrls, createImagePreviewTrigger: createImagePreviewTrigger, openImagePreview: openImagePreview, closeImagePreview: closeImagePreview, markLeftActive: markLeftActive, reapplyLeftActive: reapplyLeftActive, bindReopen: bindReopen, fConfirm: fConfirm, doDeleteItem: doDeleteItem, bindDelete: bindDelete, renderOverview: renderOverview, renderOverviewNative: renderOverviewNative, unmountReactOverview: unmountReactOverview, startHumanReplyPoll: startHumanReplyPoll, stopHumanReplyPoll: stopHumanReplyPoll, pollHumanReplies: pollHumanReplies, detectNewHumanReplies: detectNewHumanReplies };
 })();
 </script>
 </body>
