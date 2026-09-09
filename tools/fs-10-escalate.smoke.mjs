@@ -147,6 +147,11 @@ test('FS-10 增强·持续双向人工对话：实施 human-message（含截图�
   assert.equal(last.by, FIELD_NAME);
   assert.match(last.text, /报错截图/);
   assert.ok(Array.isArray(last.media) && last.media.length === 1, '截图挂到本条消息 media');
+  // 关键回归：图必须真落盘（磁盘文件存在），不能只在 chat/返回里有路径而盘上无文件（本次 bug：线上该 conv 连 media 目录都没有）。
+  //   media 路径形如 media/<convId>/img-1.png，落在 INTAKE_DATA/intake-store/<projId>/ 下。
+  const diskPath = path.join(tmpData, 'intake-store', PID, last.media[0]);
+  assert.ok(fs.existsSync(diskPath), '截图真落盘：' + diskPath);
+  assert.ok(fs.statSync(diskPath).size > 0, '落盘文件非空');
   assert.equal(e.humanReplied, false, '现场发言后回到「待回复」态');
   assert.ok(e.lastFieldMsgAt, 'lastFieldMsgAt 有值');
   // 空消息（无文本无图）→ 400

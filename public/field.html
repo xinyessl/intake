@@ -3914,6 +3914,13 @@ button.f-ov-card { width: 100%; appearance: none; }
   }
   function renderSavedConversation(projectFallback) {
     var messages = Array.isArray(chat.messages) ? chat.messages : [];
+    // FS-10 回归修复：现场人工消息/运营回复的截图缩略图靠 mediaUrls(project, m.media) 拼 /api/intake-media 取图，project 为空则 mediaUrls 返 []（图丢）。
+    //   刷新恢复「本会话新起的」escalated consult 时，reopenConvProject/reopenIntakeProject 都为空（那两个仅 reopen 列表记录才置），
+    //   此时 consult 的 project 落在 chat.reopenProject（reopen 续聊）或 currentArchive().project（新起会话·随导航上下文，与发送落盘时同一 project）。
+    //   → 兜底解析出 consult 真实 project 传给 mediaUrls，否则文字气泡在、图却因 project='' 全丢（正是本次 bug 现象）。
+    if (!projectFallback && chat.submitKind === 'consult') {
+      projectFallback = chat.reopenProject || (currentArchive().project) || '';
+    }
     var tickets = normalizeBuiltTickets(chat.builtTickets, chat.savedId);
     var cardsByMessageIndex = {};
     tickets.forEach(function (t) {
