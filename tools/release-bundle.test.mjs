@@ -1,0 +1,22 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import {execFileSync} from 'node:child_process';
+import {deliveryBundle} from './release-bundle.mjs';
+const release={version:'1',platform:'docker',dbVendor:'mysql'};
+const zip=(dir,kind,files)=>{const file=path.join(dir,kind+'.zip');execFileSync('python3',['-c',`import zipfile,json,sys\nwith zipfile.ZipFile(sys.argv[1],'w',zipfile.ZIP_DEFLATED) as z:\n for k,v in json.loads(sys.argv[2]): z.writestr(k,v)`,file,JSON.stringify(files)]);const bytes=fs.readFileSync(file),sha256=crypto.createHash('sha256').update(bytes).digest('hex');fs.copyFileSync(file,path.join(dir,'release-artifacts',sha256));return {file:kind+'.zip',kind,size:bytes.length,sha256};};
+const setup=()=>{const d=fs.mkdtempSync(path.join(os.tmpdir(),'flat-bundle-test-'));fs.mkdirSync(path.join(d,'release-artifacts'));return d;};
+const inspect=file=>JSON.parse(execFileSync('python3',['-c',"import zipfile,sys,json;z=zipfile.ZipFile(sys.argv[1]);assert z.testzip() is None;print(json.dumps({n:z.read(n).decode() for n in z.namelist()}))",file]));
+test('flat delivery merges programs/dependencies and excludes migration metadata',async()=>{const d=setup();try{const app=zip(d,'application',[['manifest.json','{}'],['apps/bms/bms.jar','app'],['web/index.html','web'],['migrations/manual/mysql/etl.sql','old sql']]),dep=zip(d,'dependencies',[['manifest.json','{}'],['apps/bms/lib/a.jar','lib']]);const extra=[{file:'升级SQL/mysql-etl.sql',content:'merged sql'}];const a=await deliveryBundle(d,release,[app,dep],extra),data=inspect(a.file);assert.deepEqual(Object.keys(data).sort(),['升级SQL/','升级SQL/mysql-etl.sql','程序文件/','程序文件/apps/bms/bms.jar','程序文件/apps/bms/lib/a.jar','程序文件/web/index.html'].sort());assert.equal(data['程序文件/apps/bms/lib/a.jar'],'lib');assert.equal((await deliveryBundle(d,release,[app,dep],extra)).file,a.file);const noDep=inspect((await deliveryBundle(d,release,[app],extra)).file);assert(!Object.keys(noDep).some(n=>n.includes('/lib/')));assert.notEqual((await deliveryBundle(d,release,[app],[])).file,a.file);}finally{fs.rmSync(d,{recursive:true});}});
+for(const [title,appFiles,depFiles]of [
+ ['traversal',[['../evil','x'],['apps/x/a.jar','a']],null],
+ ['duplicate',[['apps/x/a.jar','a'],['apps/x/a.jar','b']],null],
+ ['case collision',[['apps/x/A.jar','a']],[['apps/x/a.jar','b']]],
+ ['file directory collision',[['apps/x','a']],[['apps/x/a.jar','b']]],
+ ['duplicate sql',[['apps/x/a.sql','a']],null],
+])test('rejects '+title,async()=>{const d=setup();try{const artifacts=[zip(d,'application',appFiles)];if(depFiles)artifacts.push(zip(d,'dependencies',depFiles));await assert.rejects(deliveryBundle(d,release,artifacts));assert(!fs.readdirSync(path.join(d,'release-bundles')).some(n=>n.endsWith('.tmp')));}finally{fs.rmSync(d,{recursive:true});}});
+test('rejects tampered source SHA',async()=>{const d=setup();try{const a=zip(d,'application',[['apps/x/a.jar','a']]);const p=path.join(d,'release-artifacts',a.sha256),bytes=fs.readFileSync(p);bytes[35]^=1;fs.writeFileSync(p,bytes);await assert.rejects(deliveryBundle(d,release,[a]),/完整性/);}finally{fs.rmSync(d,{recursive:true});}});
+for(const kind of ['symlink','local-header','payload-crc'])test('rejects '+kind+' even with matching artifact SHA',async()=>{const d=setup();try{const a=zip(d,'application',[['apps/x/a.jar','hello payload']]),old=path.join(d,'release-artifacts',a.sha256),bytes=fs.readFileSync(old);if(kind==='symlink'){const c=bytes.indexOf(Buffer.from([0x50,0x4b,0x01,0x02]));bytes.writeUInt32LE((0xa1ff*65536)>>>0,c+38);}else if(kind==='local-header')bytes[30]^=1;else {const c=bytes.indexOf(Buffer.from([0x50,0x4b,0x01,0x02]));bytes[c+16]^=1;}a.sha256=crypto.createHash('sha256').update(bytes).digest('hex');fs.writeFileSync(path.join(d,'release-artifacts',a.sha256),bytes);await assert.rejects(deliveryBundle(d,release,[a]));}finally{fs.rmSync(d,{recursive:true});}});

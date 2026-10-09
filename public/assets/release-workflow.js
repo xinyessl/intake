@@ -133,11 +133,13 @@ window.ReleaseUI = (() => {
     const x=hooks.siteInfo;if(x)message(box,'当前现场：'+(siteVersion(x)||'版本待运营确认')+' · '+(x.deployment?.dbVendor||'数据库待确认')+' / '+(x.deployment?.platform||'部署待确认'));
     box.append(checklist,files);choose(selected);
     const link=(label,url)=>{const a=document.createElement('a');a.className='btn btn-sm';a.style.cssText='margin:4px 8px 4px 0';a.textContent=label;a.href=url;a.target='_blank';files.append(a);};
-    if(downloads?.needsUpdate){message(files,'目标版本 '+downloads.version);link('下载更新包','/api/field/release-bundle'+query);files.querySelector('a').onclick=()=>{if(!files.querySelector('[data-bundle-status]')){const note=message(files,'正在准备更新包，首次准备可能需要稍等，请勿重复点击。文件开始下载后可在浏览器下载列表查看进度。');note.dataset.bundleStatus='true';note.setAttribute('role','status');}};message(files,'已按医院当前版本及部署环境配好程序和所需依赖。下载后先解压更新包，按其中说明安装。');}
+    if(downloads?.needsUpdate){message(files,'目标版本 '+downloads.version);link('下载更新包','/api/field/release-bundle'+query);files.querySelector('a').onclick=()=>{if(!files.querySelector('[data-bundle-status]')){const note=message(files,'正在准备更新包，首次准备可能需要稍等，请勿重复点击。文件开始下载后可在浏览器下载列表查看进度。');note.dataset.bundleStatus='true';note.setAttribute('role','status');}};message(files,'已按医院当前版本及部署环境配好程序和所需依赖。解压后只有“程序文件”和“升级SQL”两个目录，所需依赖已合并到程序文件中。');}
     const groups=p?.sqlGroups||downloads?.sqlGroups||[],tasks=p?.tasks||downloads?.tasks||[];
-    message(files,'本次累计升级 SQL');
-    groups.forEach(g=>link('下载 '+g.vendor+' / '+g.db+' 合并 SQL（'+g.scriptCount+' 个脚本）',(p?'/api/field/update-sql-merged':'/api/field/release-sql-merged')+query+'&group='+encodeURIComponent(g.id)));
-    message(files,'在 Navicat 连接对应数据库，执行下载的 SQL 文件并查看执行结果。文件保留原脚本顺序；下载不会标记执行成功，核验后请手动确认。');
+    if(downloads?.needsUpdate){
+      message(files,'先备份数据库、程序及医院配置。程序文件/apps、程序文件/web 按现场安装目录更新；保留医院自己的配置。');
+      message(files,'升级SQL 中的 etl 文件在数据中心库执行，bms 文件在病案业务库执行。请在 Navicat 连接对应数据库，执行一次并查看结果，勿重复执行。');
+      message(files,'下载不会标记执行成功。完成后回到更新清单确认各库 SQL、程序安装及业务验证。');
+    }
     if(!p){message(checklist,downloads?(downloads.needsUpdate?'已合并现场版本之后需要处理的更新，无需逐个旧版本查看。':'医院已是目标版本，没有待升级事项。'):(error||'暂时无法读取更新清单，请联系运营核对医院版本及部署信息。'));if(downloads?.needsUpdate){message(checklist,downloads.fromVersion+' → '+downloads.version+' · 累计 '+downloads.versionsInRange.join('、'));if(downloads.baselineReviewRequired)message(checklist,'旧现场的历史执行情况需要核对。下面已包含首个规范版本起的全部已知更新，请核实已做事项和已执行 SQL，避免重复执行。');message(checklist,'做完一项勾选一项，系统会保存进度；勾选不会修改医院版本。');}}
     else {message(checklist,p.fromVersion+' → '+p.toVersion+' · 累计 '+p.versionsInRange.join('、'));if(p.baselineReviewRequired)message(checklist,'旧现场需核对历史版本及数据库；已保留本现场此前勾选进度，各库SQL仍须单独确认。');}
     let updateReady=()=>{};
