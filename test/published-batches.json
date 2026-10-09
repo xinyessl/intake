@@ -1,0 +1,707 @@
+{
+  "_note": "Synthetic fixture retaining release topology, IDs and counts only; no customer ledger, users, download history or live SQL.",
+  "batches": [
+    {
+      "id": "B-01",
+      "product": "wzh2-0",
+      "status": "已交付",
+      "pkgVersion": "1.0.26082502",
+      "releaseTime": "2026-08-25 18:39",
+      "deployPlan": {
+        "schemaVersion": 1
+      }
+    },
+    {
+      "id": "B-02",
+      "product": "wzh2-0",
+      "status": "可下载",
+      "pkgVersion": "1.5.26092901",
+      "releaseTime": "2026-09-30 13:00",
+      "deployPlan": {
+        "schemaVersion": 2,
+        "kind": "delta",
+        "version": "1.5.26092901",
+        "to": "1.5.26092901",
+        "tag": "1.5.26092901",
+        "commit": "451ed6dbdecb4d75a3f20a60d40cc1b71bebb7d8",
+        "parentVersion": "",
+        "dependencySetId": "fdbf5175c8e77e0cd86c12a25d6e4ce8bb3046e057672fe6334cec1af6ba4f64",
+        "tasks": [
+          {
+            "id": "baseline-review",
+            "title": "Fixture task 1",
+            "desc": "Synthetic test instruction."
+          },
+          {
+            "id": "runner-install",
+            "title": "Fixture task 2",
+            "desc": "Synthetic test instruction."
+          },
+          {
+            "id": "dc42-mode",
+            "title": "Fixture task 3",
+            "desc": "Synthetic test instruction."
+          },
+          {
+            "id": "dc43-source",
+            "title": "Fixture task 4",
+            "desc": "Synthetic test instruction."
+          },
+          {
+            "id": "dc44-config",
+            "title": "Fixture task 5",
+            "desc": "Synthetic test instruction."
+          },
+          {
+            "id": "dc45-source-map",
+            "title": "Fixture task 6",
+            "desc": "Synthetic test instruction."
+          },
+          {
+            "id": "verify",
+            "title": "Fixture task 7",
+            "desc": "Synthetic test instruction."
+          },
+          {
+            "id": "dc47-verify",
+            "title": "Fixture task 8",
+            "desc": "Synthetic test instruction."
+          },
+          {
+            "id": "bms42-panels",
+            "title": "Fixture task 9",
+            "desc": "Synthetic test instruction."
+          },
+          {
+            "id": "death-flag-verify",
+            "title": "Fixture task 10",
+            "desc": "Synthetic test instruction."
+          },
+          {
+            "id": "bms43-death-map",
+            "title": "Fixture task 11",
+            "desc": "Synthetic test instruction."
+          },
+          {
+            "id": "bms43-nonmedical-map",
+            "title": "Fixture task 12",
+            "desc": "Synthetic test instruction."
+          },
+          {
+            "id": "bms43-single-patient-verify",
+            "title": "Fixture task 13",
+            "desc": "Synthetic test instruction."
+          },
+          {
+            "id": "bms44-pdfjs-runtime-check",
+            "title": "Fixture task 14",
+            "desc": "Synthetic test instruction."
+          },
+          {
+            "id": "beitun-baseline",
+            "title": "Fixture task 15",
+            "desc": "Synthetic test instruction."
+          }
+        ],
+        "sql": [
+          {
+            "id": "release-dc42-disabled-task",
+            "title": "Fixture migration",
+            "desc": "Synthetic SQL; never execute as upgrade.",
+            "file": "sql/migrations/2026-09-29_release-dc42-disabled-task.mysql.sql",
+            "vendor": "mysql",
+            "db": "etl",
+            "content": "SELECT 'fixture-release-dc42-disabled-task';\n",
+            "checksum": "09834d7fbe6f11fe97cc28949c9dccd08dad60f6a2e26cd3cc0ea4884c8da665"
+          },
+          {
+            "id": "release-dc42-disabled-task",
+            "title": "Fixture migration",
+            "desc": "Synthetic SQL; never execute as upgrade.",
+            "file": "sql/migrations/2026-09-29_release-dc42-disabled-task.pg.sql",
+            "vendor": "postgresql",
+            "db": "etl",
+            "content": "SELECT 'fixture-release-dc42-disabled-task';\n",
+            "checksum": "09834d7fbe6f11fe97cc28949c9dccd08dad60f6a2e26cd3cc0ea4884c8da665"
+          },
+          {
+            "id": "dc43-blood-source9-seed",
+            "title": "Fixture migration",
+            "desc": "Synthetic SQL; never execute as upgrade.",
+            "file": "sql/migrations/2026-09-23_dc43-blood-source9-seed.mysql.sql",
+            "vendor": "mysql",
+            "db": "etl",
+            "content": "SELECT 'fixture-dc43-blood-source9-seed';\n",
+            "checksum": "b49ea00d6342b4587e9d93eb156baeff2747e48f66755a89eaf590e9b6f43eb1"
+          },
+          {
+            "id": "dc43-blood-source9-seed",
+            "title": "Fixture migration",
+            "desc": "Synthetic SQL; never execute as upgrade.",
+            "file": "sql/migrations/2026-09-23_dc43-blood-source9-seed.pg.sql",
+            "vendor": "postgresql",
+            "db": "etl",
+            "content": "SELECT 'fixture-dc43-blood-source9-seed';\n",
+            "checksum": "b49ea00d6342b4587e9d93eb156baeff2747e48f66755a89eaf590e9b6f43eb1"
+          },
+          {
+            "id": "dc44-signature-record",
+            "title": "Fixture migration",
+            "desc": "Synthetic SQL; never execute as upgrade.",
+            "file": "sql/migrations/2026-09-23_dc44-signature-record.mysql.sql",
+            "vendor": "mysql",
+            "db": "etl",
+            "content": "SELECT 'fixture-dc44-signature-record';\n",
+            "checksum": "6e3d39b16532e0c457a0632471232d2088dcc66fe7179541e2b07583943af235"
+          },
+          {
+            "id": "dc44-signature-record",
+            "title": "Fixture migration",
+            "desc": "Synthetic SQL; never execute as upgrade.",
+            "file": "sql/migrations/2026-09-23_dc44-signature-record.pg.sql",
+            "vendor": "postgresql",
+            "db": "etl",
+            "content": "SELECT 'fixture-dc44-signature-record';\n",
+            "checksum": "6e3d39b16532e0c457a0632471232d2088dcc66fe7179541e2b07583943af235"
+          },
+          {
+            "id": "dc44-signature-config-seed",
+            "title": "Fixture migration",
+            "desc": "Synthetic SQL; never execute as upgrade.",
+            "file": "sql/migrations/2026-09-23_dc44-signature-config-seed.mysql.sql",
+            "vendor": "mysql",
+            "db": "etl",
+            "content": "SELECT 'fixture-dc44-signature-config-seed';\n",
+            "checksum": "d05477de51d2a3d5be6bb6843048d1d507f07a18deb97bb2a150e606b06cb3ac"
+          },
+          {
+            "id": "dc44-signature-config-seed",
+            "title": "Fixture migration",
+            "desc": "Synthetic SQL; never execute as upgrade.",
+            "file": "sql/migrations/2026-09-23_dc44-signature-config-seed.pg.sql",
+            "vendor": "postgresql",
+            "db": "etl",
+            "content": "SELECT 'fixture-dc44-signature-config-seed';\n",
+            "checksum": "d05477de51d2a3d5be6bb6843048d1d507f07a18deb97bb2a150e606b06cb3ac"
+          },
+          {
+            "id": "dc44-signature-menu",
+            "title": "Fixture migration",
+            "desc": "Synthetic SQL; never execute as upgrade.",
+            "file": "sql/migrations/2026-09-23_dc44-signature-menu.mysql.sql",
+            "vendor": "mysql",
+            "db": "bms",
+            "content": "SELECT 'fixture-dc44-signature-menu';\n",
+            "checksum": "d823a1660e69f3e5b717ca9d5d0f46f5389c14eb109fbec61c720ed2f068aa15"
+          },
+          {
+            "id": "dc44-signature-menu",
+            "title": "Fixture migration",
+            "desc": "Synthetic SQL; never execute as upgrade.",
+            "file": "sql/migrations/2026-09-23_dc44-signature-menu.pg.sql",
+            "vendor": "postgresql",
+            "db": "bms",
+            "content": "SELECT 'fixture-dc44-signature-menu';\n",
+            "checksum": "d823a1660e69f3e5b717ca9d5d0f46f5389c14eb109fbec61c720ed2f068aa15"
+          },
+          {
+            "id": "dc45-patient",
+            "title": "Fixture migration",
+            "desc": "Synthetic SQL; never execute as upgrade.",
+            "file": "sql/migrations/2026-09-29_dc45-patient.mysql.sql",
+            "vendor": "mysql",
+            "db": "bms",
+            "content": "SELECT 'fixture-dc45-patient';\n",
+            "checksum": "6da90d84c9c8b7d64a2976cc8c6a35c84ab8f9b0c21a4ca3b5fb7fc83feba75f"
+          },
+          {
+            "id": "dc45-patient",
+            "title": "Fixture migration",
+            "desc": "Synthetic SQL; never execute as upgrade.",
+            "file": "sql/migrations/2026-09-29_dc45-patient.pg.sql",
+            "vendor": "postgresql",
+            "db": "bms",
+            "content": "SELECT 'fixture-dc45-patient';\n",
+            "checksum": "6da90d84c9c8b7d64a2976cc8c6a35c84ab8f9b0c21a4ca3b5fb7fc83feba75f"
+          },
+          {
+            "id": "dc45-interface",
+            "title": "Fixture migration",
+            "desc": "Synthetic SQL; never execute as upgrade.",
+            "file": "sql/migrations/2026-09-29_dc45-interface.mysql.sql",
+            "vendor": "mysql",
+            "db": "etl",
+            "content": "SELECT 'fixture-dc45-interface';\n",
+            "checksum": "f8c9a7c34557d32c58b4acbe449ba7b3f3732a7384ac85df978a0bfe64620e83"
+          },
+          {
+            "id": "dc45-interface",
+            "title": "Fixture migration",
+            "desc": "Synthetic SQL; never execute as upgrade.",
+            "file": "sql/migrations/2026-09-29_dc45-interface.pg.sql",
+            "vendor": "postgresql",
+            "db": "etl",
+            "content": "SELECT 'fixture-dc45-interface';\n",
+            "checksum": "f8c9a7c34557d32c58b4acbe449ba7b3f3732a7384ac85df978a0bfe64620e83"
+          },
+          {
+            "id": "dc47-interface-six-fields",
+            "title": "Fixture migration",
+            "desc": "Synthetic SQL; never execute as upgrade.",
+            "file": "sql/migrations/2026-09-29_dc47-interface-six-fields.mysql.sql",
+            "vendor": "mysql",
+            "db": "etl",
+            "content": "SELECT 'fixture-dc47-interface-six-fields';\n",
+            "checksum": "e55af8585c80d41cb882304264ab70f56d73118c456429bf8589b2867345b83e"
+          },
+          {
+            "id": "dc47-interface-six-fields",
+            "title": "Fixture migration",
+            "desc": "Synthetic SQL; never execute as upgrade.",
+            "file": "sql/migrations/2026-09-29_dc47-interface-six-fields.pg.sql",
+            "vendor": "postgresql",
+            "db": "etl",
+            "content": "SELECT 'fixture-dc47-interface-six-fields';\n",
+            "checksum": "e55af8585c80d41cb882304264ab70f56d73118c456429bf8589b2867345b83e"
+          },
+          {
+            "id": "bms43-national-export-map",
+            "title": "Fixture migration",
+            "desc": "Synthetic SQL; never execute as upgrade.",
+            "file": "sql/migrations/2026-09-29_bms43-national-export-map.mysql.sql",
+            "vendor": "mysql",
+            "db": "bms",
+            "content": "SELECT 'fixture-bms43-national-export-map';\n",
+            "checksum": "6caa5bba68e05cfa633a00cb6795b04cede89f5173962656c944b4fd8ae72367"
+          },
+          {
+            "id": "bms43-national-export-map",
+            "title": "Fixture migration",
+            "desc": "Synthetic SQL; never execute as upgrade.",
+            "file": "sql/migrations/2026-09-29_bms43-national-export-map.pg.sql",
+            "vendor": "postgresql",
+            "db": "bms",
+            "content": "SELECT 'fixture-bms43-national-export-map';\n",
+            "checksum": "6caa5bba68e05cfa633a00cb6795b04cede89f5173962656c944b4fd8ae72367"
+          }
+        ],
+        "artifacts": [
+          {
+            "kind": "application",
+            "platform": "docker",
+            "dbVendor": "mysql",
+            "file": "pams-1.5.26092901-docker-mysql-application.zip",
+            "url": "/api/release-artifact?id=27389a8e2d1aff2509e0cb7ef759c49ca9d83ba5dcc08f4fba118eb8ab03fd45",
+            "sha256": "27389a8e2d1aff2509e0cb7ef759c49ca9d83ba5dcc08f4fba118eb8ab03fd45",
+            "size": 29819771,
+            "modules": [
+              "usercenter",
+              "portal",
+              "datacenter",
+              "bms",
+              "print"
+            ]
+          },
+          {
+            "kind": "dependencies",
+            "platform": "docker",
+            "dbVendor": "mysql",
+            "file": "pams-1.5.26092901-docker-mysql-dependencies.zip",
+            "url": "/api/release-artifact?id=f750470c459e7c0d6d88a8f0958d099bd95e4c41d3b51a47c3cd80ae937ce103",
+            "sha256": "f750470c459e7c0d6d88a8f0958d099bd95e4c41d3b51a47c3cd80ae937ce103",
+            "size": 413940392,
+            "modules": [
+              "usercenter",
+              "portal",
+              "datacenter",
+              "bms",
+              "print"
+            ]
+          },
+          {
+            "kind": "application",
+            "platform": "docker",
+            "dbVendor": "postgresql",
+            "file": "pams-1.5.26092901-docker-postgresql-application.zip",
+            "url": "/api/release-artifact?id=697e3110521b1d3c5e5f5c5e275cdba4b78f18ac5f2cf4293e29291898c3ab21",
+            "sha256": "697e3110521b1d3c5e5f5c5e275cdba4b78f18ac5f2cf4293e29291898c3ab21",
+            "size": 29818256,
+            "modules": [
+              "usercenter",
+              "portal",
+              "datacenter",
+              "bms",
+              "print"
+            ]
+          },
+          {
+            "kind": "dependencies",
+            "platform": "docker",
+            "dbVendor": "postgresql",
+            "file": "pams-1.5.26092901-docker-postgresql-dependencies.zip",
+            "url": "/api/release-artifact?id=87cc82be3a9372e089c9603459de4611ddf1a2cd75ce65b552bb430abca2f043",
+            "sha256": "87cc82be3a9372e089c9603459de4611ddf1a2cd75ce65b552bb430abca2f043",
+            "size": 413940391,
+            "modules": [
+              "usercenter",
+              "portal",
+              "datacenter",
+              "bms",
+              "print"
+            ]
+          },
+          {
+            "kind": "application",
+            "platform": "windows",
+            "dbVendor": "mysql",
+            "file": "pams-1.5.26092901-windows-mysql-application.zip",
+            "url": "/api/release-artifact?id=834ad34dc11ddcca76dc2889d49dd49a681a922f441eefe58393fea223b86048",
+            "sha256": "834ad34dc11ddcca76dc2889d49dd49a681a922f441eefe58393fea223b86048",
+            "size": 29819772,
+            "modules": [
+              "usercenter",
+              "portal",
+              "datacenter",
+              "bms",
+              "print"
+            ]
+          },
+          {
+            "kind": "dependencies",
+            "platform": "windows",
+            "dbVendor": "mysql",
+            "file": "pams-1.5.26092901-windows-mysql-dependencies.zip",
+            "url": "/api/release-artifact?id=362a392b7d2b8874f4180c6400bb1f3bb2a7a8729fa43f068434d7b0b47f96c4",
+            "sha256": "362a392b7d2b8874f4180c6400bb1f3bb2a7a8729fa43f068434d7b0b47f96c4",
+            "size": 413940397,
+            "modules": [
+              "usercenter",
+              "portal",
+              "datacenter",
+              "bms",
+              "print"
+            ]
+          },
+          {
+            "kind": "application",
+            "platform": "windows",
+            "dbVendor": "postgresql",
+            "file": "pams-1.5.26092901-windows-postgresql-application.zip",
+            "url": "/api/release-artifact?id=3a37cad6e9db3671c0466ac39524a6f79b85a1b0a9b749bd713b664d8983ae09",
+            "sha256": "3a37cad6e9db3671c0466ac39524a6f79b85a1b0a9b749bd713b664d8983ae09",
+            "size": 29818258,
+            "modules": [
+              "usercenter",
+              "portal",
+              "datacenter",
+              "bms",
+              "print"
+            ]
+          },
+          {
+            "kind": "dependencies",
+            "platform": "windows",
+            "dbVendor": "postgresql",
+            "file": "pams-1.5.26092901-windows-postgresql-dependencies.zip",
+            "url": "/api/release-artifact?id=7cb93077523101c14649a5ffd24f232ffddc94c1932225150ec26f68e7560194",
+            "sha256": "7cb93077523101c14649a5ffd24f232ffddc94c1932225150ec26f68e7560194",
+            "size": 413940396,
+            "modules": [
+              "usercenter",
+              "portal",
+              "datacenter",
+              "bms",
+              "print"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "B-03",
+      "product": "wzh2-0",
+      "status": "可下载",
+      "pkgVersion": "1.5.26100901",
+      "releaseTime": "2026-10-09 11:57",
+      "deployPlan": {
+        "schemaVersion": 2,
+        "kind": "delta",
+        "version": "1.5.26100901",
+        "to": "1.5.26100901",
+        "tag": "1.5.26100901",
+        "commit": "47fdf40ca68f66f69ccecf85614827cf709d2990",
+        "parentVersion": "1.5.26092901",
+        "dependencySetId": "fdbf5175c8e77e0cd86c12a25d6e4ce8bb3046e057672fe6334cec1af6ba4f64",
+        "tasks": [
+          {
+            "id": "backup",
+            "title": "Fixture task 1",
+            "desc": "Synthetic test instruction."
+          },
+          {
+            "id": "sql-upgrade",
+            "title": "Fixture task 2",
+            "desc": "Synthetic test instruction."
+          },
+          {
+            "id": "collection-mode",
+            "title": "Fixture task 3",
+            "desc": "Synthetic test instruction."
+          },
+          {
+            "id": "blood",
+            "title": "Fixture task 4",
+            "desc": "Synthetic test instruction."
+          },
+          {
+            "id": "signature",
+            "title": "Fixture task 5",
+            "desc": "Synthetic test instruction."
+          },
+          {
+            "id": "ocr",
+            "title": "Fixture task 6",
+            "desc": "Synthetic test instruction."
+          },
+          {
+            "id": "accept",
+            "title": "Fixture task 7",
+            "desc": "Synthetic test instruction."
+          }
+        ],
+        "sql": [
+          {
+            "id": "dc48-signature-interface",
+            "title": "Fixture migration",
+            "desc": "Synthetic SQL; never execute as upgrade.",
+            "file": "sql/migrations/2026-09-30_dc48-signature-interface.mysql.sql",
+            "vendor": "mysql",
+            "db": "etl",
+            "content": "SELECT 'fixture-dc48-signature-interface';\n",
+            "checksum": "cee3b52e5d8f5752b3cfaa3aecc38a800b7061a1ba2d5906ecef4ec6b8d66152"
+          },
+          {
+            "id": "dc48-signature-interface",
+            "title": "Fixture migration",
+            "desc": "Synthetic SQL; never execute as upgrade.",
+            "file": "sql/migrations/2026-09-30_dc48-signature-interface.pg.sql",
+            "vendor": "postgresql",
+            "db": "etl",
+            "content": "SELECT 'fixture-dc48-signature-interface';\n",
+            "checksum": "cee3b52e5d8f5752b3cfaa3aecc38a800b7061a1ba2d5906ecef4ec6b8d66152"
+          },
+          {
+            "id": "dc48-signature-update-time",
+            "title": "Fixture migration",
+            "desc": "Synthetic SQL; never execute as upgrade.",
+            "file": "sql/migrations/2026-10-05_dc48-signature-update-time.mysql.sql",
+            "vendor": "mysql",
+            "db": "etl",
+            "content": "SELECT 'fixture-dc48-signature-update-time';\n",
+            "checksum": "a2de95a069d39facd4adfda415d017da12c7fd9d0df7fc6bb7227cb02a061250"
+          },
+          {
+            "id": "dc48-signature-update-time",
+            "title": "Fixture migration",
+            "desc": "Synthetic SQL; never execute as upgrade.",
+            "file": "sql/migrations/2026-10-05_dc48-signature-update-time.pg.sql",
+            "vendor": "postgresql",
+            "db": "etl",
+            "content": "SELECT 'fixture-dc48-signature-update-time';\n",
+            "checksum": "a2de95a069d39facd4adfda415d017da12c7fd9d0df7fc6bb7227cb02a061250"
+          },
+          {
+            "id": "dc50-blood-collect",
+            "title": "Fixture migration",
+            "desc": "Synthetic SQL; never execute as upgrade.",
+            "file": "sql/migrations/2026-10-05_dc50-blood-collect.mysql.sql",
+            "vendor": "mysql",
+            "db": "etl",
+            "content": "SELECT 'fixture-dc50-blood-collect';\n",
+            "checksum": "705d86ce579ddf7eef3c0aeffcf063d96edbae2eafed7c9351cf02fe750f233c"
+          },
+          {
+            "id": "dc50-blood-collect",
+            "title": "Fixture migration",
+            "desc": "Synthetic SQL; never execute as upgrade.",
+            "file": "sql/migrations/2026-10-05_dc50-blood-collect.pg.sql",
+            "vendor": "postgresql",
+            "db": "etl",
+            "content": "SELECT 'fixture-dc50-blood-collect';\n",
+            "checksum": "705d86ce579ddf7eef3c0aeffcf063d96edbae2eafed7c9351cf02fe750f233c"
+          },
+          {
+            "id": "dc51-business-record-menu",
+            "title": "Fixture migration",
+            "desc": "Synthetic SQL; never execute as upgrade.",
+            "file": "sql/migrations/2026-10-05_dc51-business-record-menu.mysql.sql",
+            "vendor": "mysql",
+            "db": "bms",
+            "content": "SELECT 'fixture-dc51-business-record-menu';\n",
+            "checksum": "254a26ecd51e157bdb70e7d630a73df912b8c574290f00b776b6e432b60ef0fc"
+          },
+          {
+            "id": "dc51-business-record-menu",
+            "title": "Fixture migration",
+            "desc": "Synthetic SQL; never execute as upgrade.",
+            "file": "sql/migrations/2026-10-05_dc51-business-record-menu.pg.sql",
+            "vendor": "postgresql",
+            "db": "bms",
+            "content": "SELECT 'fixture-dc51-business-record-menu';\n",
+            "checksum": "254a26ecd51e157bdb70e7d630a73df912b8c574290f00b776b6e432b60ef0fc"
+          },
+          {
+            "id": "ocr_service_config",
+            "title": "Fixture migration",
+            "desc": "Synthetic SQL; never execute as upgrade.",
+            "file": "sql/migrations/2026-10-09_ocr_service_config.mysql.sql",
+            "vendor": "mysql",
+            "db": "bms",
+            "content": "SELECT 'fixture-ocr_service_config';\n",
+            "checksum": "dfd67f7e6d66c1b2c922ac9d2aec59a0438d5e88581c1fa6fd9562487b06e5ff"
+          },
+          {
+            "id": "ocr_service_config",
+            "title": "Fixture migration",
+            "desc": "Synthetic SQL; never execute as upgrade.",
+            "file": "sql/migrations/2026-10-09_ocr_service_config.pg.sql",
+            "vendor": "postgresql",
+            "db": "bms",
+            "content": "SELECT 'fixture-ocr_service_config';\n",
+            "checksum": "dfd67f7e6d66c1b2c922ac9d2aec59a0438d5e88581c1fa6fd9562487b06e5ff"
+          }
+        ],
+        "artifacts": [
+          {
+            "kind": "application",
+            "platform": "docker",
+            "dbVendor": "mysql",
+            "file": "pams-1.5.26100901-docker-mysql-application.zip",
+            "url": "/api/release-artifact?id=8000d856bce992f390554346c147271c00d573a7dc42efd22406e2fb350640b0",
+            "sha256": "8000d856bce992f390554346c147271c00d573a7dc42efd22406e2fb350640b0",
+            "size": 29937441,
+            "modules": [
+              "usercenter",
+              "portal",
+              "datacenter",
+              "bms",
+              "print"
+            ]
+          },
+          {
+            "kind": "dependencies",
+            "platform": "docker",
+            "dbVendor": "mysql",
+            "file": "pams-1.5.26100901-docker-mysql-dependencies.zip",
+            "url": "/api/release-artifact?id=3dc03b6fabcb2b965e14fbe0b6020ef6ef18dcf3a984e9cad67684ac4f945304",
+            "sha256": "3dc03b6fabcb2b965e14fbe0b6020ef6ef18dcf3a984e9cad67684ac4f945304",
+            "size": 413939159,
+            "modules": [
+              "usercenter",
+              "portal",
+              "datacenter",
+              "bms",
+              "print"
+            ]
+          },
+          {
+            "kind": "application",
+            "platform": "docker",
+            "dbVendor": "postgresql",
+            "file": "pams-1.5.26100901-docker-postgresql-application.zip",
+            "url": "/api/release-artifact?id=3a76f58769ffea84dedcec418986ead2e0f685b1eaef334d38182c347777ec92",
+            "sha256": "3a76f58769ffea84dedcec418986ead2e0f685b1eaef334d38182c347777ec92",
+            "size": 29934716,
+            "modules": [
+              "usercenter",
+              "portal",
+              "datacenter",
+              "bms",
+              "print"
+            ]
+          },
+          {
+            "kind": "dependencies",
+            "platform": "docker",
+            "dbVendor": "postgresql",
+            "file": "pams-1.5.26100901-docker-postgresql-dependencies.zip",
+            "url": "/api/release-artifact?id=34e1bdc2b11367c79724e7a81fc75893f1200fbab3f5d5ae19b1636c29a65531",
+            "sha256": "34e1bdc2b11367c79724e7a81fc75893f1200fbab3f5d5ae19b1636c29a65531",
+            "size": 413939158,
+            "modules": [
+              "usercenter",
+              "portal",
+              "datacenter",
+              "bms",
+              "print"
+            ]
+          },
+          {
+            "kind": "application",
+            "platform": "windows",
+            "dbVendor": "mysql",
+            "file": "pams-1.5.26100901-windows-mysql-application.zip",
+            "url": "/api/release-artifact?id=6dcd377c923c2e767b95f9e2ca99eadf63942a94f71adb34ae062f1efed90fda",
+            "sha256": "6dcd377c923c2e767b95f9e2ca99eadf63942a94f71adb34ae062f1efed90fda",
+            "size": 29937442,
+            "modules": [
+              "usercenter",
+              "portal",
+              "datacenter",
+              "bms",
+              "print"
+            ]
+          },
+          {
+            "kind": "dependencies",
+            "platform": "windows",
+            "dbVendor": "mysql",
+            "file": "pams-1.5.26100901-windows-mysql-dependencies.zip",
+            "url": "/api/release-artifact?id=6c9f054af684f401062974e059e386d1645fe6d588a766b04e2b01fc724b0949",
+            "sha256": "6c9f054af684f401062974e059e386d1645fe6d588a766b04e2b01fc724b0949",
+            "size": 413939164,
+            "modules": [
+              "usercenter",
+              "portal",
+              "datacenter",
+              "bms",
+              "print"
+            ]
+          },
+          {
+            "kind": "application",
+            "platform": "windows",
+            "dbVendor": "postgresql",
+            "file": "pams-1.5.26100901-windows-postgresql-application.zip",
+            "url": "/api/release-artifact?id=6ced49fcd97f2cb31aab03460dc8b0f35f9139b27d94672f3559a93fdd5759b7",
+            "sha256": "6ced49fcd97f2cb31aab03460dc8b0f35f9139b27d94672f3559a93fdd5759b7",
+            "size": 29934717,
+            "modules": [
+              "usercenter",
+              "portal",
+              "datacenter",
+              "bms",
+              "print"
+            ]
+          },
+          {
+            "kind": "dependencies",
+            "platform": "windows",
+            "dbVendor": "postgresql",
+            "file": "pams-1.5.26100901-windows-postgresql-dependencies.zip",
+            "url": "/api/release-artifact?id=380100caa928c0c7d4635030169bdc02303a47f2d192d232eb0710eb02f186e1",
+            "sha256": "380100caa928c0c7d4635030169bdc02303a47f2d192d232eb0710eb02f186e1",
+            "size": 413939163,
+            "modules": [
+              "usercenter",
+              "portal",
+              "datacenter",
+              "bms",
+              "print"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

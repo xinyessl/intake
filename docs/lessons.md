@@ -1353,3 +1353,8 @@
 - 解法：将唯一/只有、全部/所有、每次、始终/从不、必然等按语义家族做逐句审计；要求 route `answerFacts` 或用户本轮已给证据在同 claim 上同时带等价量词。`mustNotConfuse` 不作正向证据；否定句、引用问句和事实自带量词必须放行。
 - 防复发：用精确 Q0807 同时注入虚构 path 和两类强化，再让修订稿仍保留强化，断言最终只发布完整 route facts。跨 route 正反例至少覆盖事实明确限定、用户证据限定、无证据强化、否定边界和引用问句；真 HTTP/SSE 要核 `initial/revision/finalViolations`、fallbackSource 和持久化 route。
 - 关联：`FS-04 AC-149`；`server.mjs`；`tools/fs-04-consult-conversation.logic.test.mjs`；`docs/changes/CHG-consult-排他全称量词证据守卫.md`。
+
+### 累计升级清单重绘不能先清空长容器
+- 勾选后先替换为“加载中”会使左侧滚动高度塌缩，浏览器将 scrollTop 钳到顶部。普通勾选应就地更新；必须刷新时保留容器高度并恢复滚动、焦点、tab和详情展开。
+- 旧现场版本不在首个规范 parent 链时，不得仅返回目标版本内容。只在可证明旧于基线且完整链校验通过时累加全部已知增量，并保留显式基线核对门禁；不伪造已执行迁移。
+- 从线上补 Git 时应按模块比较分叉，不能整文件覆盖掉 Git 已有咨询/人工服务等独立修复。

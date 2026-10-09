@@ -25,6 +25,7 @@ import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import * as db from './db.mjs';
+import { handlesReleaseRoute, handleReleaseRoute, validatePublication, published as releasePublished, isDelta as releaseIsDelta, atomicJson } from './tools/release-workflow.mjs';
 // 现场实施代办清单纯逻辑（部署清单模板/进度/合并/勾选/越权判断，可独立单测：tools/fs-06-checklist.logic.test.mjs）
 // 2026-08-05 架构重构：checklist-logic（部署清单模板/批次实施清单纯逻辑）随「跟随产品代码」重构一并废弃，不再 import。
 // 更新包「按版本独立维护 + 跨版本累积」纯逻辑（区间/累积/左连/勾选/合并SQL，可独立单测：tools/version-plan.logic.test.mjs）
@@ -293,13 +294,14 @@ const CUSTOMERS_FILE = path.join(DATA_DIR, 'customers.json');
 const CUST_LEVELS = ['三甲', '三乙', '二甲'];               // 等级枚举（对齐原型；非法值归一到「三甲」）
 const CUST_STATUSES = ['已开通', '未开通'];                 // 开通状态枚举（对齐原型；非法值归一到「已开通」）
 function loadCustomers() { try { return JSON.parse(fs.readFileSync(CUSTOMERS_FILE, 'utf8')).customers || []; } catch { return []; } }
-function saveCustomers(list) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(CUSTOMERS_FILE, JSON.stringify({ customers: list }, null, 2)); } catch {} }
+function saveCustomers(list) { atomicJson(CUSTOMERS_FILE, { customers: list }); }
 function custGenId() { return 'c' + crypto.randomBytes(4).toString('hex'); }
 // 读某客户对某产品/子系统的现场当前版本（两形状兼容）：
 //   新形状 products[project].subsystems[name==sub].version；旧形状 products[project].version（无 subsystems，产品级）。无则空串。
 function custSubVersion(cust, productId, subsystem) {
     if (!cust || !Array.isArray(cust.products)) return '';
     const pr = cust.products.find(p => p && p.project === productId); if (!pr) return '';
+    if (pr.releaseVersion) return String(pr.releaseVersion);
     if (Array.isArray(pr.subsystems)) { const ms = subsystem ? pr.subsystems.find(s => s && s.name === subsystem) : null; return (ms && ms.version) || ''; }
     return pr.version || '';   // 旧形状：产品级 version（子系统兜底同产品级）
 }
@@ -311,6 +313,7 @@ function custSubVersion(cust, productId, subsystem) {
 function custProductVersion(cust, productId) {
     if (!cust || !Array.isArray(cust.products)) return '';
     const pr = cust.products.find(p => p && p.project === productId); if (!pr) return '';
+    if (pr.releaseVersion) return String(pr.releaseVersion);
     if (Array.isArray(pr.subsystems)) {
         const vers = pr.subsystems.map(s => String((s && s.version) || '').trim()).filter(Boolean);
         if (!vers.length) return '';                                  // 全空 → 视为最早（include-all）
@@ -355,13 +358,15 @@ function bumpCustomerVersion(cust, productId, subsystem, newVer) {
 //   批次 → 工单：batches[].ticketIds（数组）；工单 → 批次：intake.data.batch（=工单对象顶层 e.batch，随 data JSON 落库，不加库列，复用 L1305 范式）。
 //   本期只做：定档建批(batch-arrange) + 列表(batches) + 详情(batch-detail)；导清单/上传包/闭环留后续期。
 const BATCHES_FILE = path.join(DATA_DIR, 'batches.json');
+const RELEASE_LOCKS = new Set();
 function loadBatches() { try { return JSON.parse(fs.readFileSync(BATCHES_FILE, 'utf8')).batches || []; } catch { return []; } }
-function saveBatches(list) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(BATCHES_FILE, JSON.stringify({ batches: list }, null, 2)); } catch {} }
+function saveBatches(list) { atomicJson(BATCHES_FILE, { batches: list }); }
 // 发布闭环·版本回写：某批次(bt)在某医院(site)的全部覆盖工单都「已关闭」时，把该医院该产品(bt.product)版本更到 bt.pkgVersion。
 //   触发口径（现场逐单验证 pass 后 / 批次转已交付兜底）——只更**这批次实际覆盖到该 site 的子系统集合**（bt.ticketIds 里属该 site 的工单 subsystem），覆盖不到的子系统不动（宁少勿错）。
 //   护栏：无 pkgVersion（没出包）→ 跳过；该 site 在该批次里非「全单已关闭」→ 跳过（还没验完不更）；医院/产品/子系统台账里找不到 → bumpCustomerVersion 内部跳过不报错；幂等（已是目标版本不重复写）。
 //   数据：读 loadCustomers()，原地 bumpCustomerVersion，changed 才 saveCustomers；返回 { changed, bumped:[{subsystem,fromVer,toVer}] } 供批次 history 留痕。⚠️ 只回写该 site 对应医院，不碰别家。
 function bumpSiteVersionForBatch(bt, proj, site) {
+    if (releaseIsDelta(bt?.deployPlan)) return { changed:false, bumped:[] }; // BP-05: only completed hospital plans advance versions
     const empty = { changed: false, bumped: [] };
     const pkg = String((bt && bt.pkgVersion) || '').trim();
     if (!pkg || pkg === '-') return empty;                                     // 未出包 → 不更
@@ -421,16 +426,19 @@ function normProduct(p) {
         const subsystems = p.subsystems
             .map(s => ({ name: String((s && s.name) || '').trim(), version: String((s && s.version) || '').trim().slice(0, 30) }))
             .filter(s => s.name && valid.has(s.name) && !seenSub.has(s.name) && seenSub.add(s.name));   // 命中该产品子系统 + 去重（不命中丢弃，防臆造）
-        return { project, subsystems };                                     // 可能为空数组（无勾选）：仍保留产品，实施端兜底显全部
+        return { project, subsystems, ...(p.releaseVersion ? {releaseVersion:p.releaseVersion} : {}), ...(p.deployment ? {deployment:p.deployment} : {}) };                                     // 可能为空数组（无勾选）：仍保留产品，实施端兜底显全部
     }
     // 旧形状：无 subsystems 字段 → 保留产品级 version（兼容）
-    return { project, version: String((p && p.version) || '').trim() };
+    return { project, version: String((p && p.version) || '').trim(), ...(p.releaseVersion ? {releaseVersion:p.releaseVersion} : {}), ...(p.deployment ? {deployment:p.deployment} : {}) };
 }
+function productVersionState(p) { return JSON.stringify({version:p?.version||'',subsystems:(p?.subsystems||[]).map(s=>({name:s.name,version:s.version||''})).sort((a,b)=>a.name.localeCompare(b.name))}); }
+function customerVersionBaseline(products) { return JSON.stringify((products||[]).map(p=>({project:p.project,state:productVersionState(p),releaseVersion:p.releaseVersion||''})).sort((a,b)=>a.project.localeCompare(b.project))); }
 function normCustomer(b, existing) {   // 规范化：名称必填、products 只保留有效产品（新形状带子系统各自版本 / 兼容旧产品级版本）；扩 level/region/impl/status
     const name = String((b && b.name) || '').trim().slice(0, 60);
     const seen = new Set();
     const products = (Array.isArray(b && b.products) ? b.products : []).map(normProduct)
         .filter(p => p && p.project && !seen.has(p.project) && seen.add(p.project)).slice(0, 40);   // 去重（按 project）+ ≤40 产品
+    for (const p of products) { const old=existing?.products?.find(x=>x.project===p.project); if(old) { if(old.deployment)p.deployment=old.deployment;if(productVersionState(p)===productVersionState(old)){if(old.releaseVersion)p.releaseVersion=old.releaseVersion;}else delete p.releaseVersion; } }
     const level = CUST_LEVELS.includes(String((b && b.level) || '').trim()) ? String(b.level).trim() : '三甲';
     const region = String((b && b.region) || '').trim().slice(0, 40);
     const status = CUST_STATUSES.includes(String((b && b.status) || '').trim()) ? String(b.status).trim() : '已开通';
@@ -449,7 +457,7 @@ function normCustomer(b, existing) {   // 规范化：名称必填、products �
     // 累积更新计划完成态（overlay，2026-08-03）：按 (产品×版本×条目) 分记 {[productId]:{[version]:{tasks:{[id]:{done,by,at}},sqls:{...}}}}，只存已完成项。
     //   偏更新（实施端勾选、customer-save）保留原值不清空，用 `'updateProgress' in b` 判存在。
     const updateProgress = (b && ('updateProgress' in b)) ? (b.updateProgress && typeof b.updateProgress === 'object' ? b.updateProgress : {}) : ((existing && existing.updateProgress && typeof existing.updateProgress === 'object') ? existing.updateProgress : {});
-    return { id: (existing && existing.id) || custGenId(), name, level, region, impl, status, products, serverInfo, deviceCode, maintainEnd, contacts, remark, deployTasks, updateProgress, updatedAt: nowStamp() };
+    return { id: (existing && existing.id) || custGenId(), name, level, region, impl, status, products, serverInfo, deviceCode, maintainEnd, contacts, remark, deployTasks, updateProgress, upgradePlans:existing?.upgradePlans || {}, releaseChecklists:existing?.releaseChecklists || {}, versionLog:existing?.versionLog || [], updatedAt: nowStamp() };
 }
 // 工单数派生：按 site↔客户名 关联统计（真库 intakes 无 customerId 列，关联键 site↔name——重名会串号，NEEDS-HUMAN）。
 //   全项目扫一遍 listIntake（不含 consult），按 site 计数，供客户台账只读展示；不落文件、不改库。
@@ -7510,12 +7518,12 @@ function authGate(pathname, user, link) {
   if (!user) return 'login';
   if (isAdmin(user)) return 'allow';                                    // 管理员：全放行
   // 现场侧（产品经理 / 实施工程师）：只允许 提交面 + 工单查看 + 验证
-  const FIELD_OK = new Set(['/', '/submit.html', '/detail.html', '/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/intake-commit-plan', '/api/consult', '/api/consult-to-intake', '/api/consult-escalate', '/api/consult-human-message', '/api/intake-delete', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-media', '/api/intake-transition', '/api/field/submissions', '/api/field/conversations', '/api/field/overview', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/intake-set-priority', '/api/field/update-plan', '/api/field/update-toggle', '/api/field/update-sql-merged']);   // FS-09：/api/field/overview = 「全览」个人全局图（医院卡 + 产品卡）数据源，端点内按 user.sites+projects 收敛。   // FS-04：/api/field/conversations = 右上「对话记录」数据源；/api/intake-commit-plan = 建单前确认清单确定性建单（v2 2026-08-07）（consult 每条 + intake 按 sessionId 分组），端点内按 user.sites 收敛   // FS-05：现场端新端点（按批次视图/下载/改版本/维保回写/逐单验证）+ 累积更新计划（读代码 docs/deploy.json/累积计划/勾选/合并SQL），均端点内按 user.sites 二次收敛。2026-08-05 架构重构删 deploy-template/customer-deploy-task/batch-task/version-releases（跟随产品代码，废弃手工登记与部署模板）
+  const FIELD_OK = new Set(['/api/field/update-start','/api/field/update-complete','/api/field/update-plan-export','/api/field/update-receipt','/api/field/release-options','/api/field/release-downloads','/api/field/release-bundle','/api/field/release-task-toggle','/api/field/release-sql-merged','/api/field/release-sql-tools','/api/release-artifact','/', '/submit.html', '/detail.html', '/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/intake-commit-plan', '/api/consult', '/api/consult-to-intake', '/api/consult-escalate', '/api/consult-human-message', '/api/intake-delete', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-media', '/api/intake-transition', '/api/field/submissions', '/api/field/conversations', '/api/field/overview', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/intake-set-priority', '/api/field/update-plan', '/api/field/update-toggle', '/api/field/update-sql-merged']);   // FS-09：/api/field/overview = 「全览」个人全局图（医院卡 + 产品卡）数据源，端点内按 user.sites+projects 收敛。   // FS-04：/api/field/conversations = 右上「对话记录」数据源；/api/intake-commit-plan = 建单前确认清单确定性建单（v2 2026-08-07）（consult 每条 + intake 按 sessionId 分组），端点内按 user.sites 收敛   // FS-05：现场端新端点（按批次视图/下载/改版本/维保回写/逐单验证）+ 累积更新计划（读代码 docs/deploy.json/累积计划/勾选/合并SQL），均端点内按 user.sites 二次收敛。2026-08-05 架构重构删 deploy-template/customer-deploy-task/batch-task/version-releases（跟随产品代码，废弃手工登记与部署模板）
   return FIELD_OK.has(pathname) ? 'allow' : 'forbidden';
 }
 // FS-08 §4①：field 域接口允许集 = LINK_OK ∪ FIELD_OK（供访客链接 + 现场账号），与 authGate 内 FIELD_OK 同源，避免漂移。
 //   注意：这里是 authGate 里那份 FIELD_OK 的镜像常量——两者若改一处务必同步（authGate 用于登录态白名单，本集用于 field 域名层外层闸）。
-const FS08_FIELD_API = new Set(['/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/intake-commit-plan', '/api/consult', '/api/consult-to-intake', '/api/consult-escalate', '/api/consult-human-message', '/api/intake-delete', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-media', '/api/intake-transition', '/api/field/submissions', '/api/field/conversations', '/api/field/overview', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/intake-set-priority', '/api/field/update-plan', '/api/field/update-toggle', '/api/field/update-sql-merged', '/api/model-config']);   // FS-09：/api/field/overview 须与 FIELD_OK 同步（否则实施域 originGate deny→forbidden，见 fs-08 防漂移断言）。   // FS-04：/api/field/conversations + /api/intake-commit-plan 须与 FIELD_OK 同步（否则实施域 originGate deny→forbidden）（否则实施域 originGate deny→forbidden，见 fs-08 防漂移断言）   // FS-05 端点须与 FIELD_OK 同步，否则实施域(field)整个流被 originGate deny→forbidden（实测坑，见 fs-08 防漂移断言）；update-plan/update-toggle/update-sql-merged 为累积更新计划现场端。2026-08-05 架构重构删 deploy-template/customer-deploy-task/batch-task/version-releases（跟随产品代码）
+const FS08_FIELD_API = new Set(['/api/field/update-start','/api/field/update-complete','/api/field/update-plan-export','/api/field/update-receipt','/api/field/release-options','/api/field/release-downloads','/api/field/release-bundle','/api/field/release-task-toggle','/api/field/release-sql-merged','/api/field/release-sql-tools','/api/release-artifact','/api/intake-submit', '/api/intake-reply', '/api/intake-chat', '/api/intake-commit-plan', '/api/consult', '/api/consult-to-intake', '/api/consult-escalate', '/api/consult-human-message', '/api/intake-delete', '/api/intake-analyze', '/api/kb-from-consult', '/api/kb-search', '/api/change-password', '/api/notifications', '/api/projects', '/api/customers', '/api/versions', '/api/spec-modules', '/api/intake-list', '/api/intake-detail', '/api/intake-media', '/api/intake-transition', '/api/field/submissions', '/api/field/conversations', '/api/field/overview', '/api/field/systems', '/api/field/batches', '/api/batch-download', '/api/customer-version', '/api/customer-maintain', '/api/intake-verify', '/api/intake-set-priority', '/api/field/update-plan', '/api/field/update-toggle', '/api/field/update-sql-merged', '/api/model-config']);   // FS-09：/api/field/overview 须与 FIELD_OK 同步（否则实施域 originGate deny→forbidden，见 fs-08 防漂移断言）。   // FS-04：/api/field/conversations + /api/intake-commit-plan 须与 FIELD_OK 同步（否则实施域 originGate deny→forbidden）（否则实施域 originGate deny→forbidden，见 fs-08 防漂移断言）   // FS-05 端点须与 FIELD_OK 同步，否则实施域(field)整个流被 originGate deny→forbidden（实测坑，见 fs-08 防漂移断言）；update-plan/update-toggle/update-sql-merged 为累积更新计划现场端。2026-08-05 架构重构删 deploy-template/customer-deploy-task/batch-task/version-releases（跟随产品代码）
 // field 域可加载的静态页（现场提交面 + 实施端外壳 + 现场可看的详情 + 登录页）。console/inbox/customers/kb/model-config/accounts/projects 等后台页不在其中 → 越域拒。
 const FS08_FIELD_PAGES = new Set(['/', '/field.html', '/submit.html', '/detail.html', '/login.html']);
 // 鉴权/健康端点：两域都放（field 域现场登录/查身份/登出/健康探测需要）。
@@ -7635,6 +7643,19 @@ const server = http.createServer((req, res) => {
     res.writeHead(302, { Location: gate === 'login' ? '/login.html' : '/submit.html' }); return res.end();
   }
 
+  if (handlesReleaseRoute(url.pathname)) return handleReleaseRoute(req, res, url, user, { isAdmin, dataDir: DATA_DIR, loadCustomers, loadBatches, saveBatches, projById, isPublishing: product => RELEASE_LOCKS.has(product),
+    onPlanCompleted: async (bt, site, by, at) => {
+      const proj=projById(bt.product);
+      for(const id of bt.ticketIds || []) {
+        const e=proj ? loadIntake(proj,id) : null;
+        if(!e || e.site!==site || (e.lifecycle || deriveLifecycle(e))!=='已出包') continue;
+        e.lifecycle='待验证';e.status=lifecycleToStatus('待验证');
+        (e.history ||= []).push({from:'已出包',to:'待验证',by,at,note:'医院升级计划已完成，待工单业务验收'});
+        await saveIntake(proj,e);
+      }
+    }
+  });
+
   // ---------- 登录 / 会话 / 账号 ----------
   if (url.pathname === '/api/login' && req.method === 'POST') {
     return readBody(req, async (b, err) => {
@@ -7743,7 +7764,15 @@ const server = http.createServer((req, res) => {
       const list = loadCustomers(); const id = String(b.id || '').trim();
       const i = id ? list.findIndex(c => c.id === id) : -1;
       const oldName = i >= 0 ? String((list[i].name || '')).trim() : '';   // 编辑改名时用于清旧名（sites 以名为键，防孤儿）
+      if(i>=0 && b.versionBaseline && customerVersionBaseline(b.versionBaseline)!==customerVersionBaseline(list[i].products))return send(res,409,JSON.stringify({ok:false,error:'医院版本已变化，请刷新后重新编辑，避免覆盖最新升级结果'}));
       const rec = normCustomer(b, i >= 0 ? list[i] : null);
+      const versionChanges=i>=0 ? rec.products.filter(p=>{const old=list[i].products?.find(x=>x.project===p.project);return old&&productVersionState(p)!==productVersionState(old);}) : [];
+      if(versionChanges.length&&!Array.isArray(b.versionBaseline))return send(res,409,JSON.stringify({ok:false,error:'修改版本请刷新客户管理页面后重试'}));
+      if(versionChanges.some(p=>Object.values(list[i].upgradePlans||{}).some(plan=>plan.product===p.project&&plan.status==='pending')))return send(res,409,JSON.stringify({ok:false,error:'该产品有未完成升级计划，不能修改版本'}));
+
+      const pendingPlans=Object.values(i>=0 ? (list[i].upgradePlans || {}) : {}).filter(p=>p.status==='pending');
+      if(pendingPlans.length && (oldName!==rec.name || pendingPlans.some(p=>!rec.products.some(x=>x.project===p.product)))) return send(res,409,JSON.stringify({ok:false,error:'医院存在未完成升级，不能改名或删除关联产品'}));
+      if(versionChanges.length){rec.versionLog ||= [];for(const p of versionChanges){const old=list[i].products.find(x=>x.project===p.project);rec.versionLog.push({productId:p.project,by:user?.name||user?.username||'admin',at:Date.now(),note:'运营从客户产品版本入口修改版本',before:{releaseVersion:old.releaseVersion||'',version:old.version||'',subsystems:old.subsystems||[]},after:{version:p.version||'',subsystems:p.subsystems||[]}});}}
       if (i >= 0) list[i] = rec; else list.push(rec);
       saveCustomers(list);
       // 双向写穿 account.sites（唯一真源 · 一院一实施）：改名先清旧名，再按本次 impl.name 把新名唯一归给目标实施账号（空则解绑）。
@@ -7966,6 +7995,7 @@ const server = http.createServer((req, res) => {
       const id = String((b && b.id) || '').trim(); if (!id) return send(res, 400, JSON.stringify({ ok: false, error: '缺少 id' }));
       const list = loadBatches();
       const bt = list.find(x => x.id === id); if (!bt) return send(res, 404, JSON.stringify({ ok: false, error: 'not found' }));
+      if(RELEASE_LOCKS.has(bt.product))return send(res,409,JSON.stringify({ok:false,error:'此产品正在发布'}));
       let changed = false;
       if ('scheduleDate' in b) {                                       // 传了才改（规范化：合法 yyyy-MM-dd 或清空）
         const next = normScheduleDate(b.scheduleDate);
@@ -7979,6 +8009,7 @@ const server = http.createServer((req, res) => {
       }
       // 编辑包信息（2026-07-30 用户反馈：包地址/版本填错要能改）——纯字段更新，不重新发包、不推工单状态（区别于 batch-release）。
       const pkgIn = ('pkgVersion' in b) || ('artifactUrl' in b) || ('releaseNote' in b);
+      if (pkgIn && releasePublished(bt)) return send(res,409,JSON.stringify({ok:false,error:'已发布批次的版本、包和发布说明不可修改'}));
       if (pkgIn) {
         const pkgVersion = 'pkgVersion' in b ? String(b.pkgVersion == null ? '' : b.pkgVersion).trim() : null;
         const artifactUrl = 'artifactUrl' in b ? String(b.artifactUrl == null ? '' : b.artifactUrl).trim() : null;
@@ -8119,7 +8150,11 @@ const server = http.createServer((req, res) => {
       const list = loadBatches();
       const bt = list.find(x => x.id === id); if (!bt) return send(res, 404, JSON.stringify({ ok: false, error: 'not found' }));
       if (bt.status !== '开发中') return send(res, 200, JSON.stringify({ ok: false, error: '仅开发中批次可上传包' }));
+      if (RELEASE_LOCKS.has(bt.product)) return send(res,409,JSON.stringify({ok:false,error:'此产品正在发布，请稍后重试'}));
+      RELEASE_LOCKS.add(bt.product);
+      try {
       const proj = projById(bt.product);
+      try { validatePublication({...bt, pkgVersion},list,proj,DATA_DIR); } catch(e) { return send(res,e.status || 400,JSON.stringify({ok:false,error:e.message})); }
       const at = nowStamp();
       const by = user ? (user.name || user.username) : 'admin';
       // 覆盖工单推进到「已出包」（跳态·系统动作直接置态 + 留痕 + fixedVersion）；非法态 skip 计 warning
@@ -8137,8 +8172,9 @@ const server = http.createServer((req, res) => {
       bt.pkgVersion = pkgVersion.slice(0, 60); bt.releaseNote = releaseNote.slice(0, 2000); bt.artifactUrl = artifactUrl.slice(0, 500);
       bt.releaseTime = at; bt.status = '可下载';
       bt.history = bt.history || []; bt.history.push({ action: 'release', by, at, note: '上传包 ' + pkgVersion + '·推进 ' + pushed + ' 单到已出包' + (skipped.length ? '（skip ' + skipped.length + '）' : '') });
-      saveBatches(list);
+      const latest=loadBatches();const index=latest.findIndex(x=>x.id===bt.id);if(index<0)throw new Error('批次消失');latest[index]=bt;saveBatches(latest);
       return send(res, 200, JSON.stringify({ ok: true, item: batchOut(bt), pushed, skipped }));
+      } catch(e) { if(!res.headersSent) return send(res,500,JSON.stringify({ok:false,error:'发布保存失败，请检查日志并重试'})); } finally { RELEASE_LOCKS.delete(bt.product); }
     });
   }
 
@@ -8214,9 +8250,10 @@ const server = http.createServer((req, res) => {
       // 该账号 sites 范围内覆盖工单（管理员=全部）
       let mine = batchTicketsForUser(bt, proj, mySites);
       if (qSite && (!mySites || mySites.includes(qSite))) mine = mine.filter(e => String(e.site || '') === qSite);   // 医院过滤（越权 qSite 已被 mySites 拦）
-      if (!mine.length) continue;   // 与该账号无关的批次不返回（AC-4/AC-F）
+      const eligibleSites = releaseIsDelta(bt.deployPlan) && releasePublished(bt) ? loadCustomers().filter(c => (!mySites || mySites.includes(c.name)) && (!qSite || c.name === qSite) && c.products?.some(p => p.project === bt.product)).map(c => c.name) : [];
+      if (!mine.length && !eligibleSites.length) continue;
       // 覆盖我负责医院去重
-      const hospSet = new Set(); mine.forEach(e => { if (e.site) hospSet.add(e.site); });
+      const hospSet = new Set(eligibleSites); mine.forEach(e => { if (e.site) hospSet.add(e.site); });
       // 按子系统分组（中文 desc），组内逐单 lifecycle/statusLabel/canVerify
       const bySub = new Map();
       for (const e of mine) {
@@ -8229,7 +8266,7 @@ const server = http.createServer((req, res) => {
       // 2026-08-05 架构重构：批次视图不再带 implTasks（实施清单跟随产品代码 → 见批次卡内「更新计划」块 update-plan）。
       groups.push({
         batchId: bt.id, product: bt.product, productName: (proj || {}).name || bt.product, status: bt.status || '开发中',
-        pkgVersion: bt.pkgVersion || '', releaseNote: bt.releaseNote || '', releaseTime: bt.releaseTime || '', artifactUrl: bt.artifactUrl || '',
+        releaseSchemaVersion: bt.deployPlan?.schemaVersion || 1, pkgVersion: bt.pkgVersion || '', releaseNote: bt.releaseNote || '', releaseTime: bt.releaseTime || '', artifactUrl: bt.artifactUrl || '',
         scheduleDate: bt.scheduleDate || '',   // 计划交付日期（yyyy-MM-dd，可空）：实施端按批次视图批次头展示排期
         downloads: bt.downloads || 0, downloadedByMe: Array.isArray(bt.downloadedBy) && bt.downloadedBy.includes(user.username || ''),
         hospitals: [...hospSet], subGroups
@@ -8295,6 +8332,7 @@ const server = http.createServer((req, res) => {
   //     新形状 products[].subsystems[name==subsystem].version（有 subsystem 时）/ 旧形状 products[].version。
   //   幂等（version==现值 不重复写不重复留痕）；留痕 versionLog[]（谁/何时/哪院/哪产品·子系统/v_old→v_new）。
   if (url.pathname === '/api/customer-version' && req.method === 'POST') {
+    if(!user || !isAdmin(user))return send(res,403,JSON.stringify({ok:false,error:'现场版本仅允许运营后台维护'}));
     return readBody(req, async (b, err) => {
       if (!b) return send(res, 400, JSON.stringify({ ok: false, error: err }));
       const site = String((b && (b.site || b.customerName)) || '').trim();
@@ -8311,6 +8349,7 @@ const server = http.createServer((req, res) => {
       if (!Array.isArray(c.products)) c.products = [];
       const pr = c.products.find(p => p && p.project === productId);
       if (!pr) return send(res, 400, JSON.stringify({ ok: false, error: '产品不属该客户' }));
+      if (pr.releaseVersion || Object.values(c.upgradePlans || {}).some(p=>p.product===productId&&p.status==='pending')) return send(res,409,JSON.stringify({ok:false,error:'该产品使用发布版本台账，请通过医院升级计划配置现场信息或完成升级'}));
       const proj = projById(productId);
       const vNew = version.slice(0, 30);
       let fromVer = '', changed = false;

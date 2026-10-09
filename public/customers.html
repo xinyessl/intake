@@ -36,6 +36,7 @@
   .implcell .implphone{font-size:12px;color:var(--color-text-tertiary)}
   .implcell .implnone{color:var(--color-text-tertiary)}
 </style>
+<script src="/assets/release-workflow.js"></script>
 </head>
 <body data-shell="admin" data-nav="customers" data-breadcrumb="主体管理 > 医院管理" data-content-layout="list">
 
@@ -170,7 +171,7 @@ function closeDrawer(id){ const d=document.getElementById(id); if(d)d.classList.
 document.addEventListener('click', e=>{ const c=e.target.closest('[data-close-drawer]'); if(c) closeDrawer(c.getAttribute('data-close-drawer')); });
 $('#drawerMask').addEventListener('click',()=>{ $$('.drawer.open').forEach(d=>d.classList.remove('open')); $('#drawerMask').classList.remove('open'); });
 
-let PROJECTS=[], CUSTOMERS=[], IMPL_ACCOUNTS=[], editId=null;
+let PROJECTS=[], CUSTOMERS=[], IMPL_ACCOUNTS=[], editId=null, editVersionBaseline=[];
 let state={ page:1, size:8, filters:{region:'',level:'',status:'',kw:''} };
 const pname=id=>{ const p=PROJECTS.find(x=>x.id===id); return p?p.name:id; };
 
@@ -206,10 +207,13 @@ function render(){
     // 上线产品·版本单元格：新形状（含 subsystems）显「产品 · N 个子系统」；旧形状（产品级 version）显「产品 版本」。
     const prodCell = prods.length
       ? prods.map(p=>{
+          if(p.releaseVersion)return `<span class="tag tag-info vtag">${esc(pname(p.project))}<b class="vv mono">${esc(p.releaseVersion)}</b></span>`;
           if(Array.isArray(p.subsystems)){
             const n=p.subsystems.length;
-            return `<span class="tag tag-info vtag">${esc(pname(p.project))}<b class="vv${n?'':' none'}">${n?(n+' 个子系统'):'未选子系统'}</b></span>`;
+
+          return `<span class="tag tag-info vtag">${esc(pname(p.project))}<b class="vv${n?'':' none'}">${n?(n+' 个子系统'):'未选子系统'}</b></span>`;
           }
+
           return `<span class="tag tag-info vtag">${esc(pname(p.project))}<b class="vv mono${p.version?'':' none'}">${p.version?esc(p.version):'未指定'}</b></span>`;
         }).join('')
       : '<span class="text-tertiary">—</span>';
@@ -320,6 +324,10 @@ function addProdRow(project, checkedMap){
   const del=document.createElement('button'); del.className='btn btn-icon btn-sm btn-del'; del.type='button'; del.title='移除'; del.innerHTML='<i class="ti ti-trash" style="color:var(--color-danger)"></i>';
   del.addEventListener('click',()=>{ row.remove(); syncProdEmpty(); });
   hd.appendChild(s); hd.appendChild(del);
+  if(editId){
+    const deployment=document.createElement('button');deployment.type='button';deployment.className='btn btn-sm';deployment.textContent='部署信息';
+    deployment.onclick=async()=>{const customer=CUSTOMERS.find(c=>c.id===editId);const pid=s.value;if(!customer?.products?.some(p=>p.project===pid)){toast('请先保存医院与关联产品','warning');return;}try{await ReleaseUI.openAdminDeploymentSettings(customer.name,pid,async()=>{const r=await(await fetch('/api/customers')).json();if(Array.isArray(r.customers))CUSTOMERS=r.customers;toast('部署信息已保存','success');},Object.fromEntries(PROJECTS.map(p=>[p.id,p.name||p.id])));}catch(e){toast(e.message,'error');}};hd.appendChild(deployment);
+  }
   const list=document.createElement('div'); list.className='subsyslist';
   row.appendChild(hd); row.appendChild(list);
   // 换产品 → 重建子系统清单（新产品的子系统，全不勾）
@@ -370,7 +378,7 @@ function collectContacts(){
   return $$('#edContactRows .contact-row').map(r=>({ name:r.querySelector('.cName').value.trim(), phone:r.querySelector('.cPhone').value.trim() })).filter(x=>x.name||x.phone);
 }
 function openEdit(c){
-  editId = c ? c.id : null;
+  editId = c ? c.id : null; editVersionBaseline=JSON.parse(JSON.stringify(c?.products||[]));
   $('#edTitle').textContent = c ? '编辑医院' : '新增医院';
   $('#edName').value = c ? (c.name||'') : '';
   $('#edLevel').value = c ? (c.level||'三甲') : '三甲';
@@ -421,7 +429,7 @@ async function saveCustomer(){
       const ok=await uiConfirm('该医院原有 '+origCount+' 个关联产品，本次保存将清空为「无关联产品」，确定继续？',{title:'确认清空关联产品',danger:true,okText:'仍要清空'});
       if(!ok) return;   // 取消 → 中止保存（finally 恢复按钮）
     }
-    const payload={ id:editId||'', name, level:$('#edLevel').value, region:(CUSTOMERS.find(c=>c.id===editId)||{}).region||'', status:$('#edStatus').value,
+    const payload={ versionBaseline:editVersionBaseline,id:editId||'', name, level:$('#edLevel').value, region:(CUSTOMERS.find(c=>c.id===editId)||{}).region||'', status:$('#edStatus').value,
       impl:{ name:$('#edImplName').value.trim(), phone:((CUSTOMERS.find(c=>c.id===editId)||{}).impl||{}).phone||'' }, products,
       contacts:collectContacts(),
       deviceCode:$('#edDeviceCode').value.trim(), maintainEnd:$('#edMaintainEnd').value,

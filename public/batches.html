@@ -86,6 +86,8 @@
   .dpbox .dp-empty{font-size:12.5px;color:var(--color-text-tertiary);padding:6px 0}
   .dpbox .dp-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:12px;padding-top:10px;border-top:1px solid var(--color-border)}
 </style>
+<link rel="stylesheet" href="/assets/release-workflow.css">
+<script src="/assets/release-workflow.js"></script>
 </head>
 <body data-shell="admin" data-nav="batches" data-breadcrumb="交付管理 > 批次管理" data-content-layout="list">
 
@@ -95,6 +97,7 @@
       <div class="filter-field"><label>产品</label><select class="select" id="fProduct"><option value="">全部产品</option></select></div>
       <div class="filter-field"><label>状态</label><select class="select" id="fStatus"><option value="">全部状态</option><option value="开发中">开发中</option><option value="可下载">可下载</option><option value="已交付">已交付</option></select></div>
     </div>
+    <button class="btn" id="btnReleaseOnly" onclick="ReleaseUI.createRelease(async()=>{await loadBatches();})">新建版本发布</button>
     <button class="btn btn-primary" id="btnArrange"><i class="ti ti-package"></i>定档建批</button>
   </div>
 </div>
@@ -264,7 +267,9 @@ async function openDetail(id){
   </div>`;
   // 上传包表单（开发中）/ 包信息（可下载/已交付）
   let relHtml='';
-  if(b.status==='开发中'){
+  if(b.releaseSchemaVersion===2 || b.deployPlan?.schemaVersion===2){
+    relHtml='';
+  } else if(b.status==='开发中'){
     relHtml=`<div class="relbox">
       <div class="rlhd"><i class="ti ti-package-export"></i>上传包 · 转「可下载」</div>
       <div class="form-group"><label>包版本 <span class="req">*</span></label><input id="relPkgVersion" placeholder="如 v2.7.1" maxlength="60"></div>
@@ -384,6 +389,8 @@ async function doAddTickets(){
 //   模型：代码 docs/deploy/<版本>.json = 草稿源（@HEAD）；发包时拉 (起始版本, 目标版本] 累积草稿 → 运营增删改 → 存快照；实施读快照。
 let DP_STATE={ batchId:'', to:'', tasks:[], sql:[] };   // 当前编辑中的部署清单（内存）
 function loadDeployBox(b){
+  const releaseBox=document.querySelector("#deployBox");
+  if(releaseBox && window.ReleaseUI){ ReleaseUI.renderBatch(releaseBox,b,async()=>{await loadBatches();await openDetail(b.id);}).catch(e=>{releaseBox.textContent=e.message;});return;}
   const box=$('#deployBox'); if(!box) return;
   DP_STATE={ batchId:b.id, to:b.pkgVersion||'', tasks:[], sql:[] };
   const reviewed=!!b.deployReviewed;

@@ -883,6 +883,7 @@ button.f-ov-card { width: 100%; appearance: none; }
 .f-verdd-row .ver { flex: 0 0 auto; color: var(--color-text); font-family: var(--font-num), monospace; }
 .f-verdd-empty { padding: 6px 10px 6px 18px; font-size: 12px; color: var(--color-text-tertiary); }
 </style>
+<script src="/assets/release-workflow.js?v=20261009-completion"></script>
 </head>
 <body>
 
@@ -2298,7 +2299,7 @@ button.f-ov-card { width: 100%; appearance: none; }
       '<span class="bid">' + escapeHtml(g.batchId || '') + '</span>' +
       '<span class="tag ' + tag + '">' + escapeHtml(g.status || '') + '</span>' +
       (g.pkgVersion ? '<span class="bpkg">包版本 ' + escapeHtml(g.pkgVersion) + '</span>' : '') +
-      (g.scheduleDate ? '<span class="bsched">计划交付 ' + escapeHtml(g.scheduleDate) + '</span>' : '<span class="bsched none">未排期</span>') +
+      (g.scheduleDate ? '<span class="bsched">计划交付 ' + escapeHtml(g.scheduleDate) + '</span>' : '') +
       (ticketCount ? '<span class="bcount">' + ticketCount + ' 单</span>' : '');
     hd.addEventListener('click', function () { state.batchExpanded[g.batchId] = !(state.batchExpanded[g.batchId] === true); wrap.classList.toggle('open'); });
     wrap.appendChild(hd);
@@ -2328,6 +2329,7 @@ button.f-ov-card { width: 100%; appearance: none; }
     card.innerHTML = '<div class="pk-t"><i class="ti ti-package"></i> ' + escapeHtml(g.productName || g.product) + ' · 更新包 ' + escapeHtml(g.pkgVersion || '') + '</div>' +
       '<div class="pk-meta">发布时间：' + escapeHtml(fmtTime(g.releaseTime)) + '</div>' +
       (g.releaseNote ? '<div class="pk-note">' + escapeHtml(g.releaseNote) + '</div>' : '');
+    if(g.releaseSchemaVersion===2){var hint=document.createElement('p');hint.textContent='请在下方创建医院升级计划，下载适用的全量应用及依赖包。';card.appendChild(hint);return card;}
     var btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'f-dl-btn';
@@ -2358,6 +2360,7 @@ button.f-ov-card { width: 100%; appearance: none; }
     return box;
   }
   function loadUpdatePlan(g, box) {
+    if(window.ReleaseUI && state.curSite){ReleaseUI.renderHospital(box,state.curSite,g.batchId,g.product,{onCompleted:refreshSiteVersionLedger,siteInfo:(state.customers.find(function(c){return c.name===state.curSite;})?.products||[]).find(function(p){return p.project===g.product;})}).catch(e=>{box.textContent=e.message;});return;}
     var site = state.curSite || '';
     if (!site) { box.innerHTML = ''; return; }
     // 2026-08-05 核心更新流重构：数据源换成批次快照（batch.deployPlan），按 batchId 拉。
@@ -2502,46 +2505,13 @@ button.f-ov-card { width: 100%; appearance: none; }
   }
 
   // 渲染改版本条：我负责的每家医院 × 子系统一条「<医院> <子系统> v_old→v_new」+「一键改版本」；bumps 为空则重进后按当前医院/覆盖医院兜底不渲染。
-  function renderBumpRows(card, g, bumps) {
-    // 去掉旧的改版本区（幂等：重复下载/刷新不重复插）
-    var old = card.querySelector('.f-bump-zone'); if (old) old.parentNode.removeChild(old);
-    if (!bumps || !bumps.length) return;   // 无 bumps（如重进无回传）→ 不渲染，避免臆造
-    var zone = document.createElement('div');
-    zone.className = 'f-bump-zone';
-    zone.style.marginTop = '10px';
-    bumps.forEach(function (bp) {
-      var row = document.createElement('div');
-      row.className = 'f-bump-row';
-      var subTxt = bp.subsystemLabel || bp.subsystem || '';
-      row.innerHTML = '<span class="bp-site">' + escapeHtml(bp.hospital || bp.site || '') + '</span>' +
-        (subTxt ? '<span class="bp-sub">' + escapeHtml(subTxt) + '</span>' : '') +
-        '<span class="bp-ver">' + escapeHtml(bp.fromVer || '—') + ' → <b>' + escapeHtml(bp.toVer || '—') + '</b></span>';
-      var bbtn = document.createElement('button');
-      bbtn.type = 'button';
-      bbtn.className = 'f-bump-btn';
-      bbtn.innerHTML = '<i class="ti ti-refresh"></i> 一键改版本';
-      bbtn.addEventListener('click', function () { doBumpVersion(bp, bbtn); });
-      row.appendChild(bbtn);
-      zone.appendChild(row);
-    });
-    card.appendChild(zone);
+  function renderBumpRows(card,g,bumps){
+    var old=card.querySelector('.f-bump-zone');if(old)old.remove();
   }
 
-  // 一键改版本：回写 customers.json 该医院该产品/子系统 v_old→v_new（幂等）；成功 → 按钮转「已改版本」
-  function doBumpVersion(bp, btn) {
-    btn.disabled = true;
-    var body = { site: bp.site || bp.hospital, project: bp.product, version: bp.toVer };
-    if (bp.subsystem) body.subsystem = bp.subsystem;
-    api('/api/customer-version', { method: 'POST', body: JSON.stringify(body) }).then(function (r) {
-      var b = r.body || {};
-      if (!b.ok) { btn.disabled = false; showToast(b.error || '改版本失败', 'error'); return; }
-      btn.classList.add('done'); btn.innerHTML = '<i class="ti ti-circle-check"></i> 已改版本';
-      // 同步刷新台账缓存（改版本后现场版本更新，归档条/renderHospChip 随之正确）
-      api('/api/customers', { method: 'GET' }).then(function (rr) { if (rr.body && Array.isArray(rr.body.customers)) { state.customers = rr.body.customers; buildSubOptions(); } });
-      showToast(b.changed ? ('已回写版本号 ' + (b.toVer || '')) : '已是最新版本', 'success');
-    }).catch(function () { btn.disabled = false; showToast('改版本失败，请重试', 'error'); });
+  async function refreshSiteVersionLedger(){
+    var r=await api('/api/customers',{method:'GET'});if(r.body&&Array.isArray(r.body.customers)){state.customers=r.body.customers;buildSubOptions();updateCtx();loadBatchView();}
   }
-
   // 批次视图逐单：类型标签 + 标题 + 状态 + 上下文（现场·时间）+（待验证态）「确认验证过」✅ /「反馈问题」按钮。
   function mkBatchItem(t, g) {
     var el = document.createElement('div');
@@ -3252,11 +3222,16 @@ button.f-ov-card { width: 100%; appearance: none; }
     // 2026-07-24 问题②：归档条不再重复显示医院名（顶栏已有医院选择器），也去前导医院图标 → 各分支直接从「现场版本：」/「系统：」起头。
     //   site 仍用于数据取值（下方 customers 匹配、currentArchive.out.site、&subsystem 过滤一律不动），只是归档条不显示它。
     if (!site) { ctx.innerHTML = '现场版本：未上线产品'; return; }
+
     // 分支①：选中具体子系统 → 只显该子系统 + 其版本，去掉产品级现场版本列（+ 常驻维保到期）
     if (state.curSub) {
       var sv = subVersion(state.curSub);
+      var selectedCustomer=state.customers.find(function(c){return(c.name||'').trim()===String(site).trim();});
+      var selectedProduct=(selectedCustomer?.products||[]).find(function(p){return Array.isArray(p.subsystems)?p.subsystems.some(function(s){return s.name===state.curSub;}):(state.projMap[p.project]?.subsystems||[]).some(function(s){return(typeof s==='string'?s:s.name)===state.curSub;});});
+      var single=(selectedProduct?.subsystems||[]).length===1;
+      var productVersion=single&&window.ReleaseUI?ReleaseUI.siteVersion(selectedProduct):'';
       ctx.innerHTML = '系统：' + escapeHtml(subLabel(state.curSub)) +
-        ' · 版本：<b>' + escapeHtml(sv || '—') + '</b>' +
+        ' · 版本：<b>' + escapeHtml(productVersion || sv || '—') + '</b>' +
         ' <span class="f-ctx-sep">·</span> ' + maintainChipHtml(site);
       bindMaintainEdit(site);
       return;
@@ -3277,7 +3252,8 @@ button.f-ov-card { width: 100%; appearance: none; }
     // 产品名摘要（多产品用『、』连接；仅产品名，不平铺子系统/版本）
     var prodNames = cust.products.map(function (pr) {
       var proj = state.projMap[pr.project];
-      return escapeHtml((proj && proj.name) || pr.project || '');
+      var currentVersion=window.ReleaseUI?ReleaseUI.siteVersion(pr):(pr.releaseVersion||pr.version||'');
+      return escapeHtml((proj && proj.name) || pr.project || '')+(currentVersion?' · '+escapeHtml(currentVersion):'');
     }).filter(Boolean).join('、');
     // 紧凑摘要 + icon 按钮（title=查看各子系统版本）；点开由 buildVerDetailPanel 逻辑接管（问题②：去医院名，直接从「现场版本：」起头）+ 常驻维保到期
     ctx.innerHTML = '现场版本：' + (prodNames || '—') +
@@ -3335,8 +3311,13 @@ button.f-ov-card { width: 100%; appearance: none; }
         rows = catalog.map(function (o) { return { label: o.desc, version: pv }; });
       }
       out += '<div class="f-verdd-grp">' + escapeHtml(pn) + '</div>';
-      if (rows.length) {
-        out += rows.map(function (r) {
+      out += '<div class="f-verdd-row" style="display:block;overflow-wrap:anywhere">数据库：'+escapeHtml(pr.deployment?.dbVendor||'待运营确认')+' · 部署：'+escapeHtml(pr.deployment?.platform||'待运营确认')+'</div>';
+      var pv=window.ReleaseUI?ReleaseUI.siteVersion(pr):(pr.releaseVersion||pr.version||'');
+      if(rows.length<=1 || (rows.every(function(r){return r.version;}) && new Set(rows.map(function(r){return r.version;})).size===1)){
+        out += '<div class="f-verdd-row" style="justify-content:flex-start;gap:8px"><span class="nm" style="flex:0 0 auto">版本：</span><span class="ver">'+escapeHtml(pv||rows[0]?.version||'—')+'</span></div>';
+      } else if (rows.length) {
+        out += rows.map(function (r,index) {
+          if(!r.label || catalog.some(function(c){return c.name===r.label;}))r.label=pn+' · 子系统'+(index+1);
           return '<div class="f-verdd-row"><span class="nm">' + escapeHtml(r.label) +
             '</span><span class="ver">' + escapeHtml(r.version || '—') + '</span></div>';
         }).join('');
