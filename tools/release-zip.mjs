@@ -25,7 +25,11 @@ export async function releaseZipEntries(file,artifact){
  total+=plain;if(total>16*1024**3)throw Error('ZIP解压容量超限');
  if(!/^(apps|web)\//.test(name))continue;
  if(/\.sql$/i.test(name))throw Error('程序目录不允许重复SQL');
- result.push({file:'程序文件/'+name.replace(/^(apps\/[^/]+)\/internal-lib\//,'$1/lib/'),size:plain,crc,stream:async function*(){if(!compressed)return;const stream=fs.createReadStream(file,{start,end:start+compressed-1}),inflate=method===8?createInflateRaw():null;try{if(inflate)stream.on('error',e=>inflate.destroy(e));for await(const chunk of inflate?stream.pipe(inflate):stream)yield chunk;}finally{stream.destroy();inflate?.destroy();}}});
+ let delivered=name.replace(/^(apps\/[^/]+)\/internal-lib\//,'$1/lib/');
+ const main=name.match(/^apps\/([^/]+)\/([^/]+\.jar)$/i);
+ if(main){const [,module,jar]=main;if(!/^[a-z][a-z0-9-]*$/.test(module)||!(jar===module+'.jar'||(jar.startsWith(module+'-')&&/^\d[0-9A-Za-z._-]*\.jar$/.test(jar.slice(module.length+1)))))throw Error('业务JAR名称不符合模块启动契约');delivered='apps/'+module+'/'+module+'.jar';}
+
+ result.push({file:'程序文件/'+delivered,size:plain,crc,stream:async function*(){if(!compressed)return;const stream=fs.createReadStream(file,{start,end:start+compressed-1}),inflate=method===8?createInflateRaw():null;try{if(inflate)stream.on('error',e=>inflate.destroy(e));for await(const chunk of inflate?stream.pipe(inflate):stream)yield chunk;}finally{stream.destroy();inflate?.destroy();}}});
  }
  if(p!==cd.length||!result.length)throw Error('ZIP缺少程序文件或目录不完整');return result;
  }finally{await f.close();}

@@ -136,7 +136,7 @@ window.ReleaseUI = (() => {
     if(downloads?.needsUpdate){message(files,'目标版本 '+downloads.version);link('下载更新包','/api/field/release-bundle'+query);files.querySelector('a').onclick=()=>{if(!files.querySelector('[data-bundle-status]')){const note=message(files,'正在准备更新包，首次准备可能需要稍等，请勿重复点击。文件开始下载后可在浏览器下载列表查看进度。');note.dataset.bundleStatus='true';note.setAttribute('role','status');}};message(files,'已按医院当前版本及部署环境配好程序和所需依赖。解压后只有“程序文件”和“升级SQL”两个目录，所需依赖已合并到程序文件中。');}
     const groups=p?.sqlGroups||downloads?.sqlGroups||[],tasks=p?.tasks||downloads?.tasks||[];
     if(downloads?.needsUpdate){
-      message(files,'先备份数据库、程序及医院配置。程序文件/apps、程序文件/web 按现场安装目录更新；保留医院自己的配置。');
+      message(files,'先备份数据库、程序及医院配置。程序文件/apps、程序文件/web 按现场安装目录更新；业务主程序已按启动脚本命名为固定名称（例如 datacenter.jar），停止对应服务后替换主程序和依赖，完成后重启；保留医院自己的配置。');
       message(files,'各模块依赖统一放在 lib。更新 pams-common 等内部组件前，请移除该组件的旧版本，避免同一组件多个版本同时加载；未随包提供的其他依赖请保留。');
       message(files,'升级SQL 中的 etl 文件在数据中心库执行，bms 文件在病案业务库执行。请在 Navicat 连接对应数据库，执行一次并查看结果，勿重复执行。');
       message(files,'下载不会标记执行成功。完成后回到更新清单确认各库 SQL、程序安装及业务验证。');

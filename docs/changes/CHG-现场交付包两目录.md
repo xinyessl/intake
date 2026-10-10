@@ -14,3 +14,9 @@
 核实正式B03五模块业务JAR manifest没有Class-Path，部署README明确internal-lib仅为应用制品隔离，现场仍用lib/*；Windows服务模板及runner既有行为一致。因此派生现场包将apps/<module>/internal-lib/*映射为apps/<module>/lib/*，不修改任何JAR字节，不改正式发布ZIP。缓存格式4避免复用旧目录结构。
 
 第三方依赖不变时只带本次应用内部组件，保留现场其他lib；页面提示清理同一内部组件旧版本。映射后的路径冲突明确拒绝。新增含/不含第三方依赖与映射冲突两项回归，总12项通过。
+
+## 2026-10-10：业务主JAR固定启动名
+
+部署Docker/Windows host配置及WinSW模板均使用固定<module>.jar；runner组装现场布局时也生成同字节固定名。手工交付包此前直接保留版本文件名，现场照目录替换无法更新固定启动文件。本次仅派生包模块根唯一业务JAR改为<module>.jar，lib下依赖文件名不变，正式制品及JAR字节不变。重复主JAR或非模块名JAR拒绝生成；缓存格式5。页面提示停服务后替换并重启。
+
+16项回归通过，包含5模块固定名、legacy固定名透传、内部/第三方依赖名称保留、多个版本和fixed+versioned冲突。Docker/Windows × MySQL/PostgreSQL四套真实应用制品均验证五模块固定命名。

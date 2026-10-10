@@ -12,7 +12,7 @@ export async function deliveryBundle(dataDir,release,artifacts,extraFiles=[]) {
  if(new Set(entries.map(a=>a.file)).size!==entries.length)throw Error('制品文件名重复');
  const extras=extraFiles.map(e=>{if(!/^升级SQL\/(mysql|postgresql)-(bms|etl)\.sql$/.test(e.file)||typeof e.content!=='string'||Buffer.byteLength(e.content)>20*1024*1024)throw Error('累计SQL附件不合法');const bytes=Buffer.from(e.content);return {file:e.file,size:bytes.length,bytes};});
  if(new Set(extras.map(e=>e.file)).size!==extras.length)throw Error('累计SQL附件重复');
- const key=hash(JSON.stringify({format:4,release,entries:entries.map(a=>[a.file,a.sha256,a.size]),extras:extras.map(e=>[e.file,hash(e.bytes)])}));const dir=path.join(dataDir,'release-bundles'),dest=path.join(dir,key+'.zip');fs.mkdirSync(dir,{recursive:true});
+ const key=hash(JSON.stringify({format:5,release,entries:entries.map(a=>[a.file,a.sha256,a.size]),extras:extras.map(e=>[e.file,hash(e.bytes)])}));const dir=path.join(dataDir,'release-bundles'),dest=path.join(dir,key+'.zip');fs.mkdirSync(dir,{recursive:true});
  if(active.has(dest))return active.get(dest);
  if(fs.existsSync(dest)){try{const st=fs.statSync(dest),meta=JSON.parse(fs.readFileSync(dest+'.json'));if(meta.key===key&&meta.size===st.size&&meta.mtimeMs===st.mtimeMs&&/^[a-f0-9]{64}$/.test(meta.sha256))return {file:dest,size:st.size};}catch{}fs.rmSync(dest,{force:true});fs.rmSync(dest+'.json',{force:true});}
  const job=(async()=>{const temp=dest+'.'+crypto.randomUUID()+'.tmp';let out;try{out=await fs.promises.open(temp,'wx',0o600);let offset=0;const central=[],archiveHash=crypto.createHash('sha256');const write=async b=>{await out.writeFile(b);archiveHash.update(b);offset+=b.length;};
