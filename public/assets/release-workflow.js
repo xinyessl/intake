@@ -137,6 +137,7 @@ window.ReleaseUI = (() => {
     const groups=p?.sqlGroups||downloads?.sqlGroups||[],tasks=p?.tasks||downloads?.tasks||[];
     if(downloads?.needsUpdate){
       message(files,'先备份数据库、程序及医院配置。程序文件/apps、程序文件/web 按现场安装目录更新；保留医院自己的配置。');
+      message(files,'各模块依赖统一放在 lib。更新 pams-common 等内部组件前，请移除该组件的旧版本，避免同一组件多个版本同时加载；未随包提供的其他依赖请保留。');
       message(files,'升级SQL 中的 etl 文件在数据中心库执行，bms 文件在病案业务库执行。请在 Navicat 连接对应数据库，执行一次并查看结果，勿重复执行。');
       message(files,'下载不会标记执行成功。完成后回到更新清单确认各库 SQL、程序安装及业务验证。');
     }
