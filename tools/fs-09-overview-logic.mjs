@@ -71,12 +71,12 @@ export function siteSubVersions(cust, productId, subLabelFn) {
   if (Array.isArray(pr.subsystems)) {
     for (const s of pr.subsystems) {
       if (!s || !s.name) continue;
-      const v = String(s.version || '').trim();
+      const v = String(pr.releaseVersion || s.version || '').trim();
       if (!v) continue;
       out.push({ subsystem: s.name, subsystemLabel: subLabelFn ? subLabelFn(productId, s.name) : s.name, version: v });
     }
   } else if (String(pr.version || '').trim()) {
-    out.push({ subsystem: '', subsystemLabel: '（整包）', version: String(pr.version).trim() });
+    out.push({ subsystem: '', subsystemLabel: '（整包）', version: String(pr.releaseVersion || pr.version).trim() });
   }
   return out;
 }
@@ -86,6 +86,7 @@ export function subVersionOf(cust, productId, subsystem) {
   if (!cust || !Array.isArray(cust.products)) return '';
   const pr = cust.products.find(p => p && p.project === productId);
   if (!pr) return '';
+  if (pr.releaseVersion) return String(pr.releaseVersion);
   if (Array.isArray(pr.subsystems)) { const ms = subsystem ? pr.subsystems.find(s => s && s.name === subsystem) : null; return (ms && ms.version) || ''; }
   return pr.version || '';
 }

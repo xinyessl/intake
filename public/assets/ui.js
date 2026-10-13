@@ -400,7 +400,10 @@ window.mdToHtml = function (src) {
         pop = document.createElement('div');
         pop.className = 'ui-sel-pop';
         buildPop();
-        document.body.appendChild(pop);
+        // Native modal dialogs occupy the top layer; a body portal is inert underneath.
+        var dialogHost = sel.closest('dialog[open]');
+        (dialogHost || document.body).appendChild(pop);
+        if (dialogHost) dialogHost.addEventListener('close', close, { once: true });
         wrap.classList.add('open');
         place();
         setTimeout(function () { document.addEventListener('mousedown', outside, true); }, 0);

@@ -696,11 +696,6 @@ button.f-ov-card { width: 100%; appearance: none; }
 .f-msg.f-human-reply .bub .f-human-tag { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; color: #2E9E6B; margin-bottom: 6px; }
 .f-msg.f-human-reply .bub .f-human-tag .ti { font-size: 14px; }
 .f-msg.f-human-reply .bub .f-human-body { min-width: 0; }
-/* FS-10 增强：居中系统提示条（人工服务结束等）+ 人工服务中提示条 */
-.f-sys-notice { display: flex; justify-content: center; margin: 10px 0; }
-.f-sys-notice span { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--color-text-tertiary); background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius-pill, 999px); padding: 4px 12px; }
-.f-human-mode-bar { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; color: #2E9E6B; background: #F1FAF4; border: 1px solid #B7E0C7; border-radius: 8px; padding: 7px 12px; }
-.f-human-mode-bar .ti { font-size: 15px; flex: 0 0 auto; }
 /* 受控 Markdown 块级元素（聊天气泡 + 经验库答复 + 答复内引用条目答案共用；紧凑分节·对齐藏青 token） */
 .f-msg .bub .md-p, .f-kb-answer .md-p, .f-kb-cite-item .a .md-p { margin: 0 0 .5em; }
 .f-msg .bub .md-p:last-child, .f-kb-answer .md-p:last-child, .f-kb-cite-item .a .md-p:last-child { margin-bottom: 0; }
@@ -1057,8 +1052,6 @@ button.f-ov-card { width: 100%; appearance: none; }
       </div>
       <!-- 输入区 f-chat-f：截图预览条 + 文本框 + 图片入口 + 发送按钮（回车发送；支持选图/粘贴，最多 6 张，每次发送后清空） -->
       <div class="f-chat-f">
-        <!-- FS-10 增强：人工服务中提示条（humanActive 时显示；消息发给运营、不走 AI） -->
-        <div class="f-human-mode-bar" id="fHumanModeBar" style="display:none"><i class="ti ti-headset"></i> <span>人工服务中 · 你发的消息将直接发给运营同事，暂不经过 AI</span></div>
         <div class="f-img-preview" id="fImgPreview"></div>
         <div class="f-chat-row">
           <input class="input" id="fChatInput" autocomplete="off" placeholder="问问这个系统怎么用、遇到的报错原因…回车发送（可贴/选截图）" maxlength="4000">
@@ -1205,7 +1198,6 @@ button.f-ov-card { width: 100%; appearance: none; }
   }
 
   function doLogout() {
-    stopHumanReplyPoll();   // FS-10：登出清「人工回复」轮询 interval（避免登出后仍打端点）
     api('/api/logout', { method: 'GET' }).catch(function () {}).then(function () {
       // AC-8 清空工作空间状态并重新显示登录门
       state = { me: null, mode: 'hosp', sites: [], curSite: null, subsystems: [], projects: [], customers: [], projMap: {}, groupBy: 'type', curSub: '', subOptions: [], systems: [], curSys: null, sysOpen: false, sysQuery: '', hospOpen: false, hospQuery: '', verMap: {}, ctxVer: null, verOpen: false, verDetailOpen: false, leftActiveKind: '', leftActiveId: '', planExpanded: {}, batchExpanded: {} };
@@ -1240,7 +1232,6 @@ button.f-ov-card { width: 100%; appearance: none; }
     hideGate();
     renderUser();
     loadTodo();
-    startHumanReplyPoll();   // FS-10：进工作空间起「人工回复」轻量轮询（可见时~18s 拉一次，见 startHumanReplyPoll）
     // FS-04：引用数据就绪后，先读取并校验导航上下文，再加载对应视图，最后恢复对话。
     // 不先调 onHospitalChange/syncConversationToSystem，避免 curSub 和草稿被初始默认界面覆盖。
     loadRefData().then(function () {
@@ -2259,15 +2250,19 @@ button.f-ov-card { width: 100%; appearance: none; }
   // ========== FS-05 · 按批次视图（替换旧降级占位）：下载 / 一键改版本 / 逐单验证 ==========
   //   数据源 /api/field/batches（当前账号相关批次 + 该账号 sites 范围内覆盖工单，服务端隔离）。
   //   仍无相关批次 → 友好空态（保留旧占位口径，别报错）。
+  var batchViewRequest = 0;
   function loadBatchView() {
+    var request = ++batchViewRequest, site = state.curSite;
     var listType = $('fListType'), listBatch = $('fListBatch');
     listType.style.display = 'none'; listBatch.style.display = 'block';
     listBatch.innerHTML = '<div class="f-list-empty"><div class="d">加载中…</div></div>';
     var qs = state.curSite ? ('?hospitalId=' + encodeURIComponent(state.curSite)) : '';
     api('/api/field/batches' + qs, { method: 'GET' }).then(function (r) {
+      if (request !== batchViewRequest || site !== state.curSite || state.groupBy !== 'batch') return;
       var groups = (r.body && Array.isArray(r.body.groups)) ? r.body.groups : [];
       renderBatchView(groups);
     }).catch(function () {
+      if (request !== batchViewRequest || site !== state.curSite || state.groupBy !== 'batch') return;
       listBatch.innerHTML = emptyHtml('ti-alert-triangle', '加载失败', '请稍后重试');
     });
   }
@@ -2275,10 +2270,14 @@ button.f-ov-card { width: 100%; appearance: none; }
   // 渲染按批次视图：每批一卡（批次号/产品/状态徽标/包版本）+（可下载）更新包卡 +（已下载）改版本条 + 组内逐单验证。
   function renderBatchView(groups) {
     var box = $('fListBatch');
+    var visibleIds = new Set(groups.map(function (g) { return g.batchId; }));
+    [state.batchExpanded, state.planExpanded].forEach(function (expanded) {
+      Object.keys(expanded).forEach(function (id) { if (!visibleIds.has(id)) delete expanded[id]; });
+    });
     box.innerHTML = '';
     if (!groups.length) {
       // 无相关批次 → 保留友好空态（不报错，AC-H 兜底口径）
-      box.innerHTML = emptyHtml('ti-calendar-stats', '暂无相关批次', '当前没有覆盖你负责医院的批次，运营端发布更新包后会出现在这里');
+      box.innerHTML = emptyHtml('ti-calendar-stats', '暂无可升级版本', '当前没有适用的更新包，发布新版本后会出现在这里');
       return;
     }
     groups.forEach(function (g) { box.appendChild(mkBatchGroup(g)); });
@@ -2705,10 +2704,9 @@ button.f-ov-card { width: 100%; appearance: none; }
       if (!item) return;
       // 恢复会话：消息流 + convId + project + kind=consult。Part B：保留每条消息的 media（per-message），渲染时随该轮就位（旧记录消息无 media → 末尾兜底显图，见下）。
       var rawChat = Array.isArray(item.chat) ? item.chat : [];
-      // FS-10：保留 human 标记（运营人工答复 / 现场人工消息 / 系统提示）+ 署名，供渲染成对应样式（区别 AI 气泡）
-      var msgs = rawChat.map(function (m) { return { role: (m.role === 'assistant' ? 'assistant' : 'user'), content: m.text || '', media: (Array.isArray(m.media) ? m.media : null), kbRefs: normalizeKbRefs(m.kbRefs), human: !!(m && m.human), by: (m && m.by) || '', system: !!(m && m.system) }; }).filter(function (m) { return m.content || (m.media && m.media.length); });
-      chat.messages = msgs.map(function (m) { var x = { role: m.role, content: m.content }; if (m.kbRefs.length) x.kbRefs = m.kbRefs; if (m.human) { x.human = true; if (m.by) x.by = m.by; if (m.system) x.system = true; } if (Array.isArray(m.media) && m.media.length) x.media = m.media; return x; });   // 引用仅供本地/历史重放；FS-10：保留 human/by/system（人工消息标记，双方向 + 系统提示）+ media，供刷新恢复重放成对应气泡；sendConsult 请求会收敛为 role/content，不能由客户端冒充本轮引用
-      chat.humanActive = !!item.humanActive;   // FS-10 增强：人工服务态随记录恢复——true → 续问走 human-message（不调 AI）
+      // FS-10：保留 human 标记（运营人工答复）+ 署名，供渲染成「运营人工答复」样式（区别 AI 气泡）
+      var msgs = rawChat.map(function (m) { return { role: (m.role === 'assistant' ? 'assistant' : 'user'), content: m.text || '', media: (Array.isArray(m.media) ? m.media : null), kbRefs: normalizeKbRefs(m.kbRefs), human: !!(m && m.human), by: (m && m.by) || '' }; }).filter(function (m) { return m.content || (m.media && m.media.length); });
+      chat.messages = msgs.map(function (m) { var x = { role: m.role, content: m.content }; if (m.kbRefs.length) x.kbRefs = m.kbRefs; return x; });   // 引用仅供本地/历史重放；sendConsult 请求会收敛为 role/content，不能由客户端冒充本轮引用
       chat.convId = item.convId || item.id || '';        // consult 的 convId = 记录 id
       chat.reopenProject = item.project || it.project;    // 续问归属锁定
       chat.reopenSubsystem = item.subsystem || '';        // 续问保留原子系统（append 时 subsystem 不被清空 + 续聊不触发咨询必选拦截）
@@ -2726,11 +2724,9 @@ button.f-ov-card { width: 100%; appearance: none; }
       msgs.forEach(function (m) {
         var urls = (m.media && m.media.length) ? mediaUrls(proj0, m.media) : [];
         if (urls.length) anyMsgMedia = true;
-        if (m.role === 'assistant' && m.human && m.system) { appendSystemNotice(m.content); return; }   // FS-10：系统提示（人工服务结束等）→ 居中系统条
         if (m.role === 'assistant' && m.human) { appendHumanReplyBubble(m.content, m.by, urls); return; }   // FS-10：运营人工答复 → 专属样式（非普通 AI 气泡）
-        // FS-10 增强：现场人工消息（role:user + human）= 实施自己在人工模式下发的消息 → 用实施侧「me」气泡（与普通提问同侧、同款）
         var bub = appendBubble(m.role === 'user' ? 'me' : 'ai', m.content, false, urls);   // urls 非空 → 气泡内附该轮截图缩略图
-        if (m.role === 'assistant' && !m.human && m.kbRefs.length && !isNonSubstantiveReply(m.content)) renderKbCite(bub, m.kbRefs);   // 没覆盖/无相关的答复：不显「已参考经验」（都没符合的经验，展示误导）
+        if (m.role === 'assistant' && m.kbRefs.length && !isNonSubstantiveReply(m.content)) renderKbCite(bub, m.kbRefs);   // 没覆盖/无相关的答复：不显「已参考经验」（都没符合的经验，展示误导）
       });
       if (!anyMsgMedia) appendMediaBubble(proj0, item.media);   // 旧记录兜底：消息级无 media（老 consult 只有记录级 e.media）→ 仍把图贴末尾，别让老记录图丢失
       markLeftActive('consult', chat.convId);                       // Bug B：左侧对应条标为选中
@@ -3350,7 +3346,6 @@ button.f-ov-card { width: 100%; appearance: none; }
     // AC-36：reopen 一条**未建单**的会话记录（intake-conv）→ 锁定其归档上下文，续聊仍走 intake-chat（同 sessionId → 同一条会话记录、AI 够了再建单落该 sessionId），不受当前视图切换影响。
     reopenConvProject: '', reopenConvSite: '', reopenConvSubsystem: '', reopenConvVersion: '',
     deep: false,             // 「深入思考」开关（默认关=基于 spec+经验库；开=sendConsult 带 deep:true，后端检索源码更深入分析）；仅 consult 生效
-    humanActive: false,      // FS-10 增强（持续人工对话）：当前打开的咨询是否处于「人工服务中」——true 时 sendChat 走 /api/consult-human-message（不调 AI），运营点「结束人工服务」→ 轮询翻 false → 恢复 AI 答疑（/api/consult）。随 reopenConsult/详情/轮询同步；随草稿 save/restore
     // AC-32（2026-08-06 改）：紧急程度改 per-ticket——不再挂 chat.priority（全局一个值），移到每张已建单卡片各设各的（见 appendArchiveCard / setTicketPriority）
     // FS-04 · 每个"系统上下文"各记一段会话（会话内内存态；切系统时保存旧段 + 恢复新段，未聊过→空会话）
     bySystem: {},           // 系统上下文键 systemKey() → 会话快照（切系统时存/取；纯内存态，不进任何端存储，刷新丢失可接受——已发咨询可点记录 reopen）
@@ -3543,15 +3538,6 @@ button.f-ov-card { width: 100%; appearance: none; }
     msg.appendChild(av); msg.appendChild(bub);
     box.appendChild(msg); scrollChatBottom();
     return bub;
-  }
-  // FS-10 增强：居中「系统提示」条（人工服务结束等）——非气泡，一行居中灰条，区别于对话消息。
-  function appendSystemNotice(text) {
-    clearPlaceholder();
-    var box = chatBox(); if (!box) return null;
-    var row = document.createElement('div'); row.className = 'f-sys-notice';
-    row.innerHTML = '<span><i class="ti ti-info-circle"></i> ' + escapeHtml(String(text || '')) + '</span>';
-    box.appendChild(row); scrollChatBottom();
-    return row;
   }
   // 构造气泡内的截图缩略图区；imgs = URL 数组（data URL 或 /api/intake-media URL 均可）。
   function bubbleImgs(imgs) {
@@ -3895,13 +3881,6 @@ button.f-ov-card { width: 100%; appearance: none; }
   }
   function renderSavedConversation(projectFallback) {
     var messages = Array.isArray(chat.messages) ? chat.messages : [];
-    // FS-10 回归修复：现场人工消息/运营回复的截图缩略图靠 mediaUrls(project, m.media) 拼 /api/intake-media 取图，project 为空则 mediaUrls 返 []（图丢）。
-    //   刷新恢复「本会话新起的」escalated consult 时，reopenConvProject/reopenIntakeProject 都为空（那两个仅 reopen 列表记录才置），
-    //   此时 consult 的 project 落在 chat.reopenProject（reopen 续聊）或 currentArchive().project（新起会话·随导航上下文，与发送落盘时同一 project）。
-    //   → 兜底解析出 consult 真实 project 传给 mediaUrls，否则文字气泡在、图却因 project='' 全丢（正是本次 bug 现象）。
-    if (!projectFallback && chat.submitKind === 'consult') {
-      projectFallback = chat.reopenProject || (currentArchive().project) || '';
-    }
     var tickets = normalizeBuiltTickets(chat.builtTickets, chat.savedId);
     var cardsByMessageIndex = {};
     tickets.forEach(function (t) {
@@ -3919,12 +3898,8 @@ button.f-ov-card { width: 100%; appearance: none; }
     }
     appendCards(0);
     messages.forEach(function (m, index) {
-      var urls = (m && Array.isArray(m.media) && m.media.length) ? mediaUrls(projectFallback || '', m.media) : [];   // FS-10：随轮 media（人工回复/历史轮附图）在气泡内就位
-      if (m.role === 'assistant' && m.human && m.system) { appendSystemNotice(m.content); appendCards(index + 1); return; }   // FS-10 增强：系统提示（人工服务结束）→ 系统条，刷新恢复不退化
-      if (m.role === 'assistant' && m.human) { appendHumanReplyBubble(m.content, m.by || '', urls); appendCards(index + 1); return; }   // FS-10：运营人工答复 → 专属「运营人工答复」样式，刷新恢复不退化成普通 AI 气泡
-      // FS-10 增强：现场人工消息（role:user + human）= 实施侧「me」气泡（与普通问句同侧同款）；此处按 role 已归 me，无需特判
-      var bub = appendBubble(m.role === 'user' ? 'me' : 'ai', m.content, false, urls);
-      if (m.role === 'assistant' && !m.human && normalizeKbRefs(m.kbRefs).length && !isNonSubstantiveReply(m.content)) renderKbCite(bub, m.kbRefs);   // 没覆盖/无相关：不显「已参考经验」
+      var bub = appendBubble(m.role === 'user' ? 'me' : 'ai', m.content);
+      if (m.role === 'assistant' && normalizeKbRefs(m.kbRefs).length && !isNonSubstantiveReply(m.content)) renderKbCite(bub, m.kbRefs);   // 没覆盖/无相关：不显「已参考经验」
       appendCards(index + 1);
     });
   }
@@ -3986,19 +3961,6 @@ button.f-ov-card { width: 100%; appearance: none; }
       appendBubble('ai', '你还没有被分配负责医院，暂时无法提交。请联系运营端为你分配医院后再试。');
       return;
     }
-    // FS-10 增强（持续人工对话）：该咨询处于人工服务中（humanActive）→ 不调 AI、直接把消息发给运营（/api/consult-human-message）。
-    //   优先于「咨询必选子系统」守卫（人工模式已在某条既有 convId 上，无需再选子系统）。
-    if (chat.submitKind === 'consult' && chat.humanActive && chat.convId) {
-      var himgs = pendingImages.slice();
-      clearPendingImages();
-      input.value = '';
-      appendBubble('me', text || '（截图）', false, himgs);   // 实施侧气泡（与普通问句同款）
-      chat.messages.push({ role: 'user', human: true, content: text || '（截图）' });   // FS-10：现场人工消息标记 human:true → 刷新恢复重放为 me 气泡、不当成 AI 前置问句
-      chat.lastQ = text;
-      saveDraft();
-      sendHumanMessage(text, himgs);
-      return;
-    }
     // 咨询必选子系统（2026-07-23 裁决）：新咨询若归档上下文无子系统（全部系统/全部子项目）→ 拦住并引导选择；不清空输入以便选完再发。
     //   仅 consult 生效；reopen 续聊带 reopenSubsystem 不被拦；提需求/报BUG（intake）走 AI 自动判子系统、不强制手选。
     if (chat.submitKind === 'consult' && guardConsultSubsystem()) return;
@@ -4015,30 +3977,6 @@ button.f-ov-card { width: 100%; appearance: none; }
     // FS-04 v2（2026-08-07）治本：续聊已建单会话也走 intake-chat（plan 流）——AI 出计划、用户在确认卡上决定「补充旧单 or 新建」，
     //   不再无脑 append 到旧单（旧 sendIntakeReply 会把新提的需求闷头追加进那张旧单，见踩坑背景）。builtTickets 随请求上送供 AI 判 append/new。
     else sendIntake(imgs);
-  }
-  // FS-10 增强：人工模式下发消息 —— 调 /api/consult-human-message（不调 AI）。消息已上屏 + push chat.messages（在 sendChat 里），此处只负责落库 + 处理返回。
-  //   服务端会给该轮图片落盘 media；成功后无需再动对话流（已上屏）。失败 → 显一条 ai 提示 + 允许重发（不清已上屏消息）。
-  function sendHumanMessage(text, imgs) {
-    var archive = currentArchive();
-    var proj = chat.reopenProject || archive.project;
-    api('/api/consult-human-message', { method: 'POST', body: JSON.stringify({ project: proj, convId: chat.convId, text: text || '', images: (Array.isArray(imgs) && imgs.length) ? imgs : undefined }) })
-      .then(function (r) {
-        var b = r.body || {};
-        if (b.ok) {
-          // 服务端已把本轮图片落盘并回相对路径 → 把最后一条 user 消息的 media 补成落盘路径（刷新恢复能取图），并 saveDraft
-          if (Array.isArray(b.media) && b.media.length) {
-            for (var i = chat.messages.length - 1; i >= 0; i--) { if (chat.messages[i].role === 'user') { chat.messages[i].media = b.media.slice(); break; } }
-          }
-          saveDraft();
-          try { refreshLeftList(); } catch (e) {}
-          return;
-        }
-        // humanActive:false（运营已结束人工服务）→ 提示恢复 AI 答疑；其余错误提示重试
-        if (b.humanActive === false) { chat.humanActive = false; syncHumanModeBar(); appendSystemNotice('人工服务已结束，你的消息未发送。恢复 AI 答疑后可重新提问。'); }
-        else appendBubble('ai', (b.error || '消息发送失败，请稍后重试。'));
-        saveDraft();
-      })
-      .catch(function () { appendBubble('ai', '消息发送失败（网络问题），请稍后重试。'); });
   }
 
   // 发送态切换：发送中把「发送」按钮切成「停止」态（不置灰死，仍可点=中断本轮 AI 生成）；结束切回「发送」。
@@ -4287,102 +4225,90 @@ button.f-ov-card { width: 100%; appearance: none; }
     // 非实质答复：答案说了"没覆盖/无相关"，就别再显/存「已参考经验」——都没符合的经验，展示反而误导（据回复内容判定）。
     if (nonSub && bub && bub._kbCite) { try { bub._kbCite.remove(); } catch (e) {} bub._kbCite = null; }
     if (replyText) { var m = { role: 'assistant', content: replyText }; var refs = normalizeKbRefs(kbRefs); if (refs.length && !nonSub) m.kbRefs = refs; chat.messages.push(m); chat.lastA = replyText; }
-    if (aborted) { scrollChatBottom(); saveDraft(); return; }   // 主动停止：不追加引导入口，仅保留已生成内容 + 存草稿
-    // 咨询答复结束后的「合并引导卡」（沉淀经验库 / 转工单 / 转人工，三入口合一条 f-msg 卡片，按条件出按钮）。
-    //   沉淀经验库：仅「实质答复」（replyText && chat.lastQ && !nonSub）——非实质无价值；转工单/转人工：仅已有咨询会话（chat.convId）。
-    //   humanActive（人工服务中）时不出（此时是人工对话，不该再引导转人工/沉淀/转工单）。
-    if (replyText) appendConsultActions(nonSub);
+    if (aborted) { scrollChatBottom(); saveDraft(); return; }   // 主动停止：不追加 KB/转工单入口，仅保留已生成内容 + 存草稿
+    // 咨询「已解决 → 沉淀经验库」入口（AC-19-KB）：结束后在气泡下追加一枚小按钮。仅「实质答复」才提示沉淀（非实质无价值）。
+    if (replyText && chat.lastQ && !nonSub) appendKbSink();
+    // 咨询「转工单」入口（CT-3）：AI 答复结束且已有咨询会话（chat.convId）→ 追加一枚转工单按钮，实施判断该升级时点它 → 弹确认弹窗 → 直接建单（不再靠 AI 生成工单模板续聊）。
+    if (replyText && chat.convId) appendConsultToIntake();
+    // FS-10 咨询「转人工」入口：AI 答不好时点它 → 该咨询打「待人工回复」态、交运营端回复（仍是咨询、不转开发工单）。外挂功能，与上面「转工单」并列。
+    if (replyText && chat.convId) appendConsultEscalate();
     scrollChatBottom();
     saveDraft();
     // 咨询落库后即时刷新左侧提交清单（否则新咨询记录不出现、切模式/新对话后"消失"，须刷新页面才见——与建单流对齐）
     try { if (chat.convId) refreshLeftList(); } catch (e) {}
   }
 
-  // ========== 咨询答复结束后的「合并引导卡」（AC-19-KB 沉淀经验库 + CT-3 转工单 + FS-10 转人工，三入口合一条卡片） ==========
-  //   一条 f-msg ai 卡片：一句精炼引导 + 一排按钮（flex 换行自适应），按实际条件出现哪些按钮。
-  //   条件：沉淀经验库 = 实质答复（!nonSub && chat.lastQ）；转工单/转人工 = 已有咨询会话（chat.convId）。
-  //   幂等：整卡同 convId 只挂一枚（`.f-consult-actions[data-conv]` 守卫，重复 finishConsult 不叠加）。
-  //   humanActive（人工服务中）时不出（此时是人工对话，续问走 sendHumanMessage 不经 finishConsult；仍加防御 return）。
-  //   注：引导按钮是交互入口、不进 chat.messages（不落草稿，刷新/reopen 后按状态重新判断是否再挂），保持原三函数行为。
-  function appendConsultActions(nonSub) {
-    if (chat.humanActive) return;   // 人工服务中 → 不再出引导卡（此刻是人工对话）
+  // AC-19-KB：咨询「解决了/沉淀经验库」→ kb-from-consult（带 project/q/a）
+  function appendKbSink() {
     var box = chatBox(); if (!box) return;
-    var convId = chat.convId || '';
     var archive = currentArchive();
-    var canKb = !nonSub && !!chat.lastQ;              // 沉淀经验库：仅实质答复
-    var canTicket = !!convId;                          // 转工单：仅已有咨询会话
-    var canEscalate = !!convId;                        // 转人工：仅已有咨询会话
-    if (!canKb && !canTicket && !canEscalate) return;  // 一个按钮都不该出 → 整卡不渲染
-    // 幂等：同会话已挂过合并卡 → 不重复追加（convId 为空时用占位键，避免无 convId 的纯沉淀卡重复挂）
-    var dedupeKey = convId || 'nc';
-    if (box.querySelector('.f-consult-actions[data-conv="' + dedupeKey + '"]')) return;
-
     var msg = document.createElement('div'); msg.className = 'f-msg ai';
     var av = document.createElement('div'); av.className = 'av'; av.innerHTML = '<i class="ti ti-bulb"></i>';
-    var card = document.createElement('div'); card.className = 'f-arch f-consult-actions'; card.setAttribute('data-conv', dedupeKey);
-    // 一句精炼引导（合并三句）
-    var lead = document.createElement('div'); lead.className = 'rowk';
-    lead.textContent = '这条答疑解决了吗？可沉淀经验库帮下一个人，或升级工单 / 转人工。';
-    card.appendChild(lead);
-    // 一排按钮（横向 flex + gap + 换行自适应）
-    var row = document.createElement('div');
-    row.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;';
-
-    // ① 已解决 · 沉淀经验库（主色）—— 逻辑逐字保留自原 appendKbSink
-    if (canKb) {
-      var kbBtn = document.createElement('button'); kbBtn.type = 'button'; kbBtn.className = 'btn btn-sm btn-primary';
-      kbBtn.innerHTML = '<i class="ti ti-book-upload"></i> 已解决 · 沉淀经验库';
-      kbBtn.addEventListener('click', function () {
-        kbBtn.disabled = true;
-        // 沉淀整段咨询对话：优先发 convId，让后端用 AI 整理整段对话成一条经验库条目（core Q + 全脉络 A）；
-        // convId 为空（异常兜底）时回落发最后一轮 lastQ/lastA，后端向后兼容。
-        var payload = chat.convId ? { project: archive.project, convId: chat.convId } : { project: archive.project, q: chat.lastQ, a: chat.lastA };
-        api('/api/kb-from-consult', { method: 'POST', body: JSON.stringify(payload) })
-          .then(function (r) {
-            if (r.body && r.body.ok) { kbBtn.innerHTML = '<i class="ti ti-check"></i> 已沉淀到经验库'; }
-            else { kbBtn.disabled = false; kbBtn.innerHTML = '<i class="ti ti-book-upload"></i> 沉淀失败，重试'; }
-          }).catch(function () { kbBtn.disabled = false; kbBtn.innerHTML = '<i class="ti ti-book-upload"></i> 沉淀失败，重试'; });
-      });
-      row.appendChild(kbBtn);
-    }
-
-    // ② 转工单（次级 · 描边）—— 逻辑逐字保留自原 appendConsultToIntake
-    if (canTicket) {
-      var ticketBtn = document.createElement('button'); ticketBtn.type = 'button'; ticketBtn.className = 'btn btn-sm';
-      ticketBtn.innerHTML = '<i class="ti ti-ticket"></i> 🎫 转工单';
-      ticketBtn.addEventListener('click', function () { openConsultToIntake(convId, archive, ticketBtn); });
-      row.appendChild(ticketBtn);
-    }
-
-    // ③ 转人工（次级 · 描边）—— 逻辑逐字保留自原 appendConsultEscalate（含进人工模式 + 提示条 + 系统提示 + 落草稿）
-    if (canEscalate) {
-      var escBtn = document.createElement('button'); escBtn.type = 'button'; escBtn.className = 'btn btn-sm';
-      escBtn.innerHTML = '<i class="ti ti-headset"></i> 转人工';
-      escBtn.addEventListener('click', function () {
-        escBtn.disabled = true;
-        api('/api/consult-escalate', { method: 'POST', body: JSON.stringify({ project: chat.reopenProject || archive.project, convId: convId }) })
-          .then(function (r) {
-            if (r.body && r.body.ok) {
-              escBtn.innerHTML = '<i class="ti ti-check"></i> 已转人工 · 可继续和运营对话'; showToast('已转人工，可直接和运营同事对话', 'success');
-              // FS-10 增强：转人工成功 → 进入人工服务模式（后续 sendChat 走 human-message，不调 AI），显提示条，落草稿
-              if (chat.convId === convId) { chat.humanActive = true; syncHumanModeBar(); appendSystemNotice('已转人工，你可以直接在下方继续和运营同事对话（含截图），运营处理完会点「结束人工服务」恢复 AI 答疑。'); saveDraft(); }
-            }
-            else { escBtn.disabled = false; escBtn.innerHTML = '<i class="ti ti-headset"></i> 转人工失败，重试'; }
-          }).catch(function () { escBtn.disabled = false; escBtn.innerHTML = '<i class="ti ti-headset"></i> 转人工失败，重试'; });
-      });
-      row.appendChild(escBtn);
-    }
-
-    card.appendChild(row);
+    var card = document.createElement('div'); card.className = 'f-arch';
+    card.innerHTML = '<div class="rowk">这条答疑对你有帮助吗？有价值可沉淀到经验库，帮下一个人少走弯路。</div>';
+    var btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn btn-sm btn-primary'; btn.style.marginTop = '8px';
+    btn.innerHTML = '<i class="ti ti-book-upload"></i> 已解决 · 沉淀经验库';
+    btn.addEventListener('click', function () {
+      btn.disabled = true;
+      // 沉淀整段咨询对话：优先发 convId，让后端用 AI 整理整段对话成一条经验库条目（core Q + 全脉络 A）；
+      // convId 为空（异常兜底）时回落发最后一轮 lastQ/lastA，后端向后兼容。
+      var payload = chat.convId ? { project: archive.project, convId: chat.convId } : { project: archive.project, q: chat.lastQ, a: chat.lastA };
+      api('/api/kb-from-consult', { method: 'POST', body: JSON.stringify(payload) })
+        .then(function (r) {
+          if (r.body && r.body.ok) { btn.innerHTML = '<i class="ti ti-check"></i> 已沉淀到经验库'; }
+          else { btn.disabled = false; btn.innerHTML = '<i class="ti ti-book-upload"></i> 沉淀失败，重试'; }
+        }).catch(function () { btn.disabled = false; btn.innerHTML = '<i class="ti ti-book-upload"></i> 沉淀失败，重试'; });
+    });
+    card.appendChild(btn);
     msg.appendChild(av); msg.appendChild(card);
     box.appendChild(msg); scrollChatBottom();
   }
-  // FS-10 增强：按 chat.humanActive 显/隐「人工服务中」提示条 + 更新输入框 placeholder（人工模式提示消息发给运营）。
-  function syncHumanModeBar() {
-    var bar = $('fHumanModeBar');
-    if (bar) bar.style.display = (chat.submitKind === 'consult' && chat.humanActive && chat.convId) ? 'flex' : 'none';
-    var input = $('fChatInput');
-    if (input && chat.submitKind === 'consult' && chat.humanActive && chat.convId) input.placeholder = '给运营同事发消息…回车发送（可贴/选截图）';
+
+  // CT-3：咨询「转工单」入口 —— 结束后在气泡下追加一枚「转工单」按钮（同 appendKbSink 小卡片风格）。
+  //   实施判断该升级为需求/BUG 时点它 → 弹确认弹窗（选类型 + 改标题）→ 确认 → POST /api/consult-to-intake 直接建单（不再靠 AI 生成工单模板续聊）。
+  //   幂等：每个咨询会话（convId）只挂一枚（重复 finishConsult 不叠加）；建单成功后按钮置「已转工单」禁用（防重复建单）。
+  function appendConsultToIntake() {
+    var box = chatBox(); if (!box) return;
+    var convId = chat.convId; if (!convId) return;
+    if (box.querySelector('.f-toticket[data-conv="' + convId + '"]')) return;   // 同会话已挂过 → 不重复追加
+    var archive = currentArchive();
+    var msg = document.createElement('div'); msg.className = 'f-msg ai';
+    var av = document.createElement('div'); av.className = 'av'; av.innerHTML = '<i class="ti ti-ticket"></i>';
+    var card = document.createElement('div'); card.className = 'f-arch f-toticket'; card.setAttribute('data-conv', convId);
+    card.innerHTML = '<div class="rowk">这个咨询需要升级为需求 / BUG 交运营端处理吗？可直接转成工单。</div>';
+    var btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn btn-sm btn-primary'; btn.style.marginTop = '8px';
+    btn.innerHTML = '<i class="ti ti-ticket"></i> 🎫 转工单';
+    btn.addEventListener('click', function () { openConsultToIntake(convId, archive, btn); });
+    card.appendChild(btn);
+    msg.appendChild(av); msg.appendChild(card);
+    box.appendChild(msg); scrollChatBottom();
+  }
+
+  // ========== FS-10 咨询「转人工」入口（外挂 · 与 lsy 的 consult 渲染隔离，只加 UI + 调新端点，不动答复流） ==========
+  //   AI 答不好时点它 → POST /api/consult-escalate {project,convId} → 该咨询打「待人工回复」态，交运营端回复（仍是咨询，不转开发工单）。
+  //   幂等：每个咨询会话（convId）只挂一枚（重复 finishConsult 不叠加）；成功后按钮置「已转人工 · 待运营回复」禁用（禁重复点）。
+  function appendConsultEscalate() {
+    var box = chatBox(); if (!box) return;
+    var convId = chat.convId; if (!convId) return;
+    if (box.querySelector('.f-escalate[data-conv="' + convId + '"]')) return;   // 同会话已挂过 → 不重复追加
+    var archive = currentArchive();
+    var msg = document.createElement('div'); msg.className = 'f-msg ai';
+    var av = document.createElement('div'); av.className = 'av'; av.innerHTML = '<i class="ti ti-headset"></i>';
+    var card = document.createElement('div'); card.className = 'f-arch f-escalate'; card.setAttribute('data-conv', convId);
+    card.innerHTML = '<div class="rowk">AI 答复没解决你的问题？可转人工，交运营同事看完整对话后给你回复（仍是咨询，不建工单）。</div>';
+    var btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn btn-sm btn-primary'; btn.style.marginTop = '8px';
+    btn.innerHTML = '<i class="ti ti-headset"></i> 转人工';
+    btn.addEventListener('click', function () {
+      btn.disabled = true;
+      api('/api/consult-escalate', { method: 'POST', body: JSON.stringify({ project: archive.project, convId: convId }) })
+        .then(function (r) {
+          if (r.body && r.body.ok) { btn.innerHTML = '<i class="ti ti-check"></i> 已转人工 · 待运营回复'; showToast('已转人工，运营会尽快回复', 'success'); }
+          else { btn.disabled = false; btn.innerHTML = '<i class="ti ti-headset"></i> 转人工失败，重试'; }
+        }).catch(function () { btn.disabled = false; btn.innerHTML = '<i class="ti ti-headset"></i> 转人工失败，重试'; });
+    });
+    card.appendChild(btn);
+    msg.appendChild(av); msg.appendChild(card);
+    box.appendChild(msg); scrollChatBottom();
   }
 
   // CT-3：转工单确认弹窗（app 风格，参考 fPrompt 那套遮罩，多字段版：类型切换 + 标题输入 + 说明）。
@@ -4529,7 +4455,6 @@ button.f-ov-card { width: 100%; appearance: none; }
       ? '问问这个系统怎么用、遇到的报错原因…回车发送'
       : '说说想要的功能改进，或遇到的问题…回车发送';
     syncDeep();   // 按 submitKind 显隐「深入思考」开关（仅 consult 可用）+ 刷新按钮态
-    syncHumanModeBar();   // FS-10 增强：按人工服务态显/隐提示条（切到 intake 时隐藏）
     saveDraft();
   }
 
@@ -4582,7 +4507,7 @@ button.f-ov-card { width: 100%; appearance: none; }
     // 「停止」：切新对话/切系统时若上一轮还在发送中 → 先 abort 旧请求（signal 传进三条路径），避免旧响应/流式串进新对话
     if (chat.sending && chat.abortCtrl) { try { chat.abortCtrl.abort(); } catch (e) {} }
     chat.abortCtrl = null;
-    chat.messages = []; chat.savedId = ''; chat.builtTickets = []; chat.lastPlanCard = null; chat.filedUpTo = 0; chat.convId = ''; chat.sessionId = newSessionId(); chat.reopenSessionId = ''; chat.analyzed = false; chat.sending = false; chat.lastQ = ''; chat.lastA = ''; chat.reopenProject = ''; chat.reopenSubsystem = ''; chat.reopenIntakeProject = ''; chat.reopenConvProject = ''; chat.reopenConvSite = ''; chat.reopenConvSubsystem = ''; chat.reopenConvVersion = ''; chat.deep = false; chat.humanActive = false;   // 新对话重置深入思考为关 + 人工服务态（新会话不带旧人工模式）；FS-04 v2 清 builtTickets/lastPlanCard（新会话不带旧已建单清单、无待确认计划卡）（合理默认：新会话不默认耗时的源码检索）；清 reopenIntakeProject/reopenConv* + filedUpTo=0（水位线归零，新会话不带旧已建单背景）；新 sessionId（这次聊天建的单归新的一条对话记录）。AC-32：紧急程度已移到 per-ticket 卡片，无全局态可重置
+    chat.messages = []; chat.savedId = ''; chat.builtTickets = []; chat.lastPlanCard = null; chat.filedUpTo = 0; chat.convId = ''; chat.sessionId = newSessionId(); chat.reopenSessionId = ''; chat.analyzed = false; chat.sending = false; chat.lastQ = ''; chat.lastA = ''; chat.reopenProject = ''; chat.reopenSubsystem = ''; chat.reopenIntakeProject = ''; chat.reopenConvProject = ''; chat.reopenConvSite = ''; chat.reopenConvSubsystem = ''; chat.reopenConvVersion = ''; chat.deep = false;   // 新对话重置深入思考为关；FS-04 v2 清 builtTickets/lastPlanCard（新会话不带旧已建单清单、无待确认计划卡）（合理默认：新会话不默认耗时的源码检索）；清 reopenIntakeProject/reopenConv* + filedUpTo=0（水位线归零，新会话不带旧已建单背景）；新 sessionId（这次聊天建的单归新的一条对话记录）。AC-32：紧急程度已移到 per-ticket 卡片，无全局态可重置
     var box = chatBox();
     if (box) {
       box.innerHTML = '';
@@ -4598,7 +4523,6 @@ button.f-ov-card { width: 100%; appearance: none; }
     markLeftActive('', '');   // Bug B：开新对话 → 清左侧选中态（当前无打开的记录）
     setSending(false);
     syncDeep();       // 深入思考已重置为关 → 刷新开关按钮态（去高亮）
-    syncHumanModeBar();   // FS-10 增强：新对话 → 隐藏人工服务提示条
     updateScope();
     // FS-04：清当前系统上下文桶那份会话（否则切走再切回会恢复出已被清掉的旧对话）
     if (chat.lastSystemKey != null && chat.bySystem) delete chat.bySystem[chat.lastSystemKey];
@@ -4623,7 +4547,7 @@ button.f-ov-card { width: 100%; appearance: none; }
       reopenProject: chat.reopenProject || '', reopenSubsystem: chat.reopenSubsystem || '',
       reopenIntakeProject: chat.reopenIntakeProject || '', reopenConvProject: chat.reopenConvProject || '',
       reopenConvSite: chat.reopenConvSite || '', reopenConvSubsystem: chat.reopenConvSubsystem || '', reopenConvVersion: chat.reopenConvVersion || '',
-      deep: !!chat.deep, humanActive: !!chat.humanActive, input: input ? input.value : '',
+      deep: !!chat.deep, input: input ? input.value : '',
       user: (state.me && (state.me.username || state.me.name)) || '',
       nav: { mode: state.mode, curSite: state.curSite, curSub: state.curSub, curSys: state.curSys, groupBy: state.groupBy, ctxVer: state.ctxVer },
       leftActive: { kind: state.leftActiveKind || '', id: state.leftActiveId || '' }
@@ -4648,7 +4572,6 @@ button.f-ov-card { width: 100%; appearance: none; }
     try {
       var d = draft || readDraft(); if (!d) return false;
       chat.deep = !!d.deep;
-      chat.humanActive = !!d.humanActive;   // FS-10 增强：恢复人工服务态（刷新后仍走 human-message；轮询会用最新 humanActive 二次校准）
       chat.submitKind = d.kind === 'consult' ? 'consult' : 'intake';
       chat.savedId = d.savedId || ''; chat.builtTickets = Array.isArray(d.builtTickets) ? d.builtTickets.slice() : []; chat.lastPlanCard = null; chat.convId = d.convId || ''; chat.sessionId = d.sessionId || newSessionId(); chat.reopenSessionId = d.reopenSessionId || ''; chat.reopenProject = d.reopenProject || ''; chat.reopenSubsystem = d.reopenSubsystem || ''; chat.reopenIntakeProject = d.reopenIntakeProject || ''; chat.reopenConvProject = d.reopenConvProject || ''; chat.reopenConvSite = d.reopenConvSite || ''; chat.reopenConvSubsystem = d.reopenConvSubsystem || ''; chat.reopenConvVersion = d.reopenConvVersion || '';   // FS-04：恢复会话 id（无则新的，刷新后续聊建单仍归一条对话记录）+ 未建单会话记录续聊上下文（AC-36）
       chat.messages = Array.isArray(d.messages) ? d.messages.slice() : [];
@@ -4853,129 +4776,6 @@ button.f-ov-card { width: 100%; appearance: none; }
       items.forEach(function (it) { results.appendChild(mkConvItem(it)); });
     }).catch(function () { results.innerHTML = ''; hollow.style.display = 'block'; hollow.textContent = '加载失败，请重试'; });
   }
-
-  // ========== FS-10（实时性增强）· 实施端轻量轮询「人工回复」 ==========
-  //   仅前端轮询 /api/field/conversations（复用 FS-04 数据源，FS-10 已透出 escalated/humanReplied/humanReplyAt）。
-  //   目标：运营在「咨询回复」页答复后，实施端**不用手动刷新**即可看到——提醒 + 对话记录徽标翻新 + 若该咨询正开在右侧则实时 append 人工回复气泡。
-  //   机制（两端通用要求）：间隔 15~20s；仅 document.visibilityState==='visible' 时轮；切回可见立即拉一次；inFlight 防并发；失败静默重试下轮；登出/卸载清 interval。
-  //   铁律：只更新对话记录/徽标/提醒（+ 待办计数），**绝不**重渲染正在流式的答复区、不清用户正在输入的框、不打断 AI 答复流。
-  var HR_POLL_MS = 18000;                 // 轮询间隔（15~20s 区间内取 18s）
-  var _hrLastReply = null;                // Map: convId → 上次已知 humanReplyAt（首帧建基线、不误报旧回复）
-  var _hrInFlight = false;                // 防并发：上一次没回来不叠发
-  var _hrTimer = null;                    // setInterval 句柄（登出/卸载 clearInterval）
-  function stopHumanReplyPoll() { if (_hrTimer) { clearInterval(_hrTimer); _hrTimer = null; } _hrInFlight = false; }
-  function startHumanReplyPoll() {
-    stopHumanReplyPoll();
-    _hrLastReply = null;                   // 每次进工作空间重建基线
-    pollHumanReplies(true);                // 立即拉一次建基线（首帧不提醒）
-    _hrTimer = setInterval(function () { if (document.visibilityState === 'visible') pollHumanReplies(false); }, HR_POLL_MS);
-  }
-  // 判「新人工回复」：与 last-seen humanReplyAt 比对；首帧（baseline）只建基线不提醒（避免把历史回复当新的）。
-  //   FS-10 增强：next 里连带记 humanActive（用于「运营结束人工服务」的检测，见 pollHumanReplies）。
-  function detectNewHumanReplies(items, lastMap, baseline) {
-    var next = {}, fresh = [];
-    (items || []).forEach(function (it) {
-      if (!it || it.kind !== 'consult') return;
-      var at = it.humanReplyAt || (it.humanReplied ? '__replied__' : '');   // 老数据无 humanReplyAt 但 humanReplied → 用占位标记，仍能判「首次变已回复」
-      next[it.id] = at;
-      if (!at) return;                                                        // 没人工回复，跳过
-      if (!baseline) {
-        var prev = lastMap ? lastMap[it.id] : undefined;
-        if (prev === undefined || prev !== at) fresh.push(it);               // 首次出现 或 时间戳变化 = 新回复（含「同一咨询运营再补一条」）
-      }
-    });
-    return { next: next, fresh: fresh };
-  }
-  function pollHumanReplies(baseline) {
-    if (_hrInFlight) return;               // 防并发
-    _hrInFlight = true;
-    var isBaseline = baseline || _hrLastReply === null;
-    api('/api/field/conversations', { method: 'GET' }).then(function (r) {
-      var items = (r.body && Array.isArray(r.body.items)) ? r.body.items : [];
-      var res = detectNewHumanReplies(items, _hrLastReply, isBaseline);
-      _hrLastReply = res.next;
-      if (res.fresh.length) onNewHumanReplies(res.fresh, isBaseline);
-      // FS-10 增强（持续双向人工对话）：当前正开着的咨询 → 无条件增量同步（拉详情把本地未渲染的双方 human/system 消息补上），
-      //   覆盖「运营回复」「运营发新截图」「运营结束人工服务（system 提示 + humanActive→false）」——不依赖 humanReplyAt 变化（结束时它不变）。
-      if (chat.convId && chat.submitKind === 'consult') {
-        var openIt = items.find(function (x) { return x && x.kind === 'consult' && x.id === chat.convId; });
-        if (openIt) syncOpenConsultMessages(openIt, isBaseline);
-      }
-      // 对话记录抽屉开着 → 静默翻新列表（徽标：待回复→已回复），不影响右侧对话区/输入框
-      if ($('fConvDrawer') && $('fConvDrawer').classList.contains('open')) refreshConvBadges(items);
-    }).catch(function () { /* 失败静默，下轮重试 */ }).then(function () { _hrInFlight = false; });
-    // 顺带刷新待办计数（原来只加载时读一次；此处轻量更新，不打断当前操作）
-    try { loadTodo(); } catch (e) {}
-  }
-  // 发现新人工回复：① 提醒（首帧 baseline 不提醒）② 若正开在右侧对话区（chat.convId 匹配）→ 由 syncOpenConsultMessages 增量补气泡（此处不重复 append）③ 抽屉徽标由 refreshConvBadges 翻新。
-  function onNewHumanReplies(freshItems, isBaseline) {
-    if (isBaseline) return;   // 首帧只建基线不提醒
-    freshItems.forEach(function (it) {
-      var titleFrag = (it.title || '').slice(0, 20);
-      showToast('运营已回复你的咨询' + (titleFrag ? '「' + titleFrag + '」' : ''), 'success');
-    });
-  }
-  // FS-10 增强：该咨询正开在右侧 → 拉一次详情，把「本地还没渲染过的」双方 human/system 消息增量 append（运营人工答复 / 运营截图 / 系统结束提示）。
-  //   同时检测「运营已结束人工服务」（humanActive→false）→ 关人工模式、隐提示条、恢复 AI 答疑。
-  //   铁律：只增量补新消息 + 更新模式态，不清空/不重建对话流、不动输入框（不打断用户正在看/输入）。
-  //   防重复：以「chat.messages 里已持久化的 human/system 条数」为增量基线——现场自己发的人工消息发送时已 push（sendChat），运营的在其后；双方消息严格按服务端真实时序追加，故本地 human/system 计数 = 已显条数。
-  function syncOpenConsultMessages(it, isBaseline) {
-    api('/api/intake-detail?project=' + encodeURIComponent(it.project) + '&id=' + encodeURIComponent(it.id), { method: 'GET' }).then(function (r) {
-      if (!chat.convId || chat.convId !== it.id || chat.submitKind !== 'consult') return;   // 拉取期间用户可能已切走，二次确认
-      var item = (r.body && r.body.item) || null; if (!item) return;
-      var box = chatBox(); if (!box) return;
-      // 服务端 chat 里所有「人工/系统」消息（双方向：运营 assistant human、现场 user human、系统 system）——过滤掉纯空消息
-      var serverHS = (Array.isArray(item.chat) ? item.chat : []).filter(function (m) { return m && (m.human || m.system) && (m.text || (Array.isArray(m.media) && m.media.length)); });
-      var localHS = (Array.isArray(chat.messages) ? chat.messages : []).filter(function (m) { return m && (m.human || m.system); }).length;
-      var pushed = false;
-      for (var i = localHS; i < serverHS.length; i++) {   // 只补本地还没有的（防重复 append + 防重复 push）
-        var m = serverHS[i];
-        var urls = (Array.isArray(m.media) && m.media.length) ? mediaUrls(item.project || it.project, m.media) : [];
-        if (m.system) { appendSystemNotice(m.text || ''); chat.messages.push({ role: 'assistant', human: true, system: true, content: m.text || '', by: m.by || '' }); pushed = true; continue; }
-        if (m.role === 'user') {   // 现场人工消息（理论上本地已 push；极端漏时兜底补 me 气泡）
-          appendBubble('me', m.text || '', false, urls);
-          var um = { role: 'user', human: true, content: m.text || '' }; if (Array.isArray(m.media) && m.media.length) um.media = m.media; chat.messages.push(um); pushed = true; continue;
-        }
-        // 运营人工答复
-        appendHumanReplyBubble(m.text || '', m.by || '', urls);
-        var msg = { role: 'assistant', human: true, content: m.text || '' };
-        if (m.by) msg.by = m.by;
-        if (Array.isArray(m.media) && m.media.length) msg.media = m.media;
-        chat.messages.push(msg); pushed = true;
-      }
-      // 模式态校准：运营结束人工服务（humanActive:false）→ 关模式、隐提示条（system 提示已随上面 append）。首帧（baseline）也校准，避免刷新后误留人工模式。
-      var wasActive = chat.humanActive;
-      chat.humanActive = !!item.humanActive;
-      if (wasActive && !chat.humanActive && !isBaseline) showToast('人工服务已结束，已恢复 AI 答疑', 'info');
-      syncHumanModeBar();
-      if (pushed || wasActive !== chat.humanActive) saveDraft();   // 落草稿 → 刷新恢复不丢双向人工消息/模式态
-    }).catch(function () {});
-  }
-  // 对话记录抽屉开着时：静默翻新每条 consult 的转人工徽标（待运营回复 → 运营已回复），不重建整列表、不打断。
-  //   按 id 定位已渲染卡片，只改 .f-conv-human 徽标；卡片不存在（新咨询）不强插（避免打断），交由用户主动开抽屉刷新。
-  function refreshConvBadges(items) {
-    var results = $('fConvResults'); if (!results) return;
-    (items || []).forEach(function (it) {
-      if (!it || it.kind !== 'consult') return;
-      // 找对应卡片：mkConvItem 未标 data-id，这里靠 humanReplied 态直接整卡翻新代价高——改为轻量：仅当抽屉开着且需要时静默重载列表。
-    });
-    // 抽屉开着时直接静默重载（不显「加载中…」，避免闪烁）——只更新未在右侧对话区打断的列表部分。
-    silentReloadConversations();
-  }
-  // 静默重载对话记录列表（抽屉开着时用）：不显「加载中…」占位，拉到后原地替换；失败保留旧列表不报错。
-  function silentReloadConversations() {
-    var results = $('fConvResults'), hollow = $('fConvHollow');
-    if (!results) return;
-    api('/api/field/conversations', { method: 'GET' }).then(function (r) {
-      if (!$('fConvDrawer') || !$('fConvDrawer').classList.contains('open')) return;   // 抽屉已关，放弃
-      var items = (r.body && Array.isArray(r.body.items)) ? r.body.items : [];
-      if (!items.length) { results.innerHTML = ''; if (hollow) { hollow.style.display = 'block'; hollow.textContent = '暂无对话记录（发起咨询或提需求/报BUG 后会出现在这里）'; } return; }
-      if (hollow) hollow.style.display = 'none';
-      results.innerHTML = '';
-      items.forEach(function (it) { results.appendChild(mkConvItem(it)); });
-    }).catch(function () { /* 静默：保留旧列表 */ });
-  }
-
   // 一条对话记录卡片：类型徽标 +（intake 多单时）「N 单」计数 + 概要标题 + 上下文（子系统·医院·时间）。点击 → reopen 续聊。
   function mkConvItem(it) {
     var el = document.createElement('div');
@@ -5425,12 +5225,6 @@ button.f-ov-card { width: 100%; appearance: none; }
   bind();
   restore();
 
-  // FS-10：可见性门控 + 卸载清理——切回可见立即拉一次（不等下个 interval）；页面隐藏时 interval 内自跳过（见 startHumanReplyPoll）；卸载清 interval。
-  document.addEventListener('visibilitychange', function () {
-    if (document.visibilityState === 'visible' && _hrTimer) pollHumanReplies(false);   // 切回可见立即拉一次（仅在轮询已起时）
-  });
-  window.addEventListener('beforeunload', function () { stopHumanReplyPoll(); });
-
   // 左右面板可拖拽调整宽度（splitter；宽度存 sessionStorage 会话级，避页面禁用的持久存储静态断言）
   (function initSplitter(){
     var sp=document.getElementById('fSplitter'), pane=document.getElementById('fSubmitPane'), ws=document.getElementById('fWorkspace');
@@ -5443,7 +5237,7 @@ button.f-ov-card { width: 100%; appearance: none; }
   })();
 
   // 暴露给测试/调试（不含敏感数据）
-  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, openConvRec: openConvRec, closeConvRec: closeConvRec, loadConversations: loadConversations, mkConvItem: mkConvItem, reopenConversation: reopenConversation, reopenIntakeConv: reopenIntakeConv, bindConvDelete: bindConvDelete, doDeleteConversation: doDeleteConversation, newSessionId: newSessionId, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, openTicketDrawer: openTicketDrawer, closeTicketDrawer: closeTicketDrawer, renderTicketDrawer: renderTicketDrawer, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, setTicketPriority: setTicketPriority, newConversation: newConversation, sendChat: sendChat, stopSending: stopSending, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast, openMaintainEdit: openMaintainEdit, doMaintainSave: doMaintainSave, maintainChipHtml: maintainChipHtml, maintainDaysLeft: maintainDaysLeft, renderTodoBody: renderTodoBody, mkUpdatePlanBlock: mkUpdatePlanBlock, loadUpdatePlan: loadUpdatePlan, renderUpdatePlan: renderUpdatePlan, mkPlanTaskItem: mkPlanTaskItem, mkSqlBundleItem: mkSqlBundleItem, doTaskToggle: doTaskToggle, doSqlBundleToggle: doSqlBundleToggle, appendConsultActions: appendConsultActions, openConsultToIntake: openConsultToIntake, doConsultToIntake: doConsultToIntake, appendMediaBubble: appendMediaBubble, mediaUrls: mediaUrls, createImagePreviewTrigger: createImagePreviewTrigger, openImagePreview: openImagePreview, closeImagePreview: closeImagePreview, markLeftActive: markLeftActive, reapplyLeftActive: reapplyLeftActive, bindReopen: bindReopen, fConfirm: fConfirm, doDeleteItem: doDeleteItem, bindDelete: bindDelete, renderOverview: renderOverview, renderOverviewNative: renderOverviewNative, unmountReactOverview: unmountReactOverview, startHumanReplyPoll: startHumanReplyPoll, stopHumanReplyPoll: stopHumanReplyPoll, pollHumanReplies: pollHumanReplies, detectNewHumanReplies: detectNewHumanReplies };
+  window.__field = { setMode: setMode, doLogin: doLogin, doLogout: doLogout, getState: function () { return state; }, openKb: openKb, closeKb: closeKb, doKbSearch: doKbSearch, kbBrowseAll: kbBrowseAll, openConvRec: openConvRec, closeConvRec: closeConvRec, loadConversations: loadConversations, mkConvItem: mkConvItem, reopenConversation: reopenConversation, reopenIntakeConv: reopenIntakeConv, bindConvDelete: bindConvDelete, doDeleteConversation: doDeleteConversation, newSessionId: newSessionId, md: md, setGroupBy: setGroupBy, selectSub: selectSub, subLabel: subLabel, onHospitalChange: onHospitalChange, buildSubOptions: buildSubOptions, fmtTime: fmtTime, renderTypeView: renderTypeView, mkItem: mkItem, reopenConsult: reopenConsult, reopenIntake: reopenIntake, openTicketDrawer: openTicketDrawer, closeTicketDrawer: closeTicketDrawer, renderTicketDrawer: renderTicketDrawer, onSystemTab: onSystemTab, loadSystemView: loadSystemView, renderSystemView: renderSystemView, updateCtx: updateCtx, productOfSystem: productOfSystem, setSubmitKind: setSubmitKind, setTicketPriority: setTicketPriority, newConversation: newConversation, sendChat: sendChat, stopSending: stopSending, currentArchive: currentArchive, getChat: function () { return chat; }, loadBatchView: loadBatchView, renderBatchView: renderBatchView, mkBatchGroup: mkBatchGroup, mkPkgCard: mkPkgCard, mkBatchItem: mkBatchItem, showToast: showToast, openMaintainEdit: openMaintainEdit, doMaintainSave: doMaintainSave, maintainChipHtml: maintainChipHtml, maintainDaysLeft: maintainDaysLeft, renderTodoBody: renderTodoBody, mkUpdatePlanBlock: mkUpdatePlanBlock, loadUpdatePlan: loadUpdatePlan, renderUpdatePlan: renderUpdatePlan, mkPlanTaskItem: mkPlanTaskItem, mkSqlBundleItem: mkSqlBundleItem, doTaskToggle: doTaskToggle, doSqlBundleToggle: doSqlBundleToggle, appendConsultToIntake: appendConsultToIntake, openConsultToIntake: openConsultToIntake, doConsultToIntake: doConsultToIntake, appendMediaBubble: appendMediaBubble, mediaUrls: mediaUrls, createImagePreviewTrigger: createImagePreviewTrigger, openImagePreview: openImagePreview, closeImagePreview: closeImagePreview, markLeftActive: markLeftActive, reapplyLeftActive: reapplyLeftActive, bindReopen: bindReopen, fConfirm: fConfirm, doDeleteItem: doDeleteItem, bindDelete: bindDelete, renderOverview: renderOverview, renderOverviewNative: renderOverviewNative, unmountReactOverview: unmountReactOverview };
 })();
 </script>
 </body>

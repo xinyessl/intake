@@ -79,16 +79,17 @@ export function sortVersions(versions) {
 // 返回的是**已登记与否无关**的候选 tag 区间；调用方再与 version-releases.json 交集取「已登记」版本。
 export function rangeVersions(orderedTags, from, to) {
   const tags = Array.isArray(orderedTags) ? orderedTags.map(String) : [];
-  if (!tags.length) return [];
+  if (!tags.length) throw new Error('没有已知版本');
   const f = String(from == null ? '' : from).trim();
   const t = String(to == null ? '' : to).trim();
 
   // 目标版本 to 的截止位置（含）：命中列表 → 该 index；未命中 → 视为列表末尾（尽力兜底 include 到最新）。
   let toIdx = tags.indexOf(t);
-  if (toIdx < 0) toIdx = tags.length - 1;
+  if (toIdx < 0) throw new Error('未知目标版本: ' + t);
 
   // 起点 from 的位置（不含）：命中 → 从 index(from)+1 起（严格大于）；未命中/空 → 从 0 起（include 全部 ≤to）。
-  let fromIdx = f ? tags.indexOf(f) : -1;      // -1 表示 from 不在列表 → 从头 include
+  let fromIdx = f ? tags.indexOf(f) : -1;
+  if (f && fromIdx < 0) throw new Error('未知起始版本: ' + f);      // -1 表示 from 不在列表 → 从头 include
   const startIdx = fromIdx + 1;                 // fromIdx=-1 → start=0（含最早）；命中 → 跳过 from 本身
 
   if (startIdx > toIdx) return [];              // 空区间（from≥to，或 from 已是最新等）
